@@ -63,13 +63,14 @@ Spec §5.1 introduces `capturing` as an explicit DB-visible state between `pendi
 ```sql
 UPDATE subaccount_baselines
 SET status = 'capturing', last_attempt_at = now()
-WHERE subaccount_id = $1
+WHERE id = $1
   AND status IN ('pending', 'ready')
-  AND baseline_version = (SELECT MAX(baseline_version) FROM subaccount_baselines WHERE subaccount_id = $1 AND status <> 'reset')
-RETURNING id;
+RETURNING id, organisation_id, subaccount_id, capture_attempt_count;
 ```
 
-Zero rows returned is a **clean exit**, not an error: the row is no longer in a runnable state because (a) another worker beat us to it, or (b) the row was reset, or (c) the row is already `captured`/`failed`. The job logs and returns; it does not throw.
+Single source of authority for "exactly one runnable row per sub-account": the partial UNIQUE index (§2 below). The lock acquisition does NOT need to subquery `MAX(baseline_version)` to disambiguate — the partial UNIQUE on `(subaccount_id) WHERE status <> 'reset'` already guarantees that a given sub-account has at most one non-reset row, and reset rows are filtered out by the `status IN ('pending','ready')` predicate. Adding a `baseline_version` clause would couple the lock to versioning logic in a way that creates regression risk if the version model evolves. Keep invariant enforcement in one place — the index.
+
+Zero rows returned is a **clean exit**, not an error: the row is no longer in a runnable state because (a) another worker beat us to it, or (b) the row was reset, or (c) the row is already `captured`/`failed`/`manual`. The job logs the miss with structured context (see §3A step 2) and returns; it does not throw.
 
 - **Considered:** advisory locks via `pg_try_advisory_lock(subaccountId-as-bigint)`. Rejected because the lock state is invisible in the DB (impossible to debug from `SELECT * FROM subaccount_baselines`) and because advisory locks survive transaction boundaries unpredictably.
 - **Considered:** a `lock_expires_at` column with a stale-lock reaper. Rejected because it adds a second background sweeper for a problem the partial UNIQUE index + `UPDATE … WHERE status IN (…) RETURNING` already solves cleanly.
@@ -152,7 +153,7 @@ The §10 invariant "calling `captureBaselineService.run` twice for the same `rea
 
 Every `TIMESTAMPTZ` in `subaccount_baselines` and `subaccount_baseline_metrics` is set by the database (`DEFAULT now()` on column or `sql\`now()\`` in service code). This guarantees deterministic ordering across application servers with clock drift, and makes month-over-month delta narration in the Reporting Agent reproducible.
 
-Enforced by the §10 hard invariant: a CI grep over `server/services/captureBaselineService.ts`, `server/services/baselineMetricReaders/`, `server/services/baselineReadinessService.ts`, and `server/services/reportingAgent/baselineHelper.ts` for `Date.now()` returns zero hits. The grep lives in `baselineInvariants.test.ts` (Chunk 3C).
+Enforced by the §10 hard invariant: a CI grep over the full F3 capture surface (`captureBaselineService.ts`, `baselineReadinessService.ts`, `baselineSubscriberService.ts`, `baselineMetricReaders/`, `reportingAgent/baselineHelper.ts`, `server/jobs/captureBaselineJob.ts`, `server/jobs/evaluateAllPendingBaselines.ts`) for `Date.now()` returns zero hits. The grep lives in `baselineInvariants.test.ts` (Chunk 3C). Duration measurement uses `process.hrtime.bigint()` (monotonic, immune to NTP) — not a wall-clock timestamp and intentionally excluded from the grep target.
 
 ### 7. Per-metric reader pattern — one file per slug, uniform contract
 
@@ -185,7 +186,7 @@ Files: `getPipelineValue.ts`, `getOpenOpportunityCount.ts`, `getLeadCount.ts`, `
 
 Idempotent — calling 1× or 100× per sub-account produces the same answer until the underlying data changes. **Resolves the spec §4 caveat** "resolve canonical source [for poll history] at build start" as follows: `connectorPollingService` writes `last_sync_at` and `last_sync_status` on `connector_configs` itself but does NOT maintain a `connector_poll_history` table on main (verified at plan time via `Grep` — zero matches in `server/db/schema/**`).
 
-**Locked decision:** Chunk 1A adds two columns to `connector_configs` via migration 0278: `successful_poll_count_total` (INTEGER, default 0) and `first_qualifying_poll_at` (TIMESTAMPTZ, nullable). The polling service updates both on every successful sync (Chunk 2B). The readiness condition derives the four §4 checks from these two columns + `canonical_metrics` non-null counts. The "≥1h settle window" check uses `now() - first_qualifying_poll_at >= interval '1 hour'`.
+**Locked decision:** Chunk 1A adds two columns to `connector_configs` via migration 0278: `successful_poll_count_total` (INTEGER, default 0) and `first_qualifying_poll_at` (TIMESTAMPTZ, nullable). The polling service updates both on every successful sync (Chunk 2B). The readiness condition derives the four §4 checks from these two columns + `canonical_metrics` non-null counts. The "≥1h settle window" check uses `now() - first_qualifying_poll_at >= interval '1 hour'` evaluated **inside Postgres** — never `Date.now() - earliest.getTime()` in application code. DB-time-as-source-of-truth (§6) applies even to ephemeral comparisons; running the comparison in SQL eliminates clock-drift risk across application servers and removes the `Date.now()` allowance from `baselineReadinessService.ts` entirely.
 
 - **Considered:** add a `connector_poll_history` table. Rejected because it duplicates information already captured in `connector_configs` for the only data the readiness evaluator needs (count + earliest qualifying timestamp), and no other consumer needs full poll history. If a future feature needs full per-poll audit, that's its migration to add.
 
@@ -213,6 +214,43 @@ The spec text says `subaccount_settings.baseline_metrics_opt_in[]`. There is **n
 ### 12. RLS — full template, both new tables
 
 Both new tables are tenant-owned and require RLS in the same migration that creates them (DEVELOPMENT_GUIDELINES §1). The canonical RLS policy template (per `migrations/0245_all_tenant_tables_rls.sql`) is applied in migration 0280. Both tables register in `server/config/rlsProtectedTables.ts`.
+
+### 13. Capture-duration telemetry — `duration_ms` on terminal events
+
+`captureBaselineService.run` measures wall-clock duration via `process.hrtime.bigint()` (monotonic; immune to NTP adjustments and the §6 DB-time invariant) and emits `duration_ms` on each terminal event: `baseline.capture.succeeded`, `baseline.capture.failed`, `baseline.capture.retry_scheduled`. This surfaces slow readers and per-org scaling pressure (a degrading canonical_metrics scan against a large org becomes visible in telemetry before it manifests as user-reported delay). Lightweight — three numeric fields on existing events, no new event type.
+
+**Anchor placement:** the start timestamp is taken **after** successful lock acquisition, not before. Including lock-contention time in `duration_ms` would mix two different signals (queue wait vs. work time) into one number; placing the anchor after the lock means `duration_ms` is the time the worker actually spent doing work for this attempt.
+
+**Semantics — not comparable to DB timestamps:** `process.hrtime.bigint()` is process-monotonic clock time. It is NOT a wall-clock timestamp; it cannot be compared to `captured_at`, `last_attempt_at`, or any other `TIMESTAMPTZ` value. Telemetry consumers MUST treat `duration_ms` as a duration (a delta), never as a point in time. Per-reader durations (§14 below) follow the same rule.
+
+### 14. Per-reader `duration_ms` — diagnostic field
+
+For each metric in `perMetric`, the capture service measures the reader's elapsed time (process-monotonic) and includes it in the `baseline.metric.captured` and `baseline.metric.unavailable` telemetry events. This surfaces *which* integration is slow (vs. only that capture as a whole is slow) and lets dashboards distinguish "GHL pipeline reader is degrading" from "Stripe revenue reader is degrading". Same monotonic-clock semantics as §13 — a duration, never a timestamp.
+
+### 15. `next_attempt_at` invariant — model rule
+
+`next_attempt_at` is set only on the retry transition and cleared on every terminal transition. Our state model never persists `status='ready'` for the first-capture path (the readiness transition is `pending → capturing` directly), so:
+
+- `status = 'ready'` → `next_attempt_at IS NOT NULL` (the row is awaiting a retry)
+- `status IN ('pending','capturing','captured','failed','manual','reset')` → `next_attempt_at IS NULL`
+
+Stated as: `next_attempt_at IS NOT NULL ↔ status = 'ready'`. Documented invariant; asserted by Chunk 3C invariant 7. Not enforced as a DB CHECK constraint because the cross-column predicate adds index-write overhead to every UPDATE — the test assertion is sufficient and prevents the realistic regression mode (a future change to the retry path forgetting to set or clear the column).
+
+### 16. Retry backoff — explicit ceiling
+
+The §5.4 schedule is `[1h, 4h, 24h]` with a 3-attempt budget. Two consequences worth stating:
+
+- **Ceiling is 24h.** No additional cap is needed because `nextBackoffMinutes(4) === null` and `isRetryBudgetExhausted(3) === true` → the row transitions to `failed` rather than computing a longer interval. Documented to prevent a future change from extending the array without realising the cap is the array length, not a `min()`.
+- **No starvation under repeated failure.** A row hits `failed` on the 3rd retryable attempt; recovery is operator-driven via `<ManualBaselineForm>` only. The cron is incapable of re-enqueuing a `failed` row (eligibility filter excludes it). This is the §5.4 contract — making it explicit here so future work doesn't introduce a "soft retry" path that bypasses the budget.
+
+### 17. Retry-job early-exit rule
+
+Every entry point into `captureBaselineService.run` (subscriber, fallback cron, manual route's auto-trigger if any) MUST early-exit when the row is no longer in `('pending','ready')` state. This is enforced two ways:
+
+1. **Pre-read at the worker entrypoint** (Chunk 3A step 0) — emits a structured `lock_miss` log with reason classification.
+2. **Lock acquisition predicate** (`status IN ('pending','ready')`) — zero rows returned is a clean exit.
+
+The combined effect: a manual override that lands while a retry job is queued does NOT cause a double-write — the retry job's pre-read sees `status='manual'` and exits with `reason: 'pre_read_terminal'`, and even if it raced past the pre-read, the lock acquisition would return zero rows. Stated as a rule so the next person who adds a fourth entry point (e.g. a new admin-replay endpoint) preserves the same guard.
 
 ---
 
@@ -303,6 +341,12 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
      status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'capturing', 'captured', 'failed', 'manual', 'reset')),
      capture_attempt_count SMALLINT NOT NULL DEFAULT 0,
      last_attempt_at TIMESTAMPTZ,
+     -- §5.4 — stamped explicitly on retry transitions (last_attempt_at + backoff
+     -- window). The cron's eligibility filter could derive this from
+     -- last_attempt_at + capture_attempt_count, but persisting it gives operators
+     -- direct visibility into "when does this retry next?" without re-deriving
+     -- the schedule. Set to NULL when status is not 'ready' with attempts > 0.
+     next_attempt_at TIMESTAMPTZ,
      ready_at TIMESTAMPTZ,
      captured_at TIMESTAMPTZ,
      source TEXT NOT NULL CHECK (source IN ('auto', 'manual', 'mixed')) DEFAULT 'auto',
@@ -401,6 +445,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        status: text('status').notNull().$type<BaselineStatus>(),
        captureAttemptCount: smallint('capture_attempt_count').notNull().default(0),
        lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+       nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
        readyAt: timestamp('ready_at', { withTimezone: true }),
        capturedAt: timestamp('captured_at', { withTimezone: true }),
        source: text('source').notNull().default('auto').$type<BaselineSource>(),
@@ -588,6 +633,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        { name: 'status', type: 'text', purpose: 'pending | ready | capturing | captured | failed | manual | reset' },
        { name: 'capture_attempt_count', type: 'smallint', purpose: 'Retry budget (max 3 retryable failures)' },
        { name: 'last_attempt_at', type: 'timestamptz', purpose: 'Backoff anchor for cron retry pickup' },
+       { name: 'next_attempt_at', type: 'timestamptz', purpose: 'Stamped at retry transition: last_attempt_at + backoff window. NULL when not in retry-pending state.' },
        { name: 'ready_at', type: 'timestamptz', purpose: 'When readiness condition was first met' },
        { name: 'captured_at', type: 'timestamptz', purpose: 'Set on transition to captured; immutable thereafter' },
        { name: 'source', type: 'text', purpose: 'auto | manual | mixed' },
@@ -848,7 +894,12 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
    ): BaselineOutcome {
      const captured = perMetric.filter((m) => m.source === 'canonical_metric').length;
      if (captured >= 2) {
-       return { kind: 'success', confidence: captured === optedInCount ? 'confirmed' : 'partial' };
+       // Edge: if optedInCount is 0 (degenerate settings — empty opt-in
+       // array explicitly set), 'confirmed' would be vacuously true. Force
+       // 'partial' so confidence is never claimed without underlying metrics.
+       const confidence: 'confirmed' | 'partial' =
+         optedInCount > 0 && captured >= optedInCount ? 'confirmed' : 'partial';
+       return { kind: 'success', confidence };
      }
      // < 2 canonical metrics — failure path. Determine whether any failure was non-retryable.
      const hasNonRetryable = perMetric.some((m) => m.source === 'unavailable' && m.errorClass === 'non_retryable');
@@ -879,6 +930,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
    - `aggregateOutcome([{source:'canonical_metric'},{source:'canonical_metric'},{source:'unavailable',errorClass:'retryable'}], 3)` = `{kind:'success', confidence:'partial'}`.
    - `aggregateOutcome([{source:'unavailable',errorClass:'retryable'}], 5)` = `{kind:'retryable_failure'}`.
    - `aggregateOutcome([{source:'unavailable',errorClass:'non_retryable'}], 5)` = `{kind:'non_retryable_failure', reason:'integration_not_connected'}`.
+   - **Edge — optedInCount=0:** `aggregateOutcome([{source:'canonical_metric'},{source:'canonical_metric'}], 0)` = `{kind:'success', confidence:'partial'}`. Confidence is forced to 'partial' even when `captured >= optedInCount` is vacuously true, so no row is marked 'confirmed' on degenerate empty-opt-in settings.
 
 5. Author `shared/constants/__tests__/baselineMetrics.test.ts`:
    - `ALL_METRIC_SLUGS.length` matches `V1_BASELINE_METRICS.length`.
@@ -956,10 +1008,16 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        const missing: string[] = [];
 
        // (1) + (2) + (3) — single query against connector_configs (one row per active connector).
+       // Settle-window check is evaluated inside Postgres via `now() - first_qualifying_poll_at >= interval '1 hour'`
+       // (§6 DB-time invariant). We compute three columns server-side: pollCount,
+       // firstAt (for telemetry exposure), and settleOk (the boolean we actually
+       // condition on). No Date.now() in this service — eliminates clock drift
+       // across application servers and keeps comparison authority in the DB.
        const connectors = await db
          .select({
            pollCount: connectorConfigs.successfulPollCountTotal,
            firstAt: connectorConfigs.firstQualifyingPollAt,
+           settleOk: sql<boolean>`(${connectorConfigs.firstQualifyingPollAt} IS NOT NULL AND now() - ${connectorConfigs.firstQualifyingPollAt} >= interval '1 hour')`,
          })
          .from(connectorConfigs)
          .where(
@@ -976,12 +1034,15 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        const totalPolls = connectors.reduce((sum, c) => sum + (c.pollCount ?? 0), 0);
        if (totalPolls < 2) missing.push('successful_polls_min_2');
 
+       // earliest timestamp is reported back for observability/telemetry only —
+       // never used as a comparison anchor in JS time. The settle decision is
+       // already made by Postgres (settleOk above).
        const earliest = connectors
          .map((c) => c.firstAt)
          .filter((d): d is Date => d != null)
          .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
 
-       const settleOk = earliest != null && (Date.now() - earliest.getTime()) >= 60 * 60 * 1000;
+       const settleOk = connectors.some((c) => c.settleOk === true);
        if (!settleOk) missing.push('settle_window_1h');
 
        // (4) — count of non-null currentValue in canonical_metrics for the four core slugs.
@@ -1070,14 +1131,14 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
 
    Place this immediately before or after the existing `subaccountOnboardingService.autoStartOwedOnboardingWorkflows({...}).then(...).catch(...)` block — they are independent and both fire-and-forget.
 
-4. Author `server/services/__tests__/baselineReadinessService.test.ts` — pure-input tests. Mock the db client following the existing `*Pure.test.ts` pattern; if the project's mocking style is fragile, restrict to a stub that returns canned rows for each query and assert the function's combinatorial output:
+4. Author `server/services/__tests__/baselineReadinessService.test.ts` — pure-input tests. Mock the db client following the existing `*Pure.test.ts` pattern; if the project's mocking style is fragile, restrict to a stub that returns canned rows for each query and assert the function's combinatorial output. Because the settle-window comparison is now evaluated in SQL, the stub returns a `settleOk` boolean alongside `pollCount` and `firstAt` — tests assert behaviour against the boolean, not against time arithmetic in JS:
    - 0 active connectors → `{ ready:false, missing:['active_connector', 'successful_polls_min_2', 'settle_window_1h', 'canonical_metrics_min_2'] }`.
-   - 1 active connector with `successfulPollCountTotal=1` → still missing `successful_polls_min_2` and possibly settle window.
-   - 1 active connector with `successfulPollCountTotal=2`, `firstQualifyingPollAt = 5 min ago` → missing `settle_window_1h`.
-   - 1 active connector with `successfulPollCountTotal=2`, `firstQualifyingPollAt = 2h ago`, 1 metric non-null → missing `canonical_metrics_min_2`.
-   - 1 active connector with `successfulPollCountTotal=2`, `firstQualifyingPollAt = 2h ago`, 2 metrics non-null → `{ ready:true, missing:[] }`.
-   - 2 active connectors with poll-counts 1 and 2 (sum=3) and 4 metrics non-null and 2h settle → `ready:true`.
-   - Settle window edge: `firstQualifyingPollAt` exactly 60 minutes ago → `ready:true` (boundary inclusive). 59 minutes ago → missing.
+   - 1 active connector with `pollCount=1, settleOk=true` → still missing `successful_polls_min_2`.
+   - 1 active connector with `pollCount=2, settleOk=false` → missing `settle_window_1h`.
+   - 1 active connector with `pollCount=2, settleOk=true`, 1 metric non-null → missing `canonical_metrics_min_2`.
+   - 1 active connector with `pollCount=2, settleOk=true`, 2 metrics non-null → `{ ready:true, missing:[] }`.
+   - 2 active connectors with poll-counts 1 and 2 (sum=3), at least one `settleOk=true`, 4 metrics non-null → `ready:true`.
+   - Settle-window boundary cases (`firstQualifyingPollAt` exactly 60 minutes ago vs 59 minutes ago) are exercised as a thin SQL-level assertion in the integration test (Chunk 3C) — the unit test trusts the boolean from the stub because the boundary semantics are owned by Postgres `interval` arithmetic.
 
 **Tests:** as in step 4.
 
@@ -1250,12 +1311,11 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
 
    ```ts
    import type PgBoss from 'pg-boss';
-   import { eq, or, sql } from 'drizzle-orm';
+   import { sql } from 'drizzle-orm';
    import { subaccountBaselines } from '../db/schema/subaccountBaselines.js';
    import { baselineReadinessService } from '../services/baselineReadinessService.js';
    import { baselineSubscriberService } from '../services/baselineSubscriberService.js';
    import { withAdminConnection } from '../lib/adminDbConnection.js';
-   import { nextBackoffMinutes } from '../services/baselineRetryClassifierPure.js';
 
    export const EVALUATE_ALL_PENDING_BASELINES_JOB = 'evaluate-all-pending-baselines';
 
@@ -1263,49 +1323,50 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
     * F3 §4 — daily fallback. Enumerates `pending` rows + `ready` rows due for
     * retry. Invokes readiness evaluation (per-org context) and enqueues capture
     * jobs. Single-writer rule honoured: this job only ENQUEUES.
+    *
+    * Retry-eligibility is filtered in SQL using the §5.4 backoff schedule so
+    * the candidate list IS the eligibility list — no JS-time comparison
+    * (DB-time invariant §6).
     */
    export async function evaluateAllPendingBaselinesHandler(_job: PgBoss.Job<unknown>): Promise<void> {
      // Cross-org sweep — admin connection required (cf. connectorPollingTick.ts).
+     // SQL eligibility filter:
+     //   - status='pending'                                                 → always eligible (no prior attempt)
+     //   - status='ready' AND attempt=1 AND last_attempt_at <= now() - 1h
+     //   - status='ready' AND attempt=2 AND last_attempt_at <= now() - 4h
+     //   - status='ready' AND attempt=3 AND last_attempt_at <= now() - 24h
+     // Attempt>=4 is the 'retry budget exhausted' state — those rows should
+     // already be 'failed', but the filter excludes them defensively.
      const candidates = await withAdminConnection(
        { source: 'baseline_evaluate_all_pending', skipAudit: true },
        async (adminDb) => {
          await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
-         return adminDb
-           .select({
-             id: subaccountBaselines.id,
-             organisationId: subaccountBaselines.organisationId,
-             subaccountId: subaccountBaselines.subaccountId,
-             status: subaccountBaselines.status,
-             attempts: subaccountBaselines.captureAttemptCount,
-             lastAttemptAt: subaccountBaselines.lastAttemptAt,
-           })
-           .from(subaccountBaselines)
-           .where(
-             or(
-               eq(subaccountBaselines.status, 'pending'),
-               eq(subaccountBaselines.status, 'ready'),
-             ),
-           );
+         const result = await adminDb.execute(sql`
+           SELECT id, organisation_id, subaccount_id, status, capture_attempt_count
+           FROM subaccount_baselines
+           WHERE status = 'pending'
+              OR (
+                status = 'ready'
+                AND (
+                  (capture_attempt_count = 0)
+                  OR (capture_attempt_count = 1 AND last_attempt_at <= now() - interval '1 hour')
+                  OR (capture_attempt_count = 2 AND last_attempt_at <= now() - interval '4 hours')
+                  OR (capture_attempt_count = 3 AND last_attempt_at <= now() - interval '24 hours')
+                )
+              )
+         `);
+         return (result as unknown as { rows: Array<{ id: string; organisation_id: string; subaccount_id: string; status: string; capture_attempt_count: number }> }).rows;
        },
      );
 
      for (const c of candidates) {
-       // Retry-eligibility filter (only for status='ready' with attempts>0).
-       if (c.status === 'ready' && c.attempts > 0) {
-         const window = nextBackoffMinutes(c.attempts);
-         if (window == null) continue;  // budget exhausted; row should already be 'failed' but defensive
-         if (!c.lastAttemptAt) continue;
-         const elapsed = (Date.now() - c.lastAttemptAt.getTime()) / 60000;
-         if (elapsed < window) continue;
-       }
-
        try {
-         const result = await baselineReadinessService.evaluate(c.subaccountId, c.organisationId);
+         const result = await baselineReadinessService.evaluate(c.subaccount_id, c.organisation_id);
          if (!result.ready && c.status === 'pending') continue;
          await baselineSubscriberService.enqueueCaptureBaselineJob({
            baselineId: c.id,
-           subaccountId: c.subaccountId,
-           organisationId: c.organisationId,
+           subaccountId: c.subaccount_id,
+           organisationId: c.organisation_id,
            triggerSource: 'fallback',
          });
        } catch (err) {
@@ -1411,6 +1472,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
    import { subaccountBaselineMetrics } from '../db/schema/subaccountBaselineMetrics.js';
    import { subaccounts } from '../db/schema/subaccounts.js';
    import { createEvent } from '../lib/tracing.js';
+   import { logger } from '../lib/logger.js';  // confirm exact path; matches existing logger usage in this layer
    import { resolveBaselineOptIn } from '../../shared/schemas/subaccount.js';
    import {
      V1_BASELINE_METRICS,
@@ -1425,25 +1487,97 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
    import {
      aggregateOutcome,
      isRetryBudgetExhausted,
+     nextBackoffMinutes,
    } from './baselineRetryClassifierPure.js';
 
    export const captureBaselineService = {
      async run(baselineId: string): Promise<void> {
+       // Step 0: cheap idempotency guard at the worker entrypoint. The lock
+       // acquisition in Step 1 already filters on status IN ('pending','ready'),
+       // but reading the row first lets us emit a clean structured log on
+       // terminal-state job firings (subscriber and cron racing inside the
+       // pg-boss singleton window) and protects future changes that might
+       // narrow the lock predicate. This is detective, not preventive.
+       //
+       // Lock-miss reason taxonomy:
+       //   pre_read_terminal — row already in a terminal state when the job
+       //                       fired. Expected (subscriber + cron + manual
+       //                       can race inside the singleton window).
+       //   not_runnable      — row exists but is in 'capturing' (another
+       //                       worker holds the lock). Possible scheduling
+       //                       issue if it stays this way for long.
+       //   lock_race         — pre-read passed but lock acquisition lost the
+       //                       race. Indicates concurrency at the second
+       //                       checkpoint (see step 1 below).
+       //   not_found         — baselineId stale (row deleted, or job carries
+       //                       an ID that never existed). Should be rare.
+       const [current] = await db
+         .select({ status: subaccountBaselines.status })
+         .from(subaccountBaselines)
+         .where(eq(subaccountBaselines.id, baselineId));
+       if (!current) {
+         logger.info('baseline.capture.lock_miss', {
+           event: 'baseline.capture.lock_miss',
+           baseline_id: baselineId,
+           reason: 'not_found',
+         });
+         return;
+       }
+       if (current.status === 'captured' || current.status === 'failed'
+           || current.status === 'manual' || current.status === 'reset') {
+         logger.info('baseline.capture.lock_miss', {
+           event: 'baseline.capture.lock_miss',
+           baseline_id: baselineId,
+           reason: 'pre_read_terminal',
+           status: current.status,
+         });
+         return;
+       }
+       if (current.status === 'capturing') {
+         logger.info('baseline.capture.lock_miss', {
+           event: 'baseline.capture.lock_miss',
+           baseline_id: baselineId,
+           reason: 'not_runnable',
+           status: current.status,
+         });
+         return;
+       }
+
        // Step 1: acquire `capturing` lock. Zero rows = clean exit.
+       // Authority for "one runnable row per sub-account" lives in the partial
+       // UNIQUE index (subaccount_id) WHERE status <> 'reset'. We do NOT
+       // subquery baseline_version here — coupling the lock to version logic
+       // creates regression risk and the index already guarantees uniqueness.
        const locked = await db.execute(sql`
          UPDATE subaccount_baselines
          SET status = 'capturing', last_attempt_at = now()
          WHERE id = ${baselineId}
            AND status IN ('pending', 'ready')
-           AND baseline_version = (
-             SELECT MAX(baseline_version) FROM subaccount_baselines
-             WHERE subaccount_id = (SELECT subaccount_id FROM subaccount_baselines WHERE id = ${baselineId})
-               AND status <> 'reset'
-           )
          RETURNING id, organisation_id, subaccount_id, capture_attempt_count
        `);
        const lockedRow = (locked as unknown as { rows: Array<{ id: string; organisation_id: string; subaccount_id: string; capture_attempt_count: number }> }).rows[0];
-       if (!lockedRow) return;  // clean exit
+       if (!lockedRow) {
+         // Clean exit. Structured log so operators can see lock misses without
+         // mistaking them for silent no-ops. The pre-read above (step 0) caught
+         // the terminal-status case; reaching here means another worker won
+         // the race between the pre-read and this UPDATE — distinguishing the
+         // two reasons matters at scale (lock_race indicates concurrency,
+         // not_runnable / pre_read_terminal indicate scheduling issues).
+         logger.info('baseline.capture.lock_miss', {
+           event: 'baseline.capture.lock_miss',
+           baseline_id: baselineId,
+           reason: 'lock_race',
+         });
+         return;
+       }
+
+       // Duration anchor: taken AFTER successful lock acquisition so
+       // duration_ms reflects the time the worker actually spent doing work
+       // for this attempt — not lock-contention time. process.hrtime.bigint()
+       // is monotonic-process time (immune to NTP adjustments and the §6
+       // DB-time invariant). NOT comparable to TIMESTAMPTZ values; treat as
+       // a delta only.
+       const captureStartHr = process.hrtime.bigint();
 
        const { organisation_id: organisationId, subaccount_id: subaccountId, capture_attempt_count: attempts } = lockedRow;
        const attemptNumber = attempts + 1;
@@ -1463,11 +1597,37 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        const optedIn = resolveBaselineOptIn(sub?.settings ?? null);
 
        // Step 3: per-metric dispatch. Each reader returns
-       // {value, source, unavailable_reason?, errorClass?}.
-       const perMetric: Array<{ slug: BaselineMetricSlug; result: MetricReaderResult }> = [];
+       // {value, source, unavailable_reason?, errorClass?}. Each reader call
+       // is wrapped in a 5-second timeout — a slow external query (e.g. a
+       // canonical_metrics scan against a large org) must not stall the whole
+       // capture. Timeout is classified as api_failure / retryable, so the
+       // cron retries with backoff. The timeout is per-reader; sibling
+       // readers continue independently.
+       //
+       // Per-reader duration is measured (process.hrtime.bigint(), monotonic)
+       // and emitted on every metric event — surfaces *which* integration is
+       // slow vs. only that capture is slow. Same semantics as overall
+       // duration_ms (architecture §13/§14): a delta, not a timestamp.
+       const READER_TIMEOUT_MS = 5_000;
+       const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+         new Promise<T>((resolve, reject) => {
+           const t = setTimeout(() => reject(new Error('reader_timeout')), ms);
+           p.then((v) => { clearTimeout(t); resolve(v); },
+                  (e) => { clearTimeout(t); reject(e); });
+         });
+
+       interface PerMetricEntry {
+         slug: BaselineMetricSlug;
+         result: MetricReaderResult;
+         durationMs: number;
+         timedOut: boolean;
+       }
+       const perMetric: PerMetricEntry[] = [];
        for (const slug of optedIn) {
          const meta = metricMeta(slug);
+         const readerStartHr = process.hrtime.bigint();
          let result: MetricReaderResult;
+         let timedOut = false;
          try {
            if (meta.readerStatus === 'unavailable_default') {
              result = UNAVAILABLE_INTEGRATION_NOT_CONNECTED;
@@ -1481,12 +1641,18 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
                  errorClass: 'non_retryable',
                };
              } else {
-               result = await reader({ organisationId, subaccountId });
+               result = await withTimeout(
+                 reader({ organisationId, subaccountId }),
+                 READER_TIMEOUT_MS,
+               );
              }
            }
          } catch (err) {
-           // Thrown errors are treated as api_failure (retryable).
+           // Thrown errors (including reader_timeout) are treated as
+           // api_failure / retryable. The cron picks the row up at the
+           // configured backoff window.
            const msg = err instanceof Error ? err.message : String(err);
+           timedOut = msg === 'reader_timeout';
            console.error('[captureBaselineService] reader failed for', slug, msg);
            result = {
              value: null, source: 'unavailable',
@@ -1494,9 +1660,15 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
              errorClass: 'retryable',
            };
          }
-         perMetric.push({ slug, result });
+         const readerDurationMs = Number(process.hrtime.bigint() - readerStartHr) / 1_000_000;
+         perMetric.push({ slug, result, durationMs: readerDurationMs, timedOut });
 
-         // Telemetry per metric.
+         // Telemetry per metric. duration_ms is process-monotonic; never
+         // compared to DB timestamps. timeout_ms / elapsed_ms appear only on
+         // the unavailable path when timedOut is true — they distinguish
+         // "slow integration" (elapsed close to budget) from "dead integration"
+         // (elapsed exactly at budget) from "flaky integration" (elapsed well
+         // below budget but threw).
          if (result.source === 'canonical_metric' && result.value) {
            createEvent('baseline.metric.captured', {
              subaccount_id: subaccountId,
@@ -1504,6 +1676,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
              metric_slug: slug,
              source: 'canonical_metric',
              value_summary: { unit: result.value.unit, numeric: result.value.numeric },
+             duration_ms: readerDurationMs,
            });
          } else if (result.source === 'unavailable') {
            createEvent('baseline.metric.unavailable', {
@@ -1512,6 +1685,10 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
              metric_slug: slug,
              unavailable_reason: result.unavailable_reason,
              error_class: result.errorClass ?? 'retryable',
+             duration_ms: readerDurationMs,
+             ...(timedOut
+               ? { timed_out: true, timeout_ms: READER_TIMEOUT_MS, elapsed_ms: readerDurationMs }
+               : {}),
            });
          }
        }
@@ -1545,6 +1722,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
              capturedAt: sql`now()`,
              confidence: outcome.confidence,
              readyAt: sql`COALESCE(ready_at, now())`,
+             nextAttemptAt: null,  // clear retry-schedule pointer on terminal transition
            })
            .where(eq(subaccountBaselines.id, baselineId));
 
@@ -1554,6 +1732,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
            confidence: outcome.confidence,
            metrics_captured_count: perMetric.filter((m) => m.result.source === 'canonical_metric').length,
            metrics_unavailable_count: perMetric.filter((m) => m.result.source === 'unavailable').length,
+           duration_ms: Number(process.hrtime.bigint() - captureStartHr) / 1_000_000,
          });
          return;
        }
@@ -1561,7 +1740,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        if (outcome.kind === 'non_retryable_failure') {
          await db
            .update(subaccountBaselines)
-           .set({ status: 'failed', failureReason: outcome.reason, captureAttemptCount: attemptNumber })
+           .set({ status: 'failed', failureReason: outcome.reason, captureAttemptCount: attemptNumber, nextAttemptAt: null })
            .where(eq(subaccountBaselines.id, baselineId));
 
          createEvent('baseline.capture.failed', {
@@ -1569,6 +1748,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
            baseline_id: baselineId,
            failure_reason: outcome.reason,
            final_attempt_count: attemptNumber,
+           duration_ms: Number(process.hrtime.bigint() - captureStartHr) / 1_000_000,
          });
          return;
        }
@@ -1577,7 +1757,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
        if (isRetryBudgetExhausted(attemptNumber)) {
          await db
            .update(subaccountBaselines)
-           .set({ status: 'failed', failureReason: 'retry_budget_exhausted', captureAttemptCount: attemptNumber })
+           .set({ status: 'failed', failureReason: 'retry_budget_exhausted', captureAttemptCount: attemptNumber, nextAttemptAt: null })
            .where(eq(subaccountBaselines.id, baselineId));
 
          createEvent('baseline.capture.failed', {
@@ -1585,16 +1765,28 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
            baseline_id: baselineId,
            failure_reason: 'retry_budget_exhausted',
            final_attempt_count: attemptNumber,
+           duration_ms: Number(process.hrtime.bigint() - captureStartHr) / 1_000_000,
          });
          return;
        }
 
        // Schedule retry: bump count + transition back to 'ready'. last_attempt_at
-       // already set by the lock acquisition. Cron picks up next eligible window.
-       await db
+       // already set by the lock acquisition. Stamp next_attempt_at explicitly
+       // (last_attempt_at + backoff window) so operators have direct visibility
+       // into when the retry will fire — and so telemetry carries a real
+       // timestamp instead of null. Cron eligibility filter still re-derives
+       // the same window in SQL; persisting it is for observability, not
+       // authority. Use Postgres now() + interval to keep DB-time as source.
+       const backoffMin = nextBackoffMinutes(attemptNumber);  // never null here — exhausted case handled above
+       const updated = await db
          .update(subaccountBaselines)
-         .set({ status: 'ready', captureAttemptCount: attemptNumber })
-         .where(eq(subaccountBaselines.id, baselineId));
+         .set({
+           status: 'ready',
+           captureAttemptCount: attemptNumber,
+           nextAttemptAt: sql`now() + (${backoffMin} || ' minutes')::interval`,
+         })
+         .where(eq(subaccountBaselines.id, baselineId))
+         .returning({ nextAttemptAt: subaccountBaselines.nextAttemptAt });
 
        const failureReasons = perMetric
          .filter((m) => m.result.source === 'unavailable')
@@ -1604,8 +1796,9 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
          subaccount_id: subaccountId,
          baseline_id: baselineId,
          attempt_number: attemptNumber,
-         next_attempt_at: null,  // cron computes window; not pre-stamped
+         next_attempt_at: updated[0]?.nextAttemptAt ?? null,
          failure_reasons: failureReasons,
+         duration_ms: Number(process.hrtime.bigint() - captureStartHr) / 1_000_000,
        });
      },
 
@@ -1633,8 +1826,14 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
          throw { statusCode: 404, errorCode: 'BASELINE_NOT_FOUND', message: 'No active baseline for this subaccount' };
        }
 
-       // §10 invariant: manual override never conflicts with auto. If currently
-       // capturing, return 409 — operator retries after auto path completes.
+       // §10 invariant: manual override never conflicts with auto. The read
+       // above is a best-effort guard for fast feedback. The atomic guard is
+       // the final UPDATE below: it predicates on status <> 'capturing'. If
+       // the auto path acquires the lock between this read and the metric
+       // upserts, the final UPDATE returns zero rows and we throw 409 — the
+       // metric upserts are themselves idempotent (PK + ON CONFLICT) so even
+       // a partial pre-empt leaves no orphaned writes the auto path can't
+       // overwrite.
        if (baseline.status === 'capturing') {
          throw { statusCode: 409, errorCode: 'BASELINE_CAPTURING', message: 'Auto capture in flight; retry shortly' };
        }
@@ -1675,17 +1874,33 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
          .from(subaccounts)
          .where(eq(subaccounts.id, params.subaccountId));
        const optedIn = resolveBaselineOptIn(sub?.settings ?? null);
-       const newConfidence: 'confirmed' | 'partial' = captured >= optedIn.length ? 'confirmed' : 'partial';
+       // §6 edge: if optedIn is empty (degenerate settings — empty array
+       // explicitly set), confidence cannot be 'confirmed'. Default to 'partial'
+       // so the row is never marked confirmed without underlying metrics.
+       const newConfidence: 'confirmed' | 'partial' =
+         optedIn.length > 0 && captured >= optedIn.length ? 'confirmed' : 'partial';
 
-       await db
+       // Atomic write-time guard against the lock race: predicate on status
+       // not being 'capturing'. If the auto path acquired the lock between
+       // our pre-check and now, this UPDATE returns zero rows — surface 409
+       // so the operator retries.
+       const result = await db
          .update(subaccountBaselines)
          .set({
            status: 'manual',
            source: newSource,
            confidence: newConfidence,
            capturedAt: sql`COALESCE(captured_at, now())`,
+           nextAttemptAt: null,
          })
-         .where(eq(subaccountBaselines.id, baseline.id));
+         .where(and(
+           eq(subaccountBaselines.id, baseline.id),
+           sql`status <> 'capturing'`,
+         ))
+         .returning({ id: subaccountBaselines.id });
+       if (result.length === 0) {
+         throw { statusCode: 409, errorCode: 'BASELINE_CAPTURING', message: 'Auto capture in flight; retry shortly' };
+       }
 
        createEvent('baseline.manual.applied', {
          subaccount_id: params.subaccountId,
@@ -1813,6 +2028,22 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
 
 **Steps:**
 
+0. **Mandatory build-blocking pre-check — revenue slug discovery.** Before authoring any reader, run:
+
+   ```bash
+   grep -REn "metric_slug.*['\"]revenue" server/services/canonicalDataService.ts server/services/integrations/ shared/ | head -20
+   grep -REn "['\"]revenue[^'\"]*['\"]" server/services/canonicalDataService.ts | head -20
+   ```
+
+   Capture the **exact** slug string the existing GHL/Stripe ingestion writes for revenue values into `canonical_metric_history` (or `canonical_metrics`). Possibilities observed historically: `revenue`, `monthly_revenue`, `revenue_last_30d`, `revenue_total`. If the grep returns no slug at all (no revenue ingestion exists yet), this is also a positive signal — the reader's `unavailable / no_data_yet` path is the correct steady state until ingestion lands.
+
+   **Decision tree — must be resolved BEFORE step 4:**
+   - Slug found, matches `revenue_last_30d` (the v1 registry default in Chunk 1B): proceed to step 4 unchanged.
+   - Slug found, differs from `revenue_last_30d` (e.g. `revenue`): update three places in the same commit before step 4 — the reader query (step 4 below), the v1 metric registry entry in `shared/constants/baselineMetrics.ts` (Chunk 1B), and the slug constant in any test fixture introduced in Chunk 3C. Document the canonical name in the Chunk 3B commit message.
+   - No slug found at all (no existing revenue ingestion): leave the reader returning `unavailable / no_data_yet / retryable` and document under `## Deferred Items` in `tasks/builds/baseline-capture/progress.md`. Do not invent a slug.
+
+   **Build-blocking:** the executor MUST resolve this before authoring step 4. Proceeding with the default assumption (`revenue` or `revenue_last_30d`) without verification produces baselines that always look "partial" for revenue and never recovers automatically. This is the single most likely silent-failure mode in F3 — treat it as a hard gate, not a follow-up.
+
 1. Establish the reader pattern. Each reader queries `canonical_metrics` joined to `canonical_accounts` filtered on `organisationId + subaccountId`, looks up the named slug, and translates the numeric value into the canonical `MetricValue` shape. For `revenue_last_30d`, sum over the last 30 days of `canonical_metric_history`. Failure paths:
    - No row found → `{source:'unavailable', unavailable_reason:'no_data_yet', errorClass:'retryable'}`.
    - DB error / network → throw (caller treats as `api_failure`/retryable).
@@ -1871,14 +2102,19 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
 4. Author `getRevenueLast30d.ts` — aggregates `canonical_metric_history` over the last 30 days:
 
    ```ts
-   import { and, eq, gte } from 'drizzle-orm';
+   import { and, eq, sql } from 'drizzle-orm';
    import { db } from '../../db/index.js';
    import { canonicalMetricHistory } from '../../db/schema/canonicalMetrics.js';
    import { canonicalAccounts } from '../../db/schema/canonicalAccounts.js';
    import type { BaselineMetricReader } from './registry.js';
 
+   /**
+    * F3 §2 — revenue over the last 30 days. Lower bound is computed by
+    * Postgres (`now() - interval '30 days'`) to keep DB-time the source of
+    * truth (§6) and to keep the F3 surface free of `Date.now()` calls
+    * (Invariant 6, Chunk 3C).
+    */
    export const getRevenueLast30d: BaselineMetricReader = async ({ organisationId, subaccountId }) => {
-     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
      const rows = await db
        .select({ value: canonicalMetricHistory.value })
        .from(canonicalMetricHistory)
@@ -1887,7 +2123,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
          eq(canonicalAccounts.organisationId, organisationId),
          eq(canonicalAccounts.subaccountId, subaccountId),
          eq(canonicalMetricHistory.metricSlug, 'revenue'),
-         gte(canonicalMetricHistory.computedAt, thirtyDaysAgo),
+         sql`${canonicalMetricHistory.computedAt} >= now() - interval '30 days'`,
        ));
 
      if (rows.length === 0) {
@@ -1941,7 +2177,7 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
    - `getRevenueLast30d` with two history rows → sum.
    - Registry membership: every entry in `AVAILABLE_METRIC_SLUGS` has a reader; every `unavailable_default` entry does NOT have a reader.
 
-7. **Pre-existing violation check (per CLAUDE.md "Pre-existing violations"):** before authoring, grep `server/services/canonicalDataService.ts` for the actual slug used for revenue (may be `revenue` or `revenue_last_30d` or `monthly_revenue`). If the spec's `revenue_last_30d` slug doesn't match what the data layer writes, **this is the top of Chunk 3B step 4** — adjust both the v1 metric registry slug and the reader query. Document the discovered slug in the commit message.
+7. **Confirm step 0 was executed.** If the executor jumped straight to authoring without running the build-blocking pre-check above, halt the chunk and run it now. The pre-check is the single most likely silent-failure mode in F3 — see Risk R8 (now resolved by step 0).
 
 **Tests:** as in step 6.
 
@@ -1976,24 +2212,37 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
 
    **Invariant 2 — Idempotent retry.** Set up a fixture where `aggregateOutcome` returns success. Call `captureBaselineService.run(baselineId)` twice. Assert: row state unchanged after second call (`status='captured'`, `confidence=...`, same `captured_at`); metric row count for the baseline unchanged.
 
-   **Invariant 3 — Single-writer rule (static check).** Grep over `server/**/*.ts` for `INSERT INTO subaccount_baselines` (raw SQL) and `db.insert(subaccountBaselines)` (Drizzle). Filter out `*_test.ts`, `*.test.ts`, `__tests__/`, `migrations/`. The remaining matches MUST live ONLY in:
+   **Invariant 3 — Single-writer rule (static check).** Grep over `server/**/*.ts` for write surfaces against `subaccountBaselines`. Three patterns covered (the third catches simple aliasing — e.g. `const sb = subaccountBaselines; await db.update(sb)`):
+     - Raw SQL: `INSERT INTO subaccount_baselines`, `UPDATE subaccount_baselines`.
+     - Drizzle direct: `db.insert(subaccountBaselines)`, `db.update(subaccountBaselines)`.
+     - Drizzle aliased: any call site whose argument expression contains the literal `subaccountBaselines)` — catches `db.update(subaccountBaselines)`, `tx.insert(subaccountBaselines)`, `someAlias(subaccountBaselines)`. This is detective for the trivial alias case (`const sb = subaccountBaselines`); a determined developer can still defeat it with deeper indirection. The mitigation is a code-review note in DEVELOPMENT_GUIDELINES (Chunk 6) — not a perfect static guarantee.
+
+   Filter out `*_test.ts`, `*.test.ts`, `__tests__/`, `migrations/`. The remaining matches MUST live ONLY in:
      - `server/services/captureBaselineService.ts`
-     - `server/services/subaccountOnboardingService.ts` (the `markBaselinePending` method only)
-   Same for UPDATE: match `UPDATE subaccount_baselines` and `db.update(subaccountBaselines)`. Allowed callers: ONLY `captureBaselineService.ts`.
+     - `server/services/subaccountOnboardingService.ts` (the `markBaselinePending` method only — INSERT)
 
    ```ts
    import { execSync } from 'node:child_process';
+   // Pattern set:
+   //   1. Raw SQL writes
+   //   2. Drizzle direct call: db.insert(subaccountBaselines) etc.
+   //   3. Drizzle aliased / trailing-paren form: catches `subaccountBaselines)` in any position
+   //      — covers `tx.update(subaccountBaselines)`, helper(subaccountBaselines), etc.
    const violations = execSync(
-     'grep -rEn "(db\\.(insert|update)\\(subaccountBaselines\\)|INSERT INTO subaccount_baselines|UPDATE subaccount_baselines)" server --include="*.ts" --exclude-dir=__tests__ || true',
+     'grep -rEn "(INSERT INTO subaccount_baselines|UPDATE subaccount_baselines|db\\.(insert|update|delete)\\(subaccountBaselines\\)|subaccountBaselines\\))" server --include="*.ts" --exclude-dir=__tests__ || true',
      { encoding: 'utf8' },
    );
-   const violationLines = violations.split('\n').filter((l) => l.length > 0).filter((l) => {
-     const allowed = [
-       'server/services/captureBaselineService.ts',
-       'server/services/subaccountOnboardingService.ts',
-     ];
-     return !allowed.some((path) => l.startsWith(path));
-   });
+   const allowed = [
+     'server/services/captureBaselineService.ts',
+     'server/services/subaccountOnboardingService.ts',
+   ];
+   const violationLines = violations.split('\n')
+     .filter((l) => l.length > 0)
+     .filter((l) => !allowed.some((path) => l.startsWith(path)))
+     // The third pattern (subaccountBaselines\)) is broad and matches benign
+     // read sites (db.select().from(subaccountBaselines) — note: from(...) NOT
+     // a write). Filter out reads explicitly to keep the signal high.
+     .filter((l) => !/\.(select|from)\s*\(/.test(l));
    assert.equal(violationLines.length, 0, `Single-writer violation: ${violationLines.join('\n')}`);
    ```
 
@@ -2001,18 +2250,35 @@ Total estimated: ~26-27h. Matches spec §8 phase ranges (3+5+5+4+3+2 = 22h) with
 
    **Invariant 5 — Admin reset preserves history.** After reset, `SELECT COUNT(*) FROM subaccount_baselines WHERE subaccount_id=$1` >= 2; one row has `status='reset' AND admin_reset_reason IS NOT NULL`; one row has `status='pending' AND baseline_version=2`.
 
-   **Invariant 6 — All timestamps via Postgres `now()` (static grep).** Same shape as Invariant 3:
+   **Invariant 6 — All timestamps via Postgres `now()` (static grep).** Same shape as Invariant 3. Per the §6 DB-time invariant the F3 capture path contains zero `Date.now()` calls — including the readiness service, which now does the settle-window comparison inside SQL (`now() - first_qualifying_poll_at >= interval '1 hour'`). The grep covers the full F3 surface:
 
    ```ts
    const dateNowHits = execSync(
-     'grep -rEn "Date\\.now\\(\\)" server/services/captureBaselineService.ts server/services/baselineMetricReaders/ server/services/reportingAgent/baselineHelper.ts || true',
+     'grep -rEn "Date\\.now\\(\\)" server/services/captureBaselineService.ts server/services/baselineReadinessService.ts server/services/baselineSubscriberService.ts server/services/baselineMetricReaders/ server/services/reportingAgent/baselineHelper.ts server/jobs/captureBaselineJob.ts server/jobs/evaluateAllPendingBaselines.ts || true',
      { encoding: 'utf8' },
    );
    const lines = dateNowHits.split('\n').filter((l) => l.length > 0);
-   assert.equal(lines.length, 0, `Date.now() found in capture path: ${lines.join('\n')}`);
+   assert.equal(lines.length, 0, `Date.now() found in F3 capture path: ${lines.join('\n')}`);
    ```
 
-   *Note:* `baselineReadinessService.ts` (Chunk 2A) uses `Date.now() - earliest.getTime()` for the settle-window comparison. **This is allowed** because it's an ephemeral comparison, not a write to a column. The grep targets ONLY the writer/reader files where `Date.now()` would land in a row. This decision is recorded explicitly in this step so the test author does not over-broaden the grep and break a legitimate comparison.
+   *Allowed exception:* `getRevenueLast30d.ts` (Chunk 3B) uses `new Date(Date.now() - 30 days)` to build the lower bound for the history query. This is a **query-parameter computation**, not a comparison anchor — Postgres receives the timestamp and uses it in `WHERE computed_at >= $1`. To keep the grep tight, that file passes `sql\`now() - interval '30 days'\`` instead of computing the date in JS (see Chunk 3B step 4 update). After that change, zero `Date.now()` hits across the entire F3 surface — no exception needed.
+
+   The cron retry-eligibility check in `evaluateAllPendingBaselines.ts` also previously used `Date.now()` to compute elapsed minutes against `lastAttemptAt`. That is rewritten to a SQL filter (Chunk 2B step 4 update) so the cron candidate list is itself the eligibility list — no JS-time comparison.
+
+   **Invariant 7 — `next_attempt_at IS NOT NULL ↔ status = 'ready'`.** Per architecture note §15. Test by exercising each transition path on a single fixture baseline:
+
+   ```ts
+   // After initial pending insert: next_attempt_at IS NULL
+   // After lock → 'capturing': next_attempt_at IS NULL (unchanged from pending)
+   // After retryable failure → 'ready' with attempts=1: next_attempt_at IS NOT NULL
+   // After 3rd retryable failure → 'failed': next_attempt_at IS NULL
+   // After non-retryable → 'failed': next_attempt_at IS NULL
+   // After success → 'captured': next_attempt_at IS NULL
+   // After runManual → 'manual': next_attempt_at IS NULL
+   // After adminReset → prior 'reset' (NULL) + new 'pending' (NULL)
+   ```
+
+   Exhaustive coverage. The forward direction (`status='ready' → next_attempt_at IS NOT NULL`) prevents the regression "retry transition forgot to stamp next_attempt_at" — operators would still get retries via cron, but lose observability. The backward direction (`next_attempt_at IS NULL → status != 'ready'`) prevents stale retry pointers on terminal rows.
 
 2. Author `server/services/__tests__/captureBaselineIntegration.test.ts` — DB-backed end-to-end fixture. Pattern to follow: existing repo integration tests (search for one like `*.integration.test.ts` or check whether F1 introduced one in `tasks/builds/subaccount-artefacts/`):
    - Setup: create test org + sub-account; insert a fake `connector_configs` row with `successfulPollCountTotal=2` and `firstQualifyingPollAt = 2h ago`; insert canonical_accounts + canonical_metrics fixture covering `pipeline_value` and `lead_count` (>= 2 of 4 core slugs).
@@ -2588,9 +2854,10 @@ If the polling service retries (pg-boss) and the counter has already been increm
 
 ### R4 — Single-writer static check is grep-based
 
-The Chunk 3C invariant 3 grep can be defeated by aliasing (`const sb = subaccountBaselines; await db.update(sb).set(...)`). Realistic threat: low — no developer reviewing this codebase would intentionally bypass; the check catches the easy mistake.
+The Chunk 3C invariant 3 grep can be defeated by deeper indirection. Realistic threat: low — no developer reviewing this codebase would intentionally bypass; the check catches the easy mistakes.
 
-- **Mitigation:** the grep is detective, not preventive. Pair it with a DEVELOPMENT_GUIDELINES note (in Chunk 6 docs) saying "writes to subaccount_baselines must go through captureBaselineService."
+- **Mitigation (tightened):** Chunk 3C invariant 3 now greps three patterns — raw SQL writes, direct Drizzle calls, AND the trailing `subaccountBaselines)` paren form. The third pattern catches the trivial alias case (`const sb = subaccountBaselines; tx.update(sb)` is still a miss; `tx.update(subaccountBaselines)` is caught even when the prefix isn't `db.`). Read sites (`select().from(subaccountBaselines)`) are explicitly filtered out to keep the signal high. Pair with a DEVELOPMENT_GUIDELINES note (Chunk 6 docs): "writes to subaccount_baselines must go through captureBaselineService."
+- **Residual:** deep indirection (e.g. dynamic table-name dispatch, function-returning-table-reference) still defeats the static check. If that pattern ever appears, the runtime invariant — exactly one row per sub-account, idempotent retry — still holds at the DB level via the partial UNIQUE index and the ON CONFLICT writes.
 
 ### R5 — Manual entry abuse — operator inflates baseline
 
@@ -2610,11 +2877,12 @@ F1 has merged. F2 (sub-account-optimiser Phases 1-4) is independent of F3 — F2
 
 - **Mitigation:** before Chunk 1A, `git fetch && git rebase main`. If F2 lands a new migration ahead of F3, re-allocate F3's migration numbers. Per executor notes: pre-flight migration check at every schema phase.
 
-### R8 — `revenue` slug mismatch between F3 readers and existing GHL/Stripe ingestion
+### R8 — `revenue` slug mismatch between F3 readers and existing GHL/Stripe ingestion (RESOLVED — build-blocking pre-check)
 
-The reader in Chunk 3B step 4 assumes `metric_slug='revenue'` in `canonical_metric_history`. If the existing ingestion writes a different slug (e.g. `monthly_revenue` or `revenue_total`), the reader returns `unavailable / no_data_yet` and the baseline stays in `partial` indefinitely.
+The reader in Chunk 3B step 4 assumes `metric_slug='revenue'` in `canonical_metric_history`. If the existing ingestion writes a different slug, the reader returns `unavailable / no_data_yet` and the baseline stays in `partial` indefinitely.
 
-- **Mitigation:** Chunk 3B step 7 explicitly directs the executor to grep `canonicalDataService.ts` and the GHL/Stripe adapters for the actual slug at build start. If different, adjust both the v1 metric registry AND the reader query AND the `revenue_last_30d` test fixture. **This is a load-bearing assumption** — failing to resolve it produces a baseline that always looks "partial" for the revenue metric.
+- **Resolution:** promoted from soft-risk to **build-blocking pre-check** in Chunk 3B step 0. The executor MUST grep `canonicalDataService.ts` and integration adapters for the actual revenue slug before authoring the reader. The decision tree (slug found / slug differs / no slug at all) is fully specified, and step 7 of the same chunk re-asserts the gate so the executor cannot silently skip it. No "default assumption" path is permitted.
+- **Residual:** none if the pre-check is run. If somehow skipped, the reader still degrades safely to `unavailable / no_data_yet / retryable` and surfaces a permanently-partial baseline that the operator can recover via `<ManualBaselineForm>`.
 
 ### R9 — `successful_poll_count_total` initial value for pre-F3 connectors
 
@@ -2627,6 +2895,24 @@ Connectors that exist on main before F3 deploys have `successful_poll_count_tota
 Per CLAUDE.md `Verifiability heuristic`, the manual-entry form's UX (validation timing, error display, currency dropdown placement) is non-verifiable agent work.
 
 - **Mitigation:** Chunk 4A and 4B should NOT be subagent-driven overnight. Sit with the form, click through, iterate visually before opening the PR.
+
+### R11 — Slow per-metric reader stalls capture
+
+A canonical_metrics scan against a large org or a downstream-DB hiccup could keep one reader hanging well past a reasonable budget, blocking sibling readers and the entire capture.
+
+- **Mitigation:** each reader call in `captureBaselineService.run` is wrapped in `withTimeout(reader(...), 5_000)` (Chunk 3A). Timeout is classified as `api_failure / retryable` so the cron retries with backoff. Sibling readers continue independently. The new `duration_ms` telemetry on terminal events (architecture note §13) surfaces slow readers in dashboards before they become user-visible delay.
+
+### R12 — Manual override race against auto capture
+
+Between the manual route's pre-check (`baseline.status !== 'capturing'`) and the final UPDATE, the auto path could acquire the lock — leaving the manual write half-applied.
+
+- **Mitigation:** the final UPDATE in `runManual` predicates on `status <> 'capturing'` and uses RETURNING; zero rows means the auto path won the race, and the route surfaces 409 to the operator. The metric upserts themselves are idempotent (PK + ON CONFLICT), so a partial pre-empt leaves no orphaned writes — the auto path overwrites them on its own ON CONFLICT pass. Tested in Chunk 3C invariant 4.
+
+### R13 — Wall-clock drift in readiness comparisons
+
+The settle-window check (`now() - first_qualifying_poll_at >= 1h`) was previously evaluated in JS via `Date.now() - earliest.getTime()`. Application servers in different time zones / with NTP drift could give different answers for the same row.
+
+- **Mitigation (resolved):** comparison pushed entirely into Postgres (`sql\`(... is not null and now() - ... >= interval '1 hour')\``) — application code receives a boolean. DB-time invariant §6 strengthened: zero `Date.now()` calls anywhere in the F3 capture surface. Static grep enforced in Chunk 3C invariant 6.
 
 ---
 
