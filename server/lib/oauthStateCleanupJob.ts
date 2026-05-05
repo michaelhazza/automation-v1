@@ -2,7 +2,7 @@
  * oauthStateCleanupJob.ts — TTL cleanup for oauth_state_nonces.
  *
  * Runs every 5 minutes via pg-boss. Deletes expired nonce rows in bounded
- * batches. Nonces expire after 10 minutes; cleanup runs every 5 minutes so
+ * batches. Nonces expire after 5 minutes; cleanup runs every 5 minutes so
  * the table stays small at steady state.
  *
  * Pre-Launch Hardening Phase 1 — S-P0-1, S-P0-2.

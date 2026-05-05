@@ -1,8 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../db/schema/index.js';
+import { orgUserRoles, subaccountUserAssignments, permissionSetItems, users } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { auditService } from '../services/auditService.js';
 import { withOrgTx } from '../instrumentation.js';
@@ -13,6 +13,8 @@ export interface JwtPayload {
   organisationId: string;
   role: string;
   email: string;
+  /** Standard JWT issued-at claim (seconds since epoch). Set by jsonwebtoken automatically. */
+  iat?: number;
 }
 
 declare global {
@@ -76,6 +78,27 @@ export const authenticate = async (
   }
 
   req.user = payload;
+
+  // JWT forced-logout: reject tokens issued before the user last changed their password.
+  // This check runs outside the org-scoped tx (uses db directly) because it must
+  // execute before the org context is established and is not tenant-data access.
+  const issuedAtMs = (payload.iat ?? 0) * 1000;
+  const [userRow] = await db
+    .select({ passwordChangedAt: users.passwordChangedAt })
+    .from(users)
+    .where(and(eq(users.id, payload.id), isNull(users.deletedAt)));
+  if (userRow && userRow.passwordChangedAt && userRow.passwordChangedAt.getTime() > issuedAtMs) {
+    void recordSecurityEvent({
+      organisationId: payload.organisationId,
+      actorUserId:    payload.id,
+      eventType:      'auth.token_revoked',
+      ip:             req.ip ?? null,
+      userAgent:      req.get('user-agent') ?? null,
+      meta:           { reason: 'password_changed_after_token_issued' },
+    });
+    res.status(401).json({ error: 'token_revoked', message: 'Your session has expired. Please log in again.' });
+    return;
+  }
 
   // system_admin can pass X-Organisation-Id to scope into any org.
   if (payload.role === 'system_admin') {

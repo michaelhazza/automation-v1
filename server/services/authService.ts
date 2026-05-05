@@ -100,6 +100,7 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
+    const now = new Date();
     await db
       .update(users)
       .set({
@@ -109,7 +110,8 @@ export class AuthService {
         status: 'active',
         inviteToken: null,
         inviteExpiresAt: null,
-        updatedAt: new Date(),
+        passwordChangedAt: now,
+        updatedAt: now,
       })
       .where(eq(users.id, user.id));
 
@@ -183,13 +185,15 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
 
+    const now = new Date();
     await db
       .update(users)
       .set({
         passwordHash,
         passwordResetToken: null,
         passwordResetExpiresAt: null,
-        updatedAt: new Date(),
+        passwordChangedAt: now,
+        updatedAt: now,
       })
       .where(eq(users.id, user.id));
 

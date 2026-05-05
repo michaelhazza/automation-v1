@@ -25,6 +25,7 @@ export const users = pgTable(
     passwordResetToken: text('password_reset_token'),
     passwordResetExpiresAt: timestamp('password_reset_expires_at', { withTimezone: true }),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }).notNull().defaultNow(),
     slackUserId: text('slack_user_id'),
     workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

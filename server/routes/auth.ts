@@ -22,13 +22,13 @@ function validatePasswordStrength(password: string): string | null {
 }
 
 router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (req, res) => {
-  const limitResult = await rateLimitCheck(rateLimitKeys.authSignup(req.ip ?? 'unknown'), 10, 900);
+  const { agencyName, email, password } = req.body as SignupInput;
+  const limitResult = await rateLimitCheck(rateLimitKeys.authSignup(req.ip ?? 'unknown', email), 10, 900);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
     return;
   }
-  const { agencyName, email, password } = req.body as SignupInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {
     res.status(400).json({ error: 'Validation failed', details: { password: [passwordError] } });
@@ -55,13 +55,26 @@ router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (re
 }));
 
 router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req, res) => {
-  const { email, password, organisationSlug } = req.body as LoginInput;
-  const limitResult = await rateLimitCheck(rateLimitKeys.authLogin(req.ip ?? 'unknown', String(email)), 10, 60);
-  if (!limitResult.allowed) {
-    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+  const { password, organisationSlug } = req.body as LoginInput;
+  const email = (req.body as LoginInput).email.trim().toLowerCase();
+  const ip = req.ip ?? 'unknown';
+
+  // Bucket 1 — short: 10 attempts / 60s (burst protection)
+  const rlShort = await rateLimitCheck(rateLimitKeys.authLogin(ip, email), 10, 60);
+  if (!rlShort.allowed) {
+    setRateLimitDeniedHeaders(res, rlShort.resetAt, rlShort.nowEpochMs);
     res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
     return;
   }
+
+  // Bucket 2 — long: 50 attempts / 3600s (credential-stuffing prevention)
+  const rlLong = await rateLimitCheck(rateLimitKeys.authLoginLong(ip, email), 50, 3600);
+  if (!rlLong.allowed) {
+    setRateLimitDeniedHeaders(res, rlLong.resetAt, rlLong.nowEpochMs);
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    return;
+  }
+
   let result;
   try {
     result = await authService.login(email, password, organisationSlug);
@@ -69,7 +82,7 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     auditService.log({
       actorType: 'user',
       action: 'login_failed',
-      metadata: { email: String(email).toLowerCase(), reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
+      metadata: { email, reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
       ipAddress: req.ip,
     });
     throw err;
