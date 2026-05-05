@@ -2990,3 +2990,24 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
   - Spec section: plan chunk 4B step 6 "Idempotency posture per route" — *"Skip: state-based; precondition `tier3.{slug}.status IN ('not_started')` — UPDATE WHERE that predicate. 0 rows affected = race; return 409 with the current state."*
   - Gap: implementation at `server/services/subaccountOnboardingService.ts:586-590` only blocks `status === 'completed'` (errorCode `ARTEFACT_ALREADY_COMPLETED`); skipping from `in_progress` or re-skipping a `skipped` artefact is allowed. Plan §4B literal precondition is `IN ('not_started')` only.
   - Suggested approach: decide whether to tighten the precondition to `not_started`-only (matches §4B; introduce errorCode `BASELINE_SKIP_PRECONDITION_FAILED` and wire 409 mapping in `server/routes/subaccounts.ts:867-879`), OR relax §4B in the spec to match the current operationally-permissive implementation. Not a regression — same behaviour the prior 2026-05-04T13-04-44Z conformance run marked PASS without flagging — so this is a follow-up cleanup, not a PR blocker.
+
+## Deferred from spec-conformance review — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05T05:08:56Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-launch-phase-2-2026-05-05T04-56-49Z.md`
+**Spec:** `docs/pre-launch-hardening-mini-spec.md`
+
+- [ ] REQ #4 — Maintenance-job done criteria: pure-function tests vs real-row integration tests
+  - Spec section: Mini-spec § Chunk 4 done criteria
+  - Gap: mini-spec says "test added per job that verifies a real row is decayed/pruned/recalibrated"; implementation ships pure-function tests of computation logic only (`ruleAutoDeprecateJobPure.test.ts`, `fastPathDecisionsPruneJobPure.test.ts`, `fastPathRecalibrateJobPure.test.ts`).
+  - Suggested approach: documented divergence — operator-locked decision per plan § 12 "no unit test suite during development" + memory note `feedback_unit-tests-mid-build`. Either (a) accept the divergence and amend the mini-spec done criteria to match the project's pure-test posture, OR (b) author DB-backed integration tests for the three jobs in a follow-up branch. No code change needed in this branch.
+
+- [ ] REQ #15 — Skill error envelope CI grep gate not implemented (C4a-6-RETSHAPE adherence enforcement)
+  - Spec section: Mini-spec § Chunk 5 done criteria — *"Skill error envelope contract is one of two documented options and 100% adherent."*
+  - Gap: plan Task 6b.7 last bullet promised "Add a CI grep gate (Chunk 7) that asserts every skill handler return shape matches the flat-string pattern (no mixed shapes — invariant 2.4 closure)." Chunk 7 shipped audit-stream-split gate and RLS-CONTRACT-IMPORT gate but did NOT ship the skill envelope adherence gate. Grep finds nested `error: { code, message, ... }` shapes in `connectorConfigService.ts`, `ghlAgencyOauthService.ts`, `locationTokenService.ts`, `skillExecutor.ts` (delegation skills) — i.e. mixed shapes still in the code.
+  - Suggested approach: author `scripts/verify-skill-error-envelope.sh` that scans `server/skills/**`, `server/tools/**`, and `server/services/skillExecutor.ts` `SKILL_HANDLERS` for return shapes; compare against the grandfather flat-string contract. Decisions required: (a) which file paths are in scope (skill handlers only, or every service that returns a skill envelope?), (b) whether the existing nested shapes in connector/oauth services represent skill returns or are out of scope (they appear to be event payloads, not skill envelopes — needs human confirmation). Not a mechanical fix because the scope decision is a design choice.
+
+- [ ] REQ #29 — SC-COVERAGE-BASELINE numbers are placeholders, not actual CI counts
+  - Spec section: Mini-spec § Chunk 6 — *"capture pre-Phase-2 baseline counts before testing changes them"*
+  - Gap: `tasks/builds/pre-launch-phase-2/progress.md` records section heading but the two count rows are placeholder text ("update with actual count from first CI run"), not actual numbers from a CI run.
+  - Suggested approach: after the next CI run on this branch, read the warning counts from `verify-input-validation.sh` and `verify-permission-scope.sh` outputs and update progress.md. Not auto-fixable from a local session because the values come from CI, not local invocation, and CLAUDE.md forbids local gate runs.
