@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>14 — Revoke Sarah?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 13 / 16 · <span class="muted">Revoke confirmation — destructive · type-the-name gate</span> · <a href="12-suspend-dialog.html">← Suspend</a> · <a href="14-subaccount-activity.html">Next: Subaccount Activity →</a></div>
+
+<div class="appbar" style="opacity: 0.55;">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Acme Client Co. / Sarah / Identity</span></span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+<div class="tabs" style="opacity: 0.55;"><a href="#" class="active">Identity</a></div>
+<div class="page" style="opacity: 0.55;"></div>
+
+<div class="modal-overlay">
+  <div class="modal" style="max-width: 540px; border-top: 3px solid var(--red-600);">
+
+    <div class="modal-head">
+      <div>
+        <h2 style="display: flex; align-items: center; gap: 8px; color: var(--red-700);">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--red-100); color: var(--red-700); display: inline-flex; align-items: center; justify-content: center;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </span>
+          Revoke Sarah's identity?
+        </h2>
+        <div class="step">Destructive · cannot be undone</div>
+      </div>
+      <button class="modal-close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <p style="font-size: 13px; color: var(--sl-700); margin: 0 0 12px;">Revoking is destructive. This identity:</p>
+
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px;">
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--red-50); color: var(--red-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Will lose all access</strong> and cannot be resumed.</div>
+        </li>
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--green-50); color: var(--green-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Will not delete history</strong> — owned mail, calendar entries, and documents remain under the actor's audit trail.</div>
+        </li>
+        <li style="display: flex; gap: 12px;">
+          <span style="width: 22px; height: 22px; border-radius: 999px; background: var(--red-50); color: var(--red-700); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
+          <div style="font-size: 13px; color: var(--sl-700); line-height: 1.5;"><strong style="color: var(--sl-900);">Frees the seat permanently</strong>.</div>
+        </li>
+      </ul>
+
+      <div class="callout callout-warn" style="margin-top: 16px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="14"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        <div>To restore Sarah-as-an-agent, you would need to <strong>hire a new agent under the same actor</strong>. New mail / calendar items would write to the new identity. The audit history of the old identity stays linked via Sarah's <code>actor_id</code>.</div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="field" style="margin-bottom: 0;">
+        <label class="field-label">Type <strong style="font-family: 'JetBrains Mono', monospace; color: var(--red-700);">SARAH</strong> to confirm</label>
+        <input class="field-input" placeholder="SARAH" style="font-family: 'JetBrains Mono', monospace;" />
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <span class="left text-xs">This action will be logged with your user ID and timestamp.</span>
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-danger" disabled>Revoke</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

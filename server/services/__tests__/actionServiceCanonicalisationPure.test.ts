@@ -1,6 +1,6 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
-import { computeValidationDigest, hashActionArgs } from '../actionService.js';
+import { expect, test } from 'vitest';
+import { buildActionIdempotencyKey, computeValidationDigest, hashActionArgs } from '../actionService.js';
+import { IDEMPOTENCY_KEY_VERSION } from '../../lib/idempotencyVersion.js';
 
 // ---------------------------------------------------------------------------
 // Pins the canonical-JSON contract for both idempotency key hashes and the
@@ -13,7 +13,7 @@ import { computeValidationDigest, hashActionArgs } from '../actionService.js';
 test('computeValidationDigest — same payload, different top-level key order → same digest', () => {
   const a = computeValidationDigest({ workflowId: 'wf_1', contactId: 'c_1' });
   const b = computeValidationDigest({ contactId: 'c_1', workflowId: 'wf_1' });
-  assert.equal(a, b);
+  expect(a).toBe(b);
 });
 
 test('computeValidationDigest — nested keys are retained and order-independent', () => {
@@ -25,19 +25,19 @@ test('computeValidationDigest — nested keys are retained and order-independent
     title: 'Review',
     recipients: { value: 'on_call', kind: 'preset' },
   });
-  assert.equal(a, b);
+  expect(a).toBe(b);
   // Sanity: different nested value → different digest (no silent drop).
   const c = computeValidationDigest({
     recipients: { kind: 'preset', value: 'different_group' },
     title: 'Review',
   });
-  assert.notEqual(a, c);
+  expect(a).not.toBe(c);
 });
 
 test('computeValidationDigest — array order IS preserved (positional semantics)', () => {
   const a = computeValidationDigest({ channels: ['in_app', 'email', 'slack'] });
   const b = computeValidationDigest({ channels: ['slack', 'email', 'in_app'] });
-  assert.notEqual(a, b);
+  expect(a).not.toBe(b);
 });
 
 test('computeValidationDigest — deeply nested structure canonicalises through every level', () => {
@@ -47,7 +47,7 @@ test('computeValidationDigest — deeply nested structure canonicalises through 
   const b = computeValidationDigest({
     outer: { middle: { inner: { a: 2, z: 1 } } },
   });
-  assert.equal(a, b);
+  expect(a).toBe(b);
 });
 
 test('hashActionArgs — same canonical contract as validation digest', () => {
@@ -59,7 +59,7 @@ test('hashActionArgs — same canonical contract as validation digest', () => {
     meta: { runId: 'r_1' },
     payload: { body: 'hi', contactId: 'c_1' },
   });
-  assert.equal(a, b);
+  expect(a).toBe(b);
 });
 
 test('present-vs-absent trap — undefined field and omitted field hash the same', () => {
@@ -68,7 +68,7 @@ test('present-vs-absent trap — undefined field and omitted field hash the same
   // same key must emerge so the dedup layer doesn't let both slip through.
   const omitted = computeValidationDigest({ contactId: 'c1' });
   const explicitUndef = computeValidationDigest({ contactId: 'c1', replyToAddress: undefined });
-  assert.equal(omitted, explicitUndef);
+  expect(omitted).toBe(explicitUndef);
 });
 
 test('present-vs-absent trap — explicit null STAYS DISTINCT from omitted', () => {
@@ -77,19 +77,56 @@ test('present-vs-absent trap — explicit null STAYS DISTINCT from omitted', () 
   // unset-to-null from unset-implicit are respected.
   const omitted = computeValidationDigest({ contactId: 'c1' });
   const explicitNull = computeValidationDigest({ contactId: 'c1', replyToAddress: null });
-  assert.notEqual(omitted, explicitNull);
+  expect(omitted).not.toBe(explicitNull);
 });
 
 test('present-vs-absent trap — applies recursively (nested undefined)', () => {
   const a = computeValidationDigest({ payload: { a: 1 } });
   const b = computeValidationDigest({ payload: { a: 1, b: undefined } });
-  assert.equal(a, b);
+  expect(a).toBe(b);
 });
 
 test('hashActionArgs — mirrors present-vs-absent behaviour', () => {
   const h1 = hashActionArgs({ args: { x: 1 } });
   const h2 = hashActionArgs({ args: { x: 1, opt: undefined } });
   const h3 = hashActionArgs({ args: { x: 1, opt: null } });
-  assert.equal(h1, h2);
-  assert.notEqual(h1, h3);
+  expect(h1).toBe(h2);
+  expect(h1).not.toBe(h3);
+});
+
+// ── Idempotency-key versioning (deferred-items brief §2) ──────────────────
+
+test('buildActionIdempotencyKey — prefixed with IDEMPOTENCY_KEY_VERSION', () => {
+  const key = buildActionIdempotencyKey({
+    runId:      'run_1',
+    toolCallId: 'tc_1',
+    args:       { x: 1 },
+  });
+  expect(key.startsWith(`${IDEMPOTENCY_KEY_VERSION}:`)).toBeTruthy();
+});
+
+test('buildActionIdempotencyKey — current v1 shape pinned', () => {
+  // Fixture: same inputs must always produce the same v1-prefixed key.
+  // Accidental canonicalisation change (or prefix removal) trips this test.
+  const key = buildActionIdempotencyKey({
+    runId:      '33333333-3333-3333-3333-333333333333',
+    toolCallId: 'tool_call_abc',
+    args:       { contactId: 'c_1', body: 'hi' },
+  });
+  const argsHash = hashActionArgs({ contactId: 'c_1', body: 'hi' });
+  expect(key).toBe(`v1:33333333-3333-3333-3333-333333333333:tool_call_abc:${argsHash}`);
+});
+
+test('buildActionIdempotencyKey — same args different key-order → same key (nested via argsHash)', () => {
+  const a = buildActionIdempotencyKey({
+    runId:      'r_1',
+    toolCallId: 't_1',
+    args:       { b: 2, a: 1 },
+  });
+  const b = buildActionIdempotencyKey({
+    runId:      'r_1',
+    toolCallId: 't_1',
+    args:       { a: 1, b: 2 },
+  });
+  expect(a).toBe(b);
 });

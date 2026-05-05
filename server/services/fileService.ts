@@ -1,4 +1,5 @@
 import { eq, and } from 'drizzle-orm';
+import * as fs from 'node:fs';
 import { db } from '../db/index.js';
 import { executionFiles, executions } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
@@ -26,12 +27,16 @@ export class FileService {
     const fileId = uuidv4();
     const storagePath = `executions/${executionId}/input/${fileId}-${file.originalname}`;
 
+    // `validateMultipart` uses `multer.diskStorage` (spec §6.1) so files arrive
+    // on disk at `file.path`, not in `file.buffer`. Stream from disk and pass
+    // `ContentLength` explicitly so the SDK skips the buffer-to-measure path.
     const s3 = getS3Client();
     await s3.send(
       new PutObjectCommand({
         Bucket: getBucketName(),
         Key: storagePath,
-        Body: file.buffer,
+        Body: fs.createReadStream(file.path),
+        ContentLength: file.size,
         ContentType: file.mimetype,
       })
     );

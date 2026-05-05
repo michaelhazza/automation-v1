@@ -11,13 +11,13 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { and, eq, lt, sql, isNull, inArray } from 'drizzle-orm';
+import { and, eq, lt, isNull, inArray } from 'drizzle-orm';
 import type PgBoss from 'pg-boss';
 import { db } from '../db.js';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
-import { budgetReservations } from '../../../server/db/schema/budgetReservations.js';
+import { computeReservations } from '../../../server/db/schema/computeReservations.js';
 import { retryUnemittedEvents } from '../persistence/runs.js';
 
 const QUEUE = 'iee-cleanup-orphans';
@@ -175,9 +175,9 @@ async function sweepReservationLeaks(): Promise<void> {
           updatedAt: new Date(),
         })
         .where(eq(ieeRuns.id, r.id));
-      await tx.update(budgetReservations)
+      await tx.update(computeReservations)
         .set({ status: 'released' })
-        .where(eq(budgetReservations.idempotencyKey, `iee:${r.id}`));
+        .where(eq(computeReservations.idempotencyKey, `iee:${r.id}`));
     }
   });
 

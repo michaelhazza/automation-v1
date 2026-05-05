@@ -24,7 +24,7 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type OccurrenceSource = 'heartbeat' | 'cron' | 'playbook' | 'scheduled_task';
+export type OccurrenceSource = 'heartbeat' | 'cron' | 'workflow' | 'scheduled_task';
 
 export type ScopeTag = 'system' | 'org' | 'subaccount';
 
@@ -67,7 +67,7 @@ export interface OccurrenceBase {
 export const SOURCE_PRIORITY = {
   heartbeat: 1,
   cron: 2,
-  playbook: 3,
+  workflow: 3,
   scheduled_task: 4,
 } as const satisfies Record<OccurrenceSource, number>;
 
@@ -251,6 +251,7 @@ export async function projectCronOccurrences(
 // Intl-based offset-detection trick to stay correct across DST boundaries.
 // ---------------------------------------------------------------------------
 
+// reason: rrule has inconsistent ESM/CJS exports across versions; `any` is required to probe the export shape at runtime.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getRRule(): Promise<any> {
   const mod = await import('rrule');
@@ -300,7 +301,7 @@ export interface RRuleInput extends OccurrenceBase {
   rrule: string;
   timezone: string;
   scheduleTime: string; // HH:MM 24hr
-  source: 'playbook' | 'scheduled_task';
+  source: 'workflow' | 'scheduled_task';
   sourceId: string;
   sourceName: string;
 }
@@ -312,6 +313,7 @@ export async function projectRRuleOccurrences(
 ): Promise<Array<{ scheduledAt: Date; base: OccurrenceBase; sourceId: string; sourceName: string }>> {
   const out: Array<{ scheduledAt: Date; base: OccurrenceBase; sourceId: string; sourceName: string }> = [];
   if (windowStartMs >= windowEndMs) return out;
+  // reason: rrule's dynamic import returns `any`; typing getRRule's return as RRule would require duplicating the class signature.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let rule: any;
   try {
@@ -330,7 +332,7 @@ export async function projectRRuleOccurrences(
   // to each date candidate. Stop when we pass the window end or hit the cap.
   let cursor = new Date(windowStartMs - 1);
   while (out.length < MAX_PROJECTED_PER_SOURCE) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const next: Date | null = rule.after(cursor, false);
     if (!next) break;
     // next() returns a Date whose UTC components encode the nominal rule date.

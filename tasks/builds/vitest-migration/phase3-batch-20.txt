@@ -1,0 +1,10 @@
+server/services/middleware/__tests__/reflectionLoopPure.test.ts
+server/services/systemMonitor/baselines/__tests__/computeKLDivergencePure.test.ts
+server/services/systemMonitor/baselines/__tests__/computeOutputEntropyPure.test.ts
+server/services/systemMonitor/heuristics/__tests__/heuristics25Pure.test.ts
+server/services/systemMonitor/heuristics/__tests__/heuristicsPure.test.ts
+server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts
+server/services/systemMonitor/synthetic/__tests__/silentAgentSuccessPure.test.ts
+server/services/systemMonitor/synthetic/__tests__/sweepCoverageDegraded.test.ts
+server/services/systemMonitor/synthetic/__tests__/syntheticChecksPure.test.ts
+server/services/systemMonitor/triage/__tests__/clusterAndSelect.test.ts

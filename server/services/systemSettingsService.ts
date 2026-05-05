@@ -28,6 +28,13 @@ export const SETTING_KEYS = {
   FEATURE_REQUEST_SLACK_CHANNEL: 'feature_request_slack_channel',
   FEATURE_REQUEST_EMAIL_ADDRESS: 'feature_request_email_address',
   SYNTHETOS_INTERNAL_SUBACCOUNT_ID: 'synthetos_internal_subaccount_id',
+  // CRM query planner tier config (§21.2) — read by llmPlanner.ts in P2
+  CRM_QUERY_PLANNER_DEFAULT_TIER:           'crm_query_planner_default_tier',
+  CRM_QUERY_PLANNER_ESCALATION_TIER:        'crm_query_planner_escalation_tier',
+  CRM_QUERY_PLANNER_CONFIDENCE_THRESHOLD:   'crm_query_planner_confidence_threshold',
+  CRM_QUERY_PLANNER_PER_QUERY_CENTS:        'crm_query_planner_per_query_cents',
+  CRM_QUERY_PLANNER_SCHEMA_TOKENS_DEFAULT:  'crm_query_planner_schema_tokens_default',
+  CRM_QUERY_PLANNER_SCHEMA_TOKENS_ESCALATED:'crm_query_planner_schema_tokens_escalated',
 } as const;
 
 export class SystemSettingsService {

@@ -4,32 +4,12 @@
 // Runnable via:
 //   npx tsx server/lib/__tests__/testRunIdempotencyPure.test.ts
 
+import { expect, test } from 'vitest';
 import {
   canonicalStringify,
   deriveTestRunIdempotencyCandidates,
   deriveTestRunIdempotencyKey,
 } from '../testRunIdempotency.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, msg: string): void {
-  if (a !== b) {
-    throw new Error(`${msg}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  }
-}
 
 function assertNotEqual(a: unknown, b: unknown, msg: string): void {
   if (a === b) {
@@ -53,13 +33,13 @@ function restoreTime(): void {
 test('canonicalStringify: object key order is normalised', () => {
   const a = canonicalStringify({ a: 1, b: 2, c: 3 });
   const b = canonicalStringify({ c: 3, a: 1, b: 2 });
-  assertEqual(a, b, 'reordered keys should produce identical output');
+  expect(a, 'reordered keys should produce identical output').toEqual(b);
 });
 
 test('canonicalStringify: nested objects sort recursively', () => {
   const a = canonicalStringify({ outer: { a: 1, b: 2 }, other: 'x' });
   const b = canonicalStringify({ other: 'x', outer: { b: 2, a: 1 } });
-  assertEqual(a, b, 'nested reorder should still collide');
+  expect(a, 'nested reorder should still collide').toEqual(b);
 });
 
 test('canonicalStringify: arrays preserve order', () => {
@@ -71,26 +51,22 @@ test('canonicalStringify: arrays preserve order', () => {
 });
 
 test('canonicalStringify: undefined in objects is omitted', () => {
-  assertEqual(
-    canonicalStringify({ a: 1, b: undefined }),
-    canonicalStringify({ a: 1 }),
-    'undefined keys dropped',
-  );
+  expect(canonicalStringify({ a: 1, b: undefined }), 'undefined keys dropped').toEqual(canonicalStringify({ a: 1 }));
 });
 
 test('canonicalStringify: undefined in arrays becomes null', () => {
-  assertEqual(canonicalStringify([1, undefined, 3]), '[1,null,3]', 'undefined → null');
+  expect(canonicalStringify([1, undefined, 3]), 'undefined → null').toBe('[1,null,3]');
 });
 
 test('canonicalStringify: non-finite numbers become null', () => {
-  assertEqual(canonicalStringify({ x: NaN, y: Infinity }), '{"x":null,"y":null}', 'non-finite → null');
+  expect(canonicalStringify({ x: NaN, y: Infinity }), 'non-finite → null').toBe('{"x":null,"y":null}');
 });
 
 test('canonicalStringify: null and primitives round-trip as JSON', () => {
-  assertEqual(canonicalStringify(null), 'null', 'null');
-  assertEqual(canonicalStringify(42), '42', 'number');
-  assertEqual(canonicalStringify('hi'), '"hi"', 'string');
-  assertEqual(canonicalStringify(true), 'true', 'bool');
+  expect(canonicalStringify(null), 'null').toBe('null');
+  expect(canonicalStringify(42), 'number').toBe('42');
+  expect(canonicalStringify('hi'), 'string').toBe('"hi"');
+  expect(canonicalStringify(true), 'bool').toBe('true');
 });
 
 // ---------------------------------------------------------------------------
@@ -108,7 +84,7 @@ test('same inputs in same time bucket produce the same key', () => {
       userId: 'u1', targetType: 'agent', targetId: 't1',
       input: { prompt: 'hello', inputJson: { x: 1 } },
     });
-    assertEqual(a, b, 'identical inputs should collide');
+    expect(a, 'identical inputs should collide').toEqual(b);
   } finally { restoreTime(); }
 });
 
@@ -123,7 +99,7 @@ test('logically-equivalent inputs with different key order collide', () => {
       userId: 'u1', targetType: 'agent', targetId: 't1',
       input: { inputJson: { b: 2, a: 1 }, prompt: 'hello' },
     });
-    assertEqual(a, b, 'canonical JSON should normalise key order');
+    expect(a, 'canonical JSON should normalise key order').toEqual(b);
   } finally { restoreTime(); }
 });
 
@@ -205,7 +181,7 @@ test('same client key hint + same input collides inside bucket', () => {
     const b = deriveTestRunIdempotencyKey({
       userId: 'u1', targetType: 'agent', targetId: 't1', input: { x: 1 }, clientKeyHint: 'same',
     });
-    assertEqual(a, b, 'matching hint should collide');
+    expect(a, 'matching hint should collide').toEqual(b);
   } finally { restoreTime(); }
 });
 
@@ -248,7 +224,7 @@ test('candidates: current key matches deriveTestRunIdempotencyKey output', () =>
     const [current] = deriveTestRunIdempotencyCandidates({
       userId: 'u1', targetType: 'agent', targetId: 't1', input: { x: 1 },
     });
-    assertEqual(current, primary, 'current candidate must equal primary key');
+    expect(current, 'current candidate must equal primary key').toEqual(primary);
   } finally { restoreTime(); }
 });
 
@@ -264,12 +240,10 @@ test('candidates: boundary-straddling retries overlap', () => {
     const [currentB, previousB] = deriveTestRunIdempotencyCandidates({
       userId: 'u1', targetType: 'agent', targetId: 't1', input: { x: 1 },
     });
-    assertEqual(previousB, currentA, 'second request sees first request current as its previous');
+    expect(previousB, 'second request sees first request current as its previous').toEqual(currentA);
     assertNotEqual(currentB, currentA, 'current keys differ between buckets');
     assertNotEqual(previousA, previousB, 'previous keys differ between buckets');
   } finally { restoreTime(); }
 });
 
-console.log('');
-console.log(`testRunIdempotencyPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+console.log('');

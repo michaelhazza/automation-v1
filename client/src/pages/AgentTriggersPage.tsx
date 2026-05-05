@@ -92,7 +92,7 @@ export default function AgentTriggersPage() {
           <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Agent Triggers</h1>
           <p className="text-[14px] text-slate-500 m-0">Event-based triggers that automatically run agents when specific events occur.</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold">
+        <button onClick={() => setShowCreate(true)} className="btn btn-sm btn-primary">
           New Trigger
         </button>
       </div>
@@ -130,8 +130,8 @@ export default function AgentTriggersPage() {
             <input type="text" value={form.filterExpression} onChange={e => setForm({ ...form, filterExpression: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. data.priority == 'high'" />
           </div>
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-[13px] text-slate-600 cursor-pointer">Cancel</button>
-            <button onClick={handleCreate} disabled={saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold">{saving ? 'Creating...' : 'Create'}</button>
+            <button onClick={() => setShowCreate(false)} className="btn btn-sm btn-secondary">Cancel</button>
+            <button onClick={handleCreate} disabled={saving} className="btn btn-sm btn-primary">{saving ? 'Creating...' : 'Create'}</button>
           </div>
         </div>
       )}

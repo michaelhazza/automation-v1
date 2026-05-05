@@ -17,13 +17,16 @@
 import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executionFiles, executions, executionPayloads, users, workflowEngines } from '../db/schema/index.js';
+import { executionFiles, executions, executionPayloads, users, automationEngines } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { emailService } from './emailService.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { logger } from '../lib/logger.js';
+
+let webhookOpenModeWarned = false;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -73,7 +76,16 @@ export const webhookService = {
    */
   verifyCallbackToken(executionId: string, token?: string, engineHmacSecret?: string): boolean {
     const secret = engineHmacSecret ?? env.WEBHOOK_SECRET;
-    if (!secret) return true;
+    if (!secret) {
+      if (!webhookOpenModeWarned) {
+        webhookOpenModeWarned = true;
+        logger.warn('webhook.open_mode_active', {
+          reason: 'WEBHOOK_SECRET unset; verifyCallbackToken accepts any token',
+          nodeEnv: env.NODE_ENV,
+        });
+      }
+      return true;
+    }
     if (!token) return false;
     const expected = crypto
       .createHmac('sha256', secret)
@@ -214,9 +226,9 @@ export const webhookService = {
     let engineHmacSecret: string | undefined;
     if (execution.engineId) {
       const [engine] = await db.select()
-        .from(workflowEngines)
+        .from(automationEngines)
         // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch engine HMAC secret; engineId obtained from execution row"
-        .where(eq(workflowEngines.id, execution.engineId));
+        .where(eq(automationEngines.id, execution.engineId));
       engineHmacSecret = engine?.hmacSecret;
     }
 

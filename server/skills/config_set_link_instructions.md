@@ -2,7 +2,7 @@
 name: Config Set Link Instructions
 description: Set custom instructions on a subaccount agent link (per-client context and directives).
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

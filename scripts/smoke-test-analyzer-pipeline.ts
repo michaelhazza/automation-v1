@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   // computes hashes via skillParserServicePure.normalizeForHash. The
   // safest reproduction is to mirror the *parsed* shape — not the .md
   // file — because that's what the pipeline compares against.
-  let definition: object | null = null;
+  let definition: object;
   try {
     definition = JSON.parse(real.definition_json) as object;
   } catch {

@@ -75,7 +75,7 @@ export default function SystemEnginesPage({ user }: { user: User }) {
           <h1 className="text-[28px] font-bold text-slate-800 m-0">System Engines</h1>
           <p className="text-slate-500 mt-2 mb-0">Platform-level execution engines (fallback for all orgs/subaccounts)</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg px-5 py-2.5 cursor-pointer font-semibold transition-colors">
+        <button onClick={() => setShowCreate(true)} className="btn btn-primary">
           + New Engine
         </button>
       </div>
@@ -108,10 +108,10 @@ export default function SystemEnginesPage({ user }: { user: User }) {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex gap-2 justify-end">
-                    <button onClick={() => handleToggleStatus(e)} className={`px-3 py-1 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors ${e.status === 'active' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-600 hover:bg-green-700'}`}>
+                    <button onClick={() => handleToggleStatus(e)} className={`btn btn-xs ${e.status === 'active' ? 'btn-ghost text-yellow-700 hover:bg-yellow-50' : 'btn-success'}`}>
                       {e.status === 'active' ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button onClick={() => setDeleteId(e.id)} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Delete</button>
+                    <button onClick={() => setDeleteId(e.id)} className="btn btn-xs btn-danger">Delete</button>
                   </div>
                 </td>
               </tr>
@@ -150,8 +150,8 @@ export default function SystemEnginesPage({ user }: { user: User }) {
               <input value={form.apiKey} onChange={e => setForm({ ...form, apiKey: e.target.value })} type="password" className={inputCls} />
             </label>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md cursor-pointer transition-colors">Cancel</button>
-              <button onClick={handleCreate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-md cursor-pointer font-semibold transition-colors">Create</button>
+              <button onClick={() => setShowCreate(false)} className="btn btn-secondary">Cancel</button>
+              <button onClick={handleCreate} className="btn btn-primary">Create</button>
             </div>
           </div>
         </div>

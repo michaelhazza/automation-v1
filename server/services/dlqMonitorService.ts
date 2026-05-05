@@ -9,19 +9,22 @@
 import type PgBoss from 'pg-boss';
 import { logger } from '../lib/logger.js';
 import { safeSerialize } from '../lib/jobErrors.js';
+import { recordIncident as defaultRecordIncident, type IncidentInput } from './incidentIngestor.js';
+import { JOB_CONFIG } from '../config/jobConfig.js';
+import { deriveDlqQueueNames } from './dlqMonitorServicePure.js';
 
-const DLQ_QUEUES = [
-  'agent-scheduled-run__dlq',
-  'agent-org-scheduled-run__dlq',
-  'agent-handoff-run__dlq',
-  'agent-triggered-run__dlq',
-  'execution-run__dlq',
-  'workflow-resume__dlq',
-  'llm-aggregate-update__dlq',
-  'llm-monthly-invoices__dlq',
-];
+const DLQ_QUEUES = deriveDlqQueueNames(JOB_CONFIG);
 
-export async function startDlqMonitor(boss: PgBoss): Promise<void> {
+export interface DlqMonitorDependencies {
+  recordIncident?: (input: IncidentInput, opts?: { forceSync?: boolean }) => Promise<void>;
+}
+
+export async function startDlqMonitor(
+  boss: PgBoss,
+  deps: DlqMonitorDependencies = {},
+): Promise<void> {
+  const recordIncident = deps.recordIncident ?? defaultRecordIncident;
+
   for (const dlqName of DLQ_QUEUES) {
     const sourceQueue = dlqName.replace('__dlq', '');
     await (boss as any).work(
@@ -37,6 +40,15 @@ export async function startDlqMonitor(boss: PgBoss): Promise<void> {
           subaccountId: payload.subaccountId,
           payload: safeSerialize(payload),
         });
+        await recordIncident({
+          source: 'job',
+          summary: `Job reached DLQ: ${sourceQueue}`,
+          errorCode: 'job_dlq',
+          organisationId: typeof payload.organisationId === 'string' ? payload.organisationId : null,
+          subaccountId: typeof payload.subaccountId === 'string' ? payload.subaccountId : null,
+          fingerprintOverride: `job:${sourceQueue}:dlq`,
+          errorDetail: { jobId: job.id },
+        }, { forceSync: true });
       },
     );
   }

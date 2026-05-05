@@ -12,7 +12,7 @@
  * one: it wakes on state-change events rather than waiting for its next heartbeat.
  */
 
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, agents, subaccountAgents, agentRuns } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
@@ -66,7 +66,7 @@ export const subtaskWakeupService = {
         organisationId: subaccountAgents.organisationId,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, subaccountId),

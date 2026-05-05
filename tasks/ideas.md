@@ -17,3 +17,21 @@ PR #159 (skill-analyzer crash-resume) relies on application-level filtering to p
 **Reference:** External-reviewer feedback on PR #159, items #3 (idempotency gap at DB level) and #5 (ON CONFLICT DO NOTHING suggestion). Kept separate from PR #159 because the cleanup step carries prod-data risk and deserves its own review.
 
 **Status:** Captured
+
+## [IDEA-2] Spec-authoring checklist: verify cited deferred items are still open before spec lock
+**Date:** 2026-04-26
+**Area:** Spec authoring workflow / process tooling
+
+**Problem / Opportunity:**
+When a sprint spec cites items from a deferred-items list (e.g. `tasks/todo.md`) as inputs to scope, those items may have already been resolved by a migration or prior PR by the time spec authoring begins. The current workflow catches this only at draft time via the global stop condition (item ID cannot be reconciled), not at spec-input lock time — meaning the author may already have written scope against stale inputs. Surfaced 2026-04-26 during Chunk 1 of the pre-launch hardening spec sprint: ~12 of 14 cited items had been closed by migration 0227 before authoring started.
+
+**Rough shape:**
+- Extend `docs/spec-authoring-checklist.md` with a "Section 0 — Verify cited deferred items are still open" step.
+- Step runs before the author commits to scope: grep each cited item ID in `tasks/todo.md`, then cross-check against `git log` to confirm no migration or PR closed it after the backlog snapshot used for citation.
+- If any cited item is already closed, the author must reconcile scope before proceeding — not after draft is written.
+- Optionally: a small shell helper (`scripts/verify-deferred-items.sh`) that accepts a list of item IDs and outputs open/closed status with the closing commit reference.
+- Estimated effort: low (checklist prose update) to medium (if shell helper is built). No code changes required for the checklist-only version.
+
+**Branch context at capture:** `spec/pre-launch-hardening` (Chunk 1 RLS spec). Out of scope for that branch — captured for separate consideration.
+
+**Status:** Captured

@@ -4,7 +4,7 @@ import { subaccounts } from './subaccounts';
 import { actions } from './actions';
 import { agentRuns } from './agentRuns';
 import { users } from './users';
-import { workflowRuns } from './workflowRuns';
+import { flowRuns } from './flowRuns';
 
 // ---------------------------------------------------------------------------
 // Review Audit Records — append-only HumanFeedbackResult log (CrewAI pattern)
@@ -33,8 +33,8 @@ export const reviewAuditRecords = pgTable(
     /** Populated only when decision = 'edited' */
     editedArgs: jsonb('edited_args'),
 
-    /** Workflow context — populated when this review item came from a workflow step. */
-    workflowRunId: uuid('workflow_run_id').references(() => workflowRuns.id),
+    /** Flow run context — populated when this review item came from a flow step. */
+    workflowRunId: uuid('workflow_run_id').references(() => flowRuns.id),
     workflowStepId: text('workflow_step_id'),
 
     // ── Pulse — Major-lane acknowledgment (migration 0160) ──────────

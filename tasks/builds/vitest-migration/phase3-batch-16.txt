@@ -1,0 +1,10 @@
+server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts
+server/services/__tests__/skillAnalyzerServicePureMergePrompt.test.ts
+server/services/__tests__/skillAnalyzerServicePureV6.test.ts
+server/services/__tests__/skillAnalyzerServicePureValidation.test.ts
+server/services/__tests__/skillExecutor.reassignTask.test.ts
+server/services/__tests__/skillExecutor.spawnSubAgents.test.ts
+server/services/__tests__/skillExecutorPure.test.ts
+server/services/__tests__/skillHandlerRegistryEquivalence.test.ts
+server/services/__tests__/skillParserServicePure.test.ts
+server/services/__tests__/skillService.resolver.test.ts

@@ -345,6 +345,27 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/resume
+// Re-enqueue a stalled or failed analysis job. The pipeline handler is
+// crash-resumable (Stage 5 skips already-classified rows, Stage 6 hits
+// the agent-embedding cache) so this is a no-op on LLM spend. Refuses
+// when the job is completed or when pg-boss already has a live entry
+// for this jobId — see skillAnalyzerService.resumeJob for the guards.
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/resume',
+  asyncHandler(async (req, res) => {
+    const result = await skillAnalyzerService.resumeJob({
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+      userId: req.user!.id,
+    });
+    return res.json(result);
+  })
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/system/skill-analyser/jobs/:jobId/results/:resultId/retry-classification
 // Retry LLM classification for a single result row with classificationFailed=true.
 // Idempotent — no-op if the row is not in a failed state.

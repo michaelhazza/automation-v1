@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations.js';
 import { canonicalAccounts } from './canonicalAccounts.js';
 
@@ -32,7 +32,7 @@ export const interventionOutcomes = pgTable(
   (table) => ({
     orgIdx: index('intervention_outcomes_org_idx').on(table.organisationId),
     accountIdx: index('intervention_outcomes_account_idx').on(table.accountId),
-    interventionIdx: index('intervention_outcomes_intervention_idx').on(table.interventionId),
+    interventionUnique: uniqueIndex('intervention_outcomes_intervention_unique').on(table.interventionId),
   })
 );
 

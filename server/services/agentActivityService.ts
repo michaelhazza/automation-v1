@@ -1,6 +1,7 @@
 import { eq, and, desc, gte, sql, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations } from '../db/schema/index.js';
+import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations, agentExecutionEvents } from '../db/schema/index.js';
+import { coerceEventCount } from './agentActivityServicePure.js';
 
 const MAX_CHAIN_NODES = 50;
 
@@ -51,8 +52,8 @@ export const agentActivityService = {
         subaccountName: subaccounts.name,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
+      .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(agentRuns.createdAt))
       .limit(limit)
@@ -61,7 +62,11 @@ export const agentActivityService = {
     return rows.map(({ run, agentName, agentSlug, subaccountName }) => ({
       id: run.id,
       agentId: run.agentId,
-      agentName,
+      // leftJoin + isNull(deletedAt) → agentName is null when the agent was
+      // soft-deleted. Mirror delegationGraphService's stable placeholder so
+      // UI consumers (e.g. TraceChainSidebar/Timeline) never render literal
+      // null. agentRuns.agentId is notNull per schema, so .slice is safe.
+      agentName: agentName ?? `(deleted agent ${run.agentId.slice(0, 8)})`,
       agentSlug,
       subaccountId: run.subaccountId,
       subaccountName,
@@ -100,8 +105,8 @@ export const agentActivityService = {
         subaccountName: subaccounts.name,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
+      .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
       .where(and(...conditions));
 
     if (!row) throw { statusCode: 404, message: 'Agent run not found' };
@@ -132,16 +137,26 @@ export const agentActivityService = {
             })),
           };
 
+    // Event count — single aggregate query (not per-row) scoped by run_id.
+    const [eventCountRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(agentExecutionEvents)
+      .where(eq(agentExecutionEvents.runId, runId));
+
+    const eventCount = coerceEventCount(eventCountRow?.count);
+
     // ieeRunId is now a denormalised column on agent_runs (migration
     // 0176) written by agentExecutionService at delegation time. No
     // JOIN or subquery needed at read time — the value is already on
     // row.run. Spread carries it through.
     return {
       ...row.run,
-      agentName: row.agentName,
+      // Same soft-delete placeholder rationale as listRuns above.
+      agentName: row.agentName ?? `(deleted agent ${row.run.agentId.slice(0, 8)})`,
       agentSlug: row.agentSlug,
       subaccountName: row.subaccountName,
       mcpCallSummary,
+      eventCount,
     };
   },
 
@@ -201,7 +216,7 @@ export const agentActivityService = {
         agentName: agents.name,
       })
       .from(taskActivities)
-      .leftJoin(agents, eq(agents.id, taskActivities.agentId))
+      .leftJoin(agents, and(eq(agents.id, taskActivities.agentId), isNull(agents.deletedAt)))
       .innerJoin(tasks, eq(tasks.id, taskActivities.taskId));
 
     if (params.subaccountId) {
@@ -272,8 +287,8 @@ export const agentActivityService = {
         subaccountName: subaccounts.name,
       })
       .from(agentRuns)
-      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
+      .leftJoin(subaccounts, and(eq(subaccounts.id, agentRuns.subaccountId), isNull(subaccounts.deletedAt)))
       .where(and(
         eq(agentRuns.organisationId, organisationId),
         sql`(${agentRuns.id} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentRunId} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentSpawnRunId} = ANY(${chainIds}::uuid[]))`,
@@ -296,7 +311,9 @@ export const agentActivityService = {
         runSource: run.runSource,
         runType: run.runType,
         status: run.status,
-        agentName,
+        // Same soft-delete placeholder rationale as listRuns above —
+        // TraceChainSidebar / TraceChainTimeline interpolate this directly.
+        agentName: agentName ?? `(deleted agent ${run.agentId.slice(0, 8)})`,
         subaccountName,
         startedAt: run.startedAt,
         completedAt: run.completedAt,

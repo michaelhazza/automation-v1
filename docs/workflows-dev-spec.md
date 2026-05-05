@@ -1,0 +1,1818 @@
+# Workflows — Development Spec (v1)
+
+_Date: 2026-05-02_
+_Status: pre-implementation. Implements `docs/workflows-dev-brief.md` v2._
+_Branch: `claude/workflows-brainstorm-LSdMm`_
+_Mockups: [`prototypes/workflows/`](../prototypes/workflows/index.html)_
+
+---
+
+## How this spec is organised
+
+This spec implements the design intent captured in [`docs/workflows-dev-brief.md` v2](./workflows-dev-brief.md). The brief is the *what and why*; this spec is the *how*. Every section below lists concrete schema changes, engine rules, API surfaces, and UI components, with the relevant brief section and mockup file cross-referenced.
+
+The 11 spec-level decisions resolved on 2026-05-02 (mobile scope, timeout behaviour, non-requester visibility, runaway protection, version pinning on schedules, default tab, concurrent editing, approver picker scoping, auto-fill behaviour, empty states, effort re-estimate) are folded into the relevant sections below.
+
+This spec assumes:
+- The engine, schema, and three system templates already exist (per brief §2).
+- The brief is the source of truth on framing; the spec extends it but does not contradict it. If a conflict arises, the brief's design intent wins and this spec is corrected.
+- Implementation chunks are decomposed by `architect` after spec-review lands; this document is the input to that step.
+
+---
+
+## Contents
+
+1. [Summary, scope, related docs](#1-summary-scope-related-docs)
+2. [Concepts and cross-references](#2-concepts-and-cross-references)
+3. [Schema deltas](#3-schema-deltas)
+4. [Engine — validator rules](#4-engine--validator-rules)
+5. [Engine — approval routing, `isCritical`, state machine](#5-engine--approval-routing-iscritical-state-machine)
+6. [Engine — confidence chip and audit fields](#6-engine--confidence-chip-and-audit-fields)
+7. [Engine — cost and time runaway protection](#7-engine--cost-and-time-runaway-protection)
+8. [Real-time coordination — WebSocket and event taxonomy](#8-real-time-coordination--websocket-and-event-taxonomy)
+9. [Open task view UI](#9-open-task-view-ui)
+10. [Studio UI](#10-studio-ui)
+11. [Ask form runtime](#11-ask-form-runtime)
+12. [Files and conversational editing](#12-files-and-conversational-editing)
+13. [Orchestrator changes](#13-orchestrator-changes)
+14. [Permissions model](#14-permissions-model)
+15. [Naming cleanup — Brief → Task](#15-naming-cleanup--brief--task)
+16. [Build punch list and effort estimates](#16-build-punch-list-and-effort-estimates)
+17. [Test plan](#17-test-plan)
+18. [Migration plan and telemetry](#18-migration-plan-and-telemetry)
+19. [Open spec-time decisions](#19-open-spec-time-decisions)
+
+---
+
+## 1. Summary, scope, related docs
+
+### 1.1 What this spec covers
+
+The implementation contract for the Workflows V1 build defined in [`docs/workflows-dev-brief.md`](./workflows-dev-brief.md) v2. Concretely:
+
+- The **operator surface** for tasks in flight (open task view, three-pane layout with Now / Plan / Files tabs, real-time multi-pane coordination, milestone-shaped chat).
+- The **authoring surface** (Studio canvas, four A's inspectors, publish notes, Studio handoff with preview, version pinning on schedules).
+- The **runtime surfaces** for the four A's, with particular depth on Approval (audit fields, confidence chip, `isCritical` routing) and Ask (form-card primitive in the chat panel, plus the four-way submitter routing).
+- A small set of **schema additions** (approver routing, teams, `isCritical`, `publish_notes`, audit fields, `seen_payload`, schedule version pinning).
+- **Orchestrator changes** that close the brief's strategic test (suggest-don't-decide for "do once vs repeat", draft hydration into Studio, milestone reporting in chat).
+- **Permissions model** for approver and Ask-submitter pickers, scoped to sub-account and the calling user's role.
+- The **naming cleanup** (Brief → Task as a UI noun; schema unchanged).
+- A **test plan, migration plan, and telemetry plan**.
+
+### 1.2 What this spec does NOT cover
+
+- Mobile / phone-responsive layouts. V1 is desktop-first (default per spec-time decision #1, brief §15). A read-only single-pane fallback for tablet/phone is V2.
+- Visual node-graph drag-and-drop authoring (permanently out of scope, brief §3).
+- Inline human editing of files (V2; conversational editing is the V1 path, brief §9.3).
+- Workflow → workflow direct nesting (permanently disallowed; agent-layer indirection allowed, brief §4.3).
+- Webhook triggers (V2, brief §12).
+- General `while` / `do-until` loops (permanently disallowed; Approval-on-reject covers the legitimate cases, brief §5.3).
+- Cost dashboards across workflows / templates (V2, brief §12).
+- Run-history search across sub-accounts (admin tooling, V2, brief §12).
+- Timeout escalation policies (only stall-and-notify-requester at 24h / 72h / 7d in V1, per spec-time decision #2).
+
+### 1.3 Related documents
+
+| Document | Purpose | Relationship to this spec |
+|---|---|---|
+| [`docs/workflows-dev-brief.md`](./workflows-dev-brief.md) | Design intent (v2) | This spec implements every committed item in the brief. |
+| [`prototypes/workflows/`](../prototypes/workflows/index.html) | Mockup index | Each UI section below references the relevant mockup file. |
+| [`docs/frontend-design-principles.md`](./frontend-design-principles.md) | Consumer-simple UI principles | All UI surfaces in this spec must conform; copy passes apply (no em-dashes in app-facing text, plain-language labels, no engineering jargon in operator-visible strings). |
+| [`docs/spec-authoring-checklist.md`](./spec-authoring-checklist.md) | Spec authoring rigour | This spec is reviewed against the checklist before `architect` decomposes. |
+| [`KNOWLEDGE.md`](../KNOWLEDGE.md) | Project corrections + patterns | Two recent corrections apply directly: activity-ordering is "events flow top-down with auto-scroll" (not `flex-col justify-end`); timestamps use `Xs ago` format. |
+
+### 1.4 Spec-time decisions resolved (2026-05-02)
+
+These resolve the brief's open questions and the spec-finalisation pass:
+
+| # | Decision | Default applied | Drives |
+|---|---|---|---|
+| 1 | Mobile / tablet scope | Desktop-first V1; read-only single-pane fallback in V2 | UI scope |
+| 2 | Approval / Ask timeout | Stall (no auto-fail), with notification to requester at 24h / 72h / 7d | Engine state machine + notification cadence |
+| 3 | Non-requester submitter visibility | Full task view (chat, activity, files); workflow-author can opt into "restricted" mode in V2 | Permissions model |
+| 4 | Cost / time runaway protection | Visible Pause / Stop buttons; engine auto-pause at $5 per-run cost ceiling and 1h wall-clock cap (both configurable per workflow) | Engine + UI |
+| 5 | Workflow template versioning on schedules | Default "next run uses new"; opt-in "Pin to version vN" toggle on the schedule | Engine + Studio + schedule editor |
+| 6 | Empty states | "Task created" event in activity at second zero; Plan tab shows "Drafting…" placeholder; Files tab shows "Nothing produced yet" | UI |
+| 7 | Default right-pane tab on task open | Plan, always (content adapts to task complexity per §9) | UI |
+| 8 | Concurrent editing in Studio | Last-write-wins with "this template was updated by [user] while you were editing" warning before publish | Engine + Studio |
+| 9 | Approver / Ask-submitter picker scoping | Permission-aware: org admin/manager sees org users + sub-account users; sub-account admin sees only their sub-account users | API + UI per §14 |
+| 10 | Auto-fill on schema-changed workflow | Pre-fill matching fields, leave new ones blank, no warning | UI per §11 |
+| 11 | Effort re-estimate after v2 additions | ~12-16 weeks for V1 (sanity-check by architect on decomposition) | Build planning |
+
+---
+
+## 2. Concepts and cross-references
+
+### 2.1 The four user-visible primitives (brief §4.1)
+
+| Primitive | What it is | Surface |
+|---|---|---|
+| **Task** | A unit of work in flight. Has agents, status, activity log, files. | Open task view (mock 07, 08) |
+| **Workflow** | A reusable task template. Fired manually, by schedule, or by an agent. Each firing creates a Task. | Studio for authoring (mocks 04, 05, 09); Workflow library for browsing |
+| **Schedule** | A cron rule. Fires either an agent (one-off task) or a workflow (templated task) on cadence. | Schedule editor (deferred mockup) |
+| **Agent** | An entity with persona, skills, and memory. Runs inside a task or as a step inside a workflow. | Existing AdminAgentEditPage / SubaccountAgentEditPage |
+
+Engine vocabulary that does NOT surface to the operator: skills, step runs, template versions, side-effect classes, idempotency keys, bulk run modes, briefs.
+
+### 2.2 The four A's — step types (brief §4.2)
+
+| User-facing | Engine type | Author picks a skill? |
+|---|---|---|
+| **Agent** | `agent_call` (or `prompt` for inline ad-hoc agent) | No (the agent picks skills at runtime) |
+| **Action** | `action_call` (skill) or `invoke_automation` (external) | Yes |
+| **Ask** | `user_input` | No (author writes form schema) |
+| **Approval** | `approval` | No (author picks approvers; humans only) |
+
+Branching is **not** a step type. It's an output property of any step that produces a value (brief §5.1).
+
+### 2.3 Mockup index (the spec's reference set)
+
+| Mockup | Spec sections that reference it |
+|---|---|
+| [`prototypes/workflows/04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) | §10 (Studio four A's inspectors), §5 (`isCritical` author toggle), §6 (confidence preview, audit fields) |
+| [`prototypes/workflows/05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html) | §10 (Studio canvas), §5 (Critical pill on a step), §10 (publish-notes modal) |
+| [`prototypes/workflows/07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html) | §9 (open task view layout), §8 (real-time coordination), §11 (form-card placement) |
+| [`prototypes/workflows/08-task-progression-states.html`](../prototypes/workflows/08-task-progression-states.html) | §9 (5 progression states), §13 (orchestrator narrative milestones) |
+| [`prototypes/workflows/09-ask-step-authoring.html`](../prototypes/workflows/09-ask-step-authoring.html) | §10 (Ask inspector), §11 (form schema), §14 (submitter picker) |
+| [`prototypes/workflows/10-ask-step-runtime.html`](../prototypes/workflows/10-ask-step-runtime.html) | §11 (form-card runtime, validation, submitted receipt, routing) |
+
+### 2.4 Cross-references to brief sections
+
+| Brief section | Spec section that implements it |
+|---|---|
+| §3.0 Strategic test | Implicit; every UI decision in this spec passes the "describe intent, don't build systems" test. |
+| §4 Concepts and vocabulary | §2 (this section) |
+| §5 Branching, parallel, loops | §4 (validator rules) + §9 (Plan-tab branch labels + "why this path") |
+| §6 Operator surface | §9 (open task view) + §8 (real-time coordination) |
+| §7 Studio | §10 |
+| §7.5 Studio handoff with preview | §10.5 + §13 |
+| §8 Approvals (incl. §8.5 isCritical, §8.6 confidence, §8.7 audit) | §5, §6 |
+| §9 Files + conversational editing (incl. §9.4 diff, §9.5 files-at-scale) | §12 |
+| §10 Integration story | Out of scope for this spec (reference-only) |
+| §11 Build punch list | §16 (extended with v2 additions) |
+| §12 Out of scope | §1.2 |
+| §15 Open questions | §19 (carried-forward + spec-time additions) |
+
+---
+
+## 3. Schema deltas
+
+All deltas are **additive**. No existing column is dropped. Existing system templates and runs continue to work unchanged. The migration is a single Drizzle migration file (one PR, one merge) plus the corresponding schema updates in `shared/schema/`.
+
+### 3.1 New columns on existing tables
+
+| Table | Column | Type | Default | Purpose |
+|---|---|---|---|---|
+| step-definition (the `params` JSON inside `workflow_template_steps` or equivalent — exact target table named at architect-time) | `is_critical` | `boolean` | `false` | Author-marked. When `true`, the step is auto-routed to Approval regardless of its declared side-effect class. Drives §5 routing + alert hooks. (brief §8.5) |
+| `workflow_step_reviews` | `gate_id` | `uuid` | required | FK → `workflow_step_gates.id` (new table, §3.3). One review row per decider; the gate-level snapshot lives on the gate row (one row) so multi-approver quorum doesn't fragment the snapshot. |
+| `workflow_step_reviews` | `decision_reason` | `text` | `null` | Optional free-text from the deciding approver. Per-decider, not per-gate. (brief §8.7) |
+| `workflow_template_versions` | `publish_notes` | `text` | `null` | Optional one-line "what changed in this version?" captured by the Studio Publish modal. Surfaces in version history + Plan tab caption. (brief §7.4) |
+| `workflow_templates` | `cost_ceiling_cents` | `integer` | `500` | Per-run cost cap (default $5). When breached, engine auto-pauses the run and surfaces a Pause card in chat. (spec-time decision #4) |
+| `workflow_templates` | `wall_clock_cap_seconds` | `integer` | `3600` | Per-run wall-clock cap (default 1h). Same pause behaviour as cost cap. (spec-time decision #4) |
+| `schedules` (existing) | `pinned_template_version_id` | `uuid` | `null` | When non-null, scheduled runs use this exact version regardless of newer published versions. When null, "next run uses newest" (brief §7.4). (spec-time decision #5) |
+| `agent_execution_events` (existing per `accepted_primitives`) | `task_id` | `uuid` | `null` | FK → `tasks.id`. Set on every event emitted within a task's lifecycle (workflow-fired or ad-hoc). Drives the §8 replay contract (per-task monotonic ordering). |
+| `agent_execution_events` | `task_sequence` | `bigint` | `null` | Per-task monotonic sequence allocated alongside the existing per-run sequence. Source of truth for `event_id` in §8.2; never gapped within a `task_id`. Atomic allocation extends the existing `agentExecutionEventService` per-run claim pattern to the per-task scope. |
+| `agent_execution_events` | `run_id` | `uuid` | (drop NOT NULL) | The existing schema declares `run_id` as `NOT NULL` with FK cascade to `agent_runs.id`. The §8 reconnect-with-replay contract requires task-scoped events that fire before any run exists (e.g., `task.created`, `task.routed`, `chat.message`, `agent.milestone` — see §8.2). Drop NOT NULL in this migration AND add a row-level CHECK: `CHECK (run_id IS NOT NULL OR task_id IS NOT NULL)` so every row remains anchored to either a run or a task. The pure-event mappers in `shared/types/agentExecutionLog.ts` already accept `runId: string \| null` per the discriminated union — no client change needed. |
+| `tasks` (existing) | `created_by_user_id` | `uuid` | `null` | FK → `users.id`. Identifies the human who initiated the task (when one exists; agent-initiated tasks have `NULL`). Required by §5.1 (`task_requester` approver kind), §5.3 (stall-and-notify cadence), §13.4 (`workflow.run.start` writes this on task creation). The pre-rename tasks table has `createdByAgentId` and `assignedAgentId` but no user pointer; this column adds the missing surface without affecting agent-initiated paths. NULL handling rules pinned in §5.1's `task_requester` row. |
+| `workflow_runs` (existing per-run table; architect verifies the exact name) | `effective_cost_ceiling_cents` | `integer` | (mirrors template `cost_ceiling_cents` at run start) | Per-run override. The Pause/Resume contract (§7.5) updates this on resume-with-extension; defaults to the template value when the run starts so the engine has one place to read the active cap. |
+| `workflow_runs` | `effective_wall_clock_cap_seconds` | `integer` | (mirrors template `wall_clock_cap_seconds` at run start) | Per-run override; same lifecycle as `effective_cost_ceiling_cents`. |
+| `workflow_runs` | `extension_count` | `integer` | `0` | Per-run counter incremented on each successful resume-with-extension (§7.5). Default cap is 2; once reached, the pause card disables the extension button and only Stop is offered. |
+
+### 3.2 New `approval` step `params` shape
+
+The existing `approval` step type carries `approvalPrompt` and `approvalSchema`. The new fields land inside the same `params` JSON (no schema change to the step row itself):
+
+```typescript
+{
+  approvalPrompt: string,            // existing
+  approvalSchema: object,            // existing
+  approverGroup: {                   // NEW
+    kind: 'specific_users' | 'team' | 'task_requester' | 'org_admin',
+    userIds?: string[],              // when kind === 'specific_users'
+    teamId?: string                  // when kind === 'team'
+  },
+  quorum: number                     // NEW; default 1; engine validates at publish that quorum ≤ pool size
+}
+```
+
+Same shape applies to **Ask** step `params` (the `user_input` engine type) — submitter routing reuses the same `approverGroup` structure under a `submitterGroup` key. One picker primitive, two step types using it. (brief §7.3, spec §14)
+
+**Ask `params` canonical shape** (Contracts entry; pin at this level so both server and client parse the same shape):
+
+```typescript
+{
+  prompt: string,                                                   // operator-facing prompt
+  fields: Array<{
+    key: string,                                                    // unique within schema; reserved keys rejected by validator
+    label: string,
+    type: 'text' | 'textarea' | 'select' | 'multi-select' | 'number' | 'date' | 'checkbox',
+    required: boolean,                                              // default false
+    help_text?: string,
+    error_message?: string,                                         // optional override; falls back to a generic per type
+    options?: Array<{ value: string, label: string }>,              // select / multi-select only
+    min?: number, max?: number                                      // number only
+  }>,
+  submitterGroup: {                                                 // same shape as approverGroup above
+    kind: 'specific_users' | 'team' | 'task_requester' | 'org_admin',
+    userIds?: string[],
+    teamId?: string
+  },
+  quorum: 1,                                                        // Ask is single-submit / first-wins (§4.8); validator caps at 1
+  autoFillFrom: 'none' | 'last_completed_run',                      // default 'none'; V2 expansion: 'specific_run' / 'saved_preset'
+  allowSkip: boolean                                                // default false; when true the runtime renders a "Skip-this-step" button
+}
+```
+
+Field-level `error_message` is optional; absence falls back to a per-type generic message (§11.3).
+
+### 3.3 New tables
+
+Two new tables: `workflow_drafts` (Studio-handoff path, §10.6, §13.2) and `workflow_step_gates` (gate-level snapshot for Approval / Ask gates — see below). The `teams` and `team_members` tables already exist in schema (brief §8.4); the build adds the missing CRUD UI page in Org settings. No other new tables for `isCritical`, audit fields, or confidence — those fit on `workflow_step_gates` (gate-level) and `workflow_step_reviews` (per-decider).
+
+| Table | Column | Type | Default | Purpose |
+|---|---|---|---|---|
+| `workflow_drafts` (NEW) | `id` | `uuid` (PK) | `gen_random_uuid()` | Surrogate key. |
+| `workflow_drafts` | `organisation_id` | `uuid` | required | Org tenant scope. RLS policy `app.organisation_id`-scoped per `architecture.md` § Canonical RLS session variables. |
+| `workflow_drafts` | `subaccount_id` | `uuid` | required | Sub-account tenant scope. **Authorisation contract (security-critical):** every read endpoint (`GET /api/workflow-drafts/:draftId`, `GET ...?fromDraft=:draftId` Studio hydration) MUST verify `subaccount_id = resolvedSubaccount.id` in the route handler — RLS only enforces org scope, so a same-org cross-subaccount read by ID would otherwise leak. New entry must be added to `RLS_PROTECTED_TABLES` (per `architecture.md` §1155). |
+| `workflow_drafts` | `session_id` | `text` | required | Chat session that produced the draft. Per-session, not per-user (§13.2). |
+| `workflow_drafts` | `payload` | `jsonb` | required | Draft step list + bindings + branches the orchestrator authored. **Size cap: max 100 steps per draft** — enforced at orchestrator-write time and at `?fromDraft=` Studio-hydration time. Larger drafts are truncated with a Pause card surfaced asking the operator to split the workflow. |
+| `workflow_drafts` | `created_at` | `timestamptz` | `now()` | Set at draft creation. |
+| `workflow_drafts` | `updated_at` | `timestamptz` | `now()` | Updated when the orchestrator iterates on the same session. |
+| `workflow_drafts` | `consumed_at` | `timestamptz` | `null` | Set when the operator publishes (cleared/garbage-collected) or discards. Drafts older than the retention window with `consumed_at IS NULL` are reaped by the cleanup job (§16.3 item 35a). |
+
+Lifecycle:
+
+- Created when the orchestrator drafts a workflow from chat intent (§13.2).
+- **Read repeatedly** while `consumed_at IS NULL` — Studio reads on every `?fromDraft=:draftId` visit, so closing the tab and re-entering hydrates the same draft (§10.6).
+- `consumed_at` is set when the operator publishes a new template OR explicitly discards from the orchestrator's chat draft card. After `consumed_at` is set the draft is no longer surfaced from chat or hydrated by Studio.
+- Reaped from disk after 7 days if `consumed_at IS NULL` (cleanup job; §16.3 item 35a).
+
+Indexes:
+
+| Index | Reason |
+|---|---|
+| `(subaccount_id, session_id)` UNIQUE | One in-flight draft per session per subaccount; re-drafting the same session updates in place. |
+| `(consumed_at, created_at)` partial WHERE `consumed_at IS NULL` | Cheap scan for the 7-day reaper. |
+
+#### `workflow_step_gates`
+
+One row per opened Approval or Ask gate. Holds the queue-time snapshot fields once, regardless of how many deciders / submitters the gate accepts. `workflow_step_reviews.gate_id` FKs here.
+
+| Column | Type | Default | Purpose |
+|---|---|---|---|
+| `id` | `uuid` (PK) | `gen_random_uuid()` | Surrogate key. |
+| `workflow_run_id` | `uuid` | required | The run the gate belongs to. |
+| `step_id` | `uuid` | required | The step within the run; together with `workflow_run_id` forms a UNIQUE pair (one open gate per step per run). |
+| `gate_kind` | `text` | required | `'approval'` or `'ask'`. |
+| `seen_payload` | `jsonb` | `null` | Snapshot of parameters + rendered preview at gate-open (§6.3). Approval-only; null for Ask. Engine MUST NOT regenerate from current state. |
+| `seen_confidence` | `jsonb` | `null` | Confidence chip value + reason at gate-open (§6.2.1). Approval-only. |
+| `approver_pool_snapshot` | `jsonb` | `null` | Snapshot of the eligible-approvers pool (array of `userId` strings) resolved at gate-open (§5.1). Approval / Ask both populate this. Source-of-truth for the membership check; never re-resolved from `approverGroup`/`submitterGroup` after gate-open except via the explicit `/refresh-pool` admin path (§4.6). |
+| `is_critical_synthesised` | `boolean` | `false` | `true` when the gate was synthesised because the next step has `is_critical: true` (§5.2). Approval-only. |
+| `created_at` | `timestamptz` | `now()` | Gate-open time. |
+| `resolved_at` | `timestamptz` | `null` | Set when the gate transitions to a terminal step status (`approved` / `rejected` / `submitted` / `skipped`). |
+
+Indexes:
+
+| Index | Reason |
+|---|---|
+| `(workflow_run_id, step_id)` UNIQUE | One open gate per step per run; idempotent re-emit returns the existing row. |
+| `(resolved_at) WHERE resolved_at IS NULL` partial | Cheap scan for the engine when notifying / aggregating open gates. |
+
+### 3.4 Indexes and constraints
+
+| Table | Index / constraint | Reason |
+|---|---|---|
+| `workflow_step_reviews` | composite `(workflow_run_id, step_id, created_at)` if not already present | Frequent lookup pattern: "all reviews for this step in this run, in order." |
+| `workflow_step_reviews` | UNIQUE `(gate_id, deciding_user_id)` | Per §5.1.1 Execution-Safety contract: enforces single-user idempotency on Approval double-click within a gate; 23505 → 200 idempotent-hit per the API mapping. (Replaces the `(workflow_run_id, step_id, deciding_user_id)` composite considered earlier — `gate_id` is now the canonical scope.) |
+| `agent_execution_events` | composite `(task_id, task_sequence)` UNIQUE | Per §8.1 replay contract: monotonic per-task ordering; never gapped. |
+| `schedules` | `pinned_template_version_id` | Cheap; admin queries for "all schedules pinned to v3 of template X". |
+| `workflow_drafts` | per-table indexes pinned in §3.3 | (UNIQUE `(subaccount_id, session_id)`; partial `(consumed_at, created_at)` for the reaper.) |
+| `workflow_step_gates` | per-table indexes pinned in §3.3 | (UNIQUE `(workflow_run_id, step_id)`; partial `(resolved_at) WHERE resolved_at IS NULL`.) |
+
+Verify all at architect-time; if any already exists, no-op.
+
+### 3.5 What does NOT change in schema
+
+- **No new tables** for tasks, workflows, runs, approvals, or any other V1 surface (other than `workflow_drafts` per §3.3).
+- **No rename** of any existing column. The `tasks.brief` column stays (V1 nav cleanup is UI-only — see §15).
+- **No new step types.** The four A's collapse is validator + Studio vocabulary only (brief §11.1 #2). `prompt`, `agent_call`, `user_input`, `approval`, `conditional`, `agent_decision`, `action_call`, `invoke_automation` all remain in the engine; the validator rejects publishes that use the deprecated user-facing names but accepts the underlying engine types from existing templates.
+- **No migration** of existing system template rows. They continue to use their current `params` shapes; the new fields default to safe values (`is_critical: false`, `cost_ceiling_cents: 500`, etc.).
+
+---
+
+## 4. Engine — validator rules
+
+The validator runs at template publish time. All rules below reject the publish (with a clear error) if violated. Rules apply in addition to whatever the engine validates today.
+
+### 4.0 Execution model (V1)
+
+Foundational engine contract — anchors the per-endpoint idempotency posture declarations in §5.1.1, §5.1.2, §7.5, §10.5, §11.4.1, §11.4.2, §12.4. New step types or handlers MUST conform.
+
+- **Execution model: at-least-once dispatch with idempotent handlers.** The engine guarantees every step will be dispatched at least once. Handlers MUST be idempotent: re-execution of a successfully-completed handler MUST NOT change observable state. Operator-driven `/run/resume` after a paused window, engine-level retries on transient failures, and dispatcher restart after a crash all rely on this property.
+- **Idempotency mechanism: state-based via CAS predicates (primary), unique constraints (secondary).** Each handler endpoint declares its idempotency posture inline per spec-authoring-checklist §10. The dominant pattern across this spec is state-based concurrency control (`UPDATE ... WHERE status = X` predicate; 0 rows updated → idempotent-hit response). The unique-constraint pattern (e.g., `UNIQUE (gate_id, deciding_user_id)` per §5.1.1) is used where multi-writer per-step deduplication is required.
+- **Why not exactly-once via global idempotency keys.** Exactly-once dispatch across distributed workers is a well-known impossibility outside a single transactional context. The spec instead requires handlers to be idempotent so retries are safe. A global `(run_id, task_id, step_id, attempt)` key would be redundant with the per-endpoint state-based posture and would not solve the underlying determinism problem.
+- **Implication for handler authors.** A new step type or handler MUST: (a) declare its idempotency posture inline (per spec-authoring-checklist §10), (b) verify a re-execution does not double-count or double-write, and (c) document the failure mode if the handler is not naturally idempotent — for example, an external API call without a deduplicating key must surface that constraint upstream rather than silently retry.
+
+### 4.1 Four A's vocabulary (brief §4.2, §11.1 #2)
+
+The validator accepts the user-facing names `Agent`, `Action`, `Ask`, `Approval` from the Studio. Internally, each maps to one or more engine step types:
+
+| Studio user-facing | Engine step type(s) accepted |
+|---|---|
+| Agent | `agent_call`, `prompt` |
+| Action | `action_call`, `invoke_automation` |
+| Ask | `user_input` |
+| Approval | `approval` |
+
+The deprecated user-facing names `conditional`, `agent_decision`, `prompt` (as a top-level type) are rejected at publish — they're either folded into the four A's (e.g., a decision step is now an Agent step with branching as an output property) or replaced by Action.
+
+**Existing system templates remain valid.** The validator accepts the legacy engine type names when they appear in templates that pre-date the four A's enforcement. New publishes through the Studio go through the four A's gate.
+
+### 4.2 Branching as an output property (brief §5.1)
+
+- Branching is **not** a step type. It's a property declared on any step that produces a value.
+- The validator rejects any step typed as `conditional` or `agent_decision` (legacy types) when authored fresh through the Studio. Existing templates using these types remain valid; they should migrate to the new shape opportunistically (Studio "edit" upgrades them on save).
+- Each branch has a label (e.g., `tier = "hot"`) and a target step. The validator confirms every branch's target step exists in the same template.
+- Default is linear (continue to the next step). At least one path must exist after a branched step (the validator rejects "branched but no path defined").
+
+### 4.3 Parallel: fan-out and fan-in only (brief §5.2)
+
+- Fan-out: a step has multiple `next` arrows; engine dispatches in parallel.
+- Fan-in: multiple steps converge into one `next`; engine waits for all upstream to complete.
+- The validator rejects deeply-nested parallel sub-graphs. The shape stays flat enough to read on the canvas. Specifically: a fan-out target may not itself be a fan-out source on the same canvas level (architect to define "level" precisely; rule of thumb is "no more than one nesting depth").
+- **Failure aggregation — fail-fast (V1).** If any branch of a fan-out fails (the branch step emits `step.failed` per §8.2), the entire fan-out fails immediately:
+  - Sibling branches still in flight are best-effort cancelled (per §7.3 stop semantics — external calls that have already fired are not reversible).
+  - The fan-in step transitions to `failed` with reason `parallel_branch_failed`; the event payload includes `failed_branch_step_id` and `cancelled_sibling_step_ids[]`.
+  - The workflow follows the fan-in step's `onFailure` routing if defined; otherwise it stalls (consistent with the §5.2 isCritical-rejection stall pattern).
+  - V2 may add per-step configurability for best-effort completion or partial-success aggregation — explicitly out of scope for V1.
+
+### 4.4 Loops: only Approval-on-reject (brief §5.3)
+
+- The validator rejects any backward edge that does not originate from an Approval step's `onReject` routing.
+- The reject target must be a step that comes earlier in the linear order of the template (validator computes a topological ordering ignoring the reject edges; reject targets must have a lower order index than the Approval source).
+- Action retries (`retryPolicy`) are engine-level and not validated as a "loop."
+
+### 4.5 No workflow → workflow nesting (brief §4.3, §11.1 #5)
+
+- The validator rejects any step that targets another `workflow.run.start` directly (i.e., a workflow step calling another workflow as the next step).
+- Allowed: workflow → agent → workflow (the agent layer breaks the depth count). The validator confirms the agent step is a true `agent_call` with no inline workflow invocation.
+- This rule is already enforced today; the spec is to confirm and add a regression test (§17).
+
+### 4.6 Approval-step quorum check (brief §8.2, §8.3)
+
+- Validator rejects publish if `approverGroup.kind === 'specific_users'` and `quorum > approverGroup.userIds.length`.
+- For `kind === 'team'`, validator validates at runtime (team membership can change after publish) — when the gate opens, the engine resolves the team membership and writes it to `workflow_step_gates.approver_pool_snapshot` (§3.3). If `quorum > snapshot.length` at gate-open, the engine surfaces an error in the Approval card and the run stalls. Recovery paths in V1: (a) an org admin / sub-account admin adds members to the team and re-resolves the snapshot via the `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` endpoint (contract pinned in §5.1.2); (b) the operator clicks Stop on the run (§7.3) and re-fires the workflow once the team is sized correctly. The running run cannot be patched to use a different workflow version (running tasks are pinned to their start version per the brief versioning contract).
+- For `kind === 'task_requester'`, quorum is forced to `1` at validate time (a single user; quorum > 1 is meaningless). Validator warns if author tried to set quorum > 1.
+- For `kind === 'org_admin'`, no validation at publish (admin pool is large enough).
+
+### 4.7 `isCritical` semantics (brief §8.5)
+
+- Validator accepts `isCritical: true` on Agent and Action steps only. (Ask is already a human gate; Approval is already a human gate. Setting `isCritical` on those is meaningless and the validator rejects it with a hint.)
+- No validator rule on which steps SHOULD be critical — author's call. The Studio inspector help text guides the author (irreversible side effects, high-cost ops, regulated actions).
+
+### 4.8 Ask-step submitter group (brief §7.3, spec §14)
+
+- Same shape as `approverGroup`. Same validator rules apply for the picker (type-specific validation, pool resolution).
+- **Ask is single-submit / first-submit-wins.** `submitterGroup` defines who CAN submit; only one of them DOES. The validator caps `quorum` at `1` for Ask (rejects publish if `quorum > 1`); multi-submitter aggregation is intentionally not part of V1. The first submitter to POST a valid form transitions the step to `submitted` (idempotency posture pinned in §11.4); subsequent submissions return 409 `{ error: 'already_submitted', submitted_by, submitted_at }`.
+- Ask steps with `kind === 'task_requester'` are the most common; `kind === 'team'` and `kind === 'specific_users'` route via notification (§11).
+
+---
+
+## 5. Engine — approval routing, `isCritical`, state machine
+
+### 5.1 Approver pool resolution (brief §8.2, §8.3)
+
+When an Approval step queues, the engine resolves the eligible-approvers pool from `approverGroup.kind`:
+
+| `kind` | Pool resolution |
+|---|---|
+| `specific_users` | The exact `userIds` array from the step. Validator confirms quorum ≤ length at publish (§4.6). |
+| `team` | All rows in `team_members` where `team_id = teamId` AND the parent `teams.deletedAt IS NULL` (the `teams` table carries the soft-delete tombstone; `team_members` does not — membership is removed by deleting the join row). Resolved at gate-creation time and snapshotted into `workflow_step_gates.approver_pool_snapshot` (§3.3) so later team-membership changes don't invalidate an in-flight approval. The only V1 path to re-resolve is `/refresh-pool` (§5.1.2). |
+| `task_requester` | `tasks.created_by_user_id` (column added by this spec — see §3.1). Single user. If the task was created by an agent with no user context, the field is `NULL`; in that case the validator rejects `kind: 'task_requester'` at publish-time on workflows whose triggering paths don't guarantee a user. The engine's runtime fallback when `created_by_user_id` is NULL on a published workflow that allows it is to stall the gate with `error: 'task_requester_unresolved'` and surface a Pause card requesting a manual approver assignment. |
+| `org_admin` | All users in the org with `org_admin` role. Resolved at gate-creation time. |
+
+When a user submits an approval decision, the engine:
+
+1. Verifies the deciding user is in the snapshotted pool. **403 with a clear error message if not** (this fixes a real bug where today any authenticated user can decide on any approval).
+2. Increments the decision count. If `approve` count ≥ `quorum`, the step transitions to `approved` and the workflow continues per `onApprove` routing.
+3. If any single `reject` arrives, the step transitions to `rejected` immediately (a single rejection trumps multiple approvals — V1 simplification; V2 may add "rejection requires N rejecters").
+
+#### 5.1.1 Approval write contracts (Execution-Safety)
+
+Per spec-authoring-checklist §10. Each Approval decision write declares:
+
+- **Idempotency posture: key-based + state-based.** A new UNIQUE constraint on `workflow_step_reviews (gate_id, deciding_user_id)` makes a single user's double-click idempotent at (user, gate) granularity — the second insert returns the first. The step-level transition (`review_required → approved` or `review_required → rejected`) uses an optimistic predicate (`UPDATE workflow_steps SET status = 'approved' WHERE id = $1 AND status = 'review_required'`). 0-rows-updated means another decider already transitioned the step; the API resolves the call as a successful idempotent hit and returns the winning decision to the losing caller (first-commit-wins).
+- **Retry classification: guarded.** Both the row insert and the step transition are retry-safe via the unique constraint and the predicate; the API contract documents that callers can retry on network failure without risk of double-counting.
+- **Concurrency guard for racing writes:**
+  - Two approvals from different users on the same step before quorum is met: both `INSERT` rows; quorum-counting reads from row count.
+  - Two approvals from different users that both cross the quorum threshold: the predicate ensures exactly one `UPDATE` flips the step status; the second observes 0 rows updated and treats its own row as already-counted.
+  - A concurrent approve + reject: the reject's predicate `WHERE status = 'review_required'` runs in the same transaction as the row insert; whichever commits first wins; the loser observes the post-commit state and returns the existing decision.
+  - A decision arriving after the step has been transitioned externally (e.g., the run was Stopped via §7.3, the step was cancelled by a parent fan-out failure per §4.3, or the engine moved on for any reason): the predicate `WHERE status = 'review_required'` fails AND the step status is now a non-decision value (`cancelled`, `failed`, etc.). The API returns `409 { error: 'step_already_resolved', current_status }` instead of an idempotent-hit response. This prevents ghost-approval log entries with no real winning decision and gives the client a deterministic signal to remove the approval card from the UI. Distinction from the "race won by another decider" case above: that returns `200 { idempotent_hit: true, existing_review_id }` because there IS a winning decision to surface; this returns 409 because there isn't.
+- **Unique-constraint → HTTP mapping.** `23505 unique_violation` on `workflow_step_reviews` returns `200 { idempotent_hit: true, existing_review_id }`, never bubbles as 500.
+- **State machine closure.** Valid review-record transitions: `(none) → review_required → approved | rejected`. Forbidden: `approved/rejected → *` (terminal). Adding a new review status requires a spec amendment.
+- **Run-ownership FK check (security-critical).** Every gate-route handler — `POST /api/tasks/:taskId/gates/:gateId/decide`, `POST .../refresh-pool`, `POST .../submit` (Ask), `GET .../:gateId` — MUST verify `workflow_runs.organisation_id = req.orgId` AND `workflow_runs.subaccount_id = req.subaccountId` for the run referenced by `:gateId` (joined via `workflow_step_gates.workflow_run_id`) BEFORE calling any service-layer method. RLS on `workflow_step_gates` is `organisation_id`-scoped, but the WITH CHECK only validates that an inserted row's `organisation_id` matches the session var — it does NOT validate that the related run actually belongs to that org. Without the explicit FK ownership check at the route layer, a same-org cross-subaccount or even cross-org user with a valid session can supply a foreign `runId` and the service will operate on it. Reference `DEVELOPMENT_GUIDELINES.md §9` checklist item "Cross-entity ID verified." This check is part of the route's permission guard, not a side effect — failure returns `403 { error: 'gate_run_not_in_scope' }` (NOT 404, to avoid disclosing existence).
+
+> **Spec note on `review_required` vs `awaiting_approval`:** `review_required` is this spec's user-facing term for the step status. The codebase column value is `awaiting_approval`. All SQL predicates and `assertValidTransition` calls in the implementation use `awaiting_approval`. Pure mappers may translate to `review_required` at API-response boundaries if a public contract demands it, but every CAS predicate above runs against `awaiting_approval`. Implementers reading this section directly: assume the literal in code is `awaiting_approval`.
+
+#### 5.1.2 `/refresh-pool` admin endpoint
+
+The only V1 path for re-resolving an approver pool after a team-membership change has stalled an in-flight gate (§4.6). Pinned contract:
+
+- `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` body `{}`.
+- **Permission guard.** Caller must be an org admin / org manager / sub-account admin on the task's sub-account. 403 otherwise.
+- **Idempotency posture: state-based.** Refresh only runs when `workflow_step_gates.resolved_at IS NULL` (gate is still open). If the gate has resolved, returns `200 { refreshed: false, reason: 'gate_already_resolved' }`.
+- **Effect on success.** The engine re-resolves the team membership from `teams` / `team_members` and overwrites `workflow_step_gates.approver_pool_snapshot` with the new pool. Returns `200 { refreshed: true, pool_size: <new size> }`. Emits `approval.pool_refreshed` event (per §8.2 — added below) so all open clients update the Approval card.
+- **Below-quorum behaviour.** If the refreshed pool is still smaller than `quorum`, the gate remains stalled — the API still returns `refreshed: true` but the Approval card continues to show the under-quorum error. The operator's options remain (a) more team members, then re-call refresh; (b) Stop the run.
+- **Concurrency guard.** `UPDATE workflow_step_gates SET approver_pool_snapshot = $1 WHERE id = $2 AND resolved_at IS NULL` — first-commit-wins; 0 rows updated → race lost, returns `200 { refreshed: false, reason: 'gate_already_resolved' }`.
+- **No effect on existing reviews.** Decisions already recorded against the prior pool stay valid. The refreshed pool only governs subsequent decisions on the same gate.
+- **Ask gate vs Approval gate behaviour on pool refresh** (clarifies the asymmetry between the two gate kinds, both of which use this endpoint via `workflow_step_gates.approver_pool_snapshot`):
+  - **Approval gates:** decisions already recorded against the prior pool remain valid (per the line above). New decisions use the updated snapshot. A user who was in the prior pool but is removed by the refresh CAN'T submit a new decision; an approve / reject they already submitted stays counted.
+  - **Ask gates:** submission eligibility is evaluated against the snapshot current at the time the submitter POSTs. If `/refresh-pool` ran between gate-open and submit, a user who was in the prior snapshot but is NOT in the updated snapshot is ineligible — the submit returns `403 { error: 'not_in_submitter_pool' }` and the form card on their client shows an error toast. Ask is single-submit (§4.8); there is no "decisions already recorded" carry-over to preserve.
+
+### 5.2 `isCritical` routing (brief §8.5)
+
+When the engine encounters a step (Agent or Action) with `is_critical: true`:
+
+1. Before executing the step, the engine **synthesises an Approval gate** with these defaults:
+   - `approverGroup.kind = 'task_requester'` (the operator who started the task is the default approver for critical steps).
+   - `quorum = 1`.
+   - The Approval card content shows the upcoming step's parameters and a confidence chip (§6).
+2. The synthesised gate is recorded in `workflow_step_reviews` with a flag indicating it was `isCritical`-induced (so audit can distinguish author-placed Approvals from synthesised ones).
+3. On approval, the original step executes. On rejection, the workflow stalls (no `onReject` route — author didn't define one for an implicit gate). The operator's only recovery path is clicking Stop in the task header (§7.3); the running run cannot be patched onto a new template version. Spec-time decision #2 default applies (stall-and-notify until either Stop or approval). **V2 recovery path (out of scope for V1):** allow a privileged operator (org admin / sub-account admin) to manually resume a run stalled on an `isCritical`-induced rejection, with an override reason captured and written to the audit trail. This addresses the "user accidentally rejects → entire run dead" failure mode without compromising the V1 safety stance (rejection is still terminal by default).
+4. If the author has explicitly placed an Approval before a critical step, the engine does NOT double-gate (one approval is sufficient). The validator warns the author at publish: "Step N is marked critical; the explicit Approval before it is redundant. Continue?"
+
+### 5.3 State machine — stall-and-notify on Approval / Ask (spec-time decision #2)
+
+When an Approval or Ask step queues and a human gate is open:
+
+- **No timeout.** The task does not auto-fail.
+- Engine schedules notification jobs to the task requester (per `tasks.created_by_user_id`):
+  - **24 hours** after gate-open: *"Task X has been waiting on [approval / input] for 24 hours."*
+  - **72 hours** after gate-open: same template, escalated subject line.
+  - **7 days** after gate-open: same template, with a "Cancel this task?" affordance in the email.
+- Each notification fires through the existing notification surface (review-queue / sidebar count + opt-in email per user prefs).
+- Notification jobs are cancelled when the gate resolves (approved / rejected / submitted).
+- **No auto-escalation in V1.** A future V2 may add per-step `escalateAfterHours` config; explicitly out of scope.
+
+### 5.4 Engine entry-points modified
+
+| File / function | Change |
+|---|---|
+| `agentExecutionService.ts` (gate resolution) | Add `isCritical` check; if true, synthesise an Approval gate before step execution. |
+| Approval-decision endpoint (existing) | Add pool-membership check (5.1.1). Return 403 with structured error if user not in pool. |
+| Gate creation path (Approval / Ask) | Insert `workflow_step_gates` row at gate-open with `seen_payload`, `seen_confidence`, `approver_pool_snapshot`, `is_critical_synthesised`. Per-decider `workflow_step_reviews` rows reference `gate_id`. |
+| pg-boss schedule registration | Add stall-and-notify job scheduling (5.3) when a gate opens. Cancel jobs when gate resolves. |
+| Schedule-fired run dispatch | Honour `schedules.pinned_template_version_id` if non-null (load that exact version instead of the latest published). |
+
+Architect to verify exact file paths during decomposition; the brief and existing audit refer to `agentExecutionService.ts` as the gate-resolution site.
+
+---
+
+## 6. Engine — confidence chip and audit fields
+
+### 6.1 Confidence score computation (brief §8.6)
+
+Computed at gate-creation time (when an Approval queues), snapshotted with the gate, never re-computed. V1 is heuristic; V2 swaps in a calibrated model once `workflow_step_reviews` data accumulates.
+
+**V1 inputs** (each contributes a numeric weight; final value is clamped to `low` / `medium` / `high`):
+
+| Signal | Source | Weight |
+|---|---|---|
+| Count of similar past runs of this template that were approved without modification | `workflow_step_reviews` lookup by `template_version_id` + `step_id` | + (more = higher confidence) |
+| Count of similar past runs that were rejected or required modification | same | − (more = lower confidence) |
+| Step has `is_critical: true` | step definition | clamps to `medium` ceiling |
+| Step's side-effect class is `irreversible` | step definition | clamps to `medium` ceiling |
+| Branch decision was made on a low-confidence agent output (cascade) | upstream step's confidence | clamps to `low` |
+| Skill / Action being used for the first time in this subaccount | subaccount run history | clamps to `low` |
+
+The final classification mapping (high / medium / low cut-points) is **out of scope for this spec** and is an open spec-time decision (§19). Architect to pick after seeing 100+ Approval cards on internal data.
+
+### 6.2 Confidence reason copy (brief §8.6, plain-language rule)
+
+The confidence chip renders with a one-line reason. The reason copy is **plain operator language**, not the algorithm description. Engineering terms (`clamped`, `heuristic`, `threshold`, `score`) never reach the operator surface.
+
+The render mapping (V1):
+
+| Heuristic state | Chip + reason rendered on the card |
+|---|---|
+| Many similar past runs, no clamps | `High` · matches recent successful runs |
+| `is_critical: true` on next step | `Medium` · the next step can't be undone, worth a careful look |
+| `irreversible` side-effect class | `Medium` · this can't be undone once it runs |
+| Cascade from low-confidence upstream | `Low` · the agent isn't sure about this one |
+| First use in this subaccount | `Low` · first time running this here |
+| Few past runs, mixed history | `Medium` · still learning what's normal here |
+
+The full mapping is also stored in a copy table (data file or hard-coded constant); architect to pick the storage shape. The reason string is computed at gate-creation, snapshotted into `seen_confidence.reason`, and not regenerated.
+
+#### 6.2.1 `seen_confidence` JSONB shape (Contracts)
+
+```typescript
+{
+  value: 'high' | 'medium' | 'low',                          // the chip rendered on the card
+  reason: string,                                            // operator-language one-liner per §6.2 mapping (no engineering jargon)
+  computed_at: string,                                       // ISO8601 — gate creation time; same as workflow_step_reviews.created_at
+  signals: Array<{ name: string, weight: number }>           // the heuristic signals that contributed to the value (audit / debugging only; never rendered)
+}
+```
+
+`signals` is captured for retrospective calibration when the V2 calibrated model lands. The render path uses only `value` and `reason`.
+
+### 6.3 The `seen_payload` snapshot (brief §8.7)
+
+When an Approval gate queues, the engine snapshots the parameters and rendered preview the approver will see:
+
+```typescript
+seen_payload: {
+  step_id: string,
+  step_type: 'agent' | 'action' | 'approval',  // four-A's user-facing label per §4.1, NOT the engine's WorkflowStepType union (which is broader: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision' | 'action_call' | 'invoke_automation'). Derived at gate-open via the validator's user-facing mapper.
+  step_name: string,
+  rendered_inputs: object,        // resolved bindings, e.g., { audience: "Tier A", tone: "Professional warm" }
+  rendered_preview: string | null, // optional human-readable preview (e.g., the email body if this is a "send email" Action). PLAIN TEXT ONLY — see XSS-prevention contract below.
+  agent_reasoning: string | null,  // for Agent steps with branching: the reasoning trace summary. PLAIN TEXT ONLY.
+  branch_decision: { ... } | null  // if upstream was a branched step, the resolved branch
+}
+```
+
+This snapshot is **immutable**. If the engine queues an approval and then re-derives parameters later (e.g., the data shifted between approval and execution), the audit trail must reflect what the human authorised, not what later ran. The Plan tab caption and the audit drawer (Phase 2) render from `seen_payload`, never from current state.
+
+**XSS-prevention contract (security-critical).** `rendered_preview` and `agent_reasoning` carry LLM-generated content (e.g., email bodies, agent reasoning traces). LLM output can contain HTML, JavaScript, or markup that becomes script-execution if rendered as `innerHTML`. The contract is:
+
+- **Write-time:** the engine MUST strip HTML tags from `rendered_preview` and `agent_reasoning` before persisting the snapshot. Use a server-side sanitiser (e.g., DOMPurify in node mode, or an equivalent allowlist sanitiser available in the project). Newlines are preserved; markup is removed. The persisted value is plain text.
+- **Read-time:** the audit drawer / Plan tab caption / "view what she saw" modal in the open task view (§6.5, §11) MUST render `rendered_preview` and `agent_reasoning` via React `textContent` semantics (`<p>{value}</p>` or `<pre>{value}</pre>` — never `dangerouslySetInnerHTML`).
+- **Test gate:** Plan Chunk 6 acceptance criteria require a test that injects `<script>alert(1)</script>` into a synthesised `rendered_preview`, confirms it survives write-time sanitisation as escaped/stripped text, and confirms the read-time render produces `&lt;script&gt;` (or empty) in the DOM, never an executing script element.
+- **Defence-in-depth rationale:** sanitising at write-time alone is insufficient if a future surface accidentally renders the field as HTML; rendering as `textContent` alone is insufficient if a future export path emits the field into a document that does parse HTML. Both are required.
+
+### 6.4 Failsafe: confidence is decoration, not authority (brief §8.6)
+
+`high` confidence does NOT skip the Approval. The human still clicks Approve. If we ever want auto-approval on `high`, that's a deliberate, separate design discussion — not a side effect of confidence shipping.
+
+The engine does NOT short-circuit any gate based on the confidence value. It's purely a render hint on the card.
+
+### 6.5 Where the audit fields surface
+
+| Surface | What renders |
+|---|---|
+| Plan tab in the open task view, under the approved step | One-line caption: *"Approved by Daisy · 2:32 pm · view what she saw"* (link to `seen_payload` modal) |
+| Run-history audit drawer (Phase 2) | Full audit record with snapshot, decision_reason, seen_confidence |
+| Audit export (Phase 2) | All fields in CSV / JSON |
+
+V1 ships the schema and the Plan-tab caption only. The audit drawer and export are Phase 2.
+
+---
+
+## 7. Engine — cost and time runaway protection
+
+(Spec-time decision #4. Brief §1 mentions cost reservation but does not define operator-facing protection.)
+
+### 7.1 Per-run caps
+
+Two soft caps per workflow template, both stored on `workflows` (the template table):
+
+| Column | Default | Range | Effect when reached |
+|---|---|---|---|
+| `cost_ceiling_cents` | `500` ($5) | `100`..`10000` ($1..$100) | Engine pauses the run; surfaces a Pause card in chat asking the operator to extend or stop. |
+| `wall_clock_cap_seconds` | `3600` (1h) | `60`..`86400` (1m..24h) | Same pause behaviour. |
+
+Both caps are configurable per template at publish time (Studio inspector "Run limits" section, deferred mockup). Operators cannot raise caps mid-run — the operator-facing pause card has only "Stop" and "Extend by Y minutes / $Y" with capped extensions (architect picks specific extension granularity).
+
+### 7.2 Pause card surface
+
+When the engine reaches a cap, it inserts a **Pause card** into the chat panel of the open task view (same primitive as Approval / Ask cards):
+
+- Card content: *"This run has been going for 1h 12m and used $4.80. Continue?"*
+- Buttons: `Stop run` (red, primary) · `Continue for another 30 minutes / $2.50` (secondary, capped extension).
+- Activity log records the pause as a structured event (`run.paused.cost_ceiling` or `run.paused.wall_clock`).
+- Plan tab marks the current step as paused (amber pill, distinct from the queued / working / done states).
+
+The Pause card waits indefinitely (no auto-continue). If the operator never responds, the run stays paused. Notification cadence per §5.3 (24h / 72h / 7d to the requester).
+
+### 7.3 Operator-initiated Pause / Stop
+
+Two affordances live in the open task view header (mock 07 reference; not currently in the mockup but added per spec-time decision #4):
+
+| Button | Behaviour |
+|---|---|
+| **Pause** | Same effect as a cap-triggered pause. Card lands in chat; anyone in the §14.5 visibility set (task requester, org admin/manager, sub-account admin on the task's sub-account) can resume / stop via the §7.5 endpoints. |
+| **Stop** | Immediate termination. Engine writes a `run.stopped.by_user` event with the actor's user id. Cleanup runs for any outstanding skill / Action calls (best-effort cancel; some external calls may have already fired and are not reversible). The task transitions to `failed` with reason `stopped_by_user`. |
+
+Both buttons are visible to anyone with edit-access to the task (per §14 permissions). Read-only viewers don't see them.
+
+### 7.4 Engine-level mechanics
+
+- **Cost source of truth.** Cost is tracked per-run by summing persisted entries in the run's cost-reservation ledger (architect verifies the exact table name; brief §1 mentions cost reservation as already-built infrastructure). The accumulator is the **sum of persisted ledger rows**, not an in-memory aggregate. The sum is evaluated after each step completion. If a cost-write fails, the step that produced the cost MUST be considered failed — the engine MUST NOT proceed treating the cost as zero. This ensures `effective_cost_ceiling_cents` enforcement is transactionally consistent with step completion.
+- On every step completion, the engine sums the run's accumulated cost from the ledger; if `>= effective_cost_ceiling_cents`, queue the Pause card and stop dispatching the next step.
+- Wall-clock is checked on every step completion plus a periodic (e.g., 30-second) heartbeat job.
+- Pause is **between-step**, not mid-step. A step in flight finishes (or errors out via its retry policy) before the cap takes effect. This avoids inconsistent partial state on irreversible side effects.
+- **Cap enforcement is best-effort for long-running steps.** A step already in flight when the cap is reached will run to completion (or fail via its retry policy) before the cap takes effect. A run where a single step exceeds the cap will not be paused mid-step; the overage is visible in the Pause card when the step eventually completes. Authors should set caps with their longest expected step in mind. V2 may add heartbeat checkpoints for in-step interruption — explicitly out of scope for V1.
+
+### 7.5 Pause / Stop state machine and API contract
+
+Pinned closure for the new transitions introduced by §7. Existing run statuses (`queued`, `running`, `failed`, `succeeded`) keep their current meaning. Two new statuses land:
+
+| New status | Meaning | Set by |
+|---|---|---|
+| `paused` | The run is suspended; no new step is dispatched until the run resumes. | Engine on cap breach (§7.1) or operator Pause (§7.3). |
+| (no new status for Stop — Stop transitions to existing `failed` with reason `stopped_by_user`.) |  |  |
+
+**Valid transitions:**
+
+```
+running ──► paused        (cost cap, wall-clock cap, operator Pause)
+paused  ──► running       (operator resume / extend; resets cap counters per §7.1)
+running ──► failed         (existing path: error; or Stop with reason `stopped_by_user`)
+paused  ──► failed         (operator Stop on a paused run; reason `stopped_by_user`)
+```
+
+**Forbidden transitions:** `failed → running`, `failed → paused`, `succeeded → *` (terminal). Adding a new status requires a spec amendment.
+
+**Run completion invariant.** `running → succeeded` is the existing terminal-success transition (carried over from the existing engine path; not shown in the table above because it predates this spec). The engine MUST verify both conditions before transitioning a run to `succeeded`: (1) every step in the run is in a terminal status (`completed`, `failed`, `skipped`, `cancelled`); (2) no `queued` or `awaiting_input` or `review_required` step remains. This prevents phantom-completion races where a fan-out branch is still in flight when the run is incorrectly marked succeeded.
+
+**Resume API.**
+
+- `POST /api/tasks/:taskId/run/resume` body `{ extend_cost_cents?: integer, extend_seconds?: integer }`. The body is required to contain at least one extension when the previous pause was cap-triggered (`run.paused.cost_ceiling` or `run.paused.wall_clock`). A no-extension resume after a cap-triggered pause is rejected with `400 { error: 'extension_required', reason: 'previous_pause_was_cap_triggered', cap: 'cost_ceiling' | 'wall_clock' }` so the engine can't immediately re-hit the same ceiling. After an operator-Pause (`run.paused.by_user`) the body may be empty.
+- Effect on success: the engine increments `workflow_runs.effective_cost_ceiling_cents` by `extend_cost_cents` (if provided), `workflow_runs.effective_wall_clock_cap_seconds` by `extend_seconds`, and increments `workflow_runs.extension_count` by 1. The run transitions to `running`. Emits `run.resumed` per §8.2.
+- Permission guard: caller must be in the visibility set for Pause / Stop buttons (§14.5 — task requester, org admin/manager, sub-account admin on the task's sub-account).
+- Idempotency: state-based. If the run's current status is `running`, the endpoint returns `200 { resumed: false, reason: 'not_paused' }` (no-op).
+- Cap on extensions: when `workflow_runs.extension_count >= 2` (architect refines per §19.2 #G), further resume calls return `400 { error: 'extension_cap_reached' }` and the pause card disables the extension button (Stop remains available).
+- Concurrency: the transition uses an optimistic predicate (`UPDATE workflow_runs SET status = 'running', effective_cost_ceiling_cents = ..., effective_wall_clock_cap_seconds = ..., extension_count = extension_count + 1 WHERE status = 'paused' AND id = $1`). 0 rows updated → 409 `{ error: 'race_with_other_action', current_status: <observed> }`.
+- **Resume vs retry separation.** Resume continues the run from the next pending step (the step that was about to dispatch when the engine paused); it does NOT re-execute already-completed steps. Step-level retries (per §4.4 `retryPolicy` / engine-level `withBackoff` primitive) are independent of resume — a step that failed during the paused window will retry per its own retry policy when the engine resumes dispatching, without operator intervention. A successful resume transitioning the run from `paused` to `running` does NOT itself trigger any retry; retry decisions remain local to each failed step's policy.
+
+**Stop API.**
+
+- `POST /api/tasks/:taskId/run/stop` body `{}`.
+- Permission guard: same as resume.
+- Idempotency: state-based. If the run is already terminal (`failed` or `succeeded`), returns `200 { stopped: false, reason: 'already_terminal', current_status: <observed> }`. If `running` or `paused`, transitions to `failed` with reason `stopped_by_user` and emits `run.stopped.by_user`.
+
+The pause card's `Continue for another 30 minutes / $2.50` button calls `/run/resume` with the corresponding extension. The pause card's `Stop run` button calls `/run/stop`.
+
+### 7.6 Telemetry
+
+- `run.paused.cost_ceiling`, `run.paused.wall_clock`, `run.paused.by_user`, `run.stopped.by_user` events emit through the existing tracing registry (per brief §2.5).
+- Cost-ceiling and wall-clock-cap incidents per workflow template are aggregated in the existing run telemetry; an admin can spot a template that pauses too often and tune its cap.
+
+---
+
+## 8. Real-time coordination — WebSocket and event taxonomy
+
+(Brief §6.2. This is the feature that sells the product — sub-200ms event-to-render latency end-to-end across all three panes.)
+
+### 8.1 Connection model
+
+- **One WebSocket per open task**, not per pane. The client opens a single connection when the task page mounts and closes it on unmount.
+- Connection authentication: existing session cookie / token. The server scopes events to tasks the user has visibility into (per §14 permissions).
+- Reconnect-with-replay: if the WebSocket drops, the client resumes from the last seen `event_id`. Server replays missed events. **Does not** replay from task start; does not lose events.
+- **Event retention.** `agent_execution_events` rows for a task must be retained for at least as long as the maximum expected session reconnect window (architect to pick specific TTL at decomposition; minimum 24 hours recommended). If the replay query returns zero rows for a non-empty `lastEventId` cursor — i.e., the cursor pre-dates the earliest retained event — the client MUST fall back to a full task reload (re-fetch current task state from the REST API and rebuild the UI from scratch). This is a gap-detection invariant: the client can distinguish "nothing new" from "cursor too old" by checking whether the server returns a `gap_detected: true` flag on the replay response (architect to define the exact protocol — HTTP header or envelope field on the WebSocket replay-ack message are both acceptable).
+- Backpressure: if the engine emits 50+ events in a burst (rare, but possible during a fan-out), the client batches the render to keep the frame rate smooth (architect picks specific batching window; rule of thumb: 60 fps cap on render).
+- **Client ordering invariant.** Events MUST be applied in strictly ascending `task_sequence` order. If an event arrives with `task_sequence` greater than the next expected value (a gap), the client MUST buffer it and apply only when the gap fills via in-order arrivals. If the gap does not fill within a small recovery window (architect picks; ~1 second recommended), the client SHOULD trigger a replay from the last contiguous `task_sequence` to recover any genuinely-lost events. Without this, parallel-fan-out bursts can render out-of-order and corrupt UI state (e.g., a step rendered as `completed` before its `step.started` event applies).
+
+**Persisted event log.** Per-task events are persisted to the existing `agent_execution_events` table (the primitive named in `docs/spec-context.md` `accepted_primitives` — `agentExecutionEventService` + `agentExecutionEventServicePure`). The existing primitive allocates a monotonic sequence per agent run; for workflow-fired tasks with multiple agent runs that ordering is too narrow. The spec extends the table with one new column — `task_id uuid NULL` (FK → `tasks.id`) — captured in the §3.1 schema deltas — and a new monotonic sequence allocated **per task** alongside the existing per-run sequence. The per-task sequence is the source of truth for `event_id` in §8.2 (replay and ordering); the existing per-run sequence is preserved for any consumer that already depends on it.
+
+**`task_sequence` allocation invariant.** Per-task allocation MUST be atomic and gap-free per `task_id`. Concretely:
+
+- Implementation MUST use a single-row counter with `FOR UPDATE` locking, or a database sequence scoped per `task_id`. The existing per-run claim pattern in `agentExecutionEventService` is the reference implementation; the per-task variant extends the same locking discipline to the per-task counter row.
+- Allocation and the event row INSERT MUST happen in the same transaction. If the INSERT fails after the sequence has been allocated, the transaction rolls back and the sequence number is reused on the retry (no gap).
+- If a non-retryable write failure leaves a gap that cannot be filled, the engine MUST surface this as a fatal error on the run (the run transitions to `failed` with reason `event_log_corrupted`) — replay correctness depends on the contract holding.
+- Parallel fan-out workers all contend on the same per-task counter; throughput is bounded by the lock acquisition rate. If this becomes a hotspot in production, the spec amendment lands a sharded counter (out of scope for V1).
+
+Replay contract on reconnect:
+
+```sql
+SELECT * FROM agent_execution_events
+ WHERE task_id = $1 AND task_sequence > $lastEventId
+ ORDER BY task_sequence ASC
+```
+
+(Column names are illustrative; architect picks the exact column name for the per-task sequence at decomposition. The contract is "monotonic per task, sequence-ordered, durable, never gapped".)
+
+### 8.2 Event taxonomy
+
+All events share a common envelope:
+
+```typescript
+{
+  event_id: string,             // monotonically increasing per task; used for replay cursor
+  task_id: string,
+  kind: string,                 // see table below
+  timestamp: ISO8601,
+  actor: { kind: 'user' | 'agent' | 'system', id: string, label: string },
+  payload: object,              // kind-specific
+  entity_refs: Array<{ kind: string, id: string, label: string }> // for activity-log linked chips
+}
+```
+
+**Event kinds (V1):**
+
+| Kind | When emitted | Payload notable fields | Where it renders |
+|---|---|---|---|
+| `task.created` | At task creation | requester, initial prompt | Activity (oldest event) |
+| `task.routed` | Orchestrator routing decision | target agent / workflow | Activity |
+| `agent.delegation.opened` | Agent delegated work to a sub-agent | parent_agent, child_agent, scope | Activity, Now (org-chart edge appears) |
+| `agent.delegation.closed` | Sub-agent returned to parent | child_agent, summary | Activity, Now (status dot transitions) |
+| `step.queued` | Workflow step queued for execution | step_id, step_type, params | Plan (step border activates) |
+| `step.started` | Step began executing | step_id | Plan, Activity, Now |
+| `step.completed` | Step finished successfully | step_id, outputs, file_refs[] | Plan (✓ done), Activity, Files (if file_refs non-empty), Now |
+| `step.failed` | Step errored | step_id, error_class, error_message | Plan (red), Activity |
+| `step.branch_decided` | A producing step's output resolved a branch | step_id, field, resolved_value, target_step | Plan (resolved label appears), Activity |
+| `approval.queued` | Approval gate opened | step_id, approver_pool, seen_payload, seen_confidence | Chat (Approval card), Plan (current step indigo + confidence chip), Activity |
+| `approval.decided` | Approval resolved | decided_by, decision, decision_reason | Chat (card collapses to receipt), Plan (✓ or red), Activity |
+| `approval.pool_refreshed` | An admin called `/refresh-pool` on a stalled team-Approval gate (§5.1.2) | actor, new_pool_size, still_below_quorum (boolean) | Chat (Approval card refreshes the pool size + clears or retains the under-quorum error), Activity |
+| `ask.queued` | Ask form gate opened | step_id, submitter_pool, schema, prompt | Chat (form card), Plan (current step indigo), Activity |
+| `ask.submitted` | Ask form submitted | submitted_by, values | Chat (card collapses to receipt), Plan (✓), Activity |
+| `ask.skipped` | Ask form skipped (only when `params.allowSkip === true`; §3.2, §11.4.1) | submitted_by, step_id | Chat (card collapses to "Skipped" receipt), Plan (✓ skipped), Activity |
+| `file.created` | A new file or version landed | file_id, version, producer_agent | Files (thumbnail appears, optionally auto-selects), Activity (with chip), Chat (if milestone-shaped) |
+| `file.edited` | Conversational edit produced a new version | file_id, prior_version, new_version, edit_request | Files (reader updates, version dropdown updates), Activity, Chat (if requested via chat) |
+| `chat.message` | Operator or orchestrator posted a chat message | author, body, attachments | Chat |
+| `agent.milestone` | Sub-agent reports a milestone in chat (per brief §6.1 milestone-vs-narration rule) | agent, summary, link_ref | Chat |
+| `thinking.changed` | Current micro-task changed | new_text | Thinking box (overwrites previous) |
+| `run.paused.cost_ceiling` / `run.paused.wall_clock` / `run.paused.by_user` | Run paused (§7) | reason, cap_value, current_cost / current_elapsed | Chat (Pause card), Plan, Activity |
+| `run.resumed` | Run resumed via §7.5 `/run/resume` (with or without an extension) | actor, extension_cost_cents, extension_seconds | Chat (Pause card collapses to a "Resumed" receipt), Plan (paused pill clears), Activity |
+| `run.stopped.by_user` | Run stopped (§7) | actor | Activity, task transitions to `failed` |
+
+Architect to lock the precise field names during decomposition. The above is the V1-canonical list.
+
+### 8.3 Per-pane subscription / filter
+
+Each pane subscribes to the same event stream and filters to what it cares about:
+
+| Pane | Filters to |
+|---|---|
+| Chat | `chat.message`, `agent.milestone`, `approval.queued` / `approval.decided`, `ask.queued` / `ask.submitted` / `ask.skipped`, `run.paused.*`, `run.resumed` |
+| Activity | All events (the full chronological log) |
+| Now (when the active right-tab) | `agent.delegation.*`, `step.started` / `step.completed`, `step.failed` |
+| Plan (when the active right-tab) | `step.queued` / `step.started` / `step.completed` / `step.failed`, `step.branch_decided`, `approval.queued` / `approval.decided`, `ask.queued` / `ask.submitted` |
+| Files (when the active right-tab) | `file.created`, `file.edited` |
+| Thinking box | `thinking.changed` (overwrite-only) |
+
+Inactive tabs still process events into a local cache so switching tabs is instant (no re-fetch).
+
+### 8.4 Optimistic rendering on operator actions
+
+When the operator performs an action that produces an event (sending a chat message, clicking Approve, submitting an Ask form, clicking Pause / Stop):
+
+- The pane updates **immediately** with the optimistic state.
+- The action POSTs to the server.
+- When the server's authoritative event lands on the WebSocket, the client reconciles (typically a no-op if the optimistic prediction was accurate).
+- If the server rejects (e.g., the user is no longer in the approver pool because team membership changed), the client rolls back the optimistic update and surfaces an error toast.
+
+### 8.5 Latency budget
+
+End-to-end target: **sub-200ms from engine event emit to all three panes rendered**. Architect to verify with synthetic load tests; brief §6.2 names this as the demo-quality bar.
+
+---
+
+## 9. Open task view UI
+
+(Mockups: [`prototypes/workflows/07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html), [`prototypes/workflows/08-task-progression-states.html`](../prototypes/workflows/08-task-progression-states.html). Brief §6.)
+
+### 9.1 Layout
+
+Three columns, full-width. Widths per brief §6.1:
+
+| Column | Width | Min-width |
+|---|---|---|
+| Chat | 26% | 320px |
+| Activity (collapsible) | 22% expanded · 36px minimised | 240px when expanded |
+| Right pane (Now / Plan / Files) | 52% expanded · ~74% minimised | — |
+
+Activity collapses to a 36px vertical strip on a chevron click. Restore by clicking the strip.
+
+### 9.2 Chat panel
+
+Carries the operator-orchestrator conversation, per-agent **milestone** updates, and a thinking box at the bottom (brief §6.1 milestone-vs-narration rule).
+
+**What goes IN chat:**
+
+- The operator's prompts.
+- The orchestrator's setup, milestone summaries, and questions (with inline action buttons for Approve / Open files / etc.).
+- Per-agent milestone cards: a sub-agent finishing a deliverable (file produced, decision made, hand-off complete) appears with attribution + a link to the deliverable. Mock 8 state 5 shows the full milestone arc.
+- Approval cards (the existing Approval primitive) and Ask form cards (§11).
+- Pause cards (§7.2).
+- Composer at the bottom (above the thinking box) for the operator to send messages.
+
+**What does NOT go IN chat:**
+
+- Per-agent in-progress narration (*"scanning rate cards…"*, *"drafting annex…"*). Lives in activity + Now-tab status dots.
+- Every step.started / step.completed event. Lives in activity.
+
+**Thinking box** (above the composer, below the chat scroll area):
+
+- Single line, italic, with a pulsing indigo dot.
+- Renders the latest `thinking.changed` event payload.
+- Plain language; no engineering jargon (rule from `docs/frontend-design-principles.md`).
+
+### 9.3 Activity panel
+
+Chronological event log, **newest at the bottom** (per brief §6.1 + KNOWLEDGE.md correction 2026-05-02).
+
+- Events flow top-down in natural document order. The container has `overflow-y-auto`; events stack from the top.
+- Auto-scrolls to the bottom on new events.
+- If the operator scrolls up to read history, auto-scroll pauses and a small floating **"↓ N new events"** pill appears at the bottom of the panel; clicking it scrolls to the latest and resumes auto-scroll.
+- Each event renders with: relative timestamp (`Xs ago` / `Xm ago` format per KNOWLEDGE.md correction), actor + label, body text, optional linked-entity chips with a "View" affordance.
+
+### 9.4 Right pane — tabs
+
+Three tabs: **Now / Plan / Files**. Default tab on task open: **Plan** (per spec-time decision #7).
+
+> **Resolution of brief-internal contradiction.** Brief §6.3 lists four right-panel tabs (Now / Plan / Activity / Files); brief §6.4 #2 lists three (Now / Plan / Files) and explicitly explains that Activity moved out of the right panel into its own collapsible left-of-right-panel column. The spec follows brief §6.4. There is no Activity tab in the right panel — Activity is a dedicated column (§9.3). Brief §6.3 should be reconciled to match.
+
+#### 9.4.1 Now tab
+
+- Org chart of agents involved in the task (mock 07).
+- Status dots per agent: `done` (green), `working` (blue, pulsing), `idle` (grey).
+- Edges between parent and child agents indicate delegation.
+- Updates on `agent.delegation.*` and `step.started` / `step.completed` events.
+
+#### 9.4.2 Plan tab
+
+**Always present, content adapts to task complexity** (per Q7 resolution).
+
+| Task type | Plan tab content |
+|---|---|
+| Trivial (single skill call, no sub-agents) | One row: the skill the orchestrator is calling, e.g., *"Looking up Acme's churn rate."* |
+| Multi-step ad-hoc | Orchestrator's plan as it evolves. Each step appears as the orchestrator commits to it. Steps show `queued` / `working` / `done` states. |
+| Workflow-fired | The full step DAG up front. The four A's pills decorate each step. |
+
+**Branch decisions render inline** (brief §5.1): when a producing step's branch resolves, the chosen path's label appears in indigo (e.g., **`tier = "hot"`**); other paths render muted with their labels. A "Why?" link next to the resolved label opens a card sourced from the agent's reasoning trace.
+
+**Critical pill** on any step marked `is_critical: true` (mock 5, 7, 8 show the visual treatment).
+
+**Confidence chip** appears below the current Approval step when one is queued (mock 8 state 5).
+
+**Empty state** (per spec-time decision #6): when a task has just been created and the orchestrator hasn't drafted a plan yet, the Plan tab shows a "Drafting…" placeholder.
+
+#### 9.4.3 Files tab
+
+(Detail in §12.) Top thumbnail strip + reader pane. Auto-selects the latest file when a `file.created` event lands.
+
+### 9.5 Header
+
+Above the three panes, a thin header with:
+
+- Task name (editable inline).
+- Task status badge.
+- **Pause** / **Stop** buttons (per spec-time decision #4 + §7.3). Visible only to users with edit-access (per §14).
+- Breadcrumb: `Tasks › [task name]` (the v2 brief retired "Brief" as a noun — see §15).
+
+### 9.6 Empty states (per spec-time decision #6)
+
+| State | Activity panel | Plan tab | Files tab | Chat panel |
+|---|---|---|---|---|
+| Task just created (second 0) | One event: *"Task created · just now"* | "Drafting…" placeholder | "Nothing produced yet" | Operator's prompt + thinking box: *"Routing to the orchestrator"* |
+| Task done, no files produced | Full event log | Final step ✓ | "Nothing produced yet" | Final orchestrator message |
+
+### 9.7 Files referenced
+
+| File | Change |
+|---|---|
+| `client/src/pages/AgentChatPage.tsx` (existing) | Refactored into the three-pane layout. Existing chat patterns preserved (operator turn, agent reply, system messages, approval card). |
+| New components: `OpenTaskView.tsx`, `ChatPane.tsx`, `ActivityPane.tsx`, `RightPaneTabs.tsx`, `NowTab.tsx`, `PlanTab.tsx`, `FilesTab.tsx`, `ThinkingBox.tsx`, `MilestoneCard.tsx`, `ApprovalCard.tsx` (refactor existing), `AskFormCard.tsx` (§11), `PauseCard.tsx` (§7) | Architect picks final names + co-location. |
+| WebSocket client hook: `useTaskEventStream(taskId)` | One subscription per task; panes consume via context. |
+
+---
+
+## 10. Studio UI
+
+(Mockups: [`prototypes/workflows/04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html), [`prototypes/workflows/05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html), [`prototypes/workflows/09-ask-step-authoring.html`](../prototypes/workflows/09-ask-step-authoring.html). Brief §7.)
+
+### 10.1 Where it lives
+
+Admin / power-user nav. Not in the operator's primary nav. Routes:
+
+| Route | Purpose |
+|---|---|
+| `/admin/workflows` | Workflow library (admin browsing) |
+| `/admin/workflows/:id/edit` | Studio canvas for editing an existing template |
+| `/admin/workflows/new?fromDraft=:draftId` | Studio canvas for a brand-new template, hydrated from an orchestrator draft (per §10.6 + §13.2). On publish, the Studio creates v1 of a new template and sets the draft's `consumed_at`. |
+
+Operators reach the Studio via:
+
+- A "Edit workflow" link from a task that fired from a workflow.
+- A "Browse workflows" link from the admin nav.
+- An "Open in Studio" button from an orchestrator chat draft (§13.2).
+
+If the Studio becomes the operator's primary entry point, we've drifted (brief §3.0 strategic test).
+
+### 10.2 Canvas layout (mock 05)
+
+| Element | Behaviour |
+|---|---|
+| Canvas | Vertical step-card list. Branching as forks. Parallel as side-by-side. Approval-on-reject as a dashed back-arrow. |
+| Inspector (slide-out, right) | Opens on click of a step. Closes on click of empty canvas. One slide-out at a time — no permanent multi-pane chrome. |
+| Chat (Studio agent) | Docked pill bottom-left of the canvas. `⌘K` or click to expand into a left side-panel. Used for big restructures. Agent proposes a diff card; user clicks Apply or Discard. No silent edits. |
+| Bottom action bar | Floating pill, centred. Validation status (`1 issue` / `All checks pass`), estimated cost per run, single primary action `Publish vN`. |
+| Title bar | Template name (editable inline), forked-from indicator (`Forked from system / lead-reengagement v3 · saved 14s ago`). |
+
+### 10.3 Four A's inspectors (mock 04)
+
+Each step type's inspector content per brief §7.3:
+
+| Step | Inspector fields |
+|---|---|
+| **Agent** | Name, agent reference (system / org agents), free-form instruction textarea, optional branching on output (e.g., `tier → hot/cold`), side-effect class, **Mark as critical** toggle (per §5.2). |
+| **Action** | Name, type radio (Skill / External automation), picked skill or automation, input fields (templated from previous step outputs), on-failure routing, side-effect class, **Mark as critical** toggle. |
+| **Ask** | (Detailed in §10.4 — also mock 09) Name, prompt, form schema editor, **Who can submit** dropdown (4-way routing per §14), **Auto-fill from** dropdown. |
+| **Approval** | Name, what approvers see (which step outputs to render), approver routing (humans-only, 4-way per §14), quorum, if-approved routing, if-rejected routing (with loop-back option), **Confidence preview** (read-only, shows what runtime will render — per mock 04), **Audit on decision** footnote (read-only, lists what gets snapshotted — per mock 04). |
+
+### 10.4 Ask inspector deep-dive (mock 09)
+
+Five inspector states demonstrated:
+
+- **Default** — name, prompt, form fields list (each row: key + type + required), Add-a-field button, Who-can-submit dropdown (closed), Auto-fill dropdown (closed).
+- **Who-can-submit dropdown open** — four options visible (Specific people, A team, Task requester, Org admin) with help text.
+- **Auto-fill dropdown open** — V1 options (Don't auto-fill, Last completed run) + V2-deferred options (Pick a specific run, Saved preset).
+- **Add-a-field picker open** — 7 V1 field types in a tile picker (text, textarea, select, multi-select, number, date, checkbox). V2 deferrals (file upload, conditional fields, custom validation, no-code forms-builder UI) named in the footer.
+- **Editing a select field** — label, field key (read-only, auto-derived), help text, options list with drag-handles, required toggle.
+
+Field-key auto-derivation: lowercase, replace spaces with `_`, strip non-alphanumeric. Author can manually edit if needed (validator confirms uniqueness within the schema and rejects reserved words).
+
+### 10.5 Publishing (mock 05 publish-notes modal)
+
+- Click "Publish vN" → modal opens.
+- Modal: single optional textarea labeled "What changed in this version?", with placeholder copy. Skip / Publish buttons.
+- Empty notes accepted; the prompt is always shown.
+- Stored on `workflow_template_versions.publish_notes`.
+- Renders in the Workflow library's version history and in the open task view's Plan tab caption (one line under the version label of the run that used that version).
+- **Publish API contract.** `POST /api/admin/workflows/:id/publish` body `{ steps: [...], publish_notes?: string }`. Persists a new `workflow_template_versions` row in a single transaction (steps + publish_notes + version_number) and returns `200 { version_id: uuid, version_number: integer }`. New workflow runs (manual fire from the library, schedule fire, or agent-triggered) reference the latest published `version_id` at dispatch time and pin to that version for the run's lifetime (per §4.6 versioning contract). Schedules with `pinned_template_version_id` (per §3.1) override the "latest" selection and use the pinned version. The engine reads from `workflow_template_versions` only — never from in-flight Studio drafts (the `workflow_drafts` table per §3.3 is operator-side only and is never read by the dispatcher). This eliminates any "executed something different than what user saw" race: the published version_id is the single dispatch-time reference.
+
+**Concurrent editing handling** (per spec-time decision #8):
+
+- Studio uses last-write-wins.
+- Before submit-to-publish, Studio captures the template's current `latest_version` integer (a counter on `workflow_templates` incremented atomically with each new `workflow_template_versions` row). On submit-to-publish, Studio sends `expected_latest_version: <captured value>`. The publish endpoint runs the version-write inside a transaction predicated on `WHERE latest_version = :expected_latest_version`; 0 rows updated → `409 { error: 'concurrent_publish', current_latest_version, last_published_by_user_id, last_published_at }`. The Publish modal shows the warning: *"This template was updated by [user] [Xm ago]. You're publishing your version on top of theirs. Review changes?"* with a link to a quick diff (Phase 2) and Publish-anyway / Cancel buttons. Choosing Publish-anyway re-submits with the new `latest_version` value, accepting overwrite. Rationale: `workflow_template_versions` rows are immutable (no `updated_at` column), so the freshness signal lives on the parent template's monotonic version counter.
+- No soft-locking, no presence indicators in V1.
+
+### 10.6 Studio handoff with preview loaded (brief §7.5)
+
+When the orchestrator drafts a workflow from chat intent and the operator clicks **"Open in Studio"** on the draft card:
+
+1. Orchestrator persists the draft as a `workflow_drafts` row keyed by the chat `session_id` (table contract pinned in §3.3).
+2. The "Open in Studio" link is `/admin/workflows/new?fromDraft=<draftId>`.
+3. Studio reads the draft, hydrates the canvas with the steps the orchestrator drafted. On **publish** (creating v1 of a new template) the draft's `consumed_at` is set and the draft is no longer surfaced from the chat card. On **explicit discard** (operator clicks "Discard" on the orchestrator's chat draft card per §13.2) the draft's `consumed_at` is also set, with the chat conversation returning to its prior state for further intent-shaping. Closing the Studio tab without publishing or explicitly discarding leaves `consumed_at` null — the draft persists for re-entry from the same chat session and is reaped after 7 days (§3.3, §16.3 item 35a).
+4. **No interstitial preview screen** — the canvas itself is the preview.
+5. **Discoverability — chat session only (V1).** Drafts are discoverable only via the originating chat session's "Open in Studio" card. There is no separate "Recent drafts" surface in Studio in V1. Rationale: matches the brief §3.0 strategic test ("describe intent, don't build systems") and the `frontend-design-principles.md` "default to hidden" rule. A user who closes the Studio tab and navigates away from the originating chat session must return to that conversation to re-enter the draft. If discoverability becomes a real pain point in production, a Studio-side "Continue from draft" surface lands in a follow-up spec.
+
+Without this, "describe intent → see plan → tweak in Studio" becomes "describe intent → see plan → recreate manually" — fails the §3.0 strategic test.
+
+### 10.7 Files referenced
+
+| File | Change |
+|---|---|
+| New: `client/src/pages/StudioPage.tsx` | Replaces / extends current Playbook Studio (the rename pass — separate effort, not in this spec). |
+| New: `StudioCanvas.tsx`, `StudioInspector.tsx` (with per-step-type variants), `StudioChatPanel.tsx`, `StudioBottomBar.tsx`, `PublishModal.tsx` | Architect picks naming + co-location. |
+| New: `WorkflowDraftService.ts` (server) | Drafts table CRUD; cleanup on publish or discard. |
+| Studio handoff URL handling | Existing routing layer (Wouter / React Router — architect verifies). |
+
+---
+
+## 11. Ask form runtime
+
+(Mockup: [`prototypes/workflows/10-ask-step-runtime.html`](../prototypes/workflows/10-ask-step-runtime.html). Brief §7.3.)
+
+### 11.1 The form-card primitive
+
+When the engine reaches an Ask step, it emits an `ask.queued` event (§8.2). The chat panel renders a **form card**, the same primitive shape as Approval cards:
+
+- Amber-tinted card (`background: #fffbeb; border: 1px solid #fde68a`) to distinguish from regular chat bubbles.
+- Header: `Ask` pill + step name.
+- Prompt-to-user as the first line.
+- Form fields rendered inline using the V1 field-type renderer (§11.2).
+- Required fields marked with a red asterisk.
+- Submit button (primary, indigo) + Skip-this-step button (secondary, only enabled if the workflow author allowed skipping — V1 flag on the step, defaults to `false`).
+
+### 11.2 V1 field renderer
+
+Seven field types (per brief §7.3):
+
+| Type | Render |
+|---|---|
+| `text` | Single-line `<input>` with placeholder |
+| `textarea` | Multi-line `<textarea>` with placeholder |
+| `select` | Native `<select>` with the author-defined options |
+| `multi-select` | Checkbox list (or Combobox-with-tags if the option count is large; architect picks threshold) |
+| `number` | `<input type="number">` with optional min/max from the schema |
+| `date` | Native date picker (or `react-datepicker` if browser support insufficient) |
+| `checkbox` | Single boolean checkbox with the field's label |
+
+Each field has: label, help-text (optional, renders below the input), error (renders in red below the input on validation failure).
+
+### 11.3 Validation
+
+Client-side, runs on Submit click:
+
+- Required-field check: each field with `required: true` in schema must have a non-empty value.
+- Type-specific check: `number` must be numeric; `date` must be a valid date.
+
+If validation fails:
+
+- Each invalid field gets a red border + an inline error message ("Pick a segment to continue", "Enter a valid number", etc. — author-customisable in the schema's `error_message` field; falls back to a generic message).
+- Submit stays enabled (clicking again re-runs validation).
+- No modal, no toast, no extra surface.
+
+V2 (deferred): server-side validation, custom regex patterns, conditional fields.
+
+### 11.4 Submission and state transitions
+
+On valid Submit:
+
+1. Client POSTs to `/api/tasks/:taskId/ask/:stepId/submit` with the form values + the user's id.
+2. Server validates the user is in the `submitter_pool` (similar to Approval pool check — §5.1, §14). 403 if not.
+3. Server persists the values on the step run record's `outputs` JSON (so they're available as bindings: `${steps.confirm_campaign_target.outputs.audience}`). The persisted shape is fixed (Contracts entry):
+
+   ```typescript
+   // step run record .outputs JSON for an Ask step
+   {
+     submitted_by: string,                          // user id
+     submitted_at: string,                          // ISO8601
+     values: Record<string, unknown>,               // keyed by Ask params.fields[].key; type matches the field type
+     skipped: boolean                               // true when the user clicked Skip (only possible if params.allowSkip === true; values is then {})
+   }
+   ```
+
+   Bindings resolve `steps.<step_name>.outputs.<field_key>` against `outputs.values`. If `outputs.skipped === true`, every binding to that step's field returns `null` and downstream branches that depend on the field treat it as the default-branch case.
+4. Server emits `ask.submitted` event.
+5. Client receives the event, collapses the form card to a green-tinted **receipt** showing what was submitted, by whom, when:
+
+```
+✓ Submitted · Confirm campaign target
+Submitted by Mike H. · 2:14 pm
+
+Audience segment: High-fit accounts (Tier A)
+Tone:            Professional warm
+```
+
+6. Engine resumes the workflow (next step starts).
+
+#### 11.4.1 Ask submission contracts (Execution-Safety)
+
+Per spec-authoring-checklist §10. Each Ask submission write declares:
+
+- **Idempotency posture: state-based.** The step transition (`awaiting_input → submitted`) uses an optimistic predicate (`UPDATE workflow_steps SET status = 'submitted', outputs = $1 WHERE id = $2 AND status = 'awaiting_input'`). 0 rows updated means another submitter already won; the API returns `409 { error: 'already_submitted', submitted_by, submitted_at }` (the existing submitter info comes from the row that won).
+- **Retry classification: guarded.** A submitter who retries after a network failure observes one of two outcomes — `200 { ok: true }` if their original POST won, or `409 { already_submitted }` if a different submitter raced ahead. Either way, the form values land exactly once.
+- **Concurrency guard.** First-commit-wins per the predicate above; the losing caller's POST is rejected with 409 and the form card on their client reconciles via the WebSocket `ask.submitted` event.
+- **No DB unique constraint added.** State-based predicate is sufficient because Ask is single-submit; there is no `(run_id, step_id, user_id)` constraint (any one user in the pool can win, and the step status is the gate).
+- **State machine closure.** Valid step transitions for Ask: `queued → awaiting_input → submitted | skipped`. `skipped` is reachable only when `params.allowSkip === true` (§3.2). Forbidden: `submitted/skipped → *` (terminal). Adding a new step status for Ask requires a spec amendment.
+
+#### 11.4.2 Skip endpoint
+
+When `params.allowSkip === true` and the runtime renders the Skip-this-step button (§11.1):
+
+- `POST /api/tasks/:taskId/ask/:stepId/skip` body `{}`.
+- Server validates the caller is in the `submitter_pool` (same gate as submit; 403 otherwise).
+- Idempotency posture: state-based (`UPDATE workflow_steps SET status = 'skipped', outputs = $1 WHERE id = $2 AND status = 'awaiting_input'`); 0 rows updated → 409 `{ error: 'already_resolved', current_status, submitted_by, submitted_at }`.
+- The persisted `outputs` for a skip is `{ submitted_by, submitted_at, values: {}, skipped: true }` (per §11.4 step 3 Contracts entry).
+- Server emits `ask.skipped`. Client receives the event and collapses the form card to a green-tinted receipt: `✓ Skipped · <step name> — Skipped by <name> · <time>`.
+- Engine resumes the workflow; downstream bindings to this step's fields resolve to `null` (per §11.4 step 3).
+
+### 11.5 Auto-fill on re-run (per spec-time decision #10)
+
+When an Ask step queues and the workflow has `autoFillFrom: 'last_completed_run'`:
+
+1. Server queries the most recent successful run of this template-version.
+2. If found, retrieves the values submitted for this Ask step.
+3. Pre-fills field keys where **both the key and the type match** the current schema; leaves new fields blank. A key that matches but whose type has changed (e.g., `text → number`, `select → multi-select`) is treated as a new field — no pre-fill, no type-coercion attempt. Prevents silent type corruption when a workflow author renames a field's type.
+4. **No warning** if the schema has changed (added/removed/renamed fields, or a key whose type changed). Pre-fill behaviour per step 3 is silent; author's responsibility to know the schema changed.
+5. Submitter can edit any pre-filled value before submitting.
+
+If no prior successful run exists (first run), no pre-fill — fields start blank.
+
+### 11.6 Routing UX (mock 10 state D)
+
+When an Ask is routed to a non-requester (`submitterGroup.kind` is `specific_users`, `team`, or `org_admin`):
+
+The form card lands in the task view as usual. The submitter reaches it via one of three paths:
+
+| Path | Shape |
+|---|---|
+| Sidebar nav badge | "Waiting on you" sidebar entry with a count. Click → "Waiting on you" page. |
+| "Waiting on you" page | List of pending Asks + Approvals across all tasks the user has visibility into. Each row click → opens that task with the form card prominent. Same surface as the existing review queue. |
+| Email notification (opt-in per user prefs) | Email with task name + form prompt + "Open task" button → opens the task view. |
+
+**The key invariant** (per brief §7.3, mock 10 footnote): all three paths land on the **same task view with the same form card**. There is no separate forms surface. The card content adapts slightly when the submitter is not the requester (*"Mike H. asked you (you're in the Marketing team)"* prefix) so the team member has context.
+
+### 11.7 Files referenced
+
+| File | Change |
+|---|---|
+| New: `AskFormCard.tsx` | The form card primitive; renders inside ChatPane. |
+| New: `FormFieldRenderer.tsx` | Maps field type → input component. |
+| New endpoint: `POST /api/tasks/:taskId/ask/:stepId/submit` | Server handler for submission. |
+| Existing review-queue UI / "Waiting on you" page | Extended to include Ask items alongside Approvals. |
+
+---
+
+## 12. Files and conversational editing
+
+(Brief §9. Mock 07 for layout; mock 08 state 3 for fetched references and state 4 for created files.)
+
+### 12.1 Files tab — top thumbnail strip + reader pane
+
+| Element | Behaviour |
+|---|---|
+| Thumbnail strip (top, horizontally scrollable) | One card per file with icon (color-coded by type / author), document orientation (portrait or landscape), file extension badge (`DOC` / `CSV` / `XLS` / `PDF` / `PPT`), and the file name. |
+| Reader pane (below) | Full panel width. A4-like proportions for portrait files, 16:9-like for landscape. Click any thumbnail to swap reader content. |
+| Document toolbar (sticky at the top of the reader pane) | File name + meta (`DOC · 2 pages · Head of Sales · 28s ago`). Two icon actions: **Download** + **Open in new window**. |
+| Version dropdown (per-file) | Surfaces all prior versions of files that have been edited via chat (§12.3). Renders only when the file has > 1 version. |
+
+### 12.2 Files-at-scale grouping (per brief §9.5)
+
+For tasks with many files (long-running campaigns, multi-deliverable proposals), the strip alone becomes unusable. V1 ships lightweight structure on the strip itself:
+
+| Affordance | Behaviour |
+|---|---|
+| Group switcher above the strip | Three taps: `Outputs · References · Versions`. Default tap is `Outputs`. The vertical divider currently in mock 07 becomes the group boundary. |
+| Latest-only toggle | When on (default), the Versions group hides files that have a newer version. Off shows full version history inline. |
+| Search box | Above the strip. Filters by file name as the operator types. Cleared on tab switch. |
+| Sort dropdown | `Recent first` (default) · `Oldest first` · `Type` · `Author`. |
+
+The reader pane stays unchanged. Document toolbar (download, open in new window, version dropdown) is per-file and doesn't change with grouping/search.
+
+### 12.3 Conversational editing
+
+The operator can ask the agent to refine a file via the chat panel:
+
+> *"Make the proposal body more concise — cut the section on competitor positioning by half."*
+
+Engine flow:
+
+1. Operator sends a chat message that the agent classifies as a file-edit request (existing chat-triage classifier infrastructure, brief §2.2).
+2. Agent reads the current file (`referenceDocuments` / `executionFiles` table — architect verifies which holds the file content).
+3. Agent applies the requested change.
+4. Agent commits the new version (file's version table `version_number = N+1`).
+5. Reader pane updates to show the latest version.
+6. Activity log records `file.edited` event with `prior_version` and `new_version` ids.
+7. Chat gets a milestone confirmation: *"Updated the proposal body. Cut the pricing section to one paragraph."* (with a "View changes" link that opens the diff view per §12.4).
+
+### 12.4 Diff view on conversational edits (per brief §9.4)
+
+After any agent-driven file edit, the reader pane offers a small toggle:
+
+| Toggle state | What renders |
+|---|---|
+| `Latest` (default) | The new version, plain. |
+| `Show changes` | Inline strikethrough on removed text, indigo highlight on added text. Section-anchored (no full-document reflow). |
+
+A one-line caption above the diff: *"Edits requested by Mike at 2:14 pm. 'Cut the pricing section to one paragraph'. Applied as v3 by Head of Sales."*
+
+**Per-hunk revert** affordance: each highlighted change has a small ↶ button that reverts that specific change (creates a new version, doesn't edit history). One click; no confirmation modal (the action creates a new version and is itself reversible).
+
+**Per-hunk revert contract** (Contracts entry):
+
+- **Hunk identity.** A hunk is identified by `(file_id, from_version, hunk_index)` where `from_version` is the version immediately prior to the version that introduced the hunk, and `hunk_index` is the position (0-based) of the hunk in the deterministic diff between `from_version` and `from_version + 1`. The diff algorithm is fixed (line-level for documents; row-level for spreadsheets) so the same `(from_version, hunk_index)` resolves to the same change set on every read.
+- **Endpoint.** `POST /api/tasks/:taskId/files/:fileId/revert-hunk` with body `{ from_version: integer, hunk_index: integer }`.
+- **Idempotency posture.** State-based (per spec-authoring-checklist §10.1). The server inspects the latest version's diff against `from_version`: if `hunk_index` is no longer present (already reverted, or superseded by a newer edit), the endpoint returns `200 { reverted: false, reason: 'already_absent' }` — the request is a no-op, not an error.
+- **Concurrency guard.** The server verifies the file's current version is exactly `from_version + 1` before applying the revert. If the file has been edited again since (current version > `from_version + 1`), the endpoint returns `409 { error: 'base_version_changed', current_version: N }` and the client surfaces "This draft has been edited again. Refresh to see the latest." This protects against revert-against-stale-base.
+- **Result.** On success, the server creates `from_version + 2` (or `current_version + 1` if no concurrency conflict) with the targeted hunk reverted; emits `file.edited` event with `prior_version` and `new_version` ids; returns `200 { reverted: true, new_version: N }`.
+
+**Out of scope for V1:**
+
+- Side-by-side full-page diff (the inline approach is simpler and reads better in the reader pane).
+- Structured diffs for spreadsheets / slides (text only in V1; spreadsheets show row-level "added/removed/modified" counts as a fallback — open spec-time decision §19).
+- Diff between non-adjacent versions (V1 always diffs against the immediately prior version; the version dropdown lets the operator load any earlier version as the new base if they need to compare further back).
+
+### 12.5 No new schema for diff
+
+The version table already preserves prior versions. Diff is computed at render time from `versionN` vs `versionN-1`. The "Edits requested by X — '...' — applied as vN" caption pulls from the existing chat message log + version metadata.
+
+### 12.6 Inline human editing — out of scope (V1, per brief §9.3)
+
+The operator cannot click into the reader paper and type directly. Reasons (preserved from brief):
+
+- Inline editing breaks the "produced by agents, audited end-to-end" story unless every keystroke is logged.
+- Download is the escape hatch.
+- Most editing requests are conceptual — a single chat message accomplishes more than ten minutes of inline editing.
+- If demand emerges in production, we can add it later.
+
+### 12.7 Files referenced
+
+| File | Change |
+|---|---|
+| New: `FilesTab.tsx` (within the open task view) | Strip + reader pane + group switcher + search + sort. |
+| New: `FileReader.tsx` | Reader pane + document toolbar + version dropdown + diff toggle. |
+| New: `DiffRenderer.tsx` | Inline strikethrough / indigo-highlight + per-hunk revert. |
+| Existing file/version system | Reused; no schema change. |
+| Existing chat-triage classifier | Extended to detect file-edit intent. |
+| New endpoint: `POST /api/tasks/:taskId/files/:fileId/revert-hunk` | Per-hunk revert. |
+
+---
+
+## 13. Orchestrator changes
+
+(Brief §11.3, §3.0 strategic test. The orchestrator is the operator's primary creator of workflows; this section locks the changes that keep it that way.)
+
+### 13.1 Suggest-don't-decide for "do once vs repeat" (brief §11.3 #14)
+
+When the operator's chat looks like a request that could naturally repeat (cadence cues in the prompt, prior similar one-off runs, calendar-aligned phrasing), the orchestrator surfaces a **recommendation card** in chat AFTER the run completes — not a forced binary mid-flight.
+
+**Detection signals (V1):**
+
+| Signal | Source | Weight |
+|---|---|---|
+| Cadence cues in the prompt | NLP on the operator's prompt: "every Monday", "weekly", "each month", "this week", "every quarter" | high |
+| Prior similar one-off runs by the same user against the same subaccount | run history lookup | medium |
+| Calendar-aligned phrasing | "before Friday", "by end of month" | low (suggests one-off, not recurring) |
+| Workflow has Approval steps that recurred to the same approvers | run history | medium |
+
+If signals score above threshold, the orchestrator emits a `chat.message` event after `task.completed` (or after the operator's last action if the task is still ad-hoc) with a recommendation card:
+
+> *"This looks like something you'd want every Monday. Save it as a scheduled Workflow?"*
+> 
+> [Yes, set up · No thanks]
+
+Default: confirm the suggestion (creates a Workflow draft + a schedule, opens Studio with both pre-filled). Decline: dismiss the card.
+
+**Pattern-detection threshold values are an open spec-time decision** (§19) — architect to pick after seeing 100+ ad-hoc runs and tuning to acceptable false-positive rate.
+
+### 13.2 Draft hydration into Studio (brief §7.5, §10.5)
+
+When the orchestrator drafts a workflow from chat intent (either through the suggest-don't-decide flow or through an explicit "make this a workflow" request), it:
+
+1. Persists the draft as a `workflow_drafts` row with `session_id` (the chat session) + `payload jsonb` (the draft steps + bindings + branches).
+2. Emits a `chat.message` event with a draft card:
+
+   > *"I drafted a workflow for this. Open in Studio to review and publish?"*
+   > 
+   > [Open in Studio · Discard]
+
+3. "Open in Studio" navigates to `/admin/workflows/new?fromDraft=<draftId>`. Studio reads the draft, hydrates the canvas, sets `consumed_at` on publish or explicit discard (§10.6 lifecycle).
+4. The draft is per-session, not per-user. If the operator closes the tab, the draft persists; the cleanup job reaps it after 7 days (§3.3, §16.3 item 35a).
+
+### 13.3 Milestone reporting in chat (brief §6.1, mock 8 state 4 + 5)
+
+When a sub-agent completes a deliverable that the operator should know about (file produced, decision made, hand-off complete), the sub-agent **directly emits an `agent.milestone` event** with attribution:
+
+```typescript
+{
+  kind: 'agent.milestone',
+  actor: { kind: 'agent', id: 'head_of_sales', label: 'Head of Sales' },
+  payload: {
+    summary: 'Body drafted ✓ Pulled SDR-1 for last quarter MRR + terms.',
+    link_ref: { kind: 'file', id: '<file_id>', label: 'Open draft' }
+  }
+}
+```
+
+The chat panel renders this as a per-agent card with the link as an inline action (mock 8 state 4 + 5).
+
+**What's a milestone (criteria for emitting `agent.milestone`):**
+
+- A new file or version was produced (`file.created` or `file.edited` event always pairs with a milestone for the producing agent).
+- A branch decision was resolved (`step.branch_decided` pairs with a milestone for the deciding agent).
+- A multi-agent hand-off completed (sub-agent finished its scope and returned to parent).
+- The orchestrator's plan changed materially (added/removed steps based on intermediate findings).
+
+**What's NOT a milestone (stays in activity, not chat):**
+
+- Skill calls, memory retrievals, intermediate tool invocations.
+- Status updates ("still scanning…", "still drafting…").
+- Step.started / step.completed at the engine level (those are activity events, not chat events).
+
+### 13.4 `workflow.run.start` skill (brief §11.3 #16, punch list §16.3 item 37)
+
+Lets any agent fire a saved workflow as a tool when the agent's intent matches a named template.
+
+**Skill contract:**
+
+```typescript
+{
+  name: 'workflow.run.start',
+  input: {
+    workflow_template_id: string,                    // template the agent wants to fire
+    template_version_id?: string,                    // optional pin; default = latest published
+    initial_inputs: Record<string, unknown>          // values mapped to the template's first-step bindings; type-checked at fire time
+  },
+  output:
+    | { ok: true, task_id: string }                  // a new Task row is created and the run begins under that task id
+    | { ok: false, error: 'permission_denied' | 'template_not_found' | 'template_not_published' | 'inputs_invalid' | 'max_workflow_depth_exceeded', message: string }
+}
+```
+
+**Permission guard.** The calling agent's principal-scoped context (per `architecture.md` § Principal-scoped RLS) must have run-permission on the template's sub-account. An org-level agent without sub-account scope cannot fire a sub-account-scoped workflow; sub-account agents can only fire workflows scoped to their sub-account. Permission is checked at the route layer and at the engine layer (defence in depth).
+
+**Workflow-depth guard (security-critical).** §4.5 prevents workflow-to-workflow nesting at the **template definition level**, but `workflow.run.start` runs at **agent runtime** outside the template validator's reach. Without a runtime cap, an agent inside Workflow A can invoke `workflow.run.start` to fire Workflow B; an agent inside B can fire C; recursion is unbounded — exhausting the pg-boss queue, DB connection pool, and the org's LLM budget. Per-run `cost_ceiling_cents` does not protect against this because each spawned run carries its own ceiling.
+
+The skill handler MUST enforce a depth cap analogous to the existing `MAX_HANDOFF_DEPTH`:
+
+- The principal context carries a `workflow_run_depth` integer (default 0 for non-workflow callers).
+- When an agent inside a `workflow_runs` lifecycle invokes `workflow.run.start`, the handler reads the parent run's depth from the context (or from `workflow_runs.metadata.workflow_run_depth` if not in context) and computes `child_depth = parent_depth + 1`.
+- If `child_depth > MAX_WORKFLOW_DEPTH` (default `3`; configurable per-org via existing limits-config), the handler returns `{ ok: false, error: 'max_workflow_depth_exceeded', message: 'workflow depth N exceeds the cap of 3 — this prevents recursive workflow chains from exhausting tenant resources' }` and emits `workflow.run_depth_exceeded` to the agent execution log for telemetry.
+- The new run's `metadata.workflow_run_depth` is set to `child_depth` so the cap propagates transitively.
+- Top-level workflow runs (fired from a chat brief, schedule, or non-workflow agent context) have `child_depth = 1`.
+
+**Version selection.** Default is the latest published version of the template. If `template_version_id` is provided and is a non-deleted version of the same template, that version fires. If the version doesn't exist or has been retracted, returns `template_not_published`.
+
+**Task creation semantics.** A new `tasks` row is created with `created_by_user_id = <the user whose session the agent is acting on>` (carried via the principal context; column added by §3.1; NULL when the calling agent has no user context per the §5.1 NULL-handling rules) and `created_by_agent_id = <calling agent's id>`. The task is owned by the caller's sub-account.
+
+**Failure modes.** Permission denial, missing template, missing version, type-check failure on `initial_inputs` against the template's first-step bindings, depth-cap exceeded. All return structured errors per the output union (with `max_workflow_depth_exceeded` added to the error enum).
+
+**Existing primitive vs new.** This is a new skill registered in the existing skill catalogue (`server/config/actionRegistry.ts` per `architecture.md`). No new service layer. The depth check lives inside the skill handler (`SkillExecutionContext` is the natural place — same pattern as `MAX_HANDOFF_DEPTH`).
+
+### 13.5 Files referenced
+
+| File | Change |
+|---|---|
+| Existing orchestrator (`server/jobs/orchestratorFromTaskJob.ts` per brief §2.1) | Extended with: (a) cadence-signal detection on the operator's prompt; (b) draft creation when intent looks workflow-shaped; (c) milestone-event emission per agent. |
+| Chat-triage classifier (existing) | Extended to recognise the suggest-don't-decide and "make this a workflow" intents. |
+| New: `WorkflowDraftService.ts` (server) | Drafts CRUD + cleanup. |
+| New: `RecommendationCard.tsx` | Renders in the chat panel after task completion. |
+| Per-agent skill / scope code | Each sub-agent reports its own milestones via a new `emitMilestone(summary, link_ref)` helper. |
+| New: `workflow_drafts` cleanup job (extends existing pg-boss cleanup pattern) | Runs daily; reaps unclaimed drafts older than 7 days (§3.3, §13.2). |
+| New skill registration: `workflow.run.start` in `server/config/actionRegistry.ts` | Per §13.4 contract. |
+
+---
+
+## 14. Permissions model
+
+(Spec-time decision #9. Tasks live at the **sub-account** level; pickers must be scoped to the calling user's role and the resource's sub-account.)
+
+### 14.1 Roles relevant to V1
+
+| Role | Scope | Sees |
+|---|---|---|
+| **Org admin / org manager** | Whole org | All sub-accounts; can pick org users + sub-account users (across the entire org) |
+| **Sub-account admin** | One or more specific sub-accounts | Only sub-account members for sub-accounts they have admin rights on |
+| **Sub-account member** | One specific sub-account | Their own profile only (cannot author workflows; cannot configure pickers) |
+
+Role names + checks reuse existing identity infrastructure. Architect verifies exact role enum at decomposition.
+
+### 14.2 The "users I'm allowed to assign" API
+
+A new endpoint returns the pool of users the calling user is allowed to put into an `approverGroup` or `submitterGroup` (used by both the Approval and Ask inspectors in the Studio):
+
+```
+GET /api/orgs/:orgId/subaccounts/:subaccountId/assignable-users
+```
+
+Response (V1 shape):
+
+```typescript
+{
+  users: Array<{
+    id: string,
+    name: string,
+    email: string,
+    role: 'org_admin' | 'org_manager' | 'subaccount_admin' | 'subaccount_member',
+    is_org_user: boolean,           // true if the user is at the org level (visible to all sub-accounts in the org)
+    is_subaccount_member: boolean   // true if the user belongs to this specific sub-account
+  }>,
+  teams: Array<{
+    id: string,
+    name: string,
+    member_count: number
+  }>
+}
+```
+
+Server-side scoping logic:
+
+| Calling user's role | Returns |
+|---|---|
+| `org_admin` or `org_manager` | All org users + all members of the specified sub-account, with role labels. The picker UI can show two grouped sections: "Org users" and "[Sub-account name] members". |
+| `subaccount_admin` (with rights on this sub-account) | Only members of the specified sub-account. The picker UI shows one ungrouped list. |
+| `subaccount_admin` (without rights on this sub-account) | 403. Architect picks specific error code; the UI surfaces "You don't have permission to configure this workflow". |
+| `subaccount_member` | 403. Members can't author. |
+
+`teams` array filtered to teams the calling user has visibility into (org admin sees all org teams; sub-account admin sees only sub-account-scoped teams).
+
+### 14.3 Picker UI behaviour (per spec-time decision #9)
+
+For the **Approval / Ask "Specific people"** picker:
+
+- Search-and-select against `users[]` with typeahead.
+- Selected users render as removable chips.
+- If the calling user is org admin/manager, the dropdown groups results: **Org users** (with role icon) above **[Sub-account name] members** (no icon).
+- If the calling user is sub-account admin, no grouping — single flat list.
+- Search matches name + email (case-insensitive).
+
+For the **"A team"** picker:
+
+- Same `teams[]` payload.
+- Single dropdown, no grouping (teams aren't org vs sub-account in V1; teams scope is set at team creation per existing infrastructure).
+
+### 14.4 Visibility for non-requester submitters (per spec-time decision #3)
+
+When a non-requester submitter (specific person, team member, org admin) clicks through a notification to land on the task view:
+
+- **They see the whole task by default** (chat history, all files, activity log). They need context to answer the form correctly.
+
+**Authorisation contract (security-critical).** The cross-subaccount Ask routing path (§14.6) intentionally grants task read access to users who would otherwise 403 based on their subaccount membership. The route's permission check MUST be:
+
+> "The calling user has base task-read permission on the task's subaccount, **OR** the calling user's ID appears in the `approver_pool_snapshot` of at least one OPEN gate (`workflow_step_gates.resolved_at IS NULL`) on this task."
+
+This is the minimum-grant rule that makes the cross-subaccount path work without widening the surface to "any user with any historical pool membership." Specifically:
+
+- A user whose ID appears only in a RESOLVED gate's snapshot does NOT get task read access. The grant disappears when the gate resolves.
+- A user invited to one open Ask sees the whole task while that gate is open. When they submit, the gate resolves; if they have no other open-gate membership, they lose task read access on the next request.
+- The task's open-gate count is the authoritative grant; it changes as gates open and close.
+
+The route handler implements this as: `getTaskById(taskId)` joined with a check for either (a) caller in the task's subaccount memberships (existing path), or (b) `EXISTS (SELECT 1 FROM workflow_step_gates WHERE workflow_run_id IN (SELECT id FROM workflow_runs WHERE task_id = :taskId) AND resolved_at IS NULL AND approver_pool_snapshot @> jsonb_build_array(:userId))`. The query runs inside `withOrgTx` so RLS still enforces the `organisation_id` boundary — cross-org Ask routing remains forbidden by RLS even if the workflow author tried to author it.
+
+- A future V2 may add a "restricted view" mode for sensitive workflows (HR, billing, legal) — workflow author opts in at publish; submitter sees only the form card and the prompt. **Out of scope for V1.** V1 grants full task view per the rule above; V2 narrows the grant.
+
+### 14.5 Pause / Stop button visibility (§7.3)
+
+The Pause / Stop buttons in the open task view header (§9.5) are visible to:
+
+- The task requester (always).
+- Org admins / managers.
+- Sub-account admins on the task's sub-account.
+
+Read-only viewers (other sub-account members, users invited to a single Approval / Ask only) do not see the buttons.
+
+### 14.6 Cross-team / cross-subaccount Asks
+
+If a workflow author (org admin) configures an Ask step routed to a team in **another** sub-account:
+
+- The validator allows it at publish (org admins can route across the org).
+- At runtime, the team members in that other sub-account get the notification and can submit.
+- They land on the task view with full visibility (per §14.4) — even though the task is in a sub-account they don't normally have access to. This is intentional: the workflow author authorised them.
+- Audit captures their cross-sub-account access via the `agent_execution_events` log: `ask.queued` (with `submitter_pool` snapshotted) and `ask.submitted` (with `submitted_by` and the cross-subaccount-actor's id) are the auditable trail. For Approval steps that route across sub-accounts, the equivalent trail is on `workflow_step_gates.approver_pool_snapshot` plus the per-decider `workflow_step_reviews` rows.
+
+Sub-account admins **cannot** route across sub-account boundaries (the picker doesn't surface other sub-accounts' users / teams to them).
+
+### 14.7 Files referenced
+
+| File | Change |
+|---|---|
+| New: `assignableUsersService.ts` (server) | Implements the role-scoped pool resolution. |
+| New endpoint: `GET /api/orgs/:orgId/subaccounts/:subaccountId/assignable-users` | Picker data source. |
+| New: `UserPicker.tsx`, `TeamPicker.tsx` | Generic pickers used by both Approval and Ask inspectors. |
+| Existing role middleware | Reused; no schema change. |
+
+---
+
+## 15. Naming cleanup — Brief → Task
+
+(Brief §11.5. UI-only; schema unchanged.)
+
+### 15.1 Scope
+
+Retire **Brief** as a UI noun. Every user-visible string that refers to a "brief" becomes "Task" (or contextually appropriate variant). The schema is unchanged — `tasks` table stays, `tasks.brief` text column stays.
+
+### 15.2 String / nav / route changes
+
+| Surface | Before | After |
+|---|---|---|
+| Sidebar nav entry | "Briefs" | "Tasks" |
+| Page title | "Briefs" | "Tasks" |
+| Breadcrumb | `Briefs › [task name]` | `Tasks › [task name]` |
+| New-item modal | `NewBriefModal` (component name + title) | `NewTaskModal` (component renamed; title "New Task") |
+| Empty-state copy | "No briefs yet" | "No tasks yet" |
+| Email templates referencing the term | "Your brief is waiting" | "Your task is waiting" |
+| Search index labels | "brief" type | "task" type |
+
+### 15.3 What does NOT change
+
+- The `tasks` table.
+- The `tasks.brief` text column (it's a content column, not a noun for the surface).
+- Engine-internal references to brief content (the column name + its content).
+- Existing routes — the actual route is `/admin/briefs/:briefId` (not `/briefs/:id`); it redirects to `/admin/tasks/:taskId` for backward compat. The `/admin/` prefix is preserved.
+
+### 15.4 Files referenced
+
+The actual surface (verified against `client/src/`) is broader than a two-file rename. The following is the ground-truth file list at spec-time; architect reverifies at chunk-time before starting:
+
+| File | Change |
+|---|---|
+| `client/src/components/sidebar/*` | Update nav entry label "Briefs" → "Tasks". |
+| `client/src/pages/BriefDetailPage.tsx` | Rename to `TaskDetailPage.tsx` (or merge into `OpenTaskView.tsx` from Chunk 11 — architect picks at chunk-time). Update the route's symbol name in `App.tsx`. |
+| `client/src/components/global-ask-bar/GlobalAskBar.tsx` + `GlobalAskBarPure.ts` | The "new brief" entry-point lives in this global bar (there is NO `NewBriefModal.tsx` file). Update operator-visible strings (placeholder text, button labels, success copy). |
+| `client/src/components/brief-artefacts/*` | Internal directory naming stays as-is in V1 — the directory holds artefact-card components (ApprovalCard / StructuredResultCard / ErrorCard) that are an internal architectural concept, not a user-visible label. Operator-visible copy inside these components is updated where it says "brief". |
+| `client/src/lib/briefArtefactLifecyclePure.ts` + tests | Internal name; not user-visible. Stays as-is. |
+| `client/src/components/TaskModal.tsx` | Already named correctly. Audit user-visible strings for any "brief" → "task" updates. |
+| `client/src/App.tsx` | The actual existing route is `<Route path="/admin/briefs/:briefId" element={<BriefDetailPage ... />} />` (line 361). Add `/admin/tasks/:taskId` as the new canonical route, keep `/admin/briefs/:briefId` as a 301 redirect to the new path. |
+| Server email templates (`server/templates/email/*`) | String-replace user-visible "brief" → "task". |
+| i18n / translation files (if any) | Update keys + values. |
+
+**Files NOT in scope** (despite the original spec listing them — they don't exist in the codebase):
+- `client/src/pages/BriefsPage.tsx` — does not exist; only `BriefDetailPage.tsx` does.
+- `client/src/components/NewBriefModal.tsx` — does not exist; the entry-point is `GlobalAskBar.tsx`.
+
+### 15.5 Effort
+
+~1 day (revised from ~½ day) once the actual surface was verified against `client/src/`. Still the smallest item in the build punch list, but the artefact-cards directory + GlobalAskBar updates add roughly ½ day over the original "two-file rename" estimate.
+
+---
+
+## 16. Build punch list and effort estimates
+
+(Brief §11, extended with v2 additions. Architect re-decomposes into implementation chunks during plan-gate.)
+
+### 16.1 Engine and schema
+
+| # | Item | Brief / spec ref | Effort |
+|---|---|---|---|
+| 1 | Schema migration (all §3 deltas): `is_critical` on step definition; `decision_reason` + `gate_id` FK on `workflow_step_reviews`; new `workflow_step_gates` table (with `seen_payload`, `seen_confidence`, `approver_pool_snapshot`, `is_critical_synthesised`); `publish_notes` on `workflow_template_versions`; `cost_ceiling_cents` / `wall_clock_cap_seconds` on workflows; `effective_cost_ceiling_cents` / `effective_wall_clock_cap_seconds` / `extension_count` on workflow_runs; `pinned_template_version_id` on schedules; `task_id` + `task_sequence` on `agent_execution_events`; new `workflow_drafts` table; updates to `RLS_PROTECTED_TABLES` for `workflow_drafts` and `workflow_step_gates` | §3 | 1.5 days (one Drizzle migration + Drizzle schema updates + tests + RLS manifest entries) |
+| 2 | Approver routing: `approverGroup` + `quorum` on Approval step, pool resolution + 403 enforcement | §5.1, brief §11.1 #1 | 1.5 days (engine enforcement + tests) |
+| 3 | Submitter routing on Ask: same `approverGroup` shape under `submitterGroup` | §3.2, §11 | 0.5 day (mostly reuses #2) |
+| 4 | Step-type validator: collapse user-visible vocabulary to four A's, accept legacy types from existing templates | §4.1, brief §11.1 #2 | 1 day |
+| 5 | Branching as output property validator | §4.2, brief §11.1 #3 | 0.5 day |
+| 6 | Loop validator: only Approval-on-reject backward edges | §4.4, brief §11.1 #4 | 0.5 day |
+| 7 | Workflow → workflow nesting validator | §4.5, brief §11.1 #5 | 0.25 day (regression test mostly) |
+| 8 | `isCritical` synthesised Approval gate | §5.2 | 1 day |
+| 9 | Stall-and-notify scheduling on Approval / Ask gates (24h / 72h / 7d) | §5.3 | 1 day |
+| 10 | Cost / wall-clock cap monitoring + Pause card emission | §7 | 1.5 days |
+| 11 | Confidence chip heuristic + reason copy mapping | §6.1, §6.2 | 1.5 days |
+| 12 | Audit fields write path (`seen_payload`, `seen_confidence`) on gate creation | §6.3 | 0.5 day |
+| 13 | Schedule version pinning honour | §3.1, §5.4 | 0.5 day |
+| 14 | WebSocket event stream + reconnect-with-replay | §8 | 3 days |
+
+**Engine subtotal: ~13 days** (~2.5 weeks for one engineer; some items parallelise).
+
+### 16.2 New UI
+
+| # | Item | Mockup ref | Effort |
+|---|---|---|---|
+| 15 | Open task view three-pane layout: Chat / Activity / Right-pane (Now/Plan/Files) | mock 07 | 5 days |
+| 16 | Plan tab content: workflow DAG render, branch labels, "why this path" reasoning card, current-step indigo, `isCritical` pill, confidence chip preview, empty state | mocks 07, 08 | 3 days |
+| 17 | Now tab: org-chart with status dots + edges | mock 07, 08 | 1.5 days |
+| 18 | Files tab: thumbnail strip + reader pane + document toolbar + group switcher (Outputs / References / Versions) + latest-only toggle + search + sort | mock 07 + brief §9.5 | 3 days |
+| 19 | Diff renderer: inline strikethrough + highlight + per-hunk revert + version dropdown | brief §9.4, §12.4 | 2 days |
+| 20 | Chat panel: conversation + per-agent milestone cards + thinking box + composer | mocks 07, 08 (states 4 + 5) | 2 days |
+| 21 | Approval card (refactor existing) with confidence chip render + audit-aware Plan-tab caption | mock 04 (Approval state) | 1 day |
+| 22 | Ask form card primitive + 7-field-type renderer + validation + receipt | mock 10 | 2 days |
+| 23 | Pause card + operator-initiated Pause / Stop buttons in task header | §7.2, §7.3 | 1 day |
+| 24 | Studio canvas + per-step-type inspectors (four A's) | mocks 04, 05 | 7 days |
+| 25 | Studio chat panel (docked, agent diff cards) | mock 03 (legacy) for diff-card pattern + mock 05 | 3 days |
+| 26 | Studio publish modal with version notes | mock 05 (publish-notes inset) | 0.5 day |
+| 27 | Studio concurrent-edit handling (last-write-wins + warning banner) | §10.5 | 1 day |
+| 28 | Studio handoff with draft hydration | §10.6, §13.2 | 1.5 days |
+| 29 | Ask inspector deep-dive (5 sub-states: default, Who-can-submit, Auto-fill, Add-a-field picker, Edit field) | mock 09 | 2 days |
+| 30 | Approver / Submitter user picker + team picker (permission-aware) | §14.3 | 2 days |
+| 31 | Team management page in Org settings | brief §8.4 (small CRUD) | 0.5 day |
+| 32 | Workflow library page (admin-only) | needs refresh from earlier mocks | 2 days |
+| 33 | "Waiting on you" page (extended for Asks alongside Approvals) | mock 10 state D | 1 day |
+
+**UI subtotal: ~40 days** (~8 weeks for one engineer; significantly parallelisable across 2–3).
+
+### 16.3 Orchestrator
+
+| # | Item | Spec ref | Effort |
+|---|---|---|---|
+| 34 | Suggest-don't-decide pattern detection + recommendation card | §13.1 | 2 days |
+| 35 | Draft hydration into Studio (drafts table + endpoint + Studio integration) | §13.2 | 1.5 days |
+| 35a | `workflow_drafts` cleanup job — reaps drafts with `consumed_at IS NULL AND created_at < now() - interval '7 days'` (architect can extend the existing pg-boss cleanup-job pattern; no new pg-boss machinery) | §3.3, §13.2 | 0.25 day |
+| 36 | Per-agent milestone emission + chat-panel routing | §13.3 | 1 day |
+| 37 | Workflow-as-tool for agents (`workflow.run.start` skill — see §13.4 for the contract) | §13.4, brief §11.3 #16 | 1 day |
+
+**Orchestrator subtotal: ~5.5 days.**
+
+### 16.4 Naming cleanup
+
+| # | Item | Spec ref | Effort |
+|---|---|---|---|
+| 38 | Brief → Task UI rename (sidebar, page titles, breadcrumbs, modals, email templates) | §15 | 0.5 day |
+
+### 16.5 Total
+
+| Workstream | Days | Weeks (1 engineer) |
+|---|---|---|
+| Engine + schema | ~13 | ~2.5 |
+| New UI | ~40 | ~8 |
+| Orchestrator | ~5.5 | ~1 |
+| Naming cleanup | ~0.5 | ~0.1 |
+| **Total** | **~59 days** | **~12 weeks** |
+
+Parallelisable across UI / engine / orchestrator workstreams. With 2–3 engineers in parallel: **~12–16 weeks calendar**. This matches the spec-time decision #11 re-estimate.
+
+Architect to re-decompose during plan-gate; some items are likely to absorb other tasks (e.g., #20 chat panel may share scaffolding with #15 layout).
+
+---
+
+## 17. Test plan
+
+Tests author-time (per CLAUDE.md, full test gates run in CI; locally only targeted unit tests for new code).
+
+### 17.1 Engine validator (§4)
+
+| Test | Asserts |
+|---|---|
+| `four-as-vocabulary.test.ts` | Validator rejects publish using deprecated user-facing names; accepts existing engine types from legacy templates. |
+| `branching-as-output-property.test.ts` | Validator rejects `conditional` / `agent_decision` step types in fresh templates; accepts when migrating an existing one. |
+| `branching-target-step-exists.test.ts` | Validator rejects branches whose target step ID doesn't exist. |
+| `loop-only-on-approval-reject.test.ts` | Validator accepts backward edges from Approval `onReject`; rejects all other backward edges. |
+| `no-workflow-to-workflow-nesting.test.ts` | Validator rejects direct workflow→workflow chains; accepts workflow→agent→workflow. |
+| `quorum-validator.test.ts` | Validator rejects publish when `quorum > userIds.length` for `kind: 'specific_users'`. |
+| `iscritical-only-on-agent-action.test.ts` | Validator rejects `is_critical: true` on Ask or Approval steps. |
+
+### 17.2 Engine state machine (§5, §7)
+
+| Test | Asserts |
+|---|---|
+| `approval-pool-membership.test.ts` | Submitting an approval decision as a user not in the snapshotted pool returns 403. |
+| `approval-quorum-counting.test.ts` | Step transitions to `approved` only when `approve` count ≥ quorum; single rejection trumps. |
+| `iscritical-synthesises-approval.test.ts` | Agent / Action step with `is_critical: true` has an Approval gate inserted before execution. |
+| `iscritical-no-double-gate.test.ts` | If author placed an Approval before a critical step, no second synthesised gate is created. |
+| `stall-notify-cadence.test.ts` | Notification jobs scheduled at 24h / 72h / 7d on gate-open; cancelled on gate-resolve. |
+| `cost-ceiling-pause.test.ts` | Run pauses when cumulative cost crosses ceiling between steps; emits `run.paused.cost_ceiling`. |
+| `wall-clock-cap-pause.test.ts` | Run pauses when elapsed time crosses cap; emits `run.paused.wall_clock`. |
+| `pause-between-steps-only.test.ts` | A step in flight finishes before pause takes effect; no mid-step interruption. |
+| `schedule-version-pinning.test.ts` | Scheduled run with `pinned_template_version_id` uses that version even when newer is published. |
+
+### 17.3 Confidence + audit (§6)
+
+| Test | Asserts |
+|---|---|
+| `confidence-heuristic-clamping.test.ts` | `is_critical: true` clamps confidence to `medium` ceiling. |
+| `confidence-heuristic-cascade.test.ts` | Low-confidence upstream cascades to `low` downstream. |
+| `confidence-snapshot-immutable.test.ts` | `seen_confidence` snapshotted at gate-creation; not regenerated on later read. |
+| `seen-payload-immutable.test.ts` | `seen_payload` snapshotted at gate-creation; reflects what the human authorised, not what later ran. |
+| `confidence-failsafe.test.ts` | `high` confidence does NOT auto-approve; gate still requires explicit operator action. |
+
+### 17.4 Real-time coordination (§8)
+
+| Test | Asserts |
+|---|---|
+| `websocket-replay-on-reconnect.test.ts` | Client resumes from last seen `event_id` after disconnect; no missed events; no replay from start. |
+| `event-fan-out-to-panes.test.ts` | One event reaches all subscribed panes within 200ms. |
+| `optimistic-rollback.test.ts` | Optimistic update rolls back when server rejects (e.g., out-of-pool approver). |
+
+### 17.5 UI surfaces (§9, §10, §11, §12)
+
+**Frontend unit tests are deferred at the framing level** per `docs/spec-context.md` (`frontend_tests: none_for_now`). The behavioural contracts that frontend tests would cover (default tab on open, auto-scroll, milestone-vs-narration filtering, form validation, modal flows, hunk revert, files-at-scale search) are validated by a combination of: (a) the targeted server-side unit tests in §17.1–§17.4 for the logic that produces the events the UI consumes, (b) the static gates that catch typecheck/lint regressions, and (c) manual mockup-driven QA at integration time. When the codebase's frontend testing posture changes (per `spec-context.md` update procedure), this section will land the corresponding `*.test.tsx` files.
+
+### 17.6 Permissions (§14)
+
+| Test | Asserts |
+|---|---|
+| `assignable-users-org-admin.test.ts` | Org admin sees org users + sub-account members in the response. |
+| `assignable-users-subaccount-admin.test.ts` | Sub-account admin sees only sub-account members. |
+| `assignable-users-403-non-admin.test.ts` | Sub-account member gets 403 (cannot author). |
+| `cross-subaccount-routing.test.ts` | Org admin can route an Ask to another sub-account's team; sub-account admin cannot. |
+| `pause-stop-visibility.test.ts` | Server-side: the Pause / Stop / resume endpoints return 403 to callers outside the visibility set; return 200 for requester / org admin / sub-account admin. (Button-render is the UI consequence; per §17.5 framing deviation, the UI assertion is manual until the frontend testing posture changes.) |
+
+### 17.7 Test posture rules
+
+- Per CLAUDE.md, full test-gate suites run in CI. Locally, only targeted unit tests for the file authored for THIS change (`npx tsx <path-to-test>`).
+- No mocking the database for tests covering migrations or engine state-machine transitions; use the real test database (per CLAUDE.md test posture).
+- Each test names the brief / spec section it validates so traceability is auditable.
+
+---
+
+## 18. Migration plan and telemetry
+
+### 18.1 Migration plan
+
+**No runtime data migration is required.** All schema deltas (§3) are additive and default-safe:
+
+- `is_critical` defaults to `false` — existing steps behave as today.
+- `decision_reason` defaults to `null` — existing approval records are unaffected.
+- `gate_id` on existing `workflow_step_reviews` rows: backfilled with newly-created `workflow_step_gates` rows during migration (the migration creates one gate row per existing review row, copying the run/step keys; this preserves audit history without runtime impact). Or, simpler, `gate_id` is `NULL` on legacy rows and the validator accepts NULL only for rows whose `created_at` is before the migration timestamp; new rows always have `gate_id`. Architect picks the path with the lower migration risk.
+- `publish_notes` defaults to `null` — existing template versions have no notes (rendering treats `null` as "no notes").
+- `cost_ceiling_cents` defaults to `500`, `wall_clock_cap_seconds` defaults to `3600` — existing workflows get the safe defaults; admins can raise them per template if needed.
+- `effective_cost_ceiling_cents`, `effective_wall_clock_cap_seconds`, `extension_count` on `workflow_runs`: the migration backfills `effective_*` columns from each run's template values (or NULL for completed runs); `extension_count` defaults to `0`.
+- `pinned_template_version_id` defaults to `null` — existing schedules behave as today (next run uses newest published).
+- `task_id`, `task_sequence` on `agent_execution_events`: NULL on legacy rows; the migration does not backfill (legacy rows pre-date the per-task replay contract). New rows always have both.
+- `workflow_drafts` and `workflow_step_gates` are new empty tables; both are added to `RLS_PROTECTED_TABLES` in the same migration.
+
+**Existing system templates** (`event-creation.workflow.ts`, `weekly-digest.workflow.ts`, `intelligence-briefing.workflow.ts`) continue to work without modification. The four A's validator accepts their legacy engine type names.
+
+**Migration steps (one PR):**
+
+1. Drizzle migration file with the additive column additions on existing tables and the `workflow_drafts` + `workflow_step_gates` create-tables (§3.1, §3.3).
+2. Schema files in `shared/schema/` updated to match; both `workflow_drafts` and `workflow_step_gates` added to `RLS_PROTECTED_TABLES` per `architecture.md` § Row-Level Security.
+3. New endpoints, services, components, validators per §3 – §15.
+4. CI runs the full test-gate battery as a pre-merge gate (per `CLAUDE.md`); we do not run gates locally.
+5. Merge → standard deploy pipeline applies the migration alongside the code that uses it. **No staged rollout, no feature flag, no per-tenant gating** — per `docs/spec-context.md` (`rollout_model: commit_and_revert`, `staged_rollout: never_for_this_codebase_yet`). The codebase is pre-production; no live operators are affected by the deploy.
+
+**Rollback plan:**
+
+- All schema changes are additive (new columns default to safe values; new table is empty on first deploy).
+- If a regression surfaces post-merge, revert the code-side commits via the standard commit-and-revert pattern; the additive schema sits unused and does not need to be rolled back.
+- The schema migration itself stays applied (rolling back additive migrations is risky and unnecessary).
+
+### 18.2 Telemetry and observability
+
+All events emit via the existing tracing registry (per brief §2.5). The engine adds the following named events on top of what's already emitted:
+
+| Event | Where | Purpose |
+|---|---|---|
+| `workflow.published` | Studio publish path | Track publish frequency per template. Existing? Architect verifies. |
+| `workflow.publish_blocked.validator` | Validator rejection on publish | Track which rules fire most (informs validator UX). |
+| `approval.queued` | Gate creation | Already in §8.2 event stream; also written as a tracing event for cross-run aggregation. |
+| `approval.decided` | Gate resolution | Same. Includes confidence chip value + reason for retrospective analysis. |
+| `approval.pool_403` | Out-of-pool decision attempt | Surfaces the bug fix where any user could decide on any approval. Should drop to zero after V1 ships. |
+| `ask.queued` / `ask.submitted` | Ask gate lifecycle | Tracks form usage, abandonment rate. |
+| `iscritical.synthesised_gate` | When `is_critical: true` triggers an Approval | Tracks how often authors mark steps critical and how often those approvals are actually needed (informs whether `isCritical` is being over- or under-used). |
+| `confidence.computed` | Heuristic computation | Tracks the distribution of confidence values; informs the V1→V2 calibration model when `workflow_step_reviews` data accumulates. |
+| `run.paused.cost_ceiling` / `run.paused.wall_clock` / `run.paused.by_user` | Pause events | Tracks how often runs hit caps (informs cap tuning per template). |
+| `run.stopped.by_user` | Operator stop | Tracks operator interventions. |
+| `chat.message_sent` | Operator sent a chat message | Existing? Architect verifies. |
+| `agent.milestone_emitted` | Sub-agent milestone in chat | Tracks per-agent milestone frequency; helps identify under-reporting agents. |
+| `file.created` / `file.edited` | File lifecycle | Existing. Extended to include `edit_request` text for conversational edits. |
+| `orchestrator.suggestion_offered` | Suggest-don't-decide card surfaces | Tracks recommendation rate; informs threshold tuning. |
+| `orchestrator.suggestion_accepted` / `orchestrator.suggestion_dismissed` | Operator action on the card | Tracks acceptance rate; informs whether the pattern detection is calibrated. |
+| `studio.draft_hydrated` | Studio opened with `?fromDraft=` | Tracks the Studio handoff path. |
+| `websocket.reconnect` | Client reconnected to event stream | Tracks connection stability. |
+
+**Cost / latency guardrails:**
+
+- Each event emit is async fire-and-forget (per existing tracing pattern, brief §2.5).
+- Target overhead: <5ms per event on the hot path.
+- Architect adds a synthetic load test that fires 1000 events in a burst and confirms p95 latency stays under target.
+
+### 18.3 Logs vs events
+
+- **Tracing events** (above) are structured, queryable, persisted to the events sink.
+- **Application logs** (existing logger) capture context for unstructured debugging — engine errors, validator rejections, exceptional state. Not extended in this spec; uses existing patterns.
+
+### 18.4 Dashboards and alerts
+
+- A small admin dashboard (V2) aggregates the per-template metrics: pause rate, approval-403 rate, suggestion-acceptance rate. Not in V1 scope.
+- One alert in V1: `approval.pool_403` rate > 0 in production after the first month — indicates a regression in the pool-membership check.
+
+### 18.5 KNOWLEDGE.md additions on completion
+
+After V1 ships, append KNOWLEDGE.md entries for:
+
+- Any non-obvious validator rules (e.g., the `quorum > activeTeamMembers` runtime check, vs the publish-time check).
+- The exact confidence-chip threshold values picked.
+- Any orchestrator pattern-detection signals that turned out to be noise.
+
+---
+
+## Deferred Items
+
+Per spec-authoring-checklist §7. Single canonical list of features / migrations / criteria mentioned in prose but intentionally deferred. Each entry: name, where the prose mention lives, the V1 scope, the V2 scope, reason. Cross-cuts §1.2 (out-of-scope summary) and §19.3 (out-of-scope re-statement).
+
+- **Mobile / phone-responsive layouts.** Phase V1 ships desktop-first. Phase V2 ships read-only single-pane fallback for tablet/phone. Reason: spec-time decision #1; the operator UX requires the three-pane real-estate.
+- **Visual node-graph drag-and-drop authoring.** Permanently out of scope per brief §3 product positioning. Reason: structural mismatch with the orchestrator-drafts-then-author flow.
+- **Inline human editing of files.** Phase V1 ships conversational-editing only. Phase V2 may add inline editing if production demand emerges. Reason: brief §9.3 audit-trail concerns.
+- **Workflow → workflow direct nesting.** Permanently disallowed; agent-layer indirection allowed. Reason: brief §4.3 bounded-blast-radius guardrail.
+- **Webhook triggers.** Phase V1 ships manual / scheduled / agent-fired triggers only. Phase V2 may ship webhooks. Reason: brief §12 (registration, secrets, replay, idempotency on inbound require their own surface).
+- **General `while` / `do-until` loops.** Permanently disallowed; Approval-on-reject covers the legitimate cases. Reason: brief §5.3 footgun-class avoidance.
+- **Cost dashboards across workflows / templates.** Phase V1 ships per-run cost on the open task view. Phase V2 ships cross-template aggregation. Reason: brief §12.
+- **Run-history search across sub-accounts.** Phase V1 ships per-subaccount runs library. Phase V2 ships cross-subaccount admin search. Reason: brief §12 (admin tooling, not operator surface).
+- **Timeout escalation policies beyond stall-and-notify.** Phase V1 ships 24h / 72h / 7d notification cadence to the requester. Phase V2 may ship per-step `escalateAfterHours` config. Reason: spec-time decision #2.
+- **Restricted view mode for non-requester submitters.** Phase V1 ships full task view to non-requester submitters. Phase V2 may ship "restricted" mode opt-in at publish time for sensitive workflows. Reason: spec-time decision #3.
+- **Audit drawer + audit export UIs.** Phase V1 ships the schema (`seen_payload`, `seen_confidence`, `decision_reason`, `approver_pool_snapshot`, `is_critical_synthesised`) and the Plan-tab one-line caption (§6.5). Phase V2 ships the full audit drawer and CSV/JSON export. Reason: bandwidth + waiting on real audit-review usage to inform shape.
+- **Calibrated confidence model.** Phase V1 ships the heuristic in §6.1 with `signals` captured for retrospective analysis. Phase V2 swaps in a calibrated model once `workflow_step_reviews` data accumulates. Reason: brief §8.6 (no labeled data yet).
+- **Conditional fields on Ask forms.** Phase V1 ships the seven static field types (§11.2). Phase V2 may add "show field B if field A = X" logic. Reason: brief §7.3 V2 deferrals.
+- **File-upload field type on Ask.** Phase V1 ships the seven non-file field types (§11.2). Phase V2 may add file-upload. Reason: brief §7.3 V2 deferrals.
+- **Server-side validation / custom regex / no-code forms-builder UI on Ask.** Phase V1 ships client-side required + type checks. Phase V2 may ship the rest. Reason: §11.3.
+- **Side-by-side full-page diff for conversational-edit files.** Phase V1 ships inline strikethrough + indigo-highlight section-anchored diff. Phase V2 may ship side-by-side. Reason: §12.4.
+- **Structured spreadsheet diffs.** Phase V1 ships row-level "added / removed / modified" counts as fallback for spreadsheets. Phase V2 may ship full structured diff. Reason: spec-time decision §19.1 #C.
+- **Diff between non-adjacent file versions.** Phase V1 always diffs against the immediately prior version (operator can load any earlier version as the new base via the version dropdown). Phase V2 may ship arbitrary-version diff. Reason: §12.4.
+- **`Activity` tab inside the right panel.** Permanently retired (brief §6.4 #2 + spec §9.4 resolution-note). Activity is a dedicated left-of-right-panel column, never a tab. Brief §6.3 should be reconciled to remove the legacy 4-tab table.
+- **"Promote agent run to workflow" feature.** Phase V1 ships orchestrator-driven creation only. Phase V2 may ship promotion if real usage signals demand. Reason: brief §12 (speculative until V1 telemetry lands).
+- **Visual diff between published workflow-template versions.** Phase V1 ships publish-notes captions only (§3.1, §10.5). Phase V2 may ship template-version diff. Reason: brief §12 (template-version churn not yet a pain point).
+- **Workflow-template parameter UI** (`paramsJson` on templates). Phase V1 ships Ask steps for runtime input gathering. Phase V2 may surface template-level params. Reason: brief §12.
+- **"Explain this workflow" / "What does this step do?" inline explanations in Studio.** Phase V1 not in scope. Phase V2 once authoring patterns surface. Reason: brief §12, brief reviewer-reconciliation entry.
+- **Frontend-surface unit tests** (`*.test.tsx`). Permanently deferred at the framing level — see `docs/spec-context.md` `frontend_tests: none_for_now`. Reason: codebase-wide testing posture; the §17 test plan covers this with static gates + targeted server-side tests instead.
+
+## 19. Open spec-time decisions
+
+These remain open after this spec; architect / spec-reviewer settles each at decomposition. None are blockers for starting build — each can be picked with a sensible default and refined.
+
+### 19.1 Carried forward from brief §15
+
+| # | Decision | Default if not picked | Settled by |
+|---|---|---|---|
+| A | Confidence-chip threshold cut-points (high / medium / low boundaries) | Hand-tuned on 100+ internal Approval cards before public launch | Architect + product |
+| B | `isCritical` opt-in vs auto-on-irreversible | Opt-in (current default — author marks). Re-evaluate after V1 if too many irreversible steps slip through. | Product call |
+| C | Diff view scope: structured spreadsheet diff in V1 or V2? | V1 ships text-only diff for documents; spreadsheets show row-level "added / removed / modified" counts as a fallback. Full structured spreadsheet diff is V2. | Architect (visual budget call) |
+| D | Orchestrator pattern-detection signals for "do once vs repeat" | List in §13.1 is the V1 starting set. Threshold values picked after seeing 100+ ad-hoc runs. | Architect |
+| E | Document toolbar version dropdown depth | All prior versions shown; "Show more" if > 10 versions. | Settle in §12.1 build. |
+
+### 19.2 New from this spec pass
+
+| # | Decision | Default applied | Architect verifies |
+|---|---|---|---|
+| F | Exact target table for `is_critical` column | Step-definition-level (likely `workflow_template_steps` or the `params` JSON inside it) | Architect picks based on existing Drizzle schema layout. |
+| G | Cost-cap extension granularity (Pause card "Continue for another Y minutes / $Z" buttons) | One option: 30 minutes / $2.50. Cap on number of extensions per run: 2. | Architect refines if existing cost-reservation infrastructure has different granularity. |
+| H | Workflow drafts retention (when an orchestrator-drafted workflow is unclaimed in Studio) | 7 days | Architect picks based on existing cleanup-job infrastructure. |
+| I | Multi-select field renderer threshold (checkbox list vs Combobox-with-tags) | Checkbox list for ≤ 7 options; Combobox above. | Architect or designer picks at component-build time. |
+| J | WebSocket batching window for burst events | 1 frame (~16ms) at 60fps cap | Architect picks based on existing real-time infrastructure. |
+| K | Plan-tab "trivial task" detection (when content collapses to a single row) | Trivial = exactly one Action step + no agent decisions | Architect refines. |
+| L | Empty-state copy for Plan / Files / Activity tabs | Per §9.6 | Designer pass on copy at component-build. |
+
+### 19.3 Out-of-scope for V1 (re-stated, for completeness)
+
+These are intentionally not in this spec; revisit when real V1 usage data justifies:
+
+- Mobile / phone-responsive layouts (V2; spec-time decision #1).
+- "Restricted view" mode for non-requester submitters on sensitive workflows (V2; spec-time decision #3).
+- Auto-escalation policies beyond stall-and-notify (V2; spec-time decision #2).
+- Full structured spreadsheet diff (V2; decision §19.1 #C).
+- Audit drawer + audit export UIs (V2; spec §6.5).
+- Cost dashboards across templates (V2; brief §12).
+- Run-history search across sub-accounts (V2; brief §12).
+- Calibrated confidence model (V2; replaces V1 heuristic once `workflow_step_reviews` data accumulates).
+- Per-step `escalateAfterHours` config on Approvals (V2; spec §5.3).
+- Conditional fields on Ask forms ("show field B if field A = X") (V2; brief §7.3 V2 deferrals).
+- File upload field type on Ask (V2; brief §7.3 V2 deferrals).
+
+### 19.4 Spec-review pass
+
+This spec goes through `spec-reviewer` before `architect` decomposes:
+
+1. `spec-reviewer` reviews this document, classifies findings as mechanical / directional / ambiguous.
+2. Mechanical fixes auto-applied.
+3. Directional findings either auto-decided per the agent's framing assumptions, or routed to `tasks/todo.md`.
+4. Up to 5 iterations max per spec-reviewer's lifetime cap.
+
+After spec-review settles, `architect` decomposes into implementation chunks, then `feature-coordinator` orchestrates the build per chunk.
+
+---
+
+_End of spec. Brief: [`docs/workflows-dev-brief.md`](./workflows-dev-brief.md). Mockups: [`prototypes/workflows/index.html`](../prototypes/workflows/index.html)._
+
+---

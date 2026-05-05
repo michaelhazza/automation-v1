@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
+import { OnboardAgentModal } from '../components/workspace/OnboardAgentModal';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ interface AgentLink {
   parentSubaccountAgentId: string | null;
   agentRole: string | null;
   agentTitle: string | null;
+  workspaceIdentityStatus: string | null;
   agent: { id: string; name: string; slug: string; status: string };
 }
 
@@ -134,7 +136,9 @@ function SubaccountTreeRow({ node, depth }: { node: TreeNode; depth: number }) {
 
 export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
+  const navigate = useNavigate();
   const [agentLinks, setAgentLinks] = useState<AgentLink[]>([]);
+  const [onboardLink, setOnboardLink] = useState<AgentLink | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [pageTab, setPageTab] = useState<PageTab>('list');
   const [loading, setLoading] = useState(true);
@@ -326,19 +330,19 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
         <div className="flex gap-2">
           <button
             onClick={openLoadAgents}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+            className="btn btn-secondary"
           >
             Load System Agents
           </button>
           <button
             onClick={openLinkOrgAgent}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+            className="btn btn-secondary"
           >
             + Link Org Agent
           </button>
           <button
             onClick={openLoadTemplate}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+            className="btn btn-primary"
           >
             Load Company Template
           </button>
@@ -418,6 +422,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                   <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Role</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Active</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -440,6 +445,31 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                     <td className="px-4 py-3"><RoleBadge role={link.agentRole} /></td>
                     <td className="px-4 py-3">
                       <span className={`inline-block w-2 h-2 rounded-full ${link.isActive ? 'bg-green-500' : 'bg-slate-300'}`} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/admin/subaccounts/${subaccountId}/agents/${link.id}/manage`}
+                          className="text-[12px] text-indigo-500 hover:underline no-underline"
+                        >
+                          Manage
+                        </Link>
+                        {link.workspaceIdentityStatus == null ? (
+                          <button
+                            onClick={() => setOnboardLink(link)}
+                            className="text-[12px] text-slate-500 hover:text-slate-700 bg-transparent border-0 cursor-pointer p-0"
+                          >
+                            Onboard to workplace
+                          </button>
+                        ) : (
+                          <Link
+                            to={`/admin/subaccounts/${subaccountId}/agents/${link.id}/manage?tab=identity`}
+                            className="text-[12px] text-slate-500 hover:text-slate-700 no-underline"
+                          >
+                            Identity
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -502,11 +532,11 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                 <button
                   onClick={handleLoadAgents}
                   disabled={loadingAgents || selectedAgentIds.size === 0}
-                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${loadingAgents || selectedAgentIds.size === 0 ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+                  className="btn btn-primary"
                 >
                   {loadingAgents ? 'Loading...' : `Load ${selectedAgentIds.size} Agent${selectedAgentIds.size !== 1 ? 's' : ''}`}
                 </button>
-                <button onClick={resetLoadAgents} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+                <button onClick={resetLoadAgents} className="btn btn-secondary">
                   Cancel
                 </button>
               </div>
@@ -524,7 +554,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                   <div><span className="text-slate-500">Reused:</span> {loadAgentsResult.summary.agentsReused}</div>
                 </div>
               </div>
-              <button onClick={resetLoadAgents} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+              <button onClick={resetLoadAgents} className="btn btn-primary">
                 Done
               </button>
             </>
@@ -591,11 +621,11 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                 <button
                   onClick={handleLoadTemplate}
                   disabled={loadingTemplate || !selectedTemplateId}
-                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${loadingTemplate || !selectedTemplateId ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+                  className="btn btn-primary"
                 >
                   {loadingTemplate ? 'Loading...' : 'Load Template'}
                 </button>
-                <button onClick={resetLoadTemplate} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+                <button onClick={resetLoadTemplate} className="btn btn-secondary">
                   Cancel
                 </button>
               </div>
@@ -624,7 +654,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                   </div>
                 )}
               </div>
-              <button onClick={resetLoadTemplate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+              <button onClick={resetLoadTemplate} className="btn btn-primary">
                 Done
               </button>
             </>
@@ -657,7 +687,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                   <button
                     onClick={() => handleLinkOrgAgent(agent.id)}
                     disabled={linkingId === agent.id}
-                    className={`px-3 py-1.5 text-[12px] font-medium rounded-md border-0 transition-colors shrink-0 ${linkingId === agent.id ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'}`}
+                    className="btn btn-sm btn-primary shrink-0"
                   >
                     {linkingId === agent.id ? 'Linking…' : 'Link'}
                   </button>
@@ -668,12 +698,25 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
           <div className="mt-4 flex justify-end">
             <button
               onClick={() => setShowLinkOrgAgent(false)}
-              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+              className="btn btn-secondary"
             >
               Close
             </button>
           </div>
         </Modal>
+      )}
+      {onboardLink && subaccountId && (
+        <OnboardAgentModal
+          open={!!onboardLink}
+          subaccountId={subaccountId}
+          agentId={onboardLink.agentId}
+          agentDisplayName={onboardLink.agent.name}
+          onClose={() => setOnboardLink(null)}
+          onSuccess={(_identityId) => {
+            setOnboardLink(null);
+            navigate(`/admin/subaccounts/${subaccountId}/agents/${onboardLink.id}/manage?tab=identity`);
+          }}
+        />
       )}
     </div>
   );

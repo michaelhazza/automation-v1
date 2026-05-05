@@ -7,27 +7,9 @@
  *   npx tsx server/services/__tests__/computeStaffActivityPulsePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { computeStaffActivityPulse, type MutationRow } from '../computeStaffActivityPulsePure.js';
 import type { StaffActivityDefinition } from '../orgConfigService.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(msg);
-}
 
 const baseConfig: StaffActivityDefinition = {
   countedMutationTypes: [
@@ -55,9 +37,9 @@ function m(daysAgo: number, mutationType: string, externalUserKind: MutationRow[
 
 test('empty mutation list → zero score, zero counts', () => {
   const result = computeStaffActivityPulse([], baseConfig, now);
-  assert(result.numericValue === 0, `got ${result.numericValue}`);
-  assert(Object.keys(result.jsonPayload.countsByType).length === 0, 'no counts');
-  assert(result.jsonPayload.windows.length === 3, '3 windows');
+  expect(result.numericValue === 0, `got ${result.numericValue}`).toBeTruthy();
+  expect(Object.keys(result.jsonPayload.countsByType).length === 0, 'no counts').toBeTruthy();
+  expect(result.jsonPayload.windows.length === 3, '3 windows').toBeTruthy();
 });
 
 test('weights applied per mutation type', () => {
@@ -71,8 +53,8 @@ test('weights applied per mutation type', () => {
     now,
   );
   // 30-day window: 3.5
-  assert(result.numericValue === 3.5, `expected 3.5, got ${result.numericValue}`);
-  assert(result.jsonPayload.countsByType.contact_created === 1, 'contact_created count');
+  expect(result.numericValue === 3.5, `expected 3.5, got ${result.numericValue}`).toBeTruthy();
+  expect(result.jsonPayload.countsByType.contact_created === 1, 'contact_created count').toBeTruthy();
 });
 
 test('excluded user kinds do not contribute', () => {
@@ -86,8 +68,8 @@ test('excluded user kinds do not contribute', () => {
     baseConfig,
     now,
   );
-  assert(result.numericValue === 1.0, `only staff row counts, got ${result.numericValue}`);
-  assert(result.jsonPayload.excludedUserMutationCount === 3, 'excluded count');
+  expect(result.numericValue === 1.0, `only staff row counts, got ${result.numericValue}`).toBeTruthy();
+  expect(result.jsonPayload.excludedUserMutationCount === 3, 'excluded count').toBeTruthy();
 });
 
 test('unconfigured mutation type contributes zero (not penalised)', () => {
@@ -99,11 +81,8 @@ test('unconfigured mutation type contributes zero (not penalised)', () => {
     baseConfig,
     now,
   );
-  assert(result.numericValue === 1.0, `workflow_edited not counted, got ${result.numericValue}`);
-  assert(
-    result.jsonPayload.countsByType.workflow_edited === undefined,
-    'unconfigured types do not appear in countsByType',
-  );
+  expect(result.numericValue === 1.0, `workflow_edited not counted, got ${result.numericValue}`).toBeTruthy();
+  expect(result.jsonPayload.countsByType.workflow_edited === undefined, 'unconfigured types do not appear in countsByType').toBeTruthy();
 });
 
 test('lookback window respected — mutation outside longest window dropped', () => {
@@ -115,10 +94,10 @@ test('lookback window respected — mutation outside longest window dropped', ()
     baseConfig,
     now,
   );
-  assert(result.numericValue === 1.0, 'only within-window counts');
+  expect(result.numericValue === 1.0, 'only within-window counts').toBeTruthy();
   // 90-day window should still show raw count 1
   const w90 = result.jsonPayload.windows.find((w) => w.days === 90);
-  assert(w90?.weightedScore === 1.0, `w90 got ${w90?.weightedScore}`);
+  expect(w90?.weightedScore === 1.0, `w90 got ${w90?.weightedScore}`).toBeTruthy();
 });
 
 test('per-window scoring — 7d vs 30d vs 90d', () => {
@@ -131,9 +110,9 @@ test('per-window scoring — 7d vs 30d vs 90d', () => {
   const w7 = result.jsonPayload.windows.find((w) => w.days === 7);
   const w30 = result.jsonPayload.windows.find((w) => w.days === 30);
   const w90 = result.jsonPayload.windows.find((w) => w.days === 90);
-  assert(w7?.weightedScore === 1.0, `w7 expected 1, got ${w7?.weightedScore}`);
-  assert(w30?.weightedScore === 2.0, `w30 expected 2, got ${w30?.weightedScore}`);
-  assert(w90?.weightedScore === 3.0, `w90 expected 3, got ${w90?.weightedScore}`);
+  expect(w7?.weightedScore === 1.0, `w7 expected 1, got ${w7?.weightedScore}`).toBeTruthy();
+  expect(w30?.weightedScore === 2.0, `w30 expected 2, got ${w30?.weightedScore}`).toBeTruthy();
+  expect(w90?.weightedScore === 3.0, `w90 expected 3, got ${w90?.weightedScore}`).toBeTruthy();
 });
 
 test('falls back to longest window when 30-day not configured', () => {
@@ -147,14 +126,12 @@ test('falls back to longest window when 30-day not configured', () => {
     now,
   );
   // 14-day window includes both = 2.0
-  assert(result.numericValue === 2.0, `expected longest=14d score 2, got ${result.numericValue}`);
+  expect(result.numericValue === 2.0, `expected longest=14d score 2, got ${result.numericValue}`).toBeTruthy();
 });
 
 test('algorithm tag stable (schema contract)', () => {
   const result = computeStaffActivityPulse([], baseConfig, now);
-  assert(result.jsonPayload.algorithm === 'weighted_sum_v1', 'algorithm version tag');
+  expect(result.jsonPayload.algorithm === 'weighted_sum_v1', 'algorithm version tag').toBeTruthy();
 });
 
 console.log('');
-console.log(`computeStaffActivityPulsePure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

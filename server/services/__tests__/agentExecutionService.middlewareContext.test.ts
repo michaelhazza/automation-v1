@@ -9,6 +9,7 @@
  * lightweight pattern as server/services/__tests__/runContextLoader.test.ts.
  */
 
+import { expect, test } from 'vitest';
 import {
   buildMiddlewareContext,
   type BuildMiddlewareContextParams,
@@ -16,29 +17,10 @@ import {
 import type { AgentRunRequest } from '../agentExecutionService.js';
 import type { SubaccountAgent } from '../../db/schema/index.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
 }
 
 // ── Fixture helpers ────────────────────────────────────────────────
@@ -87,89 +69,89 @@ console.log('');
 // ── Initial counter state ──────────────────────────────────────────
 test('builds context with tokensUsed=0', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assertEqual(ctx.tokensUsed, 0, 'tokensUsed');
+  expect(ctx.tokensUsed, 'tokensUsed').toBe(0);
 });
 
 test('builds context with toolCallsCount=0', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assertEqual(ctx.toolCallsCount, 0, 'toolCallsCount');
+  expect(ctx.toolCallsCount, 'toolCallsCount').toBe(0);
 });
 
 test('builds context with empty toolCallHistory', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assertEqual(ctx.toolCallHistory, [], 'toolCallHistory');
+  expect(ctx.toolCallHistory, 'toolCallHistory').toEqual([]);
 });
 
 test('builds context with iteration=0', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assertEqual(ctx.iteration, 0, 'iteration');
+  expect(ctx.iteration, 'iteration').toBe(0);
 });
 
 // ── Pass-through params ────────────────────────────────────────────
 test('forwards runId through unchanged', () => {
   const ctx = buildMiddlewareContext(makeParams({ runId: 'my-specific-run' }));
-  assertEqual(ctx.runId, 'my-specific-run', 'runId');
+  expect(ctx.runId, 'runId').toBe('my-specific-run');
 });
 
 test('forwards startTime through unchanged', () => {
   const ctx = buildMiddlewareContext(makeParams({ startTime: 9999 }));
-  assertEqual(ctx.startTime, 9999, 'startTime');
+  expect(ctx.startTime, 'startTime').toBe(9999);
 });
 
 test('forwards tokenBudget through unchanged', () => {
   const ctx = buildMiddlewareContext(makeParams({ tokenBudget: 50000 }));
-  assertEqual(ctx.tokenBudget, 50000, 'tokenBudget');
+  expect(ctx.tokenBudget, 'tokenBudget').toBe(50000);
 });
 
 test('forwards maxToolCalls through unchanged', () => {
   const ctx = buildMiddlewareContext(makeParams({ maxToolCalls: 10 }));
-  assertEqual(ctx.maxToolCalls, 10, 'maxToolCalls');
+  expect(ctx.maxToolCalls, 'maxToolCalls').toBe(10);
 });
 
 test('forwards timeoutMs through unchanged', () => {
   const ctx = buildMiddlewareContext(makeParams({ timeoutMs: 60000 }));
-  assertEqual(ctx.timeoutMs, 60000, 'timeoutMs');
+  expect(ctx.timeoutMs, 'timeoutMs').toBe(60000);
 });
 
 test('forwards agent modelId / temperature / maxTokens', () => {
   const agent = { modelId: 'claude-sonnet-4', temperature: 0.3, maxTokens: 8192 };
   const ctx = buildMiddlewareContext(makeParams({ agent }));
-  assertEqual(ctx.agent, agent, 'agent');
+  expect(ctx.agent, 'agent').toEqual(agent);
 });
 
 test('forwards request through unchanged', () => {
   const request = makeRequest({ agentId: 'a-456', organisationId: 'org-other' });
   const ctx = buildMiddlewareContext(makeParams({ request }));
-  assertEqual(ctx.request, request, 'request');
+  expect(ctx.request, 'request').toEqual(request);
 });
 
 test('forwards saLink through unchanged', () => {
   const saLink = makeSaLink();
   const ctx = buildMiddlewareContext(makeParams({ saLink }));
-  assertEqual(ctx.saLink, saLink, 'saLink');
+  expect(ctx.saLink, 'saLink').toEqual(saLink);
 });
 
 // ── Warning-state flags default to absent ──────────────────────────
 test('soft warning flag not set initially', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assert(ctx._softWarningIssued === undefined, '_softWarningIssued should be undefined');
+  expect(ctx._softWarningIssued === undefined, '_softWarningIssued should be undefined').toBeTruthy();
 });
 
 test('critical warning flag not set initially', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assert(ctx._criticalWarningIssued === undefined, '_criticalWarningIssued should be undefined');
+  expect(ctx._criticalWarningIssued === undefined, '_criticalWarningIssued should be undefined').toBeTruthy();
 });
 
 test('cycle warning flag not set initially', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assert(ctx._cycleWarningIssued === undefined, '_cycleWarningIssued should be undefined');
+  expect(ctx._cycleWarningIssued === undefined, '_cycleWarningIssued should be undefined').toBeTruthy();
 });
 
 // ── Sprint 2 P1.1 Layer 3 — preToolDecisions cache ─────────────────
 test('preToolDecisions initialised as empty Map', () => {
   const ctx = buildMiddlewareContext(makeParams());
-  assert(ctx.preToolDecisions instanceof Map, 'preToolDecisions should be a Map');
-  assert(ctx.preToolDecisions.size === 0, 'preToolDecisions should be empty');
+  expect(ctx.preToolDecisions instanceof Map, 'preToolDecisions should be a Map').toBeTruthy();
+  expect(ctx.preToolDecisions.size === 0, 'preToolDecisions should be empty').toBeTruthy();
 });
 
 test('mutating preToolDecisions does not affect later calls', () => {
@@ -177,7 +159,7 @@ test('mutating preToolDecisions does not affect later calls', () => {
   const ctx1 = buildMiddlewareContext(params);
   ctx1.preToolDecisions.set('tc1', { action: 'continue' });
   const ctx2 = buildMiddlewareContext(params);
-  assert(ctx2.preToolDecisions.size === 0, 'ctx2 preToolDecisions still empty');
+  expect(ctx2.preToolDecisions.size === 0, 'ctx2 preToolDecisions still empty').toBeTruthy();
 });
 
 // ── Purity check ───────────────────────────────────────────────────
@@ -185,19 +167,15 @@ test('two calls with the same params produce structurally equal contexts', () =>
   const params = makeParams();
   const ctx1 = buildMiddlewareContext(params);
   const ctx2 = buildMiddlewareContext(params);
-  assertEqual(
-    JSON.parse(JSON.stringify(ctx1)),
-    JSON.parse(JSON.stringify(ctx2)),
-    'structural equality',
-  );
+  expect(JSON.parse(JSON.stringify(ctx1)), 'structural equality').toEqual(JSON.parse(JSON.stringify(ctx2)));
 });
 
 test('successive calls produce distinct object references (no aliasing)', () => {
   const params = makeParams();
   const ctx1 = buildMiddlewareContext(params);
   const ctx2 = buildMiddlewareContext(params);
-  assert(ctx1 !== ctx2, 'references should differ');
-  assert(ctx1.toolCallHistory !== ctx2.toolCallHistory, 'toolCallHistory arrays should be fresh per call');
+  expect(ctx1 !== ctx2, 'references should differ').toBeTruthy();
+  expect(ctx1.toolCallHistory !== ctx2.toolCallHistory, 'toolCallHistory arrays should be fresh per call').toBeTruthy();
 });
 
 test('mutating the returned toolCallHistory does not affect later calls', () => {
@@ -205,10 +183,8 @@ test('mutating the returned toolCallHistory does not affect later calls', () => 
   const ctx1 = buildMiddlewareContext(params);
   ctx1.toolCallHistory.push({ name: 'evil', inputHash: 'hash', iteration: 99 });
   const ctx2 = buildMiddlewareContext(params);
-  assertEqual(ctx2.toolCallHistory, [], 'ctx2 toolCallHistory still empty');
+  expect(ctx2.toolCallHistory, 'ctx2 toolCallHistory still empty').toEqual([]);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

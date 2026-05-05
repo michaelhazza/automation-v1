@@ -114,7 +114,7 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
         </div>
         <button
           onClick={() => navigate('/admin/skills/new')}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
+          className="btn btn-primary whitespace-nowrap"
         >
           + New Skill
         </button>
@@ -157,7 +157,7 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
                 <div className="text-[13px] text-slate-500 mb-4">Create custom skills to encode your proprietary workflows.</div>
                 <button
                   onClick={() => navigate('/admin/skills/new')}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors"
+                  className="btn btn-sm btn-primary"
                 >
                   + Create Custom Skill
                 </button>

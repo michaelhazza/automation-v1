@@ -51,6 +51,22 @@ export const organisations = pgTable(
     // ── Session 1 (migration 0182) — onboarding wizard gate ────────────
     // NULL → wizard auto-opens on first sign-in. Set → wizard skipped.
     onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
+    // ── Universal Brief (migration 0193) ────────────────────────────────
+    // User-facing label for the virtual COO agent. Default 'COO'.
+    agentPersonaLabel: text('agent_persona_label').notNull().default('COO'),
+    // Per-org toggles for clarifying + sparring skills (Phase 4).
+    clarifyingEnabled: boolean('clarifying_enabled').notNull().default(true),
+    sparringEnabled: boolean('sparring_enabled').notNull().default(true),
+    // ── System org marker (migration 0223) ─────────────────────────────
+    // True only for the seeded System Operations org. A partial unique index
+    // in the migration enforces at-most-one. Non-sysadmin org-listing endpoints
+    // filter rows where isSystemOrg = true so the org is invisible to tenants.
+    isSystemOrg: boolean('is_system_org').notNull().default(false),
+    // ── Agentic Commerce (migration 0271) ───────────────────────────────
+    // How long shadow-mode agent_charges rows are retained before the
+    // retention purge job deletes them. Default 90 days. Consumed by the
+    // shadow charge retention purge job (spec §14, §17 Chunk 16).
+    shadowChargeRetentionDays: integer('shadow_charge_retention_days').notNull().default(90),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

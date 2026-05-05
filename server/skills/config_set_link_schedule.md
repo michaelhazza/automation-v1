@@ -2,7 +2,7 @@
 name: Config Set Link Schedule
 description: Set the heartbeat or cron schedule on a subaccount agent link.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

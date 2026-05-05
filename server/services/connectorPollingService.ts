@@ -5,9 +5,11 @@ import { adapters } from '../adapters/index.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
+import { fromOrgId } from './principal/fromOrgId.js';
 import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import { ingestClientPulseSignalsForSubaccount } from './clientPulseIngestionService.js';
+import { recordIncident } from './incidentIngestor.js';
 
 // ---------------------------------------------------------------------------
 // Connector Polling Service — scheduled data ingestion from external platforms
@@ -77,6 +79,13 @@ export const connectorPollingService = {
         lastSyncError: 'Failed to get decrypted connection — credentials may be expired',
       });
       await connectorConfigService.update(config.id, config.organisationId, { status: 'error' });
+      recordIncident({
+        source: 'connector',
+        summary: `Connector connection error: ${config.connectorType}`,
+        errorCode: 'connector_connection_error',
+        organisationId: config.organisationId,
+        fingerprintOverride: `connector:${config.connectorType}:connection_error`,
+      });
       return { success: false, accountsSynced: 0, errors: [{ accountId: 'all', error: 'Connection error' }] };
     }
 
@@ -113,8 +122,9 @@ export const connectorPollingService = {
       await getProviderRateLimiter(config.connectorType).acquire(config.id);
       const accounts = await adapter.ingestion.listAccounts(connection as never, connConfig);
 
+      const orgPrincipal = fromOrgId(config.organisationId);
       for (const account of accounts) {
-        await canonicalDataService.upsertAccount(config.organisationId, config.id, {
+        await canonicalDataService.upsertAccount(orgPrincipal, config.id, {
           externalId: account.externalId,
           displayName: account.displayName,
           status: account.status,
@@ -134,29 +144,34 @@ export const connectorPollingService = {
       let accountsSynced = 0;
 
       for (const dbAccount of dbAccounts) {
+        // Per-account principal — carries the subaccountId so downstream
+        // canonicalDataService methods that need it (none in this loop today,
+        // but the surface contract requires the principal regardless) get the
+        // tenant-scoped context they expect.
+        const accountPrincipal = fromOrgId(config.organisationId, dbAccount.subaccountId ?? undefined);
         try {
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const contacts = await adapter.ingestion.fetchContacts(connection as never, dbAccount.externalId);
           for (const c of contacts) {
-            await canonicalDataService.upsertContact(config.organisationId, dbAccount.id, c as never);
+            await canonicalDataService.upsertContact(accountPrincipal, dbAccount.id, c as never);
           }
 
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const opportunities = await adapter.ingestion.fetchOpportunities(connection as never, dbAccount.externalId);
           for (const o of opportunities) {
-            await canonicalDataService.upsertOpportunity(config.organisationId, dbAccount.id, o as never);
+            await canonicalDataService.upsertOpportunity(accountPrincipal, dbAccount.id, o as never);
           }
 
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const conversations = await adapter.ingestion.fetchConversations(connection as never, dbAccount.externalId);
           for (const c of conversations) {
-            await canonicalDataService.upsertConversation(config.organisationId, dbAccount.id, c as never);
+            await canonicalDataService.upsertConversation(accountPrincipal, dbAccount.id, c as never);
           }
 
           await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const revenue = await adapter.ingestion.fetchRevenue(connection as never, dbAccount.externalId);
           for (const r of revenue) {
-            await canonicalDataService.upsertRevenue(config.organisationId, dbAccount.id, {
+            await canonicalDataService.upsertRevenue(accountPrincipal, dbAccount.id, {
               ...r,
               amount: String(r.amount),
             } as never);
@@ -190,8 +205,7 @@ export const connectorPollingService = {
                 }
                 const metricVersion = metricDef?.version ?? 1;
 
-                await canonicalDataService.upsertMetric({
-                  organisationId: config.organisationId,
+                await canonicalDataService.upsertMetric(accountPrincipal, {
                   accountId: dbAccount.id,
                   metricSlug: m.metricSlug,
                   currentValue: String(m.currentValue),
@@ -208,8 +222,7 @@ export const connectorPollingService = {
                   metadata: m.metadata ?? null,
                 });
 
-                await canonicalDataService.appendMetricHistory({
-                  organisationId: config.organisationId,
+                await canonicalDataService.appendMetricHistory(accountPrincipal, {
                   accountId: dbAccount.id,
                   metricSlug: m.metricSlug,
                   periodType: m.periodType,
@@ -281,6 +294,14 @@ export const connectorPollingService = {
         lastSyncAt: new Date(),
         lastSyncStatus: 'error',
         lastSyncError: msg,
+      });
+      recordIncident({
+        source: 'connector',
+        summary: `Connector sync failed: ${config.connectorType} — ${msg.slice(0, 200)}`,
+        errorCode: 'connector_sync_failed',
+        stack: err instanceof Error ? err.stack : undefined,
+        organisationId: config.organisationId,
+        fingerprintOverride: `connector:${config.connectorType}:sync_failed`,
       });
       return { success: false, accountsSynced: 0, errors: [{ accountId: 'all', error: msg }] };
     }

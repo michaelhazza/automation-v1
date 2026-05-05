@@ -4,17 +4,9 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 
 > **App-specific architecture**: See [`architecture.md`](./architecture.md) for backend conventions, route patterns, permission system, three-tier agent model, skill system, and all patterns specific to this application. Read it before making backend changes.
 >
-> **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills.
+> **Development guidelines**: See [`DEVELOPMENT_GUIDELINES.md`](./DEVELOPMENT_GUIDELINES.md) for build discipline, RLS rules, schema invariants, gate protocol, migration rules, testing posture, multi-tenant safety checklist, and the §8 development-discipline rule set. Read it before any non-trivial PR — the §8 rules (idempotency, error handling, sort tiebreakers, lifecycle hooks, deferred-enforcement logging, etc.) apply across `server/`, `client/`, and `shared/`, not just backend tenant code.
 >
-> **Editorial rules for `docs/capabilities.md` (persistent — apply to every update):**
->
-> 1. **No specific LLM / AI provider or product names** in the customer-facing sections — Core Value Proposition, Positioning & Competitive Differentiation, Product Capabilities, Agency Capabilities, Replaces / Consolidates. Do not reference Anthropic, Claude, Claude Code, Cowork, Routines, Managed Agents, Agent SDK, OpenAI, ChatGPT, GPT, Gemini, Google, Microsoft Copilot, or any other named provider or their product lines in these sections. Use generic category language instead: *"LLM providers," "foundation model vendors," "hosted agent platforms," "shared team chat products," "scheduled-prompt tools," "agent SDKs,"* etc.
-> 2. **Named provider references are permitted only in the Support-facing sections** — Integrations Reference and Skills Reference — where they are factual product documentation, not marketing. Even there, prefer neutral factual phrasing over marketing language.
-> 3. **Use marketing- and sales-ready terminology throughout the customer-facing sections.** Write for end-users, agency owners, and buyers — not engineers. Avoid internal technical identifiers (table names, service names, library names such as `pg-boss`, `BullMQ`, `Drizzle`) in customer-facing sections. Industry-standard terms (OAuth, HTTP, webhook, Docker, Playwright) are acceptable when they clarify the offering.
-> 4. **Positioning stays vendor-neutral even under objection.** If a prospect asks "why not Anthropic / Claude / OpenAI specifically?", the written collateral still uses generic category language — *"LLM providers sell capability; Synthetos sells the business."* Specific vendor responses belong in live sales conversations, not in the registry.
-> 5. **Model-agnostic is the north star.** When the topic of LLM choice comes up, frame Synthetos as *"model-agnostic across every frontier and open-source LLM — we route to the best one per task."* Never imply a default, preferred, or premium provider in customer-facing copy.
->
-> Violations of rules 1–5 block the edit — revise before committing.
+> **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills. **Editorial Rules** (vendor-neutral, marketing-ready, model-agnostic) live in `docs/capabilities.md` § *Editorial Rules* — violations block the edit.
 
 ---
 
@@ -23,10 +15,11 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - Write detailed specs upfront to reduce ambiguity
 - Define both execution steps AND verification steps before starting
-- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Prefer assertions that can be validated automatically (tests, logs, deterministic checks) over subjective evaluation. Strong success criteria let you loop independently; vague instructions ("make it work") require constant clarification.
+- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Prefer assertions that can be validated automatically (tests, logs, deterministic checks) over subjective evaluation.
 - If something goes sideways, STOP and re-plan immediately. Do not keep pushing.
-- **Stuck detection rule:** If you attempt the same approach twice and it fails both times, you are stuck. Do not try a third time.
 - Use plan mode for verification steps, not just building
+
+**Stuck detection.** If the same approach fails twice (same file edit failing the same check, same command erroring with the same message, same architectural approach hitting the same wall — rephrasing the same logic does NOT count as different), you are stuck. STOP. Write the blocker to `tasks/todo.md` under `## Blockers` (what was attempted, exact failure, root-cause hypothesis, what you'd try next), then ask the user. Do not try a third time. Try a fundamentally different approach, read more context, or check if the problem is upstream — never retry-with-rephrasing.
 
 ## 2. Subagent Strategy
 
@@ -54,6 +47,8 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Compare expected vs actual behaviour
 - Ask yourself: "Would a senior/staff engineer approve this?"
 
+**Verifiability heuristic.** Before scoping work, ask: is the success condition checkable by a deterministic test or only by human judgment? Verifiable work (route returns X, row saves with the right shape, test passes) can be agent-driven aggressively. Non-verifiable work (UX polish, tone, copy, "feels right", layout taste) needs a human in the loop on every iteration — frontier models are jagged here and will not self-correct toward the goal. For non-verifiable work: do not subagent-drive it overnight; sit with it; iterate visually.
+
 ## Verification Commands
 
 Run these after every non-trivial change. No task is complete until all relevant checks pass.
@@ -62,9 +57,9 @@ Run these after every non-trivial change. No task is complete until all relevant
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
 | Any TypeScript change | `npm run typecheck` | 3 |
-| Logic change in server/ | `npm test` (or relevant suite) | 2 |
+| Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx tsx <path-to-test>` | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
-| Client change | `npm run build` | 2 |
+| Client change | `npm run build:client` | 2 |
 
 ### Rules
 - Run the relevant checks, not all of them, unless the change spans client + server.
@@ -74,6 +69,23 @@ Run these after every non-trivial change. No task is complete until all relevant
   - What you tried
   - Your hypothesis for root cause
 - Never skip a failing check. Never suppress warnings to make a check pass.
+
+### Test gates are CI-only — never run locally
+
+Full test-gate suites and whole-repo verification scripts DO NOT run in any local agent or development session. **Continuous integration runs the complete suite as a pre-merge gate.** This rule applies to every agent in `.claude/agents/`, every skill, every review loop iteration, and every main-session task — no carve-outs.
+
+**Forbidden locally — no exceptions:**
+- `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`.
+- `bash scripts/run-all-unit-tests.sh`, `bash scripts/run-all-gates.sh`.
+- Any individual `scripts/verify-*.sh` or `scripts/gates/*.sh` invocation. They are slow whole-repo scanners; CI runs them.
+- Any "regression sanity check", "quick re-verify everything", "confirm no regression" framing — these are dressed-up gate runs.
+
+**Allowed locally:**
+- `npm run lint`, `npm run typecheck`.
+- `npm run build:server` / `npm run build:client` when the change touches the build surface.
+- **Targeted execution of unit tests authored for THIS change** — a single test file via `npx tsx <path-to-test>`. Point: confirm the new test runs and passes. Not to re-run anything else.
+
+Authoring tests and gates is encouraged — running the full battery of them locally is not. CI handles that.
 
 ---
 
@@ -91,6 +103,7 @@ Run these after every non-trivial change. No task is complete until all relevant
 - If you notice unrelated dead code, mention it in your response — don't delete it. LLMs are overconfident about what's "certainly unused." The cost of a wrong deletion is high; the cost of mentioning it is zero.
 - Remove imports/variables/functions that YOUR changes made unused. Don't remove pre-existing dead code unless asked.
 - Match existing style, even if you'd do it differently. No drive-by reformatting.
+- Never duplicate logic — if the same behaviour is needed in two or more places, extract it into a shared function, helper, or service before writing it twice.
 
 ## 7. Autonomous Bug Fixing
 
@@ -100,54 +113,12 @@ Run these after every non-trivial change. No task is complete until all relevant
 - Find root cause, not symptoms
 - Fix failing CI tests proactively without being told how
 
-## Stuck Detection Protocol
-
-When stuck (same approach fails twice):
-
-1. **STOP** — do not retry the same thing a third time
-2. **Write the blocker** to `tasks/todo.md` under a `## Blockers` heading:
-   - What was attempted (be specific — file, function, approach)
-   - Exact error or failure mode
-   - Why you think it failed (root cause hypothesis)
-   - What you would try next if unblocked
-3. **Ask the user** — present the blocker summary and wait for direction
-
-### What counts as "the same approach"
-- Same file edit that fails the same check twice
-- Same command that errors twice with the same message
-- Same architectural approach that hits the same wall
-- Rephrasing the same logic does NOT count as a different approach
-
-### What to do instead of retrying
-- Try a fundamentally different approach (different algorithm, different file, different pattern)
-- Read more context (maybe you're missing something)
-- Check if the problem is upstream (wrong assumption, stale data, missing dependency)
-
----
-
 ## 8. Skills = System Layer
 
-- Skills are NOT just markdown files. They are modular systems the agent can explore and execute.
-- Each skill folder can include: reference knowledge, executable scripts, datasets, workflows, and automation
+- Skills are NOT just markdown files. They are modular systems the agent can explore and execute — reference knowledge, executable scripts, datasets, workflows, automation.
 - The agent does not just read skills. It uses them.
-- Use skills for: verification, automation, data analysis, scaffolding, and review
-- Skills are reusable intelligence. Treat them as internal products.
-
-**Skill categories to build toward:**
-
-| Category | Purpose |
-|---|---|
-| Knowledge | Teach APIs, CLIs, and system behaviour |
-| Verification | Test flows, assert correctness, check outputs |
-| Data | Fetch, analyse, and compare signals |
-| Automation | Run repeatable workflows |
-| Scaffolding | Generate structured code and boilerplate |
-| Review | Enforce quality and standards |
-| CI/CD | Deploy, monitor, and rollback |
-| Runbooks | Debug real production issues |
-| Infra ops | Manage systems safely |
-
-Each skill should have a single clear responsibility.
+- Use skills for: verification, automation, data analysis, scaffolding, review, CI/CD, runbooks, infra ops.
+- Each skill has a single clear responsibility. Skills are reusable intelligence — treat them as internal products.
 
 ## 9. File System = Context Engine
 
@@ -173,26 +144,56 @@ Each skill should have a single clear responsibility.
 - Not later. Not "I'll come back to it." Right now, as part of the task.
 - Before marking a task complete, ask: "did I change behaviour or structure that any doc describes?" If yes, the doc update is part of the task — not a follow-up.
 - Stale docs are worse than missing docs. A wrong reference misleads future sessions; a missing one just sends the agent to read the code.
+- **Canonical checklist:** `docs/doc-sync.md` — lists every reference doc with its update trigger. Enforced at finalisation by `chatgpt-pr-review`, `chatgpt-spec-review`, and `feature-coordinator`.
+
+---
+
+## 12. Context Management
+
+Keep context lean so Claude stays sharp across long sessions.
+
+**Compact protocol** — When context usage reaches ~50–60% (visible in the VS Code status line or via `/context`):
+1. If working under a build slug, update `tasks/builds/<slug>/progress.md` with current session state: what was done, what's next, any decisions made.
+2. Run `/compact`
+
+Do not wait until the context is full — quality degrades before the hard limit.
+
+**Pre-break protocol** — Before stepping away from a session:
+1. If working under a build slug, save current progress to `tasks/builds/<slug>/progress.md`.
+2. Run `/compact`
+
+This reduces reprocessing cost when the session resumes and prevents the 5-minute prompt-cache expiry from triggering a full context reread at full cost.
+
+**Session isolation for concurrent work** — When running multiple sessions in parallel on different features:
+- Each session writes to its own `tasks/builds/<slug>/progress.md` — never to a shared file
+- `tasks/current-focus.md` is the sprint-level pointer (what spec/feature is in flight overall), not a per-session scratch pad
+- Concurrent sessions cannot collide as long as each stays within its own `tasks/builds/<slug>/` directory
+
+**Async polling cadence** — When polling external state (CI, builds, deployments, jobs) from a Claude Code session: default to 90-120s between polls, not 4-5 min. CI on this repo typically completes in 1-2 min, so a too-long cadence pushes past a full cycle and delays merge. Pick cadence to match expected event time, not to maximise prompt-cache hits — responsiveness wins for fast pollable signals. Use `ScheduleWakeup` or `Monitor`; long synchronous `sleep` commands are runtime-blocked.
+
+---
+
+## 13. Doc style: agent-facing is dense, human-facing is readable
+
+Documentation falls into two classes — write each accordingly.
+
+**Agent-facing** (loaded into LLM context routinely): `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `KNOWLEDGE.md`, all skill files, `references/**`, agent definitions, this file. Optimise for tokens and signal density: bullets over prose, short sentences, no preambles, no reassurance text, no marketing language. Code examples only when copy-paste is the point — otherwise reference the canonical source. Every line should earn its tokens.
+
+**Human-facing** (read by people, not loaded into context routinely): `docs/capabilities.md`, `README.md`, customer-visible specs, marketing copy, public-facing docs. Optimise for clarity and tone: full sentences, narrative flow, vendor-neutral product language. Editorial rules apply (see `docs/capabilities.md § Editorial Rules`).
+
+If unsure: would Claude read this in most sessions? Yes → agent-facing. When editing an agent-facing doc, condense rather than expand — if a rule cannot be stated in ≤2 sentences, the detail belongs in `architecture.md` or `KNOWLEDGE.md` with a one-line pointer in the rule doc.
 
 ---
 
 ## Long Document Writing
 
-Large single-shot `Write` calls to long documentation files can freeze Claude Code. Any time you are about to produce a documentation file (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, or an extensionless `README`/`CHANGELOG`/`LICENSE`) that will exceed **~10,000 characters** (roughly 250–300 lines of typical markdown), use the chunked workflow — no exceptions.
+Documentation files (`.md`, `.mdx`, `.rst`, `README`/`CHANGELOG`/`LICENSE`) over ~10,000 characters must use the chunked workflow — `.claude/hooks/long-doc-guard.js` blocks single Writes that exceed the threshold:
 
-### Workflow
+1. `TodoWrite` task list — one todo per chunk, named after its section. The list is mandatory; the user needs to see the phases move through.
+2. Single `Write` for the skeleton (header + ToC + headings only).
+3. `Edit` to append each section. Mark its todo `in_progress` before, `completed` immediately after. Never batch completions.
 
-1. **Create a `TodoWrite` task list first.** One todo per chunk. The user needs to SEE the phases move through — the task list is **mandatory, not optional**. Name each todo after the section it covers (e.g. "Chunk 2/5 — Testing philosophy").
-2. **Write the skeleton once.** A single `Write` call containing only the file header, table of contents, and section headings. Keep the skeleton well under the 10,000-char threshold.
-3. **Append each section via `Edit`.** For every chunk: mark its todo `in_progress`, use `Edit` to append the section content, mark the todo `completed`, give the user a one-line summary of what landed, then move to the next chunk.
-4. **Never batch completions.** Update the task list one chunk at a time so the user watches live progress through the phases.
-5. **Track chunks in `tasks/todo.md`** for Significant or Major documents, the same as any other multi-step task.
-
-### Enforcement
-
-`.claude/hooks/long-doc-guard.js` runs as a `PreToolUse` hook on every `Write` tool call. If the target file is a documentation file and the content exceeds 10,000 characters, the hook blocks the call (exit 2) and feeds instructions back to Claude. If you ever see `BLOCKED by long-doc-guard`, do not try to "work around" it — follow the chunked workflow above.
-
-Threshold and scope live in `.claude/hooks/long-doc-guard.js` (`LONG_DOC_THRESHOLD`, `DOC_EXT_RE`, `DOC_BASENAME_RE`). Update them there, not in settings.
+If you see `BLOCKED by long-doc-guard`, follow the workflow — don't work around it. Threshold and scope live in `.claude/hooks/long-doc-guard.js`.
 
 ---
 
@@ -213,16 +214,49 @@ Every non-trivial task follows this sequence:
 
 The local Claude Code session IS the developer. The agent fleet provides specialist support — architecture, independent review, intake, and pipeline orchestration. You are not a builder in this fleet; you are the builder.
 
+**Code intelligence artifacts (optional infra).** When `references/project-map.md` and `references/import-graph/<dir>.json` exist, prefer them for architecture-shaped questions (what calls X, what depends on Y, where does the route for Z live) before grepping. They are produced by `scripts/build-code-graph.ts`. If the cache appears inconsistent with what you see in source, trust source. Refresh paths, in order of preference:
+- *Automatic.* The `code-graph-freshness-check` SessionStart hook (`.claude/hooks/code-graph-freshness-check.js`) detects a dead watcher at session start and rebuilds the cache plus respawns the watcher in-process. Steady-state cost is <200ms per session; a stale-cache session pays the rebuild cost (sub-second warm, up to ~30s if days behind) once.
+- *Live during dev.* `npm run dev` runs `predev` which builds the cache and spawns a singleton chokidar watcher that keeps shards atomically updated on every file save.
+- *Manual.* Run `npm run code-graph:rebuild` if the cache is missing, looks stale (mtime older than your last large edit), or contradicts source. Run `npm run code-graph:health` for the on-demand status report (KEEP / TUNE / ESCALATE / KILL). If the cache infrastructure is not present in this repo (target of an in-progress framework import), fall back to grep.
+
 Agents live in `.claude/agents/`. Read their definitions before invoking them.
 
 | Agent | Purpose | When to invoke |
 |-------|---------|----------------|
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
-| `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done |
-| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | After `pr-reviewer` on Significant and Major tasks — **only when the user explicitly asks**, never auto-invoked |
-| `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, pauses for HITL on anything directional. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After a draft spec is written, before starting implementation against it |
-| `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
+| `spec-conformance` | Verifies implemented code matches its source spec. Auto-detects the spec (from branch diff / build slug / `current-focus`) and the changed-code set (committed + staged + unstaged + untracked). Mixed-mode: auto-fixes mechanical gaps the spec explicitly names; routes directional gaps to `tasks/todo.md`. Never modifies the spec. Never adds features the spec doesn't name. Self-writes its log to `tasks/review-logs/spec-conformance-log-<slug>[-<chunk-slug>]-<timestamp>.md` (chunk-slug included when invoked mid-build). | After the development session claims completion on any spec-driven task, **before** `pr-reviewer`. Mandatory for Standard / Significant / Major tasks that had a spec as the source of truth. Skipped automatically if no spec is detected (the agent reports "no spec detected" and returns). Not applicable to Trivial fixes or ad-hoc changes without a spec. |
+| `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done. For spec-driven tasks, run `spec-conformance` first. |
+| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review. **Local-dev only — requires the local Codex CLI; unavailable in Claude Code on the web.** | Automatically when feature-coordinator runs its branch-level review pass and Codex is available. Manual standalone invocation also allowed. Skipped silently when Codex is unavailable (e.g. Claude Code on the web). |
+| `adversarial-reviewer` | Adversarial / threat-model review — read-only. Hunts tenant-isolation, auth, race-condition, injection, resource-abuse, and cross-tenant data-leakage holes. Emits a fenced `adversarial-review-log` block; the caller persists it. Phase 1 advisory; non-blocking. | Auto-invoked from feature-coordinator branch-level review pass when diff matches the security surface (§5.1.2 of dev-pipeline-coordinators-spec). Manual invocation also supported. Phase 1 advisory; non-blocking. |
+| `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, autonomously decides directional findings using baked-in framing assumptions (pre-production, rapid evolution, no feature flags, prefer existing primitives). Uncertain decisions route to `tasks/todo.md` — never blocks. Max iterations configured via MAX_ITERATIONS in `.claude/agents/spec-reviewer.md` (currently 5), stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After writing any non-trivial spec, before starting implementation. Also after a major stakeholder edit — **but only if the 5-iteration lifetime cap has not been reached**. NOT for trivial updates (typos, one-liners). NOT mid-loop after a clean exit — diminishing returns, move to architect/build instead. |
+| `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Phase 2 of the three-coordinator pipeline — open a new session and type `launch feature coordinator` after spec-coordinator completes Phase 1 |
+| `spec-coordinator` | Phase 1 orchestrator — brief intake, mockup loop, spec authoring, spec-reviewer, chatgpt-spec-review, handoff | Starting any new Significant or Major feature from a brief |
+| `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, chatgpt-pr-review, doc-sync sweep, KNOWLEDGE.md, MERGE_READY | After feature-coordinator completes Phase 2 |
+| `builder` | Sonnet sub-agent — implements a single plan chunk and enforces G1 gate | Auto-invoked by feature-coordinator; never invoke directly |
+| `mockup-designer` | Sonnet sub-agent — hi-fi clickable HTML prototypes, iterates round-by-round | Auto-invoked by spec-coordinator; never invoke directly |
+| `chatgpt-plan-review` | Manual ChatGPT-web review coordinator for implementation plans | Auto-invoked by feature-coordinator; never invoke directly |
+| `audit-runner` | Runs codebase audits per `docs/codebase-audit-framework.md`. Three modes — Full / Targeted / Hotspot. Executes the three-pass model (findings → high-confidence fixes → deferred), self-writes the audit log to `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`, routes deferred items to `tasks/todo.md`. Uses a TodoWrite task list to process areas one by one without spawning sub-agents. Prints post-audit commands (`spec-conformance`, `pr-reviewer`) for the caller to run after the audit completes. Auto-commits and auto-pushes within its own flow. Does not create PRs — the user does. | Periodic codebase hygiene (quarterly), pre-major-release gating, post-incident health check, or any time a subsystem (RLS, agent execution, queues, skills, webhooks, frontend) feels gnarly. Default to Hotspot mode. |
+| `chatgpt-pr-review` | ChatGPT PR review coordinator — captures feedback rounds, implements accepted changes, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session (VS Code terminal CLI or new Claude Code web conversation).** | After `pr-reviewer` and/or `dual-reviewer`, when doing a ChatGPT pass on a PR |
+| `chatgpt-spec-review` | ChatGPT spec review coordinator — auto-detects the spec, captures feedback rounds, applies accepted edits, logs all decisions, finalises with KNOWLEDGE.md updates. **Run in a dedicated new Claude Code session.** | After drafting a spec, when doing a ChatGPT review pass before implementation |
+| `hotfix` | Fast-path coordinator for time-critical fixes. Bypasses the three-coordinator pipeline; still enforces lint + typecheck + targeted test + `pr-reviewer`. Mandatory KNOWLEDGE entry. | Production / main broken; bug found mid-session that must interrupt the active feature. NOT for refactors or new behaviour. |
+| `context-pack-loader` | Loads a mode-scoped slice of architecture.md / DEVELOPMENT_GUIDELINES.md / KNOWLEDGE.md instead of the full ~6k-line set. Inline playbook (not a sub-agent). | Operator types `load context pack: <review\|implement\|debug\|handover\|minimal>` at the start of a session, or the orchestrator auto-loads based on `current-focus.md` status. |
+| `codebase-explainer` | Produces a human-readable narrative tour of the codebase. Output goes to `docs/codebase-tour.md`. Different audience from `architecture.md` (which is agent-facing dense reference). | Onboarding a new engineer / contractor / external reviewer. Run `update tour` periodically when the stack or major patterns shift. |
+| `validate-setup` | Read-only framework health-checker. Verifies every agent's referenced files exist, every context-pack anchor resolves in `architecture.md`, ADR index matches files on disk, FRAMEWORK_VERSION matches CHANGELOG, every hook is registered in settings.json. Reports findings; never modifies files. | Periodic drift check (quarterly), post-adoption verification, or as a pre-merge gate for framework PRs (`.claude/agents/`, `.claude/hooks/`, `docs/decisions/`, `docs/context-packs/`, `references/`). |
+
+### Model guidance per phase
+
+Use the most capable model where reasoning matters; switch to Sonnet once decisions are made and execution is the task.
+
+| Phase | Model | What happens |
+|-------|-------|--------------|
+| Spec authoring | Opus | Writing specs, architecture decisions, `chatgpt-spec-review` passes |
+| Plan breakdown | Opus | Invoking `architect` to decompose a finalised spec into implementation chunks |
+| **Plan gate** | — | `feature-coordinator` presents the finalised plan and **stops**. Review it at `tasks/builds/{slug}/plan.md`, then manually switch to Sonnet before proceeding. |
+| Execution | Sonnet | Running `superpowers:executing-plans` / `subagent-driven-development` against the plan |
+| Mid-build decision | Opus | If a hard architectural choice surfaces during implementation, switch back to Opus for that question only, then return to Sonnet |
+
+The plan gate is a deliberate checkpoint. Do not proceed to execution on Opus — the execution phase is token-intensive and Sonnet handles a clear plan equally well at lower cost.
 
 ### Task Classification
 
@@ -231,143 +265,109 @@ Classify every task before starting:
 | Class | Definition | Action |
 |-------|-----------|--------|
 | **Trivial** | Single file, obvious change, no design decisions | Implement directly |
-| **Standard** | 2–4 files, clear approach, no new patterns | Implement, then invoke pr-reviewer |
-| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then pr-reviewer. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
-| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline; pr-reviewer before PR. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
+| **Standard** | 2–4 files, clear approach, no new patterns | Implement, then `spec-conformance` (if spec-driven), then `pr-reviewer` |
+| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then `spec-conformance` (if spec-driven), then `pr-reviewer`. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
+| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline (architect → implement → `spec-conformance` → `pr-reviewer`). `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
 
-### Invoking agents
+### Common invocations
 
 ```
-# Capture an idea without stopping the session
-"triage-agent: idea: [description]"
-
-# Capture a bug
-"triage-agent: bug: [description]"
-
-# Get an architecture plan before implementing
-"architect: [feature description]"
-
-# Independent review after implementation
+"triage-agent: idea: [description]"     # capture without derailing
+"architect: [feature description]"       # plan before implementing (Significant/Major)
+"spec-conformance: verify the current branch against its spec"
 "pr-reviewer: review the changes I just made to [file list]"
-
-# Full pipeline for a planned feature
 "feature-coordinator: implement [feature name]"
-
-# Second-phase Codex loop for CODE — LOCAL DEV ONLY, manual trigger only.
-# dual-reviewer depends on the local Codex CLI. It is NOT available in Claude
-# Code on the web. Never auto-invoke — only run when the user explicitly asks.
-"dual-reviewer: [brief description of what was implemented]"
-
-# Spec review loop for SPEC DOCUMENTS (not code)
-# Run AFTER a draft spec is written, BEFORE implementing against it
+"audit-runner: hotspot rls"              # see audit-runner.md for full mode list
+"dual-reviewer: [brief description]"     # local-only, user must explicitly ask
+"adversarial-reviewer: hunt holes in the changes I just made to [file list]"  # read-only, user must explicitly ask; caller provides the changed-file set
 "spec-reviewer: review docs/path-to-spec.md"
+"spec-coordinator: <brief or rough spec topic>"   # Phase 1: spec + mockup + review
+"launch feature coordinator"                       # Phase 2: build + review (new session)
+"launch finalisation"                              # Phase 3: finalise + ready-to-merge (new session)
+"hotfix: <what's broken>"                          # time-critical fix path
 ```
 
-### Independent review is not optional
+`audit-runner` runs INLINE in the current session — do NOT use the Agent tool. Read `.claude/agents/audit-runner.md` and execute its instructions directly so the TodoWrite task list is visible.
 
-For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marking done. The main session has implementation bias. The reviewer eliminates it.
+### Review pipeline (mandatory order)
 
-**Before creating any PR** — regardless of task size — always run `pr-reviewer` before creating the pull request.
+For Standard/Significant/Major tasks, before marking done or opening a PR:
 
-### `dual-reviewer` is a local-development-only optional add-on
+1. **Spec-driven only:** `spec-conformance` first. If it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
+2. `pr-reviewer` — always.
+3. `dual-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when Codex is available; manual standalone invocation also allowed. Skipped when Codex unavailable.
+4. `adversarial-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when diff matches security surface (§5.1.2). Manual invocation also supported. Phase 1 advisory; non-blocking.
 
-`dual-reviewer` runs a Codex CLI review loop with Claude adjudicating each recommendation. It is **only available when the session is running locally** on a machine with the Codex CLI installed and authenticated — it does **not** run in Claude Code on the web, in CI, or in any remote sandbox.
+Steps 3 and 4 are independent optional steps; their order does not affect correctness.
 
-**Never auto-invoke `dual-reviewer`.** The main session must not spawn this agent on its own judgement, even for Significant or Major tasks. Auto-invocation in a non-local environment hangs the session waiting on a command that cannot execute, and silently burns time on a review the user did not ask for.
-
-**Only invoke `dual-reviewer` when:**
-
-1. The user **explicitly** asks for it (e.g. "run dual-reviewer", "do the Codex pass"), AND
-2. The session is local. If uncertain, ask the user before spawning.
-
-The PR-ready bar for this project is: `pr-reviewer` has passed and any blocking findings are addressed. `dual-reviewer` is a power-user add-on for an extra pass when the local environment supports it — not a gate on the PR.
-
-### Review logs must be persisted
-
-Every `pr-reviewer` and `dual-reviewer` invocation produces a durable log on disk — the same convention the spec-review loop already uses (`tasks/review-logs/spec-review-log-*`). All review logs live in `tasks/review-logs/` to keep the main `tasks/` directory uncluttered. The logs exist so recurring findings can be mined across many reviews and folded back into the review rubrics, `CLAUDE.md`, or `architecture.md`.
-
-- **`pr-reviewer` caller contract.** `pr-reviewer` is read-only — it emits its complete review inside a fenced markdown block tagged `pr-review-log`. **Before fixing any issues**, the caller (main session or `feature-coordinator`) must extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md`, where `<slug>` is the feature slug (if working under `tasks/builds/<slug>/`) or a short kebab-case name otherwise, and `<timestamp>` is ISO 8601 UTC with seconds. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
-- **`dual-reviewer` self-writes.** `dual-reviewer` writes its own log to `tasks/review-logs/dual-review-log-<slug>-<timestamp>.md` per its agent spec. The caller does not need to persist anything — just read the log path the agent returns.
-
-If a reviewer ran, the log must exist. This applies regardless of task classification (Trivial / Standard / Significant / Major).
+Full caller contracts (filename convention, deferred-items routing, NON_CONFORMANT triage, log persistence) live in [`tasks/review-logs/README.md`](./tasks/review-logs/README.md). Each agent definition under `.claude/agents/` carries its own copy of the contract relevant to that agent.
 
 ### Before you write a spec
 
-For any Significant or Major spec, read `docs/spec-authoring-checklist.md` before drafting. It is a pre-authoring checklist derived from patterns the `spec-reviewer` has caught across 15+ production specs — primitives-reuse search, file-inventory lock, contracts, RLS/permissions, execution model, phase sequencing, deferred items, self-consistency, and testing posture.
+For Significant/Major specs, read [`docs/spec-authoring-checklist.md`](./docs/spec-authoring-checklist.md) before drafting. Trivial specs (typos, one-liners, pure ADRs) skip it.
 
-The checklist points back at the deep references in `architecture.md` and `docs/spec-context.md`; it does not restate them. Authors who work through the appendix checklist before invoking `spec-reviewer` shorten the review loop — every unchecked box is a finding the reviewer will raise anyway.
+**When the user asks to create a spec from a brief:** write it directly. Do not ask clarifying questions about depth, format, or location. Architecture-level is the default (domain model, service contracts, data model, integration boundaries, chunk plan — no function signatures, no SQL, no wireframes). Save to `tasks/builds/{slug}/spec.md`. The implementation plan is a separate step that comes after.
 
-Trivial specs (typos, one-line clarifications, pure ADRs) do not need the checklist — just write and move on.
+### Architecture decisions (ADRs)
 
-### Spec review is the equivalent pipeline for spec documents
+For decisions where the **why** matters for years (chose X over Y, locked a contract, set a policy), write an ADR in [`docs/decisions/`](./docs/decisions/) — short, dated, immutable once accepted. KNOWLEDGE.md is for observations and gotchas; ADRs are for durable choices with rationale. Template at [`docs/decisions/_template.md`](./docs/decisions/_template.md).
 
-When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code (and, like `dual-reviewer`, requires the local Codex CLI — only invoke when the user asks and the session is local). The agent:
+### Context packs (mode-scoped loading)
 
-- Reads `docs/spec-context.md` as framing ground truth before every run.
-- **Hard lifetime cap: 5 iterations per spec, total, across every invocation.** Not 5-per-invocation — 5 lifetime. If a spec has already seen 5 spec-reviewer iterations (count the `tasks/review-logs/spec-review-checkpoint-<slug>-<N>-*.md` files or the iteration numbers in their content), do not start a new iteration. If the spec has had substantive edits since the last clean exit and you believe more review is needed, surface that to the user and ask whether to bust the cap — do not silently re-invoke.
-- Stops early on two consecutive mechanical-only rounds.
-- Classifies every finding as **mechanical**, **directional**, or **ambiguous**.
-- **Auto-applies mechanical findings** (contradictions, stale language, file inventory drift, sequencing bugs, under-specified contracts).
-- **Pauses for HITL** on directional or ambiguous findings (scope changes, phase re-ordering, testing posture changes, rollout posture changes, architecture changes, anything that would invalidate a baked-in framing assumption).
-- Writes checkpoint files at `tasks/review-logs/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md` when HITL is needed. The human edits the checkpoint's `Decision:` lines and re-invokes the agent to resume.
+For sessions where the default load (CLAUDE.md + architecture.md + KNOWLEDGE.md + DEVELOPMENT_GUIDELINES.md ≈ 6k lines) is heavier than the task needs, use a mode-scoped context pack from [`docs/context-packs/`](./docs/context-packs/). Five packs ship: `review`, `implement`, `debug`, `handover`, `minimal`. Each names the sections to load and the sections to skip.
 
-**Directional findings are never auto-applied, even if the recommendation looks obviously correct.** The classifier biases aggressively toward HITL — a false positive costs 30 seconds of reading; a false negative costs a wrong-shaped spec and a re-review round.
+Operator invokes via `load context pack: <mode>`. The `context-pack-loader` agent (inline playbook, see `.claude/agents/context-pack-loader.md`) reads the pack and slices `architecture.md` using the anchor IDs added in the 2026-05-03 refactor.
 
-**When to invoke `spec-reviewer`:**
+### Test gates are CI-only
 
-- After writing any non-trivial spec document
-- Before starting implementation against a spec
-- After a major edit to an existing spec (e.g. incorporating feedback from a stakeholder) — **but only if the 5-iteration lifetime cap has not been reached**
-- NOT for trivial doc updates (typos, one-line clarifications) — just edit and move on
-- NOT for mid-loop spec additions where the review has already cleanly exited once — the spec-review pipeline is not a perfection engine, and re-invoking after every refinement creates an infinite-loop failure mode that has already burned real session time. Diminishing returns kick in fast. Apply judgement and move on to the architect or build phase.
+Single source of truth: [`references/test-gate-policy.md`](./references/test-gate-policy.md). Forbidden / allowed lists live there; every agent and spec references that file rather than embedding its own copy.
+
+### Agent lifecycle (add / retire)
+
+**Adding** a new agent:
+1. Drop `<name>.md` in `.claude/agents/` with the standard frontmatter (`name`, `description`, `tools`, `model`).
+2. Add a row to the fleet table above.
+3. Add to the `Common invocations` block if applicable.
+4. Update `.claude/CHANGELOG.md` under the next version's `Added:` section.
+5. If the agent introduces a new convention, also update `docs/doc-sync.md`.
+
+**Retiring** an agent:
+1. Move the file to `.claude/agents/_retired/<name>-<YYYY-MM-DD>.md` (create the directory if needed). Don't delete — future sessions may grep history.
+2. Remove the row from the fleet table.
+3. Update `.claude/CHANGELOG.md` under `Deprecated:` (one version) → `Removed:` (next version).
+4. Search the agent fleet and reference docs for callers of the retired agent. Update or remove.
+5. If a successor agent exists, link from the retired file's frontmatter (`superseded_by: <new-agent-name>`).
+
+Never silently delete an agent — debugging "what happened to that agent we used last quarter?" is harder than two extra lines in the changelog.
+
+### Framework version
+
+Two `FRAMEWORK_VERSION` files exist in this repo and they answer different questions — they are NOT competing authorities:
+
+- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` + `setup/portable/.claude/CHANGELOG.md`. The framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. `setup/portable/.claude/CHANGELOG.md` is the source of truth.
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md`. Records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. May lag canonical transiently while portable advances ahead of self-adoption.
+
+When propagating this framework to other repos, the canonical pair travels via the sync engine (`node setup/portable/sync.js --adopt`); future updates compare canonical versions and produce a delta. See `setup/portable/.claude/CHANGELOG.md` § *Upgrade protocol* and `.claude/CHANGELOG.md` § *Version authority — single source of truth*.
 
 ---
 
 ## Current focus
 
-**In-flight spec:** `tasks/llm-inflight-realtime-tracker-spec.md` — LLM in-flight real-time tracker (sits on top of the merged LLM observability ledger). Built on branch `claude/build-llm-inflight-tracker-m3l2x`; pr-reviewer passed, awaiting dual-reviewer + merge.
-**Active items:** PR #159 on `bugfixes-april26` — skill-analyzer crash-resume + Windows dev-restart hardening — merged to main 2026-04-21. Every analyzer LLM call now routes through `llmRouter.routeCall()` so analyzer dispatches will surface on the in-flight tracker's `/system/llm-pnl` In-Flight tab with `sourceType='analyzer'` + `featureTag='skill-analyzer-classify'` / `'skill-analyzer-agent-match'`. ClientPulse Session 2 merged to main 2026-04-20 (real CRM wiring + drilldown + polish, 8 ship gates passed, S2-D.1/D.4 core paths shipped). Durable primitives landed from that session: `canonicaliseJson` recursive walker + present-vs-absent collapse (`server/services/actionService.ts`); retry-vs-replay boundary pinned on `buildActionIdempotencyKey`; `executionLayer.precondition_block` structured log. ClientPulse next up: Session 3 (Chunks 9 wizard cadence + 12 panel extraction, plus S2-D.1 modal rebuild + S2-D.4 integration tests). In-flight tracker deferred items live in spec §9 (token-level streaming, historical archive, per-caller detail drawer mid-flight, queueing-delay visibility, partial-external-success provisional row, idempotency-key versioning).
+See [`tasks/current-focus.md`](./tasks/current-focus.md). Update it whenever the sprint, spec, or active branch changes. A stale pointer misleads future sessions — keep it current or set it to `none`.
 
-This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
+> **Authoritative references live in `architecture.md`, not here.** CLAUDE.md intentionally contains no canonical file mappings, route patterns, or service contracts. Do not duplicate that content here — update `architecture.md` directly. If you find a mapping in both files that differs, `architecture.md` wins.
 
 ---
 
 ## Key files per domain
 
-Quick reference for "where do I start when adding X". This is the index, not the deep reference — `architecture.md` is the deep reference for everything below.
+See [`architecture.md` § Key files per domain](./architecture.md). This is the index for domain entry points — update it when adding new domain areas.
 
-| Task | Start here |
-|------|------------|
-| Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
-| Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
-| Add a new ClientPulse intervention primitive | `server/config/actionRegistry.ts` (namespace as `crm.*` or `clientpulse.*`), `server/services/skillExecutor.ts` (review-gated via `proposeReviewGatedAction`), `server/skills/<slug>ServicePure.ts` (payload validator + provider-call builder), update `INTERVENTION_ACTION_TYPES` in `server/services/clientPulseInterventionContextService.ts` + the `actionType` enum in `server/services/interventionActionMetadata.ts` |
-| Modify the ClientPulse intervention proposer | `server/jobs/proposeClientPulseInterventionsJob.ts` (orchestration) + `server/services/clientPulseInterventionProposerPure.ts` (matcher logic) — never bypass `enqueueInterventionProposal()` |
-| Modify the outcome measurement job | `server/jobs/measureInterventionOutcomeJob.ts` + `measureInterventionOutcomeJobPure.ts` (decision pure fn) — band attribution + cooldown integrity hinge on the args passed to `interventionService.recordOutcome()` |
-| Add a Configuration Assistant config-write skill | `server/skills/<slug>.md` + service in `server/services/<slug>Service.ts` + pure validation in `<slug>Pure.ts` — sensitive paths must route through `actions` row with `gateLevel='review'` per `SENSITIVE_CONFIG_PATHS` |
-| Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
-| Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
-| Add an LLM consumer (non-agent) | `llmRouter.routeCall({ context: { sourceType: 'system' \| 'analyzer', sourceId, featureTag, systemCallerPolicy, ... } })` — NEVER import a provider adapter directly (the `verify-no-direct-adapter-calls.sh` gate + runtime `assertCalledFromRouter()` block this). Use `postProcess` + `ParseFailureError` for schema-validation failures; AbortController for cancellation. |
-| View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `prototypes/system-costs-page.html`. |
-| Modify LLM ledger retention | `env.LLM_LEDGER_RETENTION_MONTHS` (default 12). Archive job: `server/jobs/llmLedgerArchiveJob.ts` + `llmLedgerArchiveJobPure.ts` (pure cutoff math). Registered in `server/services/queueService.ts` as `maintenance:llm-ledger-archive` at 03:45 UTC. |
-| Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
-| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
-| Add a new permission key | `server/lib/permissions.ts` |
-| Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
-| Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
-| Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
-| Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
-| Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
-| Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
-| Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
-| Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
-| Add a canonical data table | `server/db/schema/`, migration with `UNIQUE(organisation_id, provider_type, external_id)`, add to `rlsProtectedTables.ts`, add RLS policy, update `server/config/canonicalDictionary.ts` |
-| Add a connector adapter | `server/services/connectorPollingService.ts` (adapter wiring), `server/config/connectorPollingConfig.ts` (intervals) |
-| Modify principal/RLS context | `server/db/withPrincipalContext.ts`, `server/config/rlsProtectedTables.ts`, migration for new policies |
-| Modify a ClientPulse adapter dispatch path | `server/services/adapters/apiAdapter.ts` (dispatch) + `apiAdapterClassifierPure.ts` (retry classifier) + `ghlEndpoints.ts` (5 endpoint mappings) + `executionLayerService.ts` (precondition gate + per-subaccount advisory lock) |
-| Modify canonical-JSON or idempotency-key derivation | `server/services/actionService.ts` — `canonicaliseJson`, `hashActionArgs`, `buildActionIdempotencyKey`, `computeValidationDigest`. Pinned by `actionServiceCanonicalisationPure.test.ts` — nested-key sort + present-vs-absent collapse + null-distinction + array-positional semantics. Retry-vs-replay contract is non-negotiable (see `buildActionIdempotencyKey` header comment) |
-| Modify the ClientPulse drilldown | `server/routes/clientpulseDrilldown.ts` (4 routes) + `server/services/drilldownService.ts` + `server/services/drilldownOutcomeBadgePure.ts` (badge rules) + `client/src/pages/ClientPulseDrilldownPage.tsx` + `client/src/components/clientpulse/drilldown/` — always scope reads by `organisationId` + `subaccountId` |
-| Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
-| Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
+---
+
+## Replit boot procedure
+
+See [`replit.md`](./replit.md) for the agent quick-start: `npm install && npm run dev`, required env vars (`docs/env-manifest.json`), the dual-tsconfig typecheck one-liner, and where to look next in the codebase. Read it the first time you open this repo on Replit.
 
 ---
 
@@ -386,62 +386,41 @@ Ideas that seem valuable in isolation may be low priority in context. Let triage
 
 ## Architecture Rules (Automation OS specific)
 
-These are non-negotiable. Violations are blocking issues in any code review.
-
-### Server
-- **Routes** call services only — never access `db` directly in a route
-- **`asyncHandler`** wraps every async handler — no manual try/catch in routes
-- **Service errors** throw as `{ statusCode, message, errorCode? }` — never raw strings
-- **`resolveSubaccount(subaccountId, orgId)`** called in every route with `:subaccountId`
-- **Auth middleware** — `authenticate` always first, then permission guards as needed
-- **Org scoping** — all queries filter by `organisationId` using `req.orgId` (not `req.user.organisationId`)
-- **Soft deletes** — always filter with `isNull(table.deletedAt)` on soft-delete tables
-- **Schema changes** — Drizzle migration files only; never raw SQL schema changes
-
-### Agent system
-- **Three-tier model** (System → Org → Subaccount) must be respected in all agent-related changes
-- **System-managed agents** — `isSystemManaged: true` means masterPrompt is not editable; only additionalPrompt
-- **Idempotency keys** — all new agent run creation paths must support deduplication
-- **Heartbeat changes** — account for `heartbeatOffsetMinutes` (minute-level precision)
-- **Handoff depth** — check `MAX_HANDOFF_DEPTH` (5) in `server/config/limits.ts`
-
-### Client
-- **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
-- **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
-- **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
-- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
+See [`architecture.md` § Architecture Rules](./architecture.md). Violations are blocking issues in any code review.
 
 ---
 
 ## Core Principles
 
-- **Simplicity First** -- Make every change as simple as possible. Impact minimal code.
-- **No Lazy Fixes** -- Find root causes. No temporary patches. Senior developer standards.
-- **Systems over Prompts** -- Better systems scale. Better prompts do not.
-- **Verification over Generation** -- Proving something works matters more than producing it fast.
-- **Iteration over Perfection** -- Ship, learn, improve. Do not stall waiting for perfect.
-- **Structure over Volume** -- A well-organised project with less content beats a dumped context window.
+Simplicity first — minimal code, root causes, no lazy patches. Systems over prompts. Verification over generation. Iteration over perfection. Structure over volume.
 
 ---
 
 ## Non-goals: what Automation OS is NOT
 
-These are durable product stances. When an LLM provider or horizontal agent platform ships a new primitive (routines, agent SDKs, skills, memory, hosted managed agents, team chat), the reflex should be to **absorb the category into `docs/capabilities.md` positioning, ship any UX polish that closes a demo gap, and never drift the pitch toward parity with the provider's primitive.** The moat is the operations layer, not any one feature.
+See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are durable product stances — review before proposing features that compete with provider primitives.
 
-- **Not a better agent SDK.** Consume LLM-provider primitives under the hood rather than competing with them.
-- **Not a hosted routines / scheduled-prompt product.** We build the operations layer on top of supply from every provider — multi-tenant isolation, approval workflows, client portals, per-client P&L, model-agnostic routing — surfaces an LLM provider's hosted-agent or routine product structurally cannot ship, because their buyer is an individual or an internal team, not an agency serving many clients.
-- **Not a general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Synthetos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
-- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for org-level extensibility — not as a competitor to general-purpose coding assistants.
-- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Synthetos competes on "run agents responsibly across many clients with approval workflows."
-- **Not a public skill or playbook marketplace.** Anthropic-scale distribution isn't the agency play.
-- **Not a bidirectional bridge to no-code workflow tools.** We import from them (supervised-migration wedge); we do not export back.
+---
 
-If a PR, marketing asset, or sales deck drifts toward a non-goal, push back. The right response to a provider shipping a new primitive is never "we have that too" — it is "we're the operations system you use on top of that."
+## Frontend Design Principles
+
+Automation OS is a consumer-simple product built on enterprise-grade backend capability. A rich backend does not justify a rich UI — frontend surfaces must be usable by non-technical operators without training.
+
+**Five hard rules — applied to every UI artifact:**
+
+1. **Start with the user's primary task, not the data model.** Design the minimum surface for that task. If you're mapping backend columns to UI panels, stop and restart from the task.
+2. **Default to hidden.** Metric dashboards, KPI boards, trend charts, diagnostic panels, ID exposure, aggregated-cost views — deferred by default. Ship only when a specific workflow requires them, or behind admin-only views.
+3. **One primary action per screen.** ≥2 primary actions → split. ≥3 sidebar panels → cut one. Table + chart + ranking + KPI tiles means you're rebuilding a monitoring product on top of the core product.
+4. **Inline state beats dashboards.** A status dot beats a utilization dashboard. A "last run · succeeded" line beats a run-history panel. Ask: can this live as inline state on an existing page?
+5. **The re-check.** Before committing a UI artifact: would a non-technical operator complete the primary task without feeling overwhelmed? If not, cut information.
+
+**Deep rationale, pre-design checklist, worked examples:** [`docs/frontend-design-principles.md`](./docs/frontend-design-principles.md). Read it before generating a mockup or designing a new page.
 
 ---
 
 ## User Preferences
 
 - Concise communication, no emojis
-- No auto-commits or auto-pushes — the user commits explicitly after reviewing changes
+- No em-dashes (—) in any UI copy, labels, or app-facing text. Use commas, colons, or rewrite the sentence.
+- No auto-commits or auto-pushes from the main session — the user commits explicitly after reviewing changes. **Exception:** review agents (`spec-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`, `chatgpt-spec-review`, `audit-runner`) auto-commit and auto-push within their own flows; the user has explicitly opted in so review output persists to the remote and is visible across sessions. Read-only reviewers (`pr-reviewer`) never commit.
 - Stop and ask when requirements are ambiguous enough to affect architecture

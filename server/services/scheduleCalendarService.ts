@@ -120,14 +120,13 @@ export async function listScheduleCalendar(
       agent: agents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.organisationId, orgId),
         inArray(subaccountAgents.subaccountId, subaccountIds),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
   assertScope(
@@ -222,7 +221,7 @@ export async function listScheduleCalendar(
         rrule: task.rrule,
         timezone: task.timezone || 'UTC',
         scheduleTime: task.scheduleTime,
-        source: task.createdByPlaybookSlug ? 'playbook' : 'scheduled_task',
+        source: task.createdByWorkflowSlug ? 'workflow' : 'scheduled_task',
         sourceId: task.id,
         sourceName: task.title,
       },
@@ -230,7 +229,7 @@ export async function listScheduleCalendar(
       window.endMs
     );
     for (const o of occs) {
-      raw.push({ ...o, source: task.createdByPlaybookSlug ? 'playbook' : 'scheduled_task' });
+      raw.push({ ...o, source: task.createdByWorkflowSlug ? 'workflow' : 'scheduled_task' });
     }
   }
 

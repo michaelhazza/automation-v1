@@ -60,6 +60,7 @@ export default function MemoryReviewQueuePage() {
 
   useEffect(() => {
     load();
+    // reason: `load` is an inline async function that closes over state setters; only the filter keys are the intended triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId, statusFilter, typeFilter]);
 

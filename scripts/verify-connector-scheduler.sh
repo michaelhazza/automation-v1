@@ -16,7 +16,9 @@ VIOLATIONS=$(grep -rn "syncConnector" server/services/ server/routes/ server/job
 if [ -n "$VIOLATIONS" ]; then
   echo "FAIL: Direct calls to syncConnector outside approved locations:"
   echo "$VIOLATIONS"
+  echo "[GATE] connector-scheduler: violations=1"
   exit 1
 fi
 
 echo "PASS: verify-connector-scheduler"
+echo "[GATE] connector-scheduler: violations=0"

@@ -40,12 +40,6 @@ interface CompanyTemplateDetail {
   tree: unknown[];
 }
 
-const SOURCE_BADGE: Record<string, { cls: string; label: string }> = {
-  manual: { cls: 'bg-slate-100 text-slate-600', label: 'Manual' },
-  paperclip_import: { cls: 'bg-blue-100 text-blue-700', label: 'Imported' },
-  from_system: { cls: 'bg-violet-100 text-violet-700', label: 'System' },
-};
-
 const ROLE_CLS: Record<string, string> = {
   orchestrator: 'bg-purple-100 text-purple-800',
   specialist: 'bg-blue-100 text-blue-800',
@@ -215,20 +209,12 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
             <p className="text-sm text-slate-500 mt-1.5">Reusable agent organisation blueprints for subaccounts</p>
           </div>
         )}
-        <div className="flex gap-2">
-          <button
-            onClick={openLibrary}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
-          >
-            Browse Shared Library
-          </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
-          >
-            + New Template
-          </button>
-        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="btn btn-primary"
+        >
+          + New Template
+        </button>
       </div>
 
       {error && (
@@ -257,13 +243,13 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
             <div className="flex gap-2">
               <button
                 onClick={openLibrary}
-                className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+                className="btn btn-secondary"
               >
                 Browse Shared Library
               </button>
               <button
                 onClick={() => setShowCreate(true)}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+                className="btn btn-primary"
               >
                 + New Template
               </button>
@@ -274,17 +260,13 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Name</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Source</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agents</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Version</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Created</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {templates.map((t) => {
-                const badge = SOURCE_BADGE[t.sourceType] ?? SOURCE_BADGE.manual;
-                return (
+              {templates.map((t) => (
                   <tr key={t.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -297,13 +279,7 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
                         <div className="text-xs text-slate-500 mt-0.5 max-w-[280px] truncate">{t.description}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium ${badge.cls}`}>
-                        {badge.label}
-                      </span>
-                    </td>
                     <td className="px-4 py-3 text-[13px] text-slate-600">{t.slotCount}</td>
-                    <td className="px-4 py-3 text-[13px] text-slate-600">v{t.version}</td>
                     <td className="px-4 py-3 text-[13px] text-slate-500">
                       {new Date(t.createdAt).toLocaleDateString()}
                     </td>
@@ -312,22 +288,21 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
                         {!t.isDefaultForSubaccount && (
                           <button
                             onClick={() => handleSetDefault(t.id)}
-                            className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-0 rounded-md text-xs font-medium cursor-pointer transition-colors"
+                            className="btn btn-xs btn-ghost text-indigo-700 hover:bg-indigo-100"
                           >
                             Set Default
                           </button>
                         )}
                         <button
                           onClick={() => setDeleteId(t.id)}
-                          className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-xs font-medium cursor-pointer transition-colors"
+                          className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50"
                         >
                           Delete
                         </button>
                       </div>
                     </td>
                   </tr>
-                );
-              })}
+                ))}
             </tbody>
           </table>
         )}
@@ -360,11 +335,11 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
             <button
               onClick={handleCreate}
               disabled={creating || !createName.trim()}
-              className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${creating || !createName.trim() ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+              className="btn btn-primary disabled:opacity-50"
             >
               {creating ? 'Creating...' : 'Create'}
             </button>
-            <button onClick={() => setShowCreate(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+            <button onClick={() => setShowCreate(false)} className="btn btn-secondary">
               Cancel
             </button>
           </div>
@@ -402,7 +377,7 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
               )}
               <button
                 onClick={() => setPreviewDetail(null)}
-                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+                className="btn btn-secondary"
               >
                 Back to Library
               </button>
@@ -429,7 +404,7 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
                       </div>
                       <button
                         onClick={() => handlePreviewTemplate(t.id)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors ml-3"
+                        className="btn btn-sm btn-secondary ml-3"
                       >
                         Preview
                       </button>
@@ -440,7 +415,7 @@ export default function SubaccountBlueprintsPage({ user: _user, embedded = false
               <div className="mt-4 flex justify-end">
                 <button
                   onClick={() => setShowLibrary(false)}
-                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+                  className="btn btn-secondary"
                 >
                   Close
                 </button>

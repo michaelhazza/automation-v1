@@ -1,0 +1,136 @@
+<!doctype html>
+<!--
+  Mock 10 / 10 — New fields inside the existing "Schedule & Concurrency" section
+  ================================================================================
+  This mock does NOT show a new page. It shows the existing
+  `AdminAgentEditPage.tsx` → "Schedule & Concurrency" section
+  (existing heading at ~line 1410; existing heartbeat fields at ~lines 1420–1480)
+  with the two new settings from the spec inserted inline:
+
+    1. Default safety mode         — new (spec §6.8). Also appears on SubaccountAgentEditPage.
+    2. Heartbeat activity gate     — new (spec §7.9). AdminAgentEditPage only in v1.
+
+  The rest of the page (Identity, Prompts, Skills, Budget, Memory, etc.) is
+  unchanged and deliberately not shown — this is a surgical addition, not a
+  redesign. An existing admin recognises the section; the new fields are the
+  only thing that's different.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 10 — New fields inside existing Schedule & Concurrency section</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+  .toggle { width:34px; height:20px; background:#cbd5e1; border-radius:999px; position:relative; transition:background 120ms; cursor:pointer; flex-shrink:0; }
+  .toggle::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; background:white; border-radius:50%; transition:left 120ms; box-shadow:0 1px 2px rgba(0,0,0,0.15); }
+  .toggle.on { background:#6366f1; }
+  .toggle.on::after { left:16px; }
+  .seg { display:inline-flex; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:white; }
+  .seg-opt { padding:6px 14px; font-size:12.5px; font-weight:600; color:#64748b; cursor:pointer; border:none; background:transparent; }
+  .seg-opt.on { background:#6366f1; color:white; }
+  .new-pill { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#4338ca; margin-left:6px; vertical-align:1px; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[720px] p-6">
+  <div class="flex justify-between items-baseline mb-4 text-[13px]">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 10 · New fields on the existing Agent Edit page</h1>
+    <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <!-- Breadcrumb + page header — existing shell, not redesigned -->
+  <div class="text-[12px] text-slate-500 mb-2">
+    Organisation <span class="text-slate-300 mx-1">›</span> Agents <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">CRM Agent</span>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-lg">
+    <!-- Existing tab bar (only "General" shown; tab set is pre-existing) -->
+    <div class="px-6 pt-4 border-b border-slate-200">
+      <div class="flex gap-4 -mb-px">
+        <button class="py-2 px-1 text-[13px] font-semibold border-b-2 border-indigo-600 text-indigo-600">General</button>
+        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Skills</button>
+        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Memory</button>
+        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Budget</button>
+        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Advanced</button>
+      </div>
+    </div>
+
+    <!-- Truncation marker so it's obvious more sections exist above -->
+    <div class="px-6 py-2.5 text-[11.5px] text-slate-400 italic border-b border-slate-100">
+      …Identity, Prompts, and other existing sections above…
+    </div>
+
+    <!-- EXISTING SECTION: "Schedule & Concurrency" — preserved verbatim -->
+    <div class="px-6 py-5 border-b border-slate-100">
+      <h3 class="text-[14px] font-semibold text-slate-900">Schedule &amp; Concurrency</h3>
+      <p class="text-[12px] text-slate-500 mt-0.5">Existing section. New fields are marked.</p>
+
+      <!-- EXISTING field: Enable heartbeat -->
+      <div class="mt-4 flex items-start justify-between">
+        <div>
+          <div class="text-[13.5px] font-semibold text-slate-900">Enable heartbeat</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Wakes the agent on a schedule to check for new signals.</div>
+        </div>
+        <div class="toggle on"></div>
+      </div>
+
+      <!-- EXISTING fields: offset + interval (condensed representation) -->
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-[12.5px] font-medium text-slate-700 mb-1">Interval (hours)</label>
+          <input type="number" value="4" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px]" />
+        </div>
+        <div>
+          <label class="block text-[12.5px] font-medium text-slate-700 mb-1">Offset</label>
+          <div class="flex items-center gap-2">
+            <input type="number" value="0" class="w-20 px-3 py-2 border border-slate-200 rounded-lg text-[13.5px]" />
+            <span class="text-[12.5px] text-slate-500">h</span>
+            <input type="number" value="0" class="w-20 px-3 py-2 border border-slate-200 rounded-lg text-[13.5px]" />
+            <span class="text-[12.5px] text-slate-500">m</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- NEW field: heartbeat activity gate (§7.9) — a single toggle below the existing controls. -->
+      <div class="mt-5 pt-4 border-t border-dashed border-indigo-200 flex items-start justify-between">
+        <div>
+          <div class="text-[13.5px] font-semibold text-slate-900">Skip ticks with no activity<span class="new-pill">new</span></div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Only runs a tick when something changed. Prevents unnecessary cost.</div>
+        </div>
+        <div class="toggle on"></div>
+      </div>
+    </div>
+
+    <!-- NEW SECTION: Default safety mode (§6.8). Slots in as its own small section below Schedule & Concurrency. -->
+    <div class="px-6 py-5 border-b border-slate-100">
+      <h3 class="text-[14px] font-semibold text-slate-900">Default safety mode<span class="new-pill">new</span></h3>
+      <p class="text-[12px] text-slate-500 mt-0.5">How runs start unless the person running the agent overrides it.</p>
+      <div class="mt-3 seg">
+        <button class="seg-opt on">Explore</button>
+        <button class="seg-opt">Execute</button>
+      </div>
+      <p class="text-[11.5px] text-slate-500 mt-2">Explore is the safe default. Users who run this agent successfully in Explore are prompted to switch to Execute.</p>
+    </div>
+
+    <!-- Truncation marker below -->
+    <div class="px-6 py-2.5 text-[11.5px] text-slate-400 italic">
+      …Budget, Memory, Advanced sections below…
+    </div>
+
+    <!-- Footer -->
+    <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+      <button class="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[13px] font-semibold rounded-lg border border-slate-300">Cancel</button>
+      <button class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save</button>
+    </div>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
+    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/AdminAgentEditPage.tsx</code> → Schedule &amp; Concurrency section (~lines 1410–1531). Two new fields (pill = <span class="new-pill">new</span>). SubaccountAgentEditPage gets only the Default safety mode addition in v1. Per-threshold inputs + historical skip-rate chart are <em>not</em> added — that lives on a future admin observability page.
+  </p>
+</div>
+
+</body>
+</html>

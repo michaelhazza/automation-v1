@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { callWithTimeout, ProviderTimeoutError } from '../llmRouterTimeoutPure.js';
 
 // ---------------------------------------------------------------------------
@@ -38,19 +37,17 @@ test('callWithTimeout — timer fires before promise resolves → aborts inner s
     return 'never-reached';
   });
 
-  await assert.rejects(result, (err: unknown) => {
-    assert.ok(err instanceof ProviderTimeoutError);
-    assert.equal(err.code, 'PROVIDER_TIMEOUT');
-    assert.equal(err.statusCode, 504);
-    assert.equal(err.timeoutMs, 20);
-    assert.equal(err.label, 'test/model');
-    return true;
-  });
+  const err = await result.catch((e: unknown) => e) as ProviderTimeoutError;
+  expect(err instanceof ProviderTimeoutError).toBeTruthy();
+  expect(err.code).toBe('PROVIDER_TIMEOUT');
+  expect(err.statusCode).toBe(504);
+  expect(err.timeoutMs).toBe(20);
+  expect(err.label).toBe('test/model');
 
   // The inner signal must have been aborted — this is the whole point.
-  assert.ok(holder.signal);
-  assert.equal(holder.signal.aborted, true);
-  assert.ok(holder.signal.reason instanceof ProviderTimeoutError);
+  expect(holder.signal).toBeTruthy();
+  expect(holder.signal!.aborted).toBe(true);
+  expect(holder.signal!.reason instanceof ProviderTimeoutError).toBeTruthy();
 });
 
 test('callWithTimeout — caller signal abort propagates to inner signal', async () => {
@@ -70,9 +67,9 @@ test('callWithTimeout — caller signal abort propagates to inner signal', async
   await new Promise((r) => setTimeout(r, 5));
   callerController.abort(new Error('caller cancelled'));
 
-  await assert.rejects(pending);
-  assert.ok(holder.signal);
-  assert.equal(holder.signal.aborted, true);
+  await expect(pending).rejects.toThrow();
+  expect(holder.signal).toBeTruthy();
+  expect(holder.signal!.aborted).toBe(true);
 });
 
 test('callWithTimeout — promise resolves before timer → returns value, no abort', async () => {
@@ -84,24 +81,23 @@ test('callWithTimeout — promise resolves before timer → returns value, no ab
     return 'ok';
   });
 
-  assert.equal(value, 'ok');
-  assert.ok(holder.signal);
-  assert.equal(holder.signal.aborted, false);
+  expect(value).toBe('ok');
+  expect(holder.signal).toBeTruthy();
+  expect(holder.signal!.aborted).toBe(false);
 });
 
 test('callWithTimeout — inner throw (non-timeout) propagates the original error', async () => {
   const original = new Error('provider returned 500');
-  await assert.rejects(
+  await expect(
     callWithTimeout('test/model', 500, undefined, async () => { throw original; }),
-    (err: unknown) => err === original,
-  );
+  ).rejects.toBe(original);
 });
 
 test('ProviderTimeoutError — shape is stable (isNonRetryableError relies on code)', () => {
   const err = new ProviderTimeoutError(30_000, 'anthropic/claude');
-  assert.equal(err.code, 'PROVIDER_TIMEOUT');
-  assert.equal(err.statusCode, 504);
-  assert.equal(err.name, 'ProviderTimeoutError');
-  assert.ok(err instanceof Error);
-  assert.ok(err instanceof ProviderTimeoutError);
+  expect(err.code).toBe('PROVIDER_TIMEOUT');
+  expect(err.statusCode).toBe(504);
+  expect(err.name).toBe('ProviderTimeoutError');
+  expect(err instanceof Error).toBeTruthy();
+  expect(err instanceof ProviderTimeoutError).toBeTruthy();
 });

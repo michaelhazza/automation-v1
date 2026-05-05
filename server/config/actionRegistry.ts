@@ -1,3 +1,4 @@
+﻿// @principal-context-import-only — reason: registry references canonicalDataService only in handler-classification documentation; future handlers that invoke it must pass fromOrgId(organisationId, subaccountId).
 import { z } from 'zod';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
@@ -51,6 +52,24 @@ export interface ParameterSchema {
  */
 export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
 
+// Closed list of valid OAuth provider slugs for `requiredIntegration` on actions.
+// Single source of truth — both the type below and `VALID_INTEGRATION_PROVIDERS`
+// in integrationBlockService derive from this constant.
+export const REQUIRED_INTEGRATION_SLUGS = ['google_drive', 'gmail', 'slack', 'notion', 'ghl', 'stripe_agent'] as const;
+
+export type RequiredIntegrationSlug = typeof REQUIRED_INTEGRATION_SLUGS[number];
+
+export interface IdempotencyContract {
+  /** Ordered ActionContext field names that together form the idempotency key. See v7.1 spec §588. */
+  keyShape: string[];
+  /** Dedup boundary. See v7.1 spec §588. */
+  scope: 'subaccount' | 'org';
+  /** Retention class before expiry. See v7.1 spec §588. */
+  ttlClass: 'permanent' | 'long' | 'short';
+  /** Whether the lock record may be reclaimed after TTL. See v7.1 spec §588. */
+  reclaimEligibility: 'eligible' | 'disabled';
+}
+
 export interface ActionDefinition {
   actionType: string;
   description: string;
@@ -69,6 +88,11 @@ export interface ActionDefinition {
    * Enforced by verify-idempotency-strategy-declared.sh.
    */
   idempotencyStrategy: IdempotencyStrategy;
+
+  // Manager-role guard — spec §9.4
+  managerAllowlistMember?: boolean;
+  directExternalSideEffect?: boolean;
+  sideEffectClass?: 'read' | 'write' | 'none';
 
   /**
    * P1.1 Layer 3 — declarative scope metadata consumed by the before-tool
@@ -137,6 +161,42 @@ export interface ActionDefinition {
    * universal-skill contract in docs/improvements-roadmap-spec.md P4.1.
    */
   isUniversal?: boolean;
+
+  /**
+   * OAuth provider this action requires. When set, agentExecutionService calls
+   * integrationBlockService.checkRequiredIntegration before dispatching the tool,
+   * blocking the run if no active connection exists.
+   * Slugs: 'google_drive' | 'gmail' | 'slack' | 'notion' | 'ghl' | 'stripe_agent'
+   * Leave unset for first-party / internal-only actions.
+   */
+  requiredIntegration?: RequiredIntegrationSlug;
+
+  /**
+   * E-D4 — marks tools that cannot safely pause mid-execution to wait for an
+   * OAuth connection. When true and the required integration is missing,
+   * checkRequiredIntegration returns { allowed: false, code: 'TOOL_NOT_RESUMABLE' }
+   * instead of a block-state payload, causing the run to be cancelled rather than paused.
+   * Use for tools with irreversible or time-sensitive external side effects.
+   */
+  integrationNotResumable?: true;
+
+  /**
+   * Agentic Commerce — marks skills that move real money through chargeRouterService.
+   * When true, policyEngineService evaluates a spendDecision in addition to the
+   * standard gate decision. Reviewed by verify-idempotency-strategy-declared.sh (CI).
+   * Spec: tasks/builds/agentic-commerce/spec.md §7.1, plan §Chunk 6.
+   */
+  spendsMoney?: boolean;
+
+  /**
+   * Agentic Commerce — declares how the charge is executed after policy approval.
+   * Required when spendsMoney is true; undefined for non-spend skills.
+   *   'main_app_stripe'    — main app calls the payment provider API directly.
+   *   'worker_hosted_form' — main app authorises and hands a charge token to the
+   *                          IEE worker, which fills a merchant-hosted payment form.
+   * Spec: tasks/builds/agentic-commerce/spec.md §7.1, §6.1.
+   */
+  executionPath?: 'main_app_stripe' | 'worker_hosted_form';
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -296,6 +356,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
+    requiredIntegration: 'gmail',
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -320,6 +381,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
+    requiredIntegration: 'gmail',
   },
   create_task: {
     actionType: 'create_task',
@@ -1630,6 +1692,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    requiredIntegration: 'ghl',
   },
 
   // ── Finance Agent — auto-gated stubs + review-gated ─────────────────────
@@ -2518,8 +2581,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
 
   // ── Memory & Briefings Phase 3 — Weekly Digest delivery ──────────────────
-  config_deliver_playbook_output: {
-    actionType: 'config_deliver_playbook_output',
+  config_deliver_workflow_output: {
+    actionType: 'config_deliver_workflow_output',
     description: 'Deliver a playbook artefact via deliveryService: always writes to inbox + dispatches portal/slack per deliveryChannels config.',
     actionCategory: 'api',
     topics: ['playbook', 'delivery'],
@@ -2548,8 +2611,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
-  config_publish_playbook_output_to_portal: {
-    actionType: 'config_publish_playbook_output_to_portal',
+  config_publish_workflow_output_to_portal: {
+    actionType: 'config_publish_workflow_output_to_portal',
     description: 'Publish a playbook step\'s output to the sub-account portal card. Creates or updates the portal_briefs row for this run and marks the run portal-visible.',
     actionCategory: 'api',
     topics: ['portal', 'playbook'],
@@ -2574,8 +2637,33 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
-  config_send_playbook_email_digest: {
-    actionType: 'config_send_playbook_email_digest',
+  // ── Workflow V1 — start a workflow run from within an agent skill ──────────
+  'workflow.run.start': {
+    actionType: 'workflow.run.start',
+    description: 'Start a new workflow run for a published org workflow template. Returns the task_id of the newly created workflow task.',
+    actionCategory: 'api',
+    topics: ['workflow', 'automation'],
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['workflow_template_id', 'template_version_id', 'initial_inputs'],
+    parameterSchema: z.object({
+      workflow_template_id: z.string().uuid().describe('UUID of the org workflow template to run'),
+      template_version_id: z.string().uuid().optional().describe('Pin to a specific version; omit for latest published'),
+      initial_inputs: z.record(z.unknown()).optional().default({}).describe('Initial input values for the workflow'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  config_send_workflow_email_digest: {
+    actionType: 'config_send_workflow_email_digest',
     description: 'Send a markdown email digest to a list of recipients. Deduplicated per (runId, sorted recipients) so retries never double-send.',
     actionCategory: 'api',
     topics: ['email', 'playbook'],
@@ -2655,6 +2743,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    requiredIntegration: 'ghl',
   },
   'crm.send_sms': {
     actionType: 'crm.send_sms',
@@ -2765,7 +2854,469 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ─────────
+  ask_clarifying_questions: {
+    actionType: 'ask_clarifying_questions',
+    description: 'Draft up to 5 ranked questions to resolve brief ambiguity when Orchestrator confidence < 0.85.',
+    actionCategory: 'api',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['briefId', 'briefText', 'orchestratorConfidence', 'ambiguityDimensions'],
+    parameterSchema: z.object({
+      briefId: z.string().uuid().describe('Brief task ID'),
+      briefText: z.string().min(1).max(2000).describe('Original brief text'),
+      conversationContext: z.array(z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      })).optional().describe('Prior conversation turns for context'),
+      orchestratorConfidence: z.number().min(0).max(1).describe('Current orchestrator confidence score'),
+      ambiguityDimensions: z.array(z.enum(['scope', 'target', 'action', 'timing', 'content', 'other']))
+        .min(1).describe('Dimensions flagged as ambiguous'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['llm_error'], doNotRetryOn: ['parse_failure'] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  challenge_assumptions: {
+    actionType: 'challenge_assumptions',
+    description: 'Adversarial analysis identifying weakest assumptions in a proposed action when stakes are high.',
+    actionCategory: 'api',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['briefId', 'runtimeConfidence', 'stakesDimensions'],
+    parameterSchema: z.object({
+      briefId: z.string().uuid().describe('Brief task ID'),
+      runtimeConfidence: z.number().min(0).max(1).describe('Runtime confidence at time of challenge'),
+      stakesDimensions: z.array(z.enum(['irreversibility', 'cost', 'scope', 'compliance']))
+        .min(1).describe('Stakes dimensions that triggered the challenge'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['llm_error'], doNotRetryOn: ['parse_failure'] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  'crm.query': {
+    actionType: 'crm.query',
+    description: 'Answer a free-text CRM question using the CRM Query Planner.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['rawIntent', 'subaccountId'],
+    parameterSchema: z.object({
+      rawIntent:    z.string().min(3).max(2000),
+      subaccountId: z.string().uuid(),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    idempotencyStrategy: 'read_only',
+    readPath: 'liveFetch',
+    liveFetchRationale: 'CRM Query Planner dispatches Stage 1/2 canonical reads when the intent matches a canonical registry entry (preferred path), and Stage 3 LLM-planned live reads through ghlReadHelpers when the intent requires a live-only field or entity. The canonical path is preferred and measured via planner.llm_skipped_rate; the live path is the fallback.',
+    scopeRequirements: {
+      validateSubaccountFields: ['subaccountId'],
+      requiresUserContext: false,
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint:    true,
+        destructiveHint: false,
+        idempotentHint:  true,
+        openWorldHint:   true,
+      },
+    },
+    onFailure: 'skip',
+  },
+
+  // ── Cached Context Infrastructure (§6.6 / §4.5) ─────────────────────────
+  cached_context_budget_breach: {
+    actionType: 'cached_context_budget_breach',
+    description:
+      'Operator review gate: the assembled context prefix for a cached-context run ' +
+      'exceeds the resolved execution budget. Payload contains the breach details, ' +
+      'top document contributors, and suggested remediation actions. ' +
+      'Approval re-runs assembly exactly once; rejection or timeout terminates the run.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'block',
+    createsBoardTask: false,
+    readPath: 'none',
+    payloadFields: ['thresholdBreached', 'budgetUsed', 'budgetAllowed', 'topContributors', 'suggestedActions'],
+    parameterSchema: z.object({
+      thresholdBreached: z.enum(['max_input_tokens', 'per_document_cap']),
+      budgetUsed: z.object({
+        inputTokens: z.number(),
+        worstPerDocumentTokens: z.number(),
+      }),
+      budgetAllowed: z.object({
+        maxInputTokens: z.number(),
+        perDocumentCap: z.number(),
+      }),
+      topContributors: z.array(z.object({
+        documentId: z.string(),
+        documentName: z.string(),
+        tokens: z.number(),
+        percentOfBudget: z.number(),
+      })),
+      suggestedActions: z.array(z.enum(['trim_bundle', 'upgrade_model', 'split_task', 'abort'])),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  // ── Thread Context (Chunk A — per-conversation living doc) ───────────────
+  update_thread_context: {
+    actionType: 'update_thread_context',
+    description:
+      'Update the conversation thread context: add/remove tasks, update task status, ' +
+      'set or append to the approach note, and add/remove decisions. ' +
+      'The thread context is a living document that persists across the conversation ' +
+      'and is visible to the user in the Context tab.',
+    actionCategory: 'worker',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['decisions', 'tasks', 'approach'],
+    parameterSchema: z.object({
+      decisions: z
+        .object({
+          add: z
+            .array(
+              z.object({
+                clientRefId: z.string().optional().describe('Caller-supplied dedup ref — returned in createdIds'),
+                decision: z.string().max(500).describe('Short decision statement (≤ 500 chars)'),
+                rationale: z.string().max(1500).describe('Rationale for the decision (≤ 1500 chars)'),
+              }),
+            )
+            .optional(),
+          remove: z.array(z.string()).optional().describe('IDs of decisions to remove'),
+        })
+        .optional(),
+      tasks: z
+        .object({
+          add: z
+            .array(
+              z.object({
+                clientRefId: z.string().optional().describe('Caller-supplied dedup ref — returned in createdIds'),
+                label: z.string().max(200).describe('Task description (≤ 200 chars)'),
+              }),
+            )
+            .optional(),
+          updateStatus: z
+            .array(
+              z.object({
+                id: z.string().describe('Task ID to update'),
+                status: z.enum(['pending', 'in_progress', 'done']),
+              }),
+            )
+            .optional(),
+          remove: z.array(z.string()).optional().describe('IDs of tasks to remove'),
+        })
+        .optional(),
+      approach: z
+        .object({
+          replace: z.string().max(10000).optional().describe('Replace approach with this text (≤ 10,000 chars)'),
+          appendNote: z.string().max(10000).optional().describe('Append a note to the existing approach (≤ 10,000 chars)'),
+        })
+        .optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['DB_ERROR', 'NETWORK_ERROR'],
+      doNotRetryOn: ['TASK_CAP_REACHED', 'DECISION_CAP_REACHED', 'APPROACH_TOO_LONG'],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ────────────────────────────
+  // All five entries: actionCategory 'api', directExternalSideEffect true,
+  // idempotencyStrategy 'locked', requiredIntegration 'stripe_agent',
+  // defaultGateLevel 'review', spendsMoney true.
+  // executionPath per spec §7.1: pay_invoice and issue_refund → main_app_stripe;
+  // purchase_resource, subscribe_to_service, top_up_balance → worker_hosted_form.
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
+  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
+  pay_invoice: {
+    actionType: 'pay_invoice',
+    description:
+      'Pay an outstanding invoice via the configured payment integration. ' +
+      'Feeder skill for process_bill. Routes through charge policy engine; ' +
+      'may auto-approve, require operator approval, or be blocked by policy.',
+    actionCategory: 'api',
+    isExternal: true,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['invoiceId', 'amount', 'currency', 'merchant', 'intent'],
+    parameterSchema: z.object({
+      invoiceId: z.string().min(1).describe('Invoice identifier issued by the vendor or payment provider'),
+      amount: z.number().int().positive().describe('Amount in currency minor units (e.g. 1999 = $19.99 USD)'),
+      currency: z.string().length(3).describe('ISO 4217 three-letter currency code (e.g. "USD")'),
+      merchant: z.object({
+        id: z.string().nullable().describe('Payment provider merchant identifier; null to fall back to descriptor matching'),
+        descriptor: z.string().min(1).describe('Human-readable merchant name'),
+      }).describe('Merchant identity for allowlist matching and ledger record'),
+      intent: z.string().min(1).max(500).describe('Human-readable description of the payment purpose'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    idempotencyStrategy: 'locked',
+    directExternalSideEffect: true,
+    requiredIntegration: 'stripe_agent',
+    spendsMoney: true,
+    executionPath: 'main_app_stripe',
+  },
+
+  purchase_resource: {
+    actionType: 'purchase_resource',
+    description:
+      'Complete a one-shot purchase against a vendor\'s hosted checkout form. ' +
+      'Routes through charge policy engine; worker fills the merchant form after authorisation.',
+    actionCategory: 'api',
+    isExternal: true,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['resourceId', 'amount', 'currency', 'merchant', 'intent'],
+    parameterSchema: z.object({
+      resourceId: z.string().min(1).describe('Identifier of the resource to purchase (domain, licence, digital product, etc.)'),
+      amount: z.number().int().positive().describe('Amount in currency minor units (e.g. 4999 = $49.99 USD)'),
+      currency: z.string().length(3).describe('ISO 4217 three-letter currency code (e.g. "USD")'),
+      merchant: z.object({
+        id: z.string().nullable().describe('Payment provider merchant identifier; null to fall back to descriptor matching'),
+        descriptor: z.string().min(1).describe('Human-readable merchant name'),
+      }).describe('Merchant identity for allowlist matching and ledger record'),
+      intent: z.string().min(1).max(500).describe('Human-readable description of what is being purchased'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    idempotencyStrategy: 'locked',
+    directExternalSideEffect: true,
+    requiredIntegration: 'stripe_agent',
+    spendsMoney: true,
+    executionPath: 'worker_hosted_form',
+  },
+
+  subscribe_to_service: {
+    actionType: 'subscribe_to_service',
+    description:
+      'Complete a vendor signup and subscription against a hosted payment form. ' +
+      'Read mirror: track_subscriptions. Routes through charge policy engine; ' +
+      'worker fills the vendor form after authorisation.',
+    actionCategory: 'api',
+    isExternal: true,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['serviceId', 'amount', 'currency', 'merchant', 'intent'],
+    parameterSchema: z.object({
+      serviceId: z.string().min(1).describe('Identifier of the subscription or service tier to activate'),
+      amount: z.number().int().positive().describe('Initial or recurring charge amount in currency minor units'),
+      currency: z.string().length(3).describe('ISO 4217 three-letter currency code (e.g. "USD")'),
+      merchant: z.object({
+        id: z.string().nullable().describe('Payment provider merchant identifier; null to fall back to descriptor matching'),
+        descriptor: z.string().min(1).describe('Human-readable vendor name'),
+      }).describe('Merchant identity for allowlist matching and ledger record'),
+      intent: z.string().min(1).max(500).describe('Human-readable description of the subscription purpose'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    idempotencyStrategy: 'locked',
+    directExternalSideEffect: true,
+    requiredIntegration: 'stripe_agent',
+    spendsMoney: true,
+    executionPath: 'worker_hosted_form',
+  },
+
+  top_up_balance: {
+    actionType: 'top_up_balance',
+    description:
+      'Top up a prepaid balance or credits account via a vendor\'s hosted top-up form. ' +
+      'Distinct from ad-platform budget top-ups. Routes through charge policy engine; ' +
+      'worker fills the vendor form after authorisation.',
+    actionCategory: 'api',
+    isExternal: true,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['accountId', 'amount', 'currency', 'merchant', 'intent'],
+    parameterSchema: z.object({
+      accountId: z.string().min(1).describe('Identifier of the prepaid balance or credits account to top up'),
+      amount: z.number().int().positive().describe('Amount to add in currency minor units (e.g. 10000 = $100.00 USD)'),
+      currency: z.string().length(3).describe('ISO 4217 three-letter currency code (e.g. "USD")'),
+      merchant: z.object({
+        id: z.string().nullable().describe('Payment provider merchant identifier; null to fall back to descriptor matching'),
+        descriptor: z.string().min(1).describe('Human-readable vendor name'),
+      }).describe('Merchant identity for allowlist matching and ledger record'),
+      intent: z.string().min(1).max(500).describe('Human-readable description of the top-up purpose'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    idempotencyStrategy: 'locked',
+    directExternalSideEffect: true,
+    requiredIntegration: 'stripe_agent',
+    spendsMoney: true,
+    executionPath: 'worker_hosted_form',
+  },
+
+  issue_refund: {
+    actionType: 'issue_refund',
+    description:
+      'Issue a refund against a prior charge. Creates a new inbound-refund ledger row ' +
+      '(kind: inbound_refund, direction: subtract); does NOT mutate the original charge record. ' +
+      'Routes through charge policy engine. See plan invariant 41.',
+    actionCategory: 'api',
+    isExternal: true,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['parentChargeId', 'amount', 'currency', 'merchant', 'intent'],
+    parameterSchema: z.object({
+      parentChargeId: z.string().uuid().describe('UUID of the original agent_charges row to refund against; must be in succeeded status'),
+      amount: z.number().int().positive().describe('Amount to refund in currency minor units; must not exceed the original charge'),
+      currency: z.string().length(3).describe('ISO 4217 three-letter currency code; must match the original charge currency'),
+      merchant: z.object({
+        id: z.string().nullable().describe('Payment provider merchant identifier; null to fall back to descriptor matching'),
+        descriptor: z.string().min(1).describe('Human-readable merchant name matching the original charge'),
+      }).describe('Merchant identity for allowlist matching and ledger record'),
+      intent: z.string().min(1).max(500).describe('Human-readable description of the refund reason'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    idempotencyStrategy: 'locked',
+    directExternalSideEffect: true,
+    requiredIntegration: 'stripe_agent',
+    spendsMoney: true,
+    executionPath: 'main_app_stripe',
+  },
+
+  // ── Shadow-to-live promotion (HITL meta-action — no money movement) ──────
+  // Spec: tasks/builds/agentic-commerce/spec.md §14 Shadow-to-Live Promotion.
+  // Created by spendingBudgetService.requestPromotion when an operator asks to
+  // flip a spending_policies row from mode='shadow' to mode='live'. Routes
+  // through HITL review; on approval, policy.mode is updated under advisory
+  // lock and approval channels notified. Does NOT move money — spendsMoney is
+  // false, no Stripe involvement, no charge ledger row.
+  promote_spending_policy_to_live: {
+    actionType: 'promote_spending_policy_to_live',
+    description:
+      'Request shadow-to-live promotion of a spending policy. Routes through ' +
+      'the HITL review queue; on approval, the spending_policies row flips from ' +
+      "mode='shadow' to mode='live'. System-initiated; no money movement.",
+    actionCategory: 'api',
+    isExternal: false,
+    readPath: 'none',
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['spendingBudgetId', 'requesterId'],
+    parameterSchema: z.object({
+      spendingBudgetId: z.string().uuid().describe('UUID of the spending budget whose policy is being promoted'),
+      requesterId: z.string().describe('User ID of the operator requesting the promotion'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    idempotencyStrategy: 'keyed_write',
+    directExternalSideEffect: false,
+    spendsMoney: false,
+  },
 };
+
+/**
+ * Spend-enabled action slugs for the workflow action_call allowlist.
+ * Concatenated into ACTION_CALL_ALLOWED_SLUGS in actionCallAllowlist.ts.
+ * Spec: tasks/builds/agentic-commerce/spec.md §7.1, §7.3.
+ * Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6.
+ */
+export const SPEND_ACTION_ALLOWED_SLUGS = [
+  'pay_invoice',
+  'purchase_resource',
+  'subscribe_to_service',
+  'top_up_balance',
+  'issue_refund',
+] as const;
 
 /**
  * Legacy action-slug aliases.
@@ -2803,7 +3354,7 @@ export function resolveActionSlug(slug: string): string {
   if (canonical === undefined) return slug;
   if (!loggedAliasHits.has(slug)) {
     loggedAliasHits.add(slug);
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`,
     );

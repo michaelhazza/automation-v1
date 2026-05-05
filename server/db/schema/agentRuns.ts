@@ -1,11 +1,13 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
+import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
 import { users } from './users';
+import { workspaceActors } from './workspaceActors';
 
 // ---------------------------------------------------------------------------
 // Agent Runs — logs of autonomous agent executions
@@ -87,7 +89,7 @@ export const agentRuns = pgTable(
     // IEE; future: OpenClaw). Non-terminal. Detail lives on the backend row
     // (iee_runs). Transitions to a terminal value when the backend reaches its
     // own terminal state, via finaliseAgentRunFromIeeRun.
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty' | 'blocked_awaiting_integration'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -112,6 +114,14 @@ export const agentRuns = pgTable(
     // Migration 0137
     citedEntryIds: jsonb('cited_entry_ids').notNull().default([]).$type<string[]>(),
     hadUncertainty: boolean('had_uncertainty').notNull().default(false),
+
+    // Phase 8 / W3c — memory_block provenance trail (migration 0199)
+    appliedMemoryBlockIds: jsonb('applied_memory_block_ids').notNull().default([]).$type<string[]>(),
+    appliedMemoryBlockCitations: jsonb('applied_memory_block_citations').notNull().default([]).$type<Array<{
+      memoryBlockId: string;
+      citedSnippet?: string;
+      citationScore: number;
+    }>>(),
 
     // Impact counters
     tasksCreated: integer('tasks_created').notNull().default(0),
@@ -147,10 +157,10 @@ export const agentRuns = pgTable(
     isSubAgent: boolean('is_sub_agent').notNull().default(false),
     parentSpawnRunId: uuid('parent_spawn_run_id'),
 
-    // Playbooks reverse link (migration 0076) — set when this agent run was
-    // dispatched by a Playbooks step. Engine reads this in onAgentRunCompleted
+    // Workflows reverse link (migration 0076) — set when this agent run was
+    // dispatched by a Workflows step. Engine reads this in onAgentRunCompleted
     // to find the originating step run.
-    playbookStepRunId: uuid('playbook_step_run_id'),
+    workflowStepRunId: uuid('workflow_step_run_id'),
 
     // IEE Phase 0 denormalised reference (migration 0176). When the run
     // is delegated to an IEE worker, agentExecutionService writes the
@@ -178,11 +188,62 @@ export const agentRuns = pgTable(
     // default. See docs/routines-response-dev-spec.md §4.4 / §4.7.
     isTestRun: boolean('is_test_run').notNull().default(false),
 
+    // Integration block state — set when the run is paused waiting for an
+    // OAuth connection. Cleared on resume or expiry sweep.
+    // blockedReason: discriminator; currently only 'integration_required'.
+    // integrationResumeToken: sha256 hash of the plaintext bearer token that
+    //   unblocks this run. Plaintext lives only in agent_messages.meta.
+    // integrationDedupKey: sha256(toolName:runId:blockSequence) — prevents
+    //   double-blocking the same tool call on retry.
+    blockedReason: text('blocked_reason').$type<'integration_required' | null>(),
+    blockedExpiresAt: timestamp('blocked_expires_at', { withTimezone: true }),
+    integrationResumeToken: text('integration_resume_token'),
+    integrationDedupKey: text('integration_dedup_key'),
+
     // P3A: Principal model fields (migration 0164)
     principalType: text('principal_type').notNull().default('user').$type<'user' | 'service' | 'delegated'>(),
     principalId: text('principal_id').notNull().default(''),
     actingAsUserId: uuid('acting_as_user_id').references(() => users.id),
     delegationGrantId: uuid('delegation_grant_id'),
+
+    // Live Agent Execution Log (migration 0192). `nextEventSeq` is the
+    // atomic per-run counter for agent_execution_events; allocation is a
+    // single `UPDATE ... RETURNING next_event_seq` so there's no MAX scan
+    // or lock on the events table. `eventLimitReachedEmitted` is the
+    // one-shot flag that gates the exactly-once `run.event_limit_reached`
+    // signal event — see spec §4.1.
+    nextEventSeq: integer('next_event_seq').notNull().default(0),
+    eventLimitReachedEmitted: boolean('event_limit_reached_emitted').notNull().default(false),
+
+    // Cached Context Infrastructure (migration 0209) — §5.8
+    // bundleSnapshotIds: array of bundle_resolution_snapshots.id for this run
+    bundleSnapshotIds: jsonb('bundle_snapshot_ids').$type<string[]>(),
+    // variableInputHash: SHA-256 of the dynamic (post-breakpoint) content
+    variableInputHash: text('variable_input_hash'),
+    // runOutcome: nullable while in-flight; set atomically at terminal write
+    runOutcome: text('run_outcome').$type<'completed' | 'degraded' | 'failed'>(),
+    softWarnTripped: boolean('soft_warn_tripped').notNull().default(false),
+    // degradedReason: diagnostic enum recorded alongside run_outcome='degraded' (§4.6)
+    degradedReason: text('degraded_reason').$type<'soft_warn' | 'token_drift' | 'cache_miss'>(),
+
+    // Paperclip Hierarchy — delegation telemetry (migration 0216, renumbered from 0204 post-merge).
+    // All four columns are nullable: only populated on runs that participate
+    // in a delegation chain. Ships empty; no behaviour change in this chunk.
+    // `handoffSourceRunId` self-references `agent_runs.id`; the FK + ON DELETE
+    // SET NULL live in the migration (see 0216_agent_runs_delegation_telemetry.sql),
+    // NOT here. Declaring `.references(() => agentRuns.id, ...)` in Drizzle
+    // creates a circular type inference that bloats agentRuns to `any` once
+    // the table has enough columns — same reason `parentRunId` and
+    // `parentSpawnRunId` are plain `uuid(...)` declarations above.
+    delegationScope: text('delegation_scope').$type<DelegationScope>(),
+    hierarchyDepth: smallint('hierarchy_depth'),
+    delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
+    handoffSourceRunId: uuid('handoff_source_run_id'),
+
+    // System monitoring — carries a request/job tracing ID into incident events
+    // so a system incident can be correlated back to the agent run that caused it.
+    correlationId: text('correlation_id'),
+    actorId: uuid('actor_id').references(() => workspaceActors.id),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -203,10 +264,10 @@ export const agentRuns = pgTable(
     idempotencyKeyIdx: uniqueIndex('agent_runs_idempotency_key_idx').on(table.idempotencyKey),
     // Stale run cleanup query
     staleRunIdx: index('agent_runs_stale_run_idx').on(table.status, table.lastActivityAt),
-    // Playbooks reverse lookup (migration 0076)
-    playbookStepRunIdx: index('agent_runs_playbook_step_run_id_idx')
-      .on(table.playbookStepRunId)
-      .where(sql`${table.playbookStepRunId} IS NOT NULL`),
+    // Workflows reverse lookup (migration 0076)
+    workflowStepRunIdx: index('agent_runs_workflow_step_run_id_idx')
+      .on(table.workflowStepRunId)
+      .where(sql`${table.workflowStepRunId} IS NOT NULL`),
     // Brain Tree OS adoption P1 (migration 0095) — supports the
     // "latest handoff for this agent" lookup used by getLatestHandoffForAgent
     // and the seedFromPreviousRun read path. Partial so the index stays

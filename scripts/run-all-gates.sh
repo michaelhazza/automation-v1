@@ -67,12 +67,15 @@ run_gate "$SCRIPT_DIR/verify-input-validation.sh"
 
 # ── Sprint 1 (P0.1 + P0.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-pure-helper-convention.sh"
+run_gate "$SCRIPT_DIR/verify-test-quality.sh"
 run_gate "$SCRIPT_DIR/verify-idempotency-strategy-declared.sh"
 run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 
 # ── Sprint 2 (P1.1 + P1.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"
+run_gate "$SCRIPT_DIR/verify-rls-session-var-canon.sh"
+run_gate "$SCRIPT_DIR/verify-rls-protected-tables.sh"
 run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
 
 # ── Sprint 3 (P2.1 + P2.2 + P2.3) gates from docs/improvements-roadmap-spec.md ──
@@ -117,6 +120,17 @@ run_gate "$SCRIPT_DIR/verify-connection-shape.sh"
 
 # ── P3B: Canonical Data Platform — RLS + Visibility Parity ──
 run_gate "$SCRIPT_DIR/verify-visibility-parity.sh"
+
+# ── CRM Query Planner — read-only executor enforcement (spec §13.3 / §16.6) ──
+run_gate "$SCRIPT_DIR/verify-crm-query-planner-read-only.sh"
+
+# ── H1: Derived-data null-safety — advisory in Phase 1 + self-test ──
+# (spec docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §H1)
+# The gate itself exits 0 unconditionally (advisory). The self-test runner
+# below is the actual assertion that the gate's detection logic still fires
+# on a deliberate violation — exits 1 if the fixture is no longer caught.
+run_gate "$SCRIPT_DIR/verify-derived-data-null-safety.sh"
+run_gate "$SCRIPT_DIR/__tests__/derived-data-null-safety/run-fixture-self-test.sh"
 
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="

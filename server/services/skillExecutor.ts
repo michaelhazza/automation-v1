@@ -1,4 +1,17 @@
-import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+﻿import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+import type { HierarchyContext } from '../../shared/types/delegation.js';
+import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
+import { insertOutcomeSafe } from './delegationOutcomeService.js';
+import { insertExecutionEventSafe } from './agentExecutionEventService.js';
+import {
+  resolveWriteSkillScope,
+  classifySpawnTargets,
+  computeReassignDirection,
+  validateReassignScope,
+  evaluateSpawnPreconditions,
+  evaluateReassignPreconditions,
+} from './skillExecutorDelegationPure.js';
+import { computeDescendantIds } from '../tools/config/configSkillHandlersPure.js';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { createHash } from 'crypto';
@@ -47,6 +60,10 @@ const execFileAsync = promisify(execFile);
 // Register worker adapter for execution layer (handles review-gated worker actions)
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
+import { recordIncident } from './incidentIngestor.js';
+import { updateThreadContextHandler } from '../actions/updateThreadContext.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { logger } from '../lib/logger.js';
 
 registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
@@ -132,7 +149,7 @@ export interface SkillExecutionContext {
   /**
    * The principal that initiated this run, when known. Populated by
    * agentExecutionService when the AgentRunRequest carries a userId.
-   * Used by user-scoped tools (e.g. Playbook Studio propose_save) to
+   * Used by user-scoped tools (e.g. Workflow Studio propose_save) to
    * enforce ownership without trusting tool inputs. Undefined for
    * scheduled / system runs that have no initiating user — tools that
    * require a user MUST refuse to run when this is undefined.
@@ -156,6 +173,19 @@ export interface SkillExecutionContext {
   /** Whether this run is a test run — propagated from agentRun.isTestRun. */
   isTestRun?: boolean;
   /**
+   * Depth of the current workflow run chain. 1 = top-level. Incremented on
+   * each workflow.run.start call. MAX_WORKFLOW_DEPTH = 3.
+   * Absent for non-workflow runs (orchestrator job, direct agent invocations).
+   */
+  workflowRunDepth?: number;
+  /**
+   * The conversation this run is associated with, when known. Populated from
+   * AgentRunRequest.conversationId so that worker skills that need to write
+   * conversation-scoped data (e.g. update_thread_context) can resolve the
+   * correct conversation without a DB lookup.
+   */
+  conversationId?: string;
+  /**
    * Loaded context data for this run — populated by agentExecutionService
    * via loadRunContextData before the loop starts. Used by the
    * read_data_source skill handler to answer list/read ops against the
@@ -168,6 +198,13 @@ export interface SkillExecutionContext {
    * Lives on the context so it survives across tool-call iterations.
    */
   readDataSourceCallCount?: number;
+  /**
+   * Immutable snapshot of this agent's position in the subaccount hierarchy.
+   * Built once per run by agentExecutionService BEFORE skill resolution.
+   * Undefined for diagnostic/test runs or when the agent has no subaccount context.
+   * See INV-4 in tasks/builds/paperclip-hierarchy/plan.md.
+   */
+  hierarchy?: Readonly<HierarchyContext>;
   /**
    * Current LLM tool call id, set by skillExecutor.execute() at the top
    * of every dispatch. Sprint 2 P1.1 Layer 3: when present, the per-case
@@ -323,6 +360,19 @@ async function runWithProcessors(
       return { success: false, error: err.reason, retryable: err.options.retry };
     }
     // Non-TripWire failure — apply the action's onFailure directive if declared.
+    // When fail_run fires, record a system incident before propagating.
+    const actionDef = getActionDefinition(toolSlug);
+    if ((actionDef?.onFailure ?? 'retry') === 'fail_run') {
+      recordIncident({
+        source: 'skill',
+        summary: `Skill terminal failure: ${toolSlug} — ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+        errorCode: 'skill_fail_run',
+        stack: err instanceof Error ? err.stack : undefined,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        fingerprintOverride: `skill:${toolSlug}:fail_run`,
+      });
+    }
     return applyOnFailure(toolSlug, err);
   }
 
@@ -549,24 +599,28 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWithActionAudit('monitor_webpage', input, context, () => executeMonitorWebpage(input, context));
   },
 
-  // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
-  playbook_read_existing: async (input) => {
-    return executePlaybookReadExisting(input);
+  // ── Workflow Studio tools (system-admin only; agent: Workflow-author) ──
+  workflow_read_existing: async (input) => {
+    return executeWorkflowReadExisting(input);
   },
-  playbook_validate: async (input) => {
-    return executePlaybookValidate(input);
+  workflow_validate: async (input) => {
+    return executeWorkflowValidate(input);
   },
-  playbook_simulate: async (input) => {
-    return executePlaybookSimulate(input);
+  workflow_simulate: async (input) => {
+    return executeWorkflowSimulate(input);
   },
-  playbook_estimate_cost: async (input) => {
-    return executePlaybookEstimateCost(input);
+  workflow_estimate_cost: async (input) => {
+    return executeWorkflowEstimateCost(input);
   },
-  playbook_propose_save: async (input, context) => {
-    return executePlaybookProposeSave(input, context);
+  workflow_propose_save: async (input, context) => {
+    return executeWorkflowProposeSave(input, context);
   },
   import_n8n_workflow: async (input) => {
     return executeImportN8nWorkflow(input);
+  },
+  'workflow.run.start': async (input, context) => {
+    const { handleWorkflowRunStartSkill } = await import('./workflowRunStartSkillService.js');
+    return handleWorkflowRunStartSkill(input, context);
   },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──
@@ -1369,6 +1423,76 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   'crm.create_task': async (input, context) => {
     return proposeReviewGatedAction('crm.create_task', input, context);
   },
+
+  // ── CRM Query Planner (read-only, not review-gated) ─────────────────────
+  // Agent-facing tool per spec §18.2 — dispatches through the planner
+  // pipeline (Stage 1 registry / Stage 2 cache / Stage 3 LLM fallback /
+  // canonical + live + hybrid executors) and returns the BriefResultContract
+  // artefact set. The route at /api/crm-query-planner/query is the user
+  // surface; this handler is the agent surface.
+  'crm.query': async (input, context) => {
+    // Resolve target subaccount — prefer the explicit tool-input value,
+    // falling back to the agent's bound subaccount context.
+    const suppliedSubaccountId = typeof input.subaccountId === 'string' && input.subaccountId.length > 0
+      ? input.subaccountId
+      : null;
+    const targetSubaccountId = suppliedSubaccountId ?? context.subaccountId;
+
+    if (!targetSubaccountId) {
+      return {
+        success: false,
+        error:   'missing_permission',
+        message: 'crm.query requires a subaccount — supply input.subaccountId or bind the agent to a subaccount.',
+      };
+    }
+
+    // Horizontal-access guard (mirrors intelligenceSkillExecutor.executeQuerySubaccountCohort):
+    // a regular subaccount agent may only read its own subaccount. Only
+    // org-subaccount agents (allowedSubaccountIds === null) may cross
+    // boundaries, and even then only to subaccounts in their allowlist if
+    // the array form is present. Skip when the caller made no explicit
+    // cross-subaccount request (input.subaccountId matches context or was omitted).
+    if (suppliedSubaccountId && suppliedSubaccountId !== context.subaccountId) {
+      const allowed = context.allowedSubaccountIds;
+      const isOrgScope = allowed === null || allowed === undefined;
+      const inAllowlist = Array.isArray(allowed) && allowed.includes(suppliedSubaccountId);
+      if (!isOrgScope && !inAllowlist) {
+        return {
+          success: false,
+          error:   'missing_permission',
+          message: 'Agent is not authorised to read the specified subaccount.',
+        };
+      }
+    }
+
+    const { runQuery } = await import('./crmQueryPlanner/index.js');
+    const result = await runQuery(
+      {
+        rawIntent:    String(input.rawIntent ?? ''),
+        subaccountId: targetSubaccountId,
+        briefId:      typeof input.briefId === 'string' ? input.briefId : undefined,
+      },
+      {
+        orgId:                  context.organisationId,
+        organisationId:         context.organisationId,
+        subaccountId:           targetSubaccountId,
+        runId:                  context.runId,
+        briefId:                typeof input.briefId === 'string' ? input.briefId : undefined,
+        principalType:          'agent',
+        principalId:            context.agentId,
+        teamIds:                [],
+        // Agent-invoked — the agent's own capabilityMap gated the skill
+        // dispatch upstream (skillExecutor.execute). The planner's
+        // validator treats unknown `canonical.*` slugs as skipped per
+        // §12.1, so the route's subaccount-capability union is not
+        // required here — `crm.query` is the only hard-gated slug.
+        callerCapabilities:     new Set<string>(['crm.query']),
+        defaultSenderIdentifier: undefined,
+      },
+    );
+    return { success: true, ...result };
+  },
+
   notify_operator: async (input, context) => {
     return proposeReviewGatedAction('notify_operator', input, context);
   },
@@ -1452,6 +1576,23 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     );
   },
 
+  // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ──────────
+  ask_clarifying_questions: async (input, context) => {
+    const { executeAskClarifyingQuestions } = await import('../tools/capabilities/askClarifyingQuestionsHandler.js');
+    return executeAskClarifyingQuestions(
+      context,
+      input as unknown as Parameters<typeof executeAskClarifyingQuestions>[1],
+    );
+  },
+
+  challenge_assumptions: async (input, context) => {
+    const { executeChallengeAssumptions } = await import('../tools/capabilities/challengeAssumptionsHandler.js');
+    return executeChallengeAssumptions(
+      context,
+      input as unknown as Parameters<typeof executeChallengeAssumptions>[1],
+    );
+  },
+
   // ── Sprint 5 P4.1: Clarification escape hatch ──────────────────
   ask_clarifying_question: async (input, context) => {
     const { executeAskClarifyingQuestion } = await import('../tools/internal/askClarifyingQuestion.js');
@@ -1480,14 +1621,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWeeklyDigestGather(input);
   },
 
-  // Action-call alias used by the playbook runner (see weekly-digest.playbook.ts)
+  // Action-call alias used by the Workflow runner (see weekly-digest.Workflow.ts)
   config_weekly_digest_gather: async (input) => {
     const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
     return executeWeeklyDigestGather(input);
   },
 
-  // ── Phase 3 S22: Deliver playbook output via deliveryService ─────
-  config_deliver_playbook_output: async (input, context) => {
+  // ── Phase 3 S22: Deliver Workflow output via deliveryService ─────
+  config_deliver_workflow_output: async (input, context) => {
     const { deliveryService } = await import('./deliveryService.js');
     const {
       subaccountId,
@@ -1676,13 +1817,13 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
 
   // Phase G — portal / email skills (spec §11.6) — action_call only.
-  config_publish_playbook_output_to_portal: async (input, context) => {
-    const { executeConfigPublishPlaybookOutputToPortal } = await import('../tools/config/playbookSkillHandlers.js');
-    return executeWithActionAudit('config_publish_playbook_output_to_portal', input, context, () => executeConfigPublishPlaybookOutputToPortal(input, context));
+  config_publish_workflow_output_to_portal: async (input, context) => {
+    const { executeConfigPublishWorkflowOutputToPortal } = await import('../tools/config/workflowSkillHandlers.js');
+    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, () => executeConfigPublishWorkflowOutputToPortal(input, context));
   },
-  config_send_playbook_email_digest: async (input, context) => {
-    const { executeConfigSendPlaybookEmailDigest } = await import('../tools/config/playbookSkillHandlers.js');
-    return executeWithActionAudit('config_send_playbook_email_digest', input, context, () => executeConfigSendPlaybookEmailDigest(input, context));
+  config_send_workflow_email_digest: async (input, context) => {
+    const { executeConfigSendWorkflowEmailDigest } = await import('../tools/config/workflowSkillHandlers.js');
+    return executeWithActionAudit('config_send_workflow_email_digest', input, context, () => executeConfigSendWorkflowEmailDigest(input, context));
   },
 
   // Onboarding smart-skip — scrapes website to pre-fill brand/audience signals.
@@ -1702,6 +1843,343 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       success: true,
       result: renderDictionary(CANONICAL_DICTIONARY_REGISTRY, { tableFilter, includeExamples }),
     };
+  },
+
+  // ── System Monitoring Agent skills ──────────────────────────────────
+  read_agent_run: async (input, context) => {
+    const { executeReadAgentRun } = await import('./systemMonitor/skills/readAgentRun.js');
+    return executeReadAgentRun(input, context);
+  },
+  read_baseline: async (input, context) => {
+    const { executeReadBaseline } = await import('./systemMonitor/skills/readBaseline.js');
+    return executeReadBaseline(input, context);
+  },
+  read_connector_state: async (input, context) => {
+    const { executeReadConnectorState } = await import('./systemMonitor/skills/readConnectorState.js');
+    return executeReadConnectorState(input, context);
+  },
+  read_dlq_recent: async (input, context) => {
+    const { executeReadDlqRecent } = await import('./systemMonitor/skills/readDlqRecent.js');
+    return executeReadDlqRecent(input, context);
+  },
+  read_heuristic_fires: async (input, context) => {
+    const { executeReadHeuristicFires } = await import('./systemMonitor/skills/readHeuristicFires.js');
+    return executeReadHeuristicFires(input, context);
+  },
+  read_incident: async (input, context) => {
+    const { executeReadIncident } = await import('./systemMonitor/skills/readIncident.js');
+    return executeReadIncident(input, context);
+  },
+  read_logs_for_correlation_id: async (input, context) => {
+    const { executeReadLogsForCorrelationId } = await import('./systemMonitor/skills/readLogsForCorrelationId.js');
+    return executeReadLogsForCorrelationId(input, context);
+  },
+  read_recent_runs_for_agent: async (input, context) => {
+    const { executeReadRecentRunsForAgent } = await import('./systemMonitor/skills/readRecentRunsForAgent.js');
+    return executeReadRecentRunsForAgent(input, context);
+  },
+  read_skill_execution: async (input, context) => {
+    const { executeReadSkillExecution } = await import('./systemMonitor/skills/readSkillExecution.js');
+    return executeReadSkillExecution(input, context);
+  },
+  write_diagnosis: async (input, context) => {
+    const { executeWriteDiagnosis } = await import('./systemMonitor/skills/writeDiagnosis.js');
+    return executeWriteDiagnosis(input, context);
+  },
+  write_event: async (input, context) => {
+    const { executeWriteEvent } = await import('./systemMonitor/skills/writeEvent.js');
+    return executeWriteEvent(input, context);
+  },
+
+  // ── Sub-Account Optimiser: generic agent-output primitive (Chunk 1) ────────
+  // output.recommend — any agent with this skill can surface operator-facing
+  // recommendations via the generic agent_recommendations primitive.
+  // Spec: docs/sub-account-optimiser-spec.md §6.2
+  'output.recommend': async (input, context) => {
+    // Requires an agent execution context — non-agent callers are rejected.
+    if (!context.agentId) {
+      return {
+        success: false,
+        error: 'output.recommend requires an agent execution context (agentId missing)',
+      };
+    }
+
+    const {
+      scope_type,
+      scope_id,
+      category,
+      severity,
+      title,
+      body,
+      evidence,
+      action_hint,
+      dedupe_key,
+    } = input as Record<string, unknown>;
+
+    // Validate required fields
+    if (!scope_type || (scope_type !== 'org' && scope_type !== 'subaccount')) {
+      return { success: false, error: 'scope_type must be "org" or "subaccount"' };
+    }
+    if (!scope_id || typeof scope_id !== 'string') {
+      return { success: false, error: 'scope_id must be a valid UUID string' };
+    }
+    // Basic UUID validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(scope_id)) {
+      return { success: false, error: 'scope_id must be a valid UUID' };
+    }
+    if (!severity || !['info', 'warn', 'critical'].includes(severity as string)) {
+      return { success: false, error: 'severity must be "info", "warn", or "critical"' };
+    }
+    if (!category || typeof category !== 'string') {
+      return { success: false, error: 'category is required' };
+    }
+    // Validate three-segment format
+    const categoryParts = (category as string).split('.');
+    if (categoryParts.length < 3) {
+      return {
+        success: false,
+        error: 'category must follow <agent_namespace>.<area>.<finding> format (three segments)',
+      };
+    }
+    if (!title || typeof title !== 'string') {
+      return { success: false, error: 'title is required' };
+    }
+    if (!body || typeof body !== 'string') {
+      return { success: false, error: 'body is required' };
+    }
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+      return { success: false, error: 'evidence must be a plain object' };
+    }
+    if (!dedupe_key || typeof dedupe_key !== 'string') {
+      return { success: false, error: 'dedupe_key is required' };
+    }
+    // Validate action_hint: null/omitted accepted; non-null must match scheme://path format
+    if (action_hint !== undefined && action_hint !== null) {
+      if (typeof action_hint !== 'string' || action_hint === '') {
+        return { success: false, error: 'action_hint must be null/omitted or a non-empty URI string' };
+      }
+      const actionHintRegex = /^[a-z][a-z0-9-]*:\/\/[^\s]+$/;
+      if (!actionHintRegex.test(action_hint as string)) {
+        return {
+          success: false,
+          error: 'action_hint must match pattern ^[a-z][a-z0-9-]*://[^\\s]+$ (e.g. configuration-assistant://agent/id?focus=budget)',
+        };
+      }
+    }
+
+    const { upsertRecommendation } = await import('./agentRecommendationsService.js');
+    const result = await upsertRecommendation(
+      {
+        organisationId: context.organisationId,
+        agentId: context.agentId,
+      },
+      {
+        scope_type: scope_type as 'org' | 'subaccount',
+        scope_id: scope_id as string,
+        category: category as string,
+        severity: severity as 'info' | 'warn' | 'critical',
+        title: title as string,
+        body: body as string,
+        evidence: evidence as Record<string, unknown>,
+        action_hint: (action_hint as string | null | undefined) ?? null,
+        dedupe_key: dedupe_key as string,
+      },
+    );
+    return { success: true, ...result };
+  },
+
+  // ── Thread context (Chunk A — per-conversation living doc) ───────────────
+  update_thread_context: async (input, context) => {
+    if (!context.conversationId) {
+      return { success: false, error: 'update_thread_context requires a conversation context — this run has no associated conversation.' };
+    }
+    return executeWithActionAudit('update_thread_context', input, context, () =>
+      updateThreadContextHandler(input, {
+        conversationId: context.conversationId!,
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+      }),
+    );
+  },
+
+  // ── Sub-Account Optimiser: scan skills (Chunk 5) ─────────────────────────
+  // Each scan skill is a thin wrapper: query module → evaluator → EvaluatorOutput[].
+  // All scan skills are read-only (no action record, no side effects).
+  // Spec: docs/sub-account-optimiser-spec.md §5
+
+  'optimiser.scan_agent_budget': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_agent_budget');
+    try {
+      const { module: agentBudgetModule } = await import('./optimiser/queries/agentBudget.js');
+      const { evaluate } = await import('./optimiser/recommendations/agentBudget.js');
+      const tx = getOrgScopedDb('optimiser.scan_agent_budget');
+      const rows = await agentBudgetModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: agentBudgetModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.agent.over_budget', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_workflow_escalations': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_workflow_escalations');
+    try {
+      const { module: escalationRateModule } = await import('./optimiser/queries/escalationRate.js');
+      const { evaluate } = await import('./optimiser/recommendations/playbookEscalation.js');
+      const tx = getOrgScopedDb('optimiser.scan_workflow_escalations');
+      const rows = await escalationRateModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: escalationRateModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.playbook.escalation_rate', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_skill_latency': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_skill_latency');
+    try {
+      const { skillLatencyModule, peerMediansViewIsPopulated, runSkillLatencyQuery } = await import('./optimiser/queries/skillLatency.js');
+      const { evaluateSkillSlow } = await import('./optimiser/recommendations/skillSlow.js');
+      // peerMediansViewIsPopulated manages its own admin connection internally
+      const populated = await peerMediansViewIsPopulated();
+      if (!populated) {
+        logger.info('optimiser.scan.partial', { scanCategory: skillLatencyModule.category, medianVersion: 0, subaccountId });
+        return { success: true, outputs: [] };
+      }
+      // allowRlsBypass: reading cross-tenant peer medians view (optimiser_skill_peer_medians) — read-only aggregate, no tenant data written
+      const { withAdminConnectionGuarded: adminGuarded } = await import('../lib/rlsBoundaryGuard.js');
+      let outputs: import('./optimiser/recommendations/types.js').EvaluatorOutput[] = [];
+      await adminGuarded(
+        { source: 'optimiser.scan_skill_latency', allowRlsBypass: false },
+        async (adminTx) => {
+          const versionRows = await adminTx.execute<{ max_version: number }>(
+            (await import('drizzle-orm')).sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
+          );
+          const medianVersion = versionRows[0]?.max_version ?? 0;
+          const rows = await runSkillLatencyQuery(adminTx, subaccountId, medianVersion);
+          logger.info('optimiser.scan.completed', { scanCategory: skillLatencyModule.category, resultCount: rows.length, subaccountId });
+          outputs = evaluateSkillSlow(rows, { subaccountId, organisationId: context.organisationId, medianVersion, priorRecsByDedupe: new Map() });
+        },
+      );
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.skill.slow', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_inactive_workflows': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_inactive_workflows');
+    try {
+      const { module: inactiveWorkflowsModule } = await import('./optimiser/queries/inactiveWorkflows.js');
+      const { evaluate } = await import('./optimiser/recommendations/inactiveWorkflow.js');
+      const tx = getOrgScopedDb('optimiser.scan_inactive_workflows');
+      const rows = await inactiveWorkflowsModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: inactiveWorkflowsModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.inactive.workflow', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_escalation_phrases': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_escalation_phrases');
+    try {
+      const { module: escalationPhrasesModule } = await import('./optimiser/queries/escalationPhrases.js');
+      const { evaluate } = await import('./optimiser/recommendations/repeatPhrase.js');
+      const tx = getOrgScopedDb('optimiser.scan_escalation_phrases');
+      const rows = await escalationPhrasesModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: escalationPhrasesModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.escalation.repeat_phrase', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_memory_citation': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_memory_citation');
+    try {
+      const { module: memoryCitationModule } = await import('./optimiser/queries/memoryCitation.js');
+      const { evaluate } = await import('./optimiser/recommendations/memoryCitation.js');
+      const tx = getOrgScopedDb('optimiser.scan_memory_citation');
+      const rows = await memoryCitationModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: memoryCitationModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.memory.low_citation_waste', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_routing_uncertainty': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_routing_uncertainty');
+    try {
+      const { module: routingUncertaintyModule } = await import('./optimiser/queries/routingUncertainty.js');
+      const { evaluate } = await import('./optimiser/recommendations/routingUncertainty.js');
+      const tx = getOrgScopedDb('optimiser.scan_routing_uncertainty');
+      const rows = await routingUncertaintyModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: routingUncertaintyModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.agent.routing_uncertainty', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_cache_efficiency': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_cache_efficiency');
+    try {
+      const { module: cacheEfficiencyModule } = await import('./optimiser/queries/cacheEfficiency.js');
+      const { evaluate } = await import('./optimiser/recommendations/cacheEfficiency.js');
+      const tx = getOrgScopedDb('optimiser.scan_cache_efficiency');
+      const rows = await cacheEfficiencyModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: cacheEfficiencyModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.llm.cache_poor_reuse', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ─────────────────────────────
+  // Thin shells over chargeRouterService.proposeCharge. Each handler validates
+  // input, resolves spending context, normalises merchant (invariant 21), and
+  // delegates to spendSkillHandlers. Dual registration enforced per invariant 14:
+  // every spendsMoney:true ACTION_REGISTRY entry has a matching SKILL_HANDLERS entry.
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
+  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
+  pay_invoice: async (input, context) => {
+    const { executePayInvoice } = await import('./spendSkillHandlers.js');
+    return executePayInvoice(input, context);
+  },
+  purchase_resource: async (input, context) => {
+    const { executePurchaseResource } = await import('./spendSkillHandlers.js');
+    return executePurchaseResource(input, context);
+  },
+  subscribe_to_service: async (input, context) => {
+    const { executeSubscribeToService } = await import('./spendSkillHandlers.js');
+    return executeSubscribeToService(input, context);
+  },
+  top_up_balance: async (input, context) => {
+    const { executeTopUpBalance } = await import('./spendSkillHandlers.js');
+    return executeTopUpBalance(input, context);
+  },
+  issue_refund: async (input, context) => {
+    const { executeIssueRefund } = await import('./spendSkillHandlers.js');
+    return executeIssueRefund(input, context);
   },
 };
 
@@ -2139,7 +2617,9 @@ async function executeReadWorkspace(
         items: subtasks.map(serializeTask),
         total: subtasks.length,
         allDone: subtasks.length > 0 && subtasks.every(t => t.status === 'done'),
-        anyBlocked: subtasks.some(t => t.status === 'blocked'),
+        // Task status enum (server/db/schema/tasks.ts) has no 'blocked' value today;
+        // field reserved for a future status. Always false at runtime under the current schema.
+        anyBlocked: false,
       };
     }
 
@@ -3115,7 +3595,7 @@ async function executeMoveTask(
   try {
     // Get current item to find subaccount
     const item = await taskService.getTask(taskId, context.organisationId);
-    const position = await taskService._nextPosition(item.subaccountId!, status);
+    const position = await taskService._nextPosition(item.subaccountId!, status as Parameters<typeof taskService._nextPosition>[1]);
 
     const updated = await taskService.moveTask(
       taskId,
@@ -3203,14 +3683,13 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       sa: subaccountAgents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, req.subaccountId),
         eq(subaccountAgents.agentId, req.agentId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 
@@ -3331,12 +3810,32 @@ async function executeReassignTask(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
+  // --- STEP 1: Evaluate preconditions (hierarchy context) ---
+  const reassignPre = evaluateReassignPreconditions({ hierarchy: context.hierarchy });
+  if (!reassignPre.ok) {
+    const errorCtx = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      skillSlug: 'reassign_task',
+    };
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: HIERARCHY_CONTEXT_MISSING, message: 'Hierarchy context is missing', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
+  }
+
+  const hierarchy = context.hierarchy!;
+
+  // --- STEP 2: Input parsing ---
   const taskId = String(input.task_id ?? '');
   const handoffContext = input.handoff_context ? String(input.handoff_context) : undefined;
 
   if (!taskId) return { success: false, error: 'task_id is required' };
 
-  // Support both singular and plural agent assignment
   const rawSingular = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
   const rawPlural = Array.isArray(input.assigned_agent_ids)
     ? (input.assigned_agent_ids as unknown[]).map(String)
@@ -3350,20 +3849,144 @@ async function executeReassignTask(
     return { success: false, error: 'Cannot reassign a task to yourself. Choose a different agent.' };
   }
 
+  // --- STEP 3: Depth check ---
   const currentDepth = context.handoffDepth ?? 0;
   if (currentDepth + 1 > MAX_HANDOFF_DEPTH) {
     return { success: false, error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot reassign further.` };
   }
 
+  // --- STEP 4: Compute effective scope ---
+  const effectiveScope = resolveWriteSkillScope({ rawScope: input.delegationScope, hierarchy });
+
+  // --- STEP 5: Resolve saLinks and validate scope for each target ---
+  // Load descendant ids once if needed (single round trip for all targets)
+  let descendantIds: string[] = [];
+  if (effectiveScope === 'descendants') {
+    const rosterRows = await db
+      .select({
+        subaccountAgentId: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,
+      })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.organisationId, context.organisationId),
+          eq(subaccountAgents.isActive, true)
+        )
+      );
+    descendantIds = computeDescendantIds({
+      callerSubaccountAgentId: hierarchy.agentId,
+      roster: rosterRows.map(r => ({
+        subaccountAgentId: r.subaccountAgentId,
+        agentId: r.agentId,
+        parentSubaccountAgentId: r.parentSubaccountAgentId ?? null,
+      })),
+    });
+  }
+
+  const isCallerRoot = hierarchy.rootId === hierarchy.agentId;
+
+  // Validate all targets; collect resolved saLinks + directions
+  const resolvedAssignees: Array<{ agentId: string; saLinkId: string; direction: 'up' | 'down' | 'lateral' }> = [];
+
+  for (const agentId of assignedAgentIds) {
+    // Look up the subaccount agent link for this target
+    const [saLinkRow] = await db
+      .select({ sa: subaccountAgents })
+      .from(subaccountAgents)
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.agentId, agentId),
+          eq(subaccountAgents.isActive, true),
+          eq(agents.status, 'active'),
+        )
+      );
+
+    if (!saLinkRow) {
+      return { success: false, error: `Agent ${agentId} not found or inactive in this subaccount` };
+    }
+
+    const targetSaId = saLinkRow.sa.id;
+
+    // Compute direction — upward escalation check BEFORE scope validation (INV-2 ordering)
+    const direction = computeReassignDirection({
+      targetSubaccountAgentId: targetSaId,
+      parentId: hierarchy.parentId,
+      childIds: hierarchy.childIds,
+      descendantIds,
+    });
+
+    // Upward escalation always permitted — skip scope check
+    if (direction === 'up') {
+      resolvedAssignees.push({ agentId, saLinkId: targetSaId, direction });
+      continue;
+    }
+
+    // Validate scope for non-upward targets
+    const scopeResult = validateReassignScope({
+      targetSubaccountAgentId: targetSaId,
+      effectiveScope,
+      childIds: hierarchy.childIds,
+      descendantIds,
+      isCallerRoot,
+    });
+
+    if (!scopeResult.valid) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: targetSaId,
+        delegationScope: effectiveScope,
+        outcome: 'rejected',
+        reason: scopeResult.errorCode,
+        delegationDirection: direction,
+      });
+      const callerChildIds = hierarchy.childIds.slice(0, 50);
+      const errorCtx: Record<string, unknown> = scopeResult.errorCode === 'cross_subtree_not_permitted'
+        ? { runId: context.runId, callerAgentId: context.agentId, callerParentId: hierarchy.parentId, suggestedScope: hierarchy.childIds.length > 0 ? 'children' : 'descendants' }
+        : { runId: context.runId, callerAgentId: context.agentId, targetAgentId: agentId, delegationScope: effectiveScope, callerChildIds };
+      if (scopeResult.errorCode === 'delegation_out_of_scope' && hierarchy.childIds.length > 50) {
+        errorCtx.truncated = true;
+      }
+      void insertExecutionEventSafe({
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+        payload: { eventType: 'tool.error', critical: false, error: { code: scopeResult.errorCode, message: scopeResult.errorCode === 'cross_subtree_not_permitted' ? 'Cross-subtree reassignment requires the caller to be the subaccount root.' : 'Reassign target is outside delegation scope.', context: errorCtx } },
+        sourceService: 'skillExecutor',
+      });
+      return { success: false, error: scopeResult.errorCode, context: errorCtx };
+    }
+
+    resolvedAssignees.push({ agentId, saLinkId: targetSaId, direction });
+  }
+
+  // Determine the canonical direction to store on the task.
+  // For single-target (typical case), use the computed direction.
+  // For multi-target, use 'down' if any target is down, else use the first target's direction.
+  const taskDelegationDirection: 'up' | 'down' | 'lateral' =
+    resolvedAssignees.some(a => a.direction === 'down') ? 'down' :
+    resolvedAssignees.some(a => a.direction === 'up') ? 'up' :
+    'lateral';
+
+  // --- STEP 6: Execute handoff (critical path) ---
   try {
     await taskService.updateTask(taskId, context.organisationId, {
       assignedAgentIds,
     });
 
+    // Write delegation_direction on the task (critical path)
     await db.update(tasks).set({
       handoffSourceRunId: context.runId,
       handoffContext: handoffContext ? { message: handoffContext } : null,
       handoffDepth: currentDepth + 1,
+      delegationDirection: taskDelegationDirection,
       updatedAt: new Date(),
     // guard-ignore-next-line: org-scoped-writes reason="taskId passed through taskService.updateTask above which verifies org membership; this is a supplemental metadata update on the same task"
     }).where(eq(tasks.id, taskId));
@@ -3376,10 +3999,10 @@ async function executeReassignTask(
 
     // Trigger a handoff for every assigned agent
     const handoffResults = await Promise.all(
-      assignedAgentIds.map(agentId =>
+      resolvedAssignees.map(a =>
         enqueueHandoff({
           taskId,
-          agentId,
+          agentId: a.agentId,
           subaccountId: context.subaccountId!,
           organisationId: context.organisationId,
           sourceRunId: context.runId,
@@ -3389,6 +4012,21 @@ async function executeReassignTask(
       )
     );
     const handoffsEnqueued = handoffResults.filter(Boolean).length;
+
+    // Write accepted outcome rows (fire-and-forget per INV-3)
+    for (const a of resolvedAssignees) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: a.saLinkId,
+        delegationScope: effectiveScope,
+        outcome: 'accepted',
+        reason: null,
+        delegationDirection: a.direction,
+      });
+    }
 
     return {
       success: true,
@@ -3411,11 +4049,7 @@ async function executeSpawnSubAgents(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  // Prevent nesting
-  if (context.isSubAgent) {
-    return { success: false, error: 'Sub-agents cannot spawn their own sub-agents. Only one level of nesting is allowed.' };
-  }
-
+  // --- STEP 1: Validate input structure ---
   const subTasks = input.sub_tasks as Array<{ title: string; brief: string; assigned_agent_id: string }> | undefined;
 
   if (!subTasks || !Array.isArray(subTasks)) {
@@ -3424,15 +4058,75 @@ async function executeSpawnSubAgents(
   if (subTasks.length < 2 || subTasks.length > MAX_SUB_AGENTS) {
     return { success: false, error: `sub_tasks must contain 2-${MAX_SUB_AGENTS} items` };
   }
-
-  // Validate each sub-task
   for (const st of subTasks) {
     if (!st.title || !st.brief || !st.assigned_agent_id) {
       return { success: false, error: 'Each sub-task requires title, brief, and assigned_agent_id' };
     }
   }
 
-  // Calculate per-child budget
+  // --- STEP 2: Compute effective scope ---
+  const effectiveScope = context.hierarchy
+    ? resolveWriteSkillScope({ rawScope: input.delegationScope, hierarchy: context.hierarchy })
+    : 'children'; // dummy — evaluateSpawnPreconditions rejects before using this
+
+  // --- STEP 3: Evaluate preconditions (hierarchy + depth + subaccount-scope) ---
+  const spawnPre = evaluateSpawnPreconditions({
+    hierarchy: context.hierarchy,
+    currentHandoffDepth: context.handoffDepth ?? 0,
+    maxHandoffDepth: MAX_HANDOFF_DEPTH,
+    effectiveScope,
+  });
+
+  if (!spawnPre.ok) {
+    if (spawnPre.errorCode === 'hierarchy_context_missing') {
+      const errorCtx = { runId: context.runId, callerAgentId: context.agentId, skillSlug: 'spawn_sub_agents' };
+      void insertExecutionEventSafe({
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+        payload: { eventType: 'tool.error', critical: false, error: { code: HIERARCHY_CONTEXT_MISSING, message: 'Hierarchy context is missing', context: errorCtx } },
+        sourceService: 'skillExecutor',
+      });
+      return { success: false, error: HIERARCHY_CONTEXT_MISSING, context: errorCtx };
+    }
+    if (spawnPre.errorCode === 'max_handoff_depth_exceeded') {
+      return { success: false, error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot spawn sub-agents at this depth.` };
+    }
+    // cross_subtree_not_permitted
+    const hierarchy = context.hierarchy!;
+    const errorCtx = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      callerParentId: hierarchy.parentId,
+      suggestedScope: hierarchy.childIds.length > 0 ? 'children' : 'descendants',
+    };
+    for (const st of subTasks) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: st.assigned_agent_id,
+        delegationScope: effectiveScope,
+        outcome: 'rejected',
+        reason: CROSS_SUBTREE_NOT_PERMITTED,
+        delegationDirection: 'lateral',
+      });
+    }
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: CROSS_SUBTREE_NOT_PERMITTED, message: 'Cross-subtree spawn is not permitted. Use children or descendants scope.', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: CROSS_SUBTREE_NOT_PERMITTED, context: errorCtx };
+  }
+
+  const hierarchy = context.hierarchy!;
+  const safeScope = spawnPre.effectiveScope;
+
+  // --- STEP 4: Budget check ---
   const totalBudget = context.tokenBudget ?? 30000;
   const elapsed = context.startTime ? Date.now() - context.startTime : 0;
   const totalTimeout = context.timeoutMs ?? 300000;
@@ -3444,48 +4138,123 @@ async function executeSpawnSubAgents(
     return { success: false, error: `Insufficient token budget remaining for ${subTasks.length} sub-agents. Need at least ${MIN_SUB_AGENT_TOKEN_BUDGET * subTasks.length} tokens.` };
   }
 
+  // --- STEP 7: Resolve saLinks for all targets ---
+  // Must be done before scope classification because we need subaccountAgentIds.
+  const resolvedTargets: Array<{ st: typeof subTasks[0]; saLink: { id: string; agentId: string } }> = [];
+  for (const st of subTasks) {
+    const [saLink] = await db
+      .select({ sa: subaccountAgents })
+      .from(subaccountAgents)
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.agentId, st.assigned_agent_id),
+          eq(subaccountAgents.isActive, true),
+          eq(agents.status, 'active'),
+        )
+      );
+
+    if (!saLink) {
+      return { success: false, error: `Agent ${st.assigned_agent_id} not found or inactive in this subaccount` };
+    }
+
+    resolvedTargets.push({ st, saLink: { id: saLink.sa.id, agentId: st.assigned_agent_id } });
+  }
+
+  // --- STEP 8: Compute descendant ids if needed ---
+  let descendantIds: string[] = [];
+  if (safeScope === 'descendants') {
+    const rosterRows = await db
+      .select({
+        subaccountAgentId: subaccountAgents.id,
+        agentId: subaccountAgents.agentId,
+        parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,
+      })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, context.subaccountId!),
+          eq(subaccountAgents.organisationId, context.organisationId),
+          eq(subaccountAgents.isActive, true)
+        )
+      );
+    descendantIds = computeDescendantIds({
+      callerSubaccountAgentId: hierarchy.agentId,
+      roster: rosterRows.map(r => ({
+        subaccountAgentId: r.subaccountAgentId,
+        agentId: r.agentId,
+        parentSubaccountAgentId: r.parentSubaccountAgentId ?? null,
+      })),
+    });
+  }
+
+  // --- STEP 9: Scope classification ---
+  const { accepted, rejected } = classifySpawnTargets({
+    proposedSubaccountAgentIds: resolvedTargets.map(t => t.saLink.id),
+    effectiveScope: safeScope,
+    childIds: hierarchy.childIds,
+    descendantIds,
+  });
+
+  if (rejected.length > 0) {
+    const rejectedTargets = resolvedTargets.filter(t => rejected.includes(t.saLink.id));
+    for (const t of rejectedTargets) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: t.saLink.id,
+        delegationScope: safeScope,
+        outcome: 'rejected',
+        reason: DELEGATION_OUT_OF_SCOPE,
+        delegationDirection: 'down',
+      });
+    }
+    const rejectedAgentIds = rejectedTargets.map(t => t.saLink.agentId);
+    const callerChildIds = hierarchy.childIds.slice(0, 50);
+    const errorCtx: Record<string, unknown> = {
+      runId: context.runId,
+      callerAgentId: context.agentId,
+      targetAgentId: rejectedAgentIds[0],
+      delegationScope: safeScope,
+      callerChildIds,
+    };
+    if (hierarchy.childIds.length > 50) errorCtx.truncated = true;
+    void insertExecutionEventSafe({
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? null,
+      payload: { eventType: 'tool.error', critical: false, error: { code: DELEGATION_OUT_OF_SCOPE, message: 'One or more spawn targets are outside delegation scope.', context: errorCtx } },
+      sourceService: 'skillExecutor',
+    });
+    return { success: false, error: DELEGATION_OUT_OF_SCOPE, context: errorCtx };
+  }
+
+  // --- STEP 10: Execute spawn ---
   try {
-    // Create task cards and resolve agent links
+    // Create task cards for all accepted targets
     const childJobs: Array<{
       task: { id: string; title: string };
       saLink: { id: string; agentId: string };
     }> = [];
 
-    for (const st of subTasks) {
+    for (const t of resolvedTargets) {
       const task = await taskService.createTask(
         context.organisationId,
         context.subaccountId!,
         {
-          title: st.title.slice(0, MAX_TASK_TITLE_LENGTH),
-          brief: st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
+          title: t.st.title.slice(0, MAX_TASK_TITLE_LENGTH),
+          brief: t.st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
           status: 'in_progress',
-          assignedAgentId: st.assigned_agent_id,
+          assignedAgentId: t.st.assigned_agent_id,
           createdByAgentId: context.agentId,
           isSubTask: true,
-          parentTaskId: context.runId, // Link to parent's task context
+          parentTaskId: context.runId,
         }
       );
-
-      // Find subaccount agent link
-      const [saLink] = await db
-        .select({ sa: subaccountAgents })
-        .from(subaccountAgents)
-        .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-        .where(
-          and(
-            eq(subaccountAgents.subaccountId, context.subaccountId!),
-            eq(subaccountAgents.agentId, st.assigned_agent_id),
-            eq(subaccountAgents.isActive, true),
-            eq(agents.status, 'active'),
-            isNull(agents.deletedAt)
-          )
-        );
-
-      if (!saLink) {
-        return { success: false, error: `Agent ${st.assigned_agent_id} not found or inactive in this subaccount` };
-      }
-
-      childJobs.push({ task, saLink: { id: saLink.sa.id, agentId: st.assigned_agent_id } });
+      childJobs.push({ task, saLink: t.saLink });
     }
 
     // Execute all children in parallel
@@ -3513,6 +4282,8 @@ async function executeSpawnSubAgents(
             },
             isSubAgent: true,
             parentSpawnRunId: context.runId,
+            delegationScope: safeScope,
+            delegationDirection: 'down',
           });
 
           return {
@@ -3536,6 +4307,21 @@ async function executeSpawnSubAgents(
         }
       })
     );
+
+    // Write accepted outcome rows (fire-and-forget per INV-3)
+    for (const t of resolvedTargets) {
+      void insertOutcomeSafe({
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        runId: context.runId,
+        callerAgentId: hierarchy.agentId,
+        targetAgentId: t.saLink.id,
+        delegationScope: safeScope,
+        outcome: 'accepted',
+        reason: null,
+        delegationDirection: 'down',
+      });
+    }
 
     const totalTokens = childResults.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
 
@@ -3994,7 +4780,7 @@ async function executeMonitorWebpage(
   }
 
   // ── 3. Establish initial baseline ────────────────────────────────────────
-  let baselineContentHash = '';
+  let baselineContentHash: string;
   let baselineExtractedData: Record<string, unknown> | null = null;
 
   if (fields) {
@@ -4844,21 +5630,21 @@ function executeMethodologySkill(
   };
 }
 
-// ─── Playbook Studio tool executors ──────────────────────────────────────────
-// Spec: tasks/playbooks-spec.md §10.8.4 — the five tools the Playbook
-// Author agent calls. All five delegate to playbookStudioService.
+// ─── Workflow Studio tool executors ──────────────────────────────────────────
+// Spec: tasks/Workflows-spec.md §10.8.4 — the five tools the Workflow
+// Author agent calls. All five delegate to workflowStudioService.
 //
-// Dynamic-imported on first call to avoid pulling the playbook services
+// Dynamic-imported on first call to avoid pulling the Workflow services
 // into the eager skillExecutor graph (which is loaded by every agent run).
 
-async function executePlaybookReadExisting(
+async function executeWorkflowReadExisting(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const slug = String(input.slug ?? '');
   if (!slug) return { success: false, error: 'slug is required' };
-  const { playbookStudioService } = await import('./playbookStudioService.js');
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
   try {
-    return playbookStudioService.readExistingPlaybook(slug);
+    return workflowStudioService.readExistingWorkflow(slug);
   } catch (err) {
     return {
       success: false,
@@ -4867,41 +5653,41 @@ async function executePlaybookReadExisting(
   }
 }
 
-async function executePlaybookValidate(
+async function executeWorkflowValidate(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const definition = input.definition;
   if (!definition) return { success: false, error: 'definition is required' };
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  return playbookStudioService.validateCandidate(definition);
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
+  return workflowStudioService.validateCandidate(definition);
 }
 
-async function executePlaybookSimulate(
+async function executeWorkflowSimulate(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const definition = input.definition;
   if (!definition) return { success: false, error: 'definition is required' };
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  return playbookStudioService.simulateRun(definition);
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
+  return workflowStudioService.simulateRun(definition);
 }
 
-async function executePlaybookEstimateCost(
+async function executeWorkflowEstimateCost(
   input: Record<string, unknown>
 ): Promise<unknown> {
   const definition = input.definition;
   if (!definition) return { success: false, error: 'definition is required' };
   const mode = (input.mode as 'optimistic' | 'pessimistic' | undefined) ?? 'pessimistic';
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  return playbookStudioService.estimateCost(definition, { mode });
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
+  return workflowStudioService.estimateCost(definition, { mode });
 }
 
-async function executePlaybookProposeSave(
+async function executeWorkflowProposeSave(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
   // Definition-only API. The agent supplies the validated definition
   // object (NOT raw file contents) and the server renders the
-  // .playbook.ts file deterministically. There is no input the agent
+  // .Workflow.ts file deterministically. There is no input the agent
   // can use to inject arbitrary file content — that's the whole point
   // of spec invariant 14 in the post-round-3 design.
   const sessionId = String(input.sessionId ?? '');
@@ -4913,7 +5699,7 @@ async function executePlaybookProposeSave(
     return {
       success: false,
       error:
-        'definition object is required. propose_save no longer accepts fileContents — the server renders the playbook file deterministically from the validated definition.',
+        'definition object is required. propose_save no longer accepts fileContents — the server renders the Workflow file deterministically from the validated definition.',
     };
   }
   // Feature 3 §5.6 — high-severity gate for n8n imports.
@@ -4927,7 +5713,7 @@ async function executePlaybookProposeSave(
   ) {
     return {
       success: false,
-      error: `Cannot save: ${input.unresolved_high_severity_count} high-severity item(s) from the n8n import are unresolved. Review the ⚠ rows in the mapping report, resolve or explicitly dismiss each one with the admin, then call playbook_propose_save again with unresolved_high_severity_count: 0.`,
+      error: `Cannot save: ${input.unresolved_high_severity_count} high-severity item(s) from the n8n import are unresolved. Review the ⚠ rows in the mapping report, resolve or explicitly dismiss each one with the admin, then call workflow_propose_save again with unresolved_high_severity_count: 0.`,
     };
   }
   // Strict user-scope enforcement (review finding #3 from the previous
@@ -4939,14 +5725,14 @@ async function executePlaybookProposeSave(
     return {
       success: false,
       error:
-        'playbook_propose_save requires a user-scoped agent run. The current run has no userId on its SkillExecutionContext (likely a scheduled or system run). Studio sessions can only be modified by their owners.',
+        'workflow_propose_save requires a user-scoped agent run. The current run has no userId on its SkillExecutionContext (likely a scheduled or system run). Studio sessions can only be modified by their owners.',
     };
   }
-  const { playbookStudioService } = await import('./playbookStudioService.js');
+  const { WorkflowStudioService: workflowStudioService } = await import('./workflowStudioService.js');
   // Validate + render in one call. This re-uses the exact same code
   // path the /render endpoint uses, so the server's view of the
   // canonical file body is consistent everywhere.
-  const rendered = playbookStudioService.validateAndRender(definition);
+  const rendered = workflowStudioService.validateAndRender(definition);
   if (!rendered.ok) {
     return {
       success: false,
@@ -4957,7 +5743,7 @@ async function executePlaybookProposeSave(
   // Persist the rendered file as the session's candidate, scoped by
   // (sessionId, userId). Returns false when the session doesn't exist
   // OR isn't owned by the calling user.
-  const updated = await playbookStudioService.updateCandidate(
+  const updated = await workflowStudioService.updateCandidate(
     sessionId,
     context.userId,
     rendered.fileContents,

@@ -8,6 +8,7 @@
  *   npx tsx server/services/__tests__/memoryEntryQualityServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   computeDecayFactor,
   isPruneEligible,
@@ -25,21 +26,6 @@ import {
   QUALITY_ADJUST_REDUCTION_DELTA,
 } from '../../config/limits.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
@@ -56,18 +42,6 @@ function assertApprox(actual: number, expected: number, tolerance: number, label
   }
 }
 
-function assertTrue(condition: boolean, label: string) {
-  if (!condition) {
-    throw new Error(`${label} — expected true, got false`);
-  }
-}
-
-function assertFalse(condition: boolean, label: string) {
-  if (condition) {
-    throw new Error(`${label} — expected false, got true`);
-  }
-}
-
 const now = new Date('2026-04-16T12:00:00.000Z');
 
 // ---------------------------------------------------------------------------
@@ -81,7 +55,7 @@ console.log('');
 test('accessed today → factor = 1.0 (no decay)', () => {
   const lastAccessedAt = new Date(now.getTime() - 1 * 60 * 60 * 1000); // 1h ago
   const factor = computeDecayFactor({ qualityScore: 0.8, lastAccessedAt, now });
-  assertEqual(factor, 1.0, 'factor within window');
+  expect(factor, 'factor within window').toBe(1.0);
 });
 
 test('accessed exactly at DECAY_WINDOW_DAYS boundary → factor = 1.0', () => {
@@ -89,7 +63,7 @@ test('accessed exactly at DECAY_WINDOW_DAYS boundary → factor = 1.0', () => {
     now.getTime() - DECAY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
   );
   const factor = computeDecayFactor({ qualityScore: 0.8, lastAccessedAt, now });
-  assertEqual(factor, 1.0, 'exact boundary = no decay');
+  expect(factor, 'exact boundary = no decay').toBe(1.0);
 });
 
 test('accessed 1 day over window → decays by DECAY_RATE', () => {
@@ -107,7 +81,7 @@ test('accessed far over window → factor clamps to 0.1 minimum (spec §4.1 floo
     now.getTime() - (DECAY_WINDOW_DAYS + 1000) * 24 * 60 * 60 * 1000,
   );
   const factor = computeDecayFactor({ qualityScore: 0.8, lastAccessedAt, now });
-  assertEqual(factor, 0.1, 'factor floored at 0.1 — decay alone never zeros a score');
+  expect(factor, 'factor floored at 0.1 — decay alone never zeros a score').toBe(0.1);
 });
 
 // ---------------------------------------------------------------------------
@@ -122,7 +96,7 @@ test('never accessed (null) → factor reflects full-window decay (floor 0.1)', 
 
 test('never accessed → factor is ≥ 0', () => {
   const factor = computeDecayFactor({ qualityScore: 0.8, lastAccessedAt: null, now });
-  assertTrue(factor >= 0, 'factor ≥ 0 for never-accessed');
+  expect(factor >= 0, 'factor ≥ 0 for never-accessed').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -138,40 +112,40 @@ const freshDate = new Date(now.getTime() - (PRUNE_AGE_DAYS - 10) * 24 * 60 * 60 
 
 test('low score + old entry → prune eligible', () => {
   const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD - 0.01, createdAt: oldDate, lastAccessedAt: null, now });
-  assertTrue(result, 'old low-quality entry is prune eligible');
+  expect(result, 'old low-quality entry is prune eligible').toBe(true);
 });
 
 test('low score + fresh entry → NOT prune eligible', () => {
   const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD - 0.01, createdAt: freshDate, lastAccessedAt: null, now });
-  assertFalse(result, 'young low-quality entry is NOT pruned');
+  expect(result, 'young low-quality entry is NOT pruned').toBe(false);
 });
 
 test('high score + old entry → NOT prune eligible', () => {
   const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD + 0.1, createdAt: oldDate, lastAccessedAt: null, now });
-  assertFalse(result, 'old high-quality entry is NOT pruned');
+  expect(result, 'old high-quality entry is NOT pruned').toBe(false);
 });
 
 test('score exactly at threshold → NOT prune eligible (threshold is exclusive lower)', () => {
   const result = isPruneEligible({ qualityScore: PRUNE_THRESHOLD, createdAt: oldDate, lastAccessedAt: null, now });
-  assertFalse(result, 'score == PRUNE_THRESHOLD → NOT pruned');
+  expect(result, 'score == PRUNE_THRESHOLD → NOT pruned').toBe(false);
 });
 
 test('score 0 + old entry → prune eligible', () => {
   const result = isPruneEligible({ qualityScore: 0, createdAt: oldDate, lastAccessedAt: null, now });
-  assertTrue(result, 'zero-score old entry is pruned');
+  expect(result, 'zero-score old entry is pruned').toBe(true);
 });
 
 test('entry exactly at PRUNE_AGE_DAYS → prune eligible', () => {
   const exactDate = new Date(now.getTime() - PRUNE_AGE_DAYS * 24 * 60 * 60 * 1000);
   const result = isPruneEligible({ qualityScore: 0, createdAt: exactDate, lastAccessedAt: null, now });
-  assertTrue(result, 'entry at exact PRUNE_AGE_DAYS boundary is pruned');
+  expect(result, 'entry at exact PRUNE_AGE_DAYS boundary is pruned').toBe(true);
 });
 
 test('lastAccessedAt provided and recent → uses lastAccessedAt (not createdAt) for age check', () => {
   // Entry is old by createdAt but was accessed recently — not prune eligible
   const recentAccess = new Date(now.getTime() - (PRUNE_AGE_DAYS - 10) * 24 * 60 * 60 * 1000);
   const result = isPruneEligible({ qualityScore: 0, createdAt: oldDate, lastAccessedAt: recentAccess, now });
-  assertFalse(result, 'old entry accessed recently is NOT pruned (lastAccessedAt is pivot)');
+  expect(result, 'old entry accessed recently is NOT pruned (lastAccessedAt is pivot)').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -249,7 +223,136 @@ test('utilityRate computed correctly', () => {
   if (Math.abs(d.utilityRate - 0.35) > 1e-9) throw new Error(`utilityRate=${d.utilityRate}`);
 });
 
+// ---------------------------------------------------------------------------
+// Hermes Tier 1 Phase B §6.6 — per-entryType half-life branching.
+// ---------------------------------------------------------------------------
+//
+// `computeDecayFactor` now branches on `entryType`:
+//   - known entryType in HALF_LIFE_DAYS → exponential half-life decay,
+//     factor = 0.5 at T = halfLife
+//   - unknown / missing → today's linear DECAY_RATE formula (§6.6
+//     "Default keeps today's single rate")
+
+import { HALF_LIFE_DAYS } from '../../services/memoryEntryQualityServicePure.js';
+
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
+console.log('Phase B §6.6 — per-entryType half-life decay:');
+
+const MS_PER_DAY_PHASE_B = 1000 * 60 * 60 * 24;
+const BASE_NOW = new Date('2026-01-01T00:00:00Z');
+
+function daysAgo(days: number): Date {
+  return new Date(BASE_NOW.getTime() - days * MS_PER_DAY_PHASE_B);
+}
+
+for (const [entryType, halfLife] of Object.entries(HALF_LIFE_DAYS) as [
+  'observation' | 'decision' | 'preference' | 'issue' | 'pattern',
+  number,
+][]) {
+  test(`${entryType} decays to factor 0.5 at T=${halfLife} days`, () => {
+    const factor = computeDecayFactor({
+      qualityScore: 1.0,
+      lastAccessedAt: daysAgo(halfLife),
+      now: BASE_NOW,
+      entryType,
+    });
+    if (Math.abs(factor - 0.5) > 1e-6) {
+      throw new Error(`expected factor ≈ 0.5, got ${factor}`);
+    }
+  });
+
+  test(`${entryType} decays to ~0.25 at T=2×halfLife (${halfLife * 2} days)`, () => {
+    const factor = computeDecayFactor({
+      qualityScore: 1.0,
+      lastAccessedAt: daysAgo(halfLife * 2),
+      now: BASE_NOW,
+      entryType,
+    });
+    if (Math.abs(factor - 0.25) > 1e-6) {
+      throw new Error(`expected factor ≈ 0.25, got ${factor}`);
+    }
+  });
+
+  test(`${entryType} factor at T=0 is 1.0 (no decay)`, () => {
+    const factor = computeDecayFactor({
+      qualityScore: 1.0,
+      lastAccessedAt: BASE_NOW,
+      now: BASE_NOW,
+      entryType,
+    });
+    if (Math.abs(factor - 1.0) > 1e-9) {
+      throw new Error(`expected factor 1.0, got ${factor}`);
+    }
+  });
+}
+
+test('factor never negative, even at extreme age', () => {
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(1_000_000),
+    now: BASE_NOW,
+    entryType: 'observation',
+  });
+  if (factor < 0) throw new Error(`factor was negative: ${factor}`);
+  if (factor > 1) throw new Error(`factor exceeded 1: ${factor}`);
+});
+
+test('observation (7-day) decays faster than preference (30-day) at same T', () => {
+  const o = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(14),
+    now: BASE_NOW,
+    entryType: 'observation',
+  });
+  const p = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(14),
+    now: BASE_NOW,
+    entryType: 'preference',
+  });
+  if (o >= p) {
+    throw new Error(`observation (${o}) should decay faster than preference (${p})`);
+  }
+});
+
+test('default branch (no entryType) falls back to linear DECAY_RATE — within window = 1.0', () => {
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(DECAY_WINDOW_DAYS / 2),
+    now: BASE_NOW,
+  });
+  if (Math.abs(factor - 1.0) > 1e-9) {
+    throw new Error(`default within-window factor should be 1.0, got ${factor}`);
+  }
+});
+
+test('default branch at DECAY_WINDOW+5 days uses linear formula', () => {
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: daysAgo(DECAY_WINDOW_DAYS + 5),
+    now: BASE_NOW,
+  });
+  const expected = Math.max(0.1, 1 - DECAY_RATE * 5);
+  if (Math.abs(factor - expected) > 1e-9) {
+    throw new Error(`expected linear ${expected}, got ${factor}`);
+  }
+});
+
+test('half-life branch on null lastAccessedAt uses DECAY_WINDOW_DAYS as baseline', () => {
+  // Null lastAccessed is treated as exactly DECAY_WINDOW_DAYS ago so the
+  // branch doesn't crash. Pinning so future refactors don't silently
+  // change the starting point.
+  const factor = computeDecayFactor({
+    qualityScore: 1.0,
+    lastAccessedAt: null,
+    now: BASE_NOW,
+    entryType: 'observation',
+  });
+  const expected = Math.pow(0.5, DECAY_WINDOW_DAYS / HALF_LIFE_DAYS.observation);
+  if (Math.abs(factor - expected) > 1e-9) {
+    throw new Error(`expected ${expected}, got ${factor}`);
+  }
+});
+
 console.log('');
-if (failed > 0) process.exit(1);
+console.log('');

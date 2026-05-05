@@ -16,8 +16,8 @@
  */
 
 import type { ConfigQuestion } from '../types/configSchema.js';
-import { INTELLIGENCE_BRIEFING_SCHEMA } from '../playbooks/intelligence-briefing.schema.js';
-import { WEEKLY_DIGEST_SCHEMA } from '../playbooks/weekly-digest.schema.js';
+import { INTELLIGENCE_BRIEFING_SCHEMA } from '../workflows/intelligence-briefing.schema.js';
+import { WEEKLY_DIGEST_SCHEMA } from '../workflows/weekly-digest.schema.js';
 
 // ---------------------------------------------------------------------------
 // Schema registry — playbook slug → ConfigQuestion[]
@@ -72,7 +72,9 @@ export async function generateConfigurationDocument(input: GenerateInput): Promi
 
   // DOCX path — uses the `docx` npm package. Imported dynamically so test
   // runs don't need the package installed.
-  const docx = await import('docx').catch(() => null as unknown as typeof import('docx') | null);
+   
+  // @ts-expect-error — optional peer dep, not declared in this project's deps
+  const docx = await (import('docx') as Promise<any>).catch(() => null) as Record<string, any> | null;
   if (!docx) {
     throw {
       statusCode: 500,

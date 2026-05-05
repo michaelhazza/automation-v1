@@ -92,7 +92,7 @@ export default function SubaccountTagsPage() {
             <label className="block text-[12px] text-slate-500 font-medium mb-1">Value</label>
             <input type="text" value={newValue} onChange={e => setNewValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. saas" />
           </div>
-          <button onClick={handleAdd} disabled={saving || !newKey.trim()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold whitespace-nowrap">{saving ? 'Adding...' : 'Add'}</button>
+          <button onClick={handleAdd} disabled={saving || !newKey.trim()} className="btn btn-sm btn-primary disabled:opacity-50">{saving ? 'Adding...' : 'Add'}</button>
         </div>
       </div>
 

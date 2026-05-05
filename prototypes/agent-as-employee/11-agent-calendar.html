@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>11 — Sarah · Calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 11 / 16 · <span class="muted">AgentCalendarPage (new) — same UI both backends</span> · <a href="10-agent-mailbox.html">← Mailbox</a> · <a href="12-suspend-dialog.html">Next: Suspend dialog →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><a href="09-agent-identity-tab.html">Sarah</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Calendar</span>
+  </span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+
+<div class="page" style="max-width: 1080px;">
+  <div class="page-header">
+    <div style="display: flex; gap: 14px; align-items: center;">
+      <a href="09-agent-identity-tab.html" class="text-sm" style="color: var(--sl-500); text-decoration: none;">← Sarah</a>
+      <span class="muted">/</span>
+      <h1 class="page-title">Calendar</h1>
+      <span class="backend-chip native"><span class="dot"></span>Synthetos-native</span>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary btn-sm">Today</button>
+      <button class="btn btn-primary btn-sm">+ New event</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h2>Upcoming</h2>
+        <div class="sub">3 events in the next 7 days</div>
+      </div>
+    </div>
+    <div class="card-body" style="padding: 0;">
+
+      <div style="display: grid; grid-template-columns: 120px 1fr; gap: 0; border-bottom: 1px solid var(--sl-100);">
+        <div style="padding: 16px; border-right: 1px solid var(--sl-100); background: var(--sl-50);">
+          <div style="font-size: 11px; font-weight: 600; color: var(--sl-500); text-transform: uppercase; letter-spacing: 0.05em;">Wed</div>
+          <div style="font-size: 22px; font-weight: 600; color: var(--sl-900); letter-spacing: -0.02em; margin: 2px 0;">30 Apr</div>
+          <div class="text-xs muted">Tomorrow</div>
+        </div>
+        <div style="padding: 16px;">
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 4px; background: var(--indigo-500); border-radius: 2px; flex-shrink: 0;"></div>
+            <div style="flex: 1;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                <div>
+                  <div style="font-size: 14px; font-weight: 600; color: var(--sl-900);">Q2 attribution sync</div>
+                  <div class="text-xs muted" style="margin-top: 3px;">10:00 – 10:30 · 30 min · Google Meet</div>
+                </div>
+                <span class="pill pill-active"><span class="dot"></span>Accepted</span>
+              </div>
+              <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;">
+                <span style="display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; background: var(--sl-50); border: 1px solid var(--sl-200); border-radius: 999px; font-size: 11px;"><span class="avatar avatar-sm avatar-human" style="width: 16px; height: 16px; font-size: 8px;">ML</span>Maya Lim</span>
+                <span style="display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; background: var(--sl-50); border: 1px solid var(--sl-200); border-radius: 999px; font-size: 11px;"><span class="avatar avatar-sm avatar-agent" style="width: 16px; height: 16px; font-size: 8px;">JO</span>Johnny</span>
+                <span style="display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; background: var(--sl-50); border: 1px solid var(--sl-200); border-radius: 999px; font-size: 11px;"><span class="avatar avatar-sm avatar-agent" style="width: 16px; height: 16px; font-size: 8px;">SA</span>Sarah</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 120px 1fr; gap: 0; border-bottom: 1px solid var(--sl-100);">
+        <div style="padding: 16px; border-right: 1px solid var(--sl-100); background: var(--sl-50);">
+          <div style="font-size: 11px; font-weight: 600; color: var(--sl-500); text-transform: uppercase; letter-spacing: 0.05em;">Thu</div>
+          <div style="font-size: 22px; font-weight: 600; color: var(--sl-900); letter-spacing: -0.02em; margin: 2px 0;">01 May</div>
+          <div class="text-xs muted">2 days</div>
+        </div>
+        <div style="padding: 16px;">
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 4px; background: #10b981; border-radius: 2px; flex-shrink: 0;"></div>
+            <div style="flex: 1;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                <div>
+                  <div style="font-size: 14px; font-weight: 600; color: var(--sl-900);">Acme Co. all-hands</div>
+                  <div class="text-xs muted" style="margin-top: 3px;">14:00 – 14:45 · 45 min · 12 attendees</div>
+                </div>
+                <span class="pill pill-active"><span class="dot"></span>Accepted</span>
+              </div>
+              <div class="text-xs muted" style="margin-top: 8px;">Organiser: <code>events@acme.com</code> · Recurring weekly</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 120px 1fr; gap: 0;">
+        <div style="padding: 16px; border-right: 1px solid var(--sl-100); background: var(--sl-50);">
+          <div style="font-size: 11px; font-weight: 600; color: var(--sl-500); text-transform: uppercase; letter-spacing: 0.05em;">Fri</div>
+          <div style="font-size: 22px; font-weight: 600; color: var(--sl-900); letter-spacing: -0.02em; margin: 2px 0;">02 May</div>
+          <div class="text-xs muted">3 days</div>
+        </div>
+        <div style="padding: 16px;">
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 4px; background: var(--amber-600); border-radius: 2px; flex-shrink: 0;"></div>
+            <div style="flex: 1;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                <div>
+                  <div style="font-size: 14px; font-weight: 600; color: var(--sl-900);">Pipeline review</div>
+                  <div class="text-xs muted" style="margin-top: 3px;">09:00 – 09:30 · 30 min · Recurring weekly</div>
+                </div>
+                <span class="pill pill-amber"><span class="dot" style="background: var(--amber-600);"></span>Tentative</span>
+              </div>
+              <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <button class="btn btn-secondary btn-sm">Decline</button>
+                <button class="btn btn-secondary btn-sm">Tentative</button>
+                <button class="btn btn-primary btn-sm">Accept</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 14px;">
+    <div class="card-head">
+      <div>
+        <h2>On Google backend</h2>
+        <div class="sub">Same UI shell. Each event deep-links to Google Calendar.</div>
+      </div>
+      <span class="backend-chip google"><span class="dot"></span>Google Workspace</span>
+    </div>
+    <div class="card-body" style="padding: 0;">
+      <div style="padding: 14px 18px; border-bottom: 1px solid var(--sl-100); display: flex; align-items: center; gap: 14px;">
+        <div style="width: 4px; height: 36px; background: var(--purple-700); border-radius: 2px;"></div>
+        <div style="flex: 1;">
+          <div style="font-size: 13px; font-weight: 600; color: var(--sl-900);">Q2 attribution sync · 10:00 Wed</div>
+          <div class="text-xs muted">Synced from Google Calendar · 3 attendees</div>
+        </div>
+        <a href="https://calendar.google.com" class="deep-link" target="_blank">
+          Open in Google Calendar
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout callout-info" style="margin-top: 8px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div>Reads <code>workspace_calendar_events</code> filtered by actor. Native runs RFC 5546 calendar-over-email — invites and replies are specially-formatted emails. Google syncs from Calendar API every 5 min. Q5 of the brief is decided: agents can both initiate and respond.</div>
+  </div>
+</div>
+
+</body>
+</html>

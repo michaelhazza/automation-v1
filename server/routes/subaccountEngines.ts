@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowEngines } from '../db/schema/index.js';
+import { automationEngines } from '../db/schema/index.js';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -15,7 +15,7 @@ import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
-function sanitizeEngine(engine: typeof workflowEngines.$inferSelect) {
+function sanitizeEngine(engine: typeof automationEngines.$inferSelect) {
   const { hmacSecret, apiKey, ...rest } = engine;
   return rest;
 }
@@ -28,13 +28,13 @@ router.get(
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const rows = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.subaccountId, subaccount.id),
-        eq(workflowEngines.scope, 'subaccount'),
-        isNull(workflowEngines.deletedAt)
+        eq(automationEngines.subaccountId, subaccount.id),
+        eq(automationEngines.scope, 'subaccount'),
+        isNull(automationEngines.deletedAt)
       ))
-      .orderBy(desc(workflowEngines.createdAt));
+      .orderBy(desc(automationEngines.createdAt));
     res.json(rows.map(sanitizeEngine));
   })
 );
@@ -54,7 +54,7 @@ router.post(
 
     const hmacSecret = crypto.randomBytes(32).toString('hex');
 
-    const [engine] = await db.insert(workflowEngines).values({
+    const [engine] = await db.insert(automationEngines).values({
       organisationId: req.orgId!,
       name,
       engineType,
@@ -78,11 +78,11 @@ router.patch(
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const [existing] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.id, req.params.id),
-        eq(workflowEngines.subaccountId, subaccount.id),
-        isNull(workflowEngines.deletedAt)
+        eq(automationEngines.id, req.params.id),
+        eq(automationEngines.subaccountId, subaccount.id),
+        isNull(automationEngines.deletedAt)
       ));
 
     if (!existing) throw { statusCode: 404, message: 'Engine not found' };
@@ -93,9 +93,9 @@ router.patch(
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
 
-    const [updated] = await db.update(workflowEngines)
+    const [updated] = await db.update(automationEngines)
       .set(updates)
-      .where(eq(workflowEngines.id, req.params.id))
+      .where(eq(automationEngines.id, req.params.id))
       .returning();
 
     res.json(sanitizeEngine(updated));
@@ -110,18 +110,18 @@ router.delete(
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const [existing] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.id, req.params.id),
-        eq(workflowEngines.subaccountId, subaccount.id),
-        isNull(workflowEngines.deletedAt)
+        eq(automationEngines.id, req.params.id),
+        eq(automationEngines.subaccountId, subaccount.id),
+        isNull(automationEngines.deletedAt)
       ));
 
     if (!existing) throw { statusCode: 404, message: 'Engine not found' };
 
-    await db.update(workflowEngines)
+    await db.update(automationEngines)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(workflowEngines.id, req.params.id));
+      .where(eq(automationEngines.id, req.params.id));
 
     res.json({ success: true });
   })

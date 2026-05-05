@@ -1,0 +1,103 @@
+<!doctype html>
+<!--
+  Mock 8 / 10 — Workflows Library
+  =================================
+  Primary user task: find a Workflow to open, or build a new one.
+  Simplified per docs/frontend-design-principles.md:
+    - one state per page (populated — empty state is a 10-line variant noted separately)
+    - 4 table columns max: name, agent, last-run status (dot + time), action
+    - dropped step-count chips ("3 native · 1 Automation") from every row — data-model leak
+    - dropped filter tabs (All / Mine / Organisation / Templates) — pick a default scope
+      on load, let the user switch via the global scope picker
+    - dropped the status badge + subheading metadata block
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 8 — Workflows Library</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[820px] p-6">
+  <div class="flex justify-between items-baseline mb-4 text-[13px]">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 8 · Workflows</h1>
+    <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <!-- Page -->
+  <div class="bg-white border border-slate-200 rounded-lg p-6">
+    <div class="flex items-start justify-between mb-5">
+      <div>
+        <h2 class="text-[22px] font-bold text-slate-900">Workflows</h2>
+        <p class="text-[13px] text-slate-500 mt-1">Multi-step flows your agents run.</p>
+      </div>
+      <button class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-md inline-flex items-center gap-1.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        New Workflow
+      </button>
+    </div>
+
+    <!-- Table -->
+    <div class="border border-slate-200 rounded-lg overflow-hidden">
+      <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 grid grid-cols-12 gap-4 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+        <div class="col-span-6">Name</div>
+        <div class="col-span-3">Agent</div>
+        <div class="col-span-3">Last run</div>
+      </div>
+
+      <a class="px-4 py-3.5 border-b border-slate-100 grid grid-cols-12 gap-4 items-center hover:bg-slate-50 no-underline">
+        <div class="col-span-6 text-[13.5px] font-medium text-slate-900">Weekly Lead Re-engagement</div>
+        <div class="col-span-3 text-[12.5px] text-slate-600">CRM Agent</div>
+        <div class="col-span-3 flex items-center gap-2 text-[12px] text-slate-500">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span>ok · 2m ago</span>
+        </div>
+      </a>
+
+      <a class="px-4 py-3.5 border-b border-slate-100 grid grid-cols-12 gap-4 items-center hover:bg-slate-50 no-underline">
+        <div class="col-span-6 text-[13.5px] font-medium text-slate-900">New-Client Onboarding</div>
+        <div class="col-span-3 text-[12.5px] text-slate-600">Ops Agent</div>
+        <div class="col-span-3 flex items-center gap-2 text-[12px] text-slate-500">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span>ok · 3h ago</span>
+        </div>
+      </a>
+
+      <a class="px-4 py-3.5 border-b border-slate-100 grid grid-cols-12 gap-4 items-center hover:bg-slate-50 no-underline">
+        <div class="col-span-6 text-[13.5px] font-medium text-slate-900">Campaign Performance Review</div>
+        <div class="col-span-3 text-[12.5px] text-slate-600">Ads Agent</div>
+        <div class="col-span-3 text-[12px] text-slate-400">never run</div>
+      </a>
+
+      <a class="px-4 py-3.5 border-b border-slate-100 grid grid-cols-12 gap-4 items-center hover:bg-slate-50 no-underline">
+        <div class="col-span-6 text-[13.5px] font-medium text-slate-900">Monthly Client Report</div>
+        <div class="col-span-3 text-[12.5px] text-slate-600">Ops Agent</div>
+        <div class="col-span-3 flex items-center gap-2 text-[12px] text-slate-500">
+          <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+          <span>failed · 1d ago</span>
+        </div>
+      </a>
+
+      <a class="px-4 py-3.5 grid grid-cols-12 gap-4 items-center hover:bg-slate-50 no-underline">
+        <div class="col-span-6 text-[13.5px] font-medium text-slate-900">Quarterly Health Check</div>
+        <div class="col-span-3 text-[12.5px] text-slate-600">Portfolio Agent</div>
+        <div class="col-span-3 flex items-center gap-2 text-[12px] text-slate-500">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span>ok · 2d ago</span>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
+    Empty state is this page with no rows and a single "Create your first Workflow" card in place of the table.
+  </p>
+</div>
+
+</body>
+</html>

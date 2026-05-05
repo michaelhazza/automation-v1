@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { db } from '../db/index.js';
-import { executions, executionPayloads, organisations, processes, users } from '../db/schema/index.js';
+import { executions, executionPayloads, organisations, automations, users } from '../db/schema/index.js';
 import { eq, and, gte, lte, desc, SQL } from 'drizzle-orm';
 import { parsePositiveInt } from '../middleware/validate.js';
 
@@ -59,7 +59,7 @@ router.get('/api/system/executions', authenticate, requireSystemAdmin, asyncHand
       subaccountId: executions.subaccountId,
       notifyOnComplete: executions.notifyOnComplete,
       organisationName: organisations.name,
-      processName: processes.name,
+      processName: automations.name,
       userEmail: users.email,
       userFirstName: users.firstName,
       userLastName: users.lastName,
@@ -67,7 +67,7 @@ router.get('/api/system/executions', authenticate, requireSystemAdmin, asyncHand
     .from(executions)
     .leftJoin(executionPayloads, eq(executions.id, executionPayloads.executionId))
     .leftJoin(organisations, eq(executions.organisationId, organisations.id))
-    .leftJoin(processes, eq(executions.processId, processes.id))
+    .leftJoin(automations, eq(executions.processId, automations.id))
     .leftJoin(users, eq(executions.triggeredByUserId, users.id))
     .where(whereClause)
     .orderBy(desc(executions.createdAt))
@@ -109,7 +109,7 @@ router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async
       subaccountId: executions.subaccountId,
       processSnapshot: executionPayloads.processSnapshot,
       organisationName: organisations.name,
-      processName: processes.name,
+      processName: automations.name,
       userEmail: users.email,
       userFirstName: users.firstName,
       userLastName: users.lastName,
@@ -117,7 +117,7 @@ router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async
     .from(executions)
     .leftJoin(executionPayloads, eq(executions.id, executionPayloads.executionId))
     .leftJoin(organisations, eq(executions.organisationId, organisations.id))
-    .leftJoin(processes, eq(executions.processId, processes.id))
+    .leftJoin(automations, eq(executions.processId, automations.id))
     .leftJoin(users, eq(executions.triggeredByUserId, users.id))
     .where(eq(executions.id, req.params.id));
 

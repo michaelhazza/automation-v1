@@ -7,7 +7,7 @@ type ActivityType =
   | 'review_item'
   | 'health_finding'
   | 'inbox_item'
-  | 'playbook_run'
+  | 'workflow_run'
   | 'workflow_execution';
 
 type NormalisedStatus = 'active' | 'attention_needed' | 'completed' | 'failed' | 'cancelled';
@@ -30,7 +30,7 @@ type ActivityItem = {
 
 const ACTIVITY_TYPES: ActivityType[] = [
   'agent_run', 'review_item', 'health_finding', 'inbox_item',
-  'playbook_run', 'workflow_execution',
+  'workflow_run', 'workflow_execution',
 ];
 
 const STATUS_OPTIONS: NormalisedStatus[] = ['active', 'attention_needed', 'completed', 'failed', 'cancelled'];
@@ -224,7 +224,10 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
       if (q) params.q = q;
       if (from) params.from = from;
       if (to) params.to = to;
-      const { data } = await api.get(getEndpoint(), { params });
+      const res = await api.get(getEndpoint(), { params });
+      const data = scope === 'org'
+        ? res.data.data
+        : res.data;
       setPermissionDenied(false);
       setItems(data.items);
       setTotal(data.total);
@@ -333,14 +336,14 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
           <div className="flex gap-2 items-end">
             <button
               onClick={load}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13.5px] font-semibold rounded-lg transition-colors"
+              className="btn btn-sm btn-primary"
             >
               Apply
             </button>
             {hasFilters && (
               <button
                 onClick={clearAll}
-                className="px-4 py-2 text-slate-600 hover:text-slate-800 text-[13px] font-medium rounded-lg hover:bg-slate-100 transition-colors"
+                className="btn btn-sm btn-ghost"
               >
                 Clear
               </button>
@@ -362,7 +365,7 @@ export function HistoryTab({ scope, subaccountId }: HistoryTabProps) {
               {hasFilters ? 'Try adjusting your filters.' : 'Activity from agents and workflows will appear here.'}
             </p>
             {hasFilters && (
-              <button onClick={clearAll} className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+              <button onClick={clearAll} className="btn btn-secondary">
                 Clear filters
               </button>
             )}

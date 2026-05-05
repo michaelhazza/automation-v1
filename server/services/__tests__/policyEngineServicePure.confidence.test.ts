@@ -13,30 +13,12 @@
  * verify-pure-helper-convention gate is satisfied.
  */
 
+import { expect, test } from 'vitest';
 import {
   applyConfidenceUpgrade,
   selectGuidanceTexts,
   type GuidanceRule,
 } from '../policyEngineServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 const DEFAULT = 0.7;
 
@@ -48,36 +30,36 @@ console.log('');
 
 test('auto with confidence above threshold stays auto', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: 0.9 }, DEFAULT);
-  assert(out.decision === 'auto', `expected auto, got ${out.decision}`);
-  assert(!out.upgradedByConfidence, 'should not flag upgrade');
-  assert(out.effectiveThreshold === DEFAULT, 'threshold mismatch');
+  expect(out.decision === 'auto', `expected auto, got ${out.decision}`).toBeTruthy();
+  expect(!out.upgradedByConfidence, 'should not flag upgrade').toBeTruthy();
+  expect(out.effectiveThreshold === DEFAULT, 'threshold mismatch').toBeTruthy();
 });
 
 test('auto at exactly threshold stays auto', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: DEFAULT }, DEFAULT);
-  assert(out.decision === 'auto', 'equal to threshold must stay auto');
+  expect(out.decision === 'auto', 'equal to threshold must stay auto').toBeTruthy();
 });
 
 test('auto with confidence below threshold upgrades to review', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: 0.6 }, DEFAULT);
-  assert(out.decision === 'review', `expected review, got ${out.decision}`);
-  assert(out.upgradedByConfidence === true, 'should flag upgrade');
+  expect(out.decision === 'review', `expected review, got ${out.decision}`).toBeTruthy();
+  expect(out.upgradedByConfidence === true, 'should flag upgrade').toBeTruthy();
 });
 
 test('auto with missing confidence upgrades (fail closed)', () => {
   const out = applyConfidenceUpgrade('auto', {}, DEFAULT);
-  assert(out.decision === 'review', 'missing confidence must upgrade');
-  assert(out.upgradedByConfidence === true, 'should flag upgrade');
+  expect(out.decision === 'review', 'missing confidence must upgrade').toBeTruthy();
+  expect(out.upgradedByConfidence === true, 'should flag upgrade').toBeTruthy();
 });
 
 test('auto with null confidence upgrades (fail closed)', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: null }, DEFAULT);
-  assert(out.decision === 'review', 'null confidence must upgrade');
+  expect(out.decision === 'review', 'null confidence must upgrade').toBeTruthy();
 });
 
 test('auto with NaN confidence upgrades (fail closed)', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: Number.NaN }, DEFAULT);
-  assert(out.decision === 'review', 'NaN must be treated as missing');
+  expect(out.decision === 'review', 'NaN must be treated as missing').toBeTruthy();
 });
 
 test('auto with Infinity is not finite → upgrade', () => {
@@ -86,42 +68,42 @@ test('auto with Infinity is not finite → upgrade', () => {
     { toolIntentConfidence: Number.POSITIVE_INFINITY },
     DEFAULT,
   );
-  assert(out.decision === 'review', 'infinite confidence must upgrade');
+  expect(out.decision === 'review', 'infinite confidence must upgrade').toBeTruthy();
 });
 
 test('review is never downgraded even with high confidence', () => {
   const out = applyConfidenceUpgrade('review', { toolIntentConfidence: 0.99 }, DEFAULT);
-  assert(out.decision === 'review', 'review must be sticky');
-  assert(out.upgradedByConfidence === false, 'review is not an upgrade');
+  expect(out.decision === 'review', 'review must be sticky').toBeTruthy();
+  expect(out.upgradedByConfidence === false, 'review is not an upgrade').toBeTruthy();
 });
 
 test('block is never downgraded even with high confidence', () => {
   const out = applyConfidenceUpgrade('block', { toolIntentConfidence: 0.99 }, DEFAULT);
-  assert(out.decision === 'block', 'block must be sticky');
+  expect(out.decision === 'block', 'block must be sticky').toBeTruthy();
 });
 
 test('rule override with stricter threshold upgrades borderline auto', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: 0.8 }, DEFAULT, 0.9);
-  assert(out.decision === 'review', 'stricter override must upgrade');
-  assert(out.effectiveThreshold === 0.9, 'override threshold must be reported');
+  expect(out.decision === 'review', 'stricter override must upgrade').toBeTruthy();
+  expect(out.effectiveThreshold === 0.9, 'override threshold must be reported').toBeTruthy();
 });
 
 test('rule override with looser threshold lets low confidence stay auto', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: 0.4 }, DEFAULT, 0.3);
-  assert(out.decision === 'auto', 'looser override must keep auto');
-  assert(out.effectiveThreshold === 0.3, 'override threshold must be reported');
+  expect(out.decision === 'auto', 'looser override must keep auto').toBeTruthy();
+  expect(out.effectiveThreshold === 0.3, 'override threshold must be reported').toBeTruthy();
 });
 
 test('rule override null falls back to default', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: 0.6 }, DEFAULT, null);
-  assert(out.decision === 'review', 'null override must fall back to default');
-  assert(out.effectiveThreshold === DEFAULT, 'effective threshold = default');
+  expect(out.decision === 'review', 'null override must fall back to default').toBeTruthy();
+  expect(out.effectiveThreshold === DEFAULT, 'effective threshold = default').toBeTruthy();
 });
 
 test('rule override undefined falls back to default', () => {
   const out = applyConfidenceUpgrade('auto', { toolIntentConfidence: 0.6 }, DEFAULT, undefined);
-  assert(out.decision === 'review', 'undefined override must fall back');
-  assert(out.effectiveThreshold === DEFAULT, 'effective threshold = default');
+  expect(out.decision === 'review', 'undefined override must fall back').toBeTruthy();
+  expect(out.effectiveThreshold === DEFAULT, 'effective threshold = default').toBeTruthy();
 });
 
 // ── selectGuidanceTexts ────────────────────────────────────────────
@@ -136,7 +118,7 @@ const matchFlag = (rule: TestRule, _ctx: unknown) => rule.matches;
 
 test('empty rule list returns empty array', () => {
   const out = selectGuidanceTexts<TestRule, unknown>([], {}, alwaysTrue);
-  assert(Array.isArray(out) && out.length === 0, 'empty → empty');
+  expect(Array.isArray(out) && out.length === 0, 'empty → empty').toBeTruthy();
 });
 
 test('rules without guidance text are skipped', () => {
@@ -147,7 +129,7 @@ test('rules without guidance text are skipped', () => {
     { id: 'd', matches: true, guidanceText: '   ' },
   ];
   const out = selectGuidanceTexts(rules, {}, matchFlag);
-  assert(out.length === 0, `expected 0 entries, got ${out.length}`);
+  expect(out.length === 0, `expected 0 entries, got ${out.length}`).toBeTruthy();
 });
 
 test('matching rules with guidance are returned in order', () => {
@@ -157,10 +139,10 @@ test('matching rules with guidance are returned in order', () => {
     { id: 'c', matches: true, guidanceText: 'third' },
   ];
   const out = selectGuidanceTexts(rules, {}, matchFlag);
-  assert(out.length === 3, `expected 3 entries, got ${out.length}`);
-  assert(out[0] === 'first', 'order 0');
-  assert(out[1] === 'second', 'order 1');
-  assert(out[2] === 'third', 'order 2');
+  expect(out.length === 3, `expected 3 entries, got ${out.length}`).toBeTruthy();
+  expect(out[0] === 'first', 'order 0').toBeTruthy();
+  expect(out[1] === 'second', 'order 1').toBeTruthy();
+  expect(out[2] === 'third', 'order 2').toBeTruthy();
 });
 
 test('non-matching rules are filtered out', () => {
@@ -170,9 +152,9 @@ test('non-matching rules are filtered out', () => {
     { id: 'c', matches: true, guidanceText: 'kept2' },
   ];
   const out = selectGuidanceTexts(rules, {}, matchFlag);
-  assert(out.length === 2, `expected 2, got ${out.length}`);
-  assert(out[0] === 'kept', 'first kept');
-  assert(out[1] === 'kept2', 'second kept');
+  expect(out.length === 2, `expected 2, got ${out.length}`).toBeTruthy();
+  expect(out[0] === 'kept', 'first kept').toBeTruthy();
+  expect(out[1] === 'kept2', 'second kept').toBeTruthy();
 });
 
 test('duplicate guidance text is de-duplicated', () => {
@@ -182,9 +164,9 @@ test('duplicate guidance text is de-duplicated', () => {
     { id: 'c', matches: true, guidanceText: 'different' },
   ];
   const out = selectGuidanceTexts(rules, {}, matchFlag);
-  assert(out.length === 2, `expected 2, got ${out.length}`);
-  assert(out[0] === 'same', 'first');
-  assert(out[1] === 'different', 'second');
+  expect(out.length === 2, `expected 2, got ${out.length}`).toBeTruthy();
+  expect(out[0] === 'same', 'first').toBeTruthy();
+  expect(out[1] === 'different', 'second').toBeTruthy();
 });
 
 test('whitespace is trimmed before comparison and output', () => {
@@ -193,8 +175,8 @@ test('whitespace is trimmed before comparison and output', () => {
     { id: 'b', matches: true, guidanceText: 'hello' },
   ];
   const out = selectGuidanceTexts(rules, {}, matchFlag);
-  assert(out.length === 1, `expected 1, got ${out.length}`);
-  assert(out[0] === 'hello', `expected trimmed, got ${JSON.stringify(out[0])}`);
+  expect(out.length === 1, `expected 1, got ${out.length}`).toBeTruthy();
+  expect(out[0] === 'hello', `expected trimmed, got ${JSON.stringify(out[0])}`).toBeTruthy();
 });
 
 test('matcher is passed the rule and the caller-supplied ctx', () => {
@@ -209,9 +191,9 @@ test('matcher is passed the rule and the caller-supplied ctx', () => {
   };
   const ctx = { foo: 'bar' };
   selectGuidanceTexts(rules, ctx, matcher);
-  assert(seen.length === 2, `expected 2 matcher calls, got ${seen.length}`);
-  assert(seen[0].id === 'a' && seen[0].ctx === ctx, 'first call args');
-  assert(seen[1].id === 'b' && seen[1].ctx === ctx, 'second call args');
+  expect(seen.length === 2, `expected 2 matcher calls, got ${seen.length}`).toBeTruthy();
+  expect(seen[0].id === 'a' && seen[0].ctx === ctx, 'first call args').toBeTruthy();
+  expect(seen[1].id === 'b' && seen[1].ctx === ctx, 'second call args').toBeTruthy();
 });
 
 test('mixed scenario: priority order preserved with filtering and dedup', () => {
@@ -224,13 +206,11 @@ test('mixed scenario: priority order preserved with filtering and dedup', () => 
     { id: '6', matches: true, guidanceText: 'C' },
   ];
   const out = selectGuidanceTexts(rules, {}, matchFlag);
-  assert(out.length === 3, `expected 3, got ${out.length}`);
-  assert(out[0] === 'A', 'order 0');
-  assert(out[1] === 'B', 'order 1');
-  assert(out[2] === 'C', 'order 2');
+  expect(out.length === 3, `expected 3, got ${out.length}`).toBeTruthy();
+  expect(out[0] === 'A', 'order 0').toBeTruthy();
+  expect(out[1] === 'B', 'order 1').toBeTruthy();
+  expect(out[2] === 'C', 'order 2').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

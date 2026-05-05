@@ -9,8 +9,14 @@ import crypto from 'crypto';
 import { env } from '../lib/env.js';
 
 export class OrganisationService {
-  async listOrganisations(params: { status?: string; limit?: number; offset?: number }) {
-    const conditions = [isNull(organisations.deletedAt)];
+  async listOrganisations(params: { status?: string; limit?: number; offset?: number; includeSystemOrg?: boolean }) {
+    const conditions = [
+      isNull(organisations.deletedAt),
+      // Filter out the seeded System Operations org from non-sysadmin views.
+      // The org is only visible to sysadmins via the dedicated system admin
+      // routes; listing it here would expose a mystery org to all tenant users.
+      ...(params.includeSystemOrg ? [] : [eq(organisations.isSystemOrg, false)]),
+    ];
     if (params.status) conditions.push(eq(organisations.status, params.status as 'active' | 'suspended'));
 
     const limit = params.limit ?? 50;
@@ -195,6 +201,27 @@ export class OrganisationService {
     };
   }
 
+  /**
+   * Update an org's shadow-charge retention window.
+   * Range: [1, 365]; default 90 (spec §14). Caller is responsible for
+   * permission gating (`SETTINGS_EDIT`); this method validates the range
+   * but does not authenticate.
+   */
+  async updateShadowChargeRetentionDays(orgId: string, days: number) {
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      throw { statusCode: 400, message: 'shadowChargeRetentionDays must be an integer between 1 and 365' };
+    }
+    const [updated] = await db
+      .update(organisations)
+      .set({ shadowChargeRetentionDays: days, updatedAt: new Date() })
+      .where(eq(organisations.id, orgId))
+      .returning({ shadowChargeRetentionDays: organisations.shadowChargeRetentionDays });
+    if (!updated) {
+      throw { statusCode: 404, message: 'Organisation not found' };
+    }
+    return { shadowChargeRetentionDays: updated.shadowChargeRetentionDays };
+  }
+
   async deleteOrganisation(id: string) {
     const [org] = await db
       .select()
@@ -213,19 +240,19 @@ export class OrganisationService {
       and(eq(users.organisationId, id), isNull(users.deletedAt))
     );
 
-    const { workflowEngines } = await import('../db/schema/index.js');
-    await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(workflowEngines.organisationId, id), isNull(workflowEngines.deletedAt))
+    const { automationEngines } = await import('../db/schema/index.js');
+    await db.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(automationEngines.organisationId, id), isNull(automationEngines.deletedAt))
     );
 
-    const { processCategories } = await import('../db/schema/index.js');
-    await db.update(processCategories).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(processCategories.organisationId, id), isNull(processCategories.deletedAt))
+    const { automationCategories } = await import('../db/schema/index.js');
+    await db.update(automationCategories).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(automationCategories.organisationId, id), isNull(automationCategories.deletedAt))
     );
 
-    const { processes } = await import('../db/schema/index.js');
-    await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(processes.organisationId, id), isNull(processes.deletedAt))
+    const { automations } = await import('../db/schema/index.js');
+    await db.update(automations).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(automations.organisationId, id), isNull(automations.deletedAt))
     );
 
     return { message: 'Organisation deleted successfully' };

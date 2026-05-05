@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Send email · intervention editor (simplified)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .bg-context { position: fixed; inset: 34px 0 0 0; background: #f5f6f8; opacity: 0.4; z-index: 1; }
+  .modal-backdrop {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15,23,42,0.55);
+    backdrop-filter: blur(3px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 10px; max-width: 580px; width: 100%;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18); overflow: hidden;
+  }
+  .m-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .m-head h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .m-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  .m-body { padding: 16px 20px; }
+
+  .form-field { margin-bottom: 12px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .form-field textarea { min-height: 140px; resize: vertical; line-height: 1.55; }
+
+  .merge-palette {
+    margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .merge-chip {
+    font-size: 11px; padding: 3px 8px; background: #eef2ff; color: #3730a3;
+    border-radius: 3px; cursor: pointer; font-family: "SF Mono", Menlo, monospace;
+  }
+  .merge-chip:hover { background: #c7d2fe; }
+
+  .preview {
+    margin-top: 14px; padding: 14px 16px;
+    background: #fafbfc; border: 1px solid #e5e7eb; border-radius: 8px;
+  }
+  .preview .plabel {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;
+    color: #6b7280; margin-bottom: 8px;
+  }
+  .preview .psubject { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .preview .pbody { font-size: 13px; color: #4b5563; white-space: pre-wrap; line-height: 1.6; }
+
+  .m-footer {
+    padding: 12px 20px; border-top: 1px solid #e5e7eb;
+    display: flex; justify-content: flex-end; gap: 8px; background: #fafbfc;
+  }
+  .btn { padding: 8px 16px; font-size: 13px; font-weight: 600; border-radius: 5px; cursor: pointer; border: 1px solid; }
+  .btn.secondary { background: #fff; color: #4b5563; border-color: #d1d5db; }
+  .btn.primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn.primary:hover { background: #4338ca; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Send email editor (simplified) · form + 5-field merge palette + live preview. Template chooser / test-email / save-as-template deferred.
+</div>
+<div class="bg-context"></div>
+
+<div class="modal-backdrop">
+  <div class="modal">
+    <div class="m-head">
+      <div>
+        <h2>Send email</h2>
+        <div class="sub">For Smith Dental · intervention for At Risk → Critical drop</div>
+      </div>
+      <button class="close">×</button>
+    </div>
+
+    <div class="m-body">
+      <div class="form-field">
+        <label>From</label>
+        <select>
+          <option>Ben Quinlan &lt;ben@synthetos.io&gt;</option>
+          <option>Agency inbox &lt;hello@agency.io&gt;</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label>To</label>
+        <input type="text" value="James Smith (primary) &lt;james@smithdental.com.au&gt;">
+      </div>
+
+      <div class="form-field">
+        <label>Subject</label>
+        <input type="text" value="Checking in — are we still on track, {{ contact.first_name }}?">
+      </div>
+
+      <div class="form-field">
+        <label>Message</label>
+        <textarea>Hi {{ contact.first_name }},
+
+Noticed things have been a bit quiet on your end this week — just wanted to make sure we're still on track for the funnel we scoped last month.
+
+Happy to jump on a quick call if anything's blocking you. Otherwise, I'll send a short update end of week.
+
+— {{ sender.first_name }}</textarea>
+        <div class="merge-palette">
+          <span class="merge-chip">{{contact.first_name}}</span>
+          <span class="merge-chip">{{contact.last_name}}</span>
+          <span class="merge-chip">{{subaccount.name}}</span>
+          <span class="merge-chip">{{sender.first_name}}</span>
+          <span class="merge-chip">{{last_contact_days}}</span>
+        </div>
+      </div>
+
+      <div class="preview">
+        <div class="plabel">Preview</div>
+        <div class="psubject">Checking in — are we still on track, James?</div>
+        <div class="pbody">Hi James,
+
+Noticed things have been a bit quiet on your end this week — just wanted to make sure we're still on track for the funnel we scoped last month.
+
+Happy to jump on a quick call if anything's blocking you. Otherwise, I'll send a short update end of week.
+
+— Ben</div>
+      </div>
+    </div>
+
+    <div class="m-footer">
+      <button class="btn secondary">Cancel</button>
+      <button class="btn primary">Send email</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

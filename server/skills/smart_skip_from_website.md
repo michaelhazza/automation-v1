@@ -2,7 +2,7 @@
 name: Smart Skip From Website
 description: Given a subaccount website URL, scrape the homepage + 1-2 linked pages and extract draft brand voice, audience, and services signals. Used in onboarding Steps 2-3 to pre-fill answers (§8.5).
 isActive: true
-visibility: internal
+visibility: basic
 ---
 
 ## Parameters

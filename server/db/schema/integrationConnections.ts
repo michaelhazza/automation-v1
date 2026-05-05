@@ -19,7 +19,7 @@ export const integrationConnections = pgTable(
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
-    providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'teamwork' | 'web_login' | 'custom'>(),
+    providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'stripe_agent' | 'teamwork' | 'web_login' | 'custom' | 'google_drive'>(),
     // Note: 'web_login' uses authType 'service_account' (username + password
     // stored in configJson + secretsRef respectively). Spec v3.4 §6 / Code Change D.
     authType: text('auth_type').notNull().$type<'oauth2' | 'api_key' | 'service_account' | 'github_app' | 'web_login'>(),

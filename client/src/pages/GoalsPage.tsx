@@ -214,7 +214,7 @@ export default function GoalsPage({ user: _user }: { user: User }) {
         </div>
         <button
           onClick={() => setShowNew(true)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-sm btn-primary"
         >
           + New Goal
         </button>
@@ -289,13 +289,13 @@ export default function GoalsPage({ user: _user }: { user: User }) {
               <button
                 onClick={handleCreate}
                 disabled={!newTitle.trim() || saving}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors"
+                className="btn btn-sm btn-primary"
               >
                 {saving ? 'Creating...' : 'Create Goal'}
               </button>
               <button
                 onClick={() => { setShowNew(false); setNewTitle(''); setNewDesc(''); setNewParentId(''); }}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors"
+                className="btn btn-sm btn-secondary"
               >
                 Cancel
               </button>
@@ -326,7 +326,7 @@ export default function GoalsPage({ user: _user }: { user: User }) {
           {filter === 'all' && (
             <button
               onClick={() => setShowNew(true)}
-              className="mt-3.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              className="btn btn-sm btn-primary mt-3.5"
             >
               + New Goal
             </button>

@@ -22,7 +22,7 @@ export interface ExistingBlockView {
   id: string;
   content: string;
   lastEditedByAgentId: string | null;
-  lastWrittenByPlaybookSlug: string | null;
+  lastWrittenByWorkflowSlug: string | null;
   sourceRunId: string | null;
 }
 
@@ -36,7 +36,7 @@ export interface UpsertDecisionInput {
   /** Merge strategy declared on the binding. */
   mergeStrategy: MergeStrategy;
   /** Slug of the playbook whose run is firing the binding. */
-  playbookSlug: string;
+  workflowSlug: string;
   /**
    * How many blocks this run has already upserted (including any that are
    * about to be applied earlier in the same finaliseRun() loop). Used for
@@ -77,7 +77,7 @@ export type UpsertDecision =
  * value + merge strategy, produce an `UpsertDecision`. Side-effect free.
  */
 export function decideUpsert(input: UpsertDecisionInput): UpsertDecision {
-  const { existing, incomingContent, mergeStrategy, playbookSlug, blocksUpsertedThisRun } =
+  const { existing, incomingContent, mergeStrategy, workflowSlug, blocksUpsertedThisRun } =
     input;
 
   if (incomingContent.trim().length === 0) {
@@ -101,8 +101,8 @@ export function decideUpsert(input: UpsertDecisionInput): UpsertDecision {
   if (existing) {
     const humanLastEdit = existing.lastEditedByAgentId === null;
     const differentOwnerSlug =
-      existing.lastWrittenByPlaybookSlug === null ||
-      existing.lastWrittenByPlaybookSlug !== playbookSlug;
+      existing.lastWrittenByWorkflowSlug === null ||
+      existing.lastWrittenByWorkflowSlug !== workflowSlug;
     if (humanLastEdit && differentOwnerSlug) {
       return {
         kind: 'skip_hitl_overwrite',

@@ -188,3 +188,106 @@ export async function listGhlFromNumbers(
 ): Promise<GhlReadResult<RawGhlFromNumber>> {
   return getJson<RawGhlFromNumber>({ ctx, path: '/phone-numbers/' });
 }
+
+// ---------------------------------------------------------------------------
+// P2 additions — live-executor helpers for CRM Query Planner (spec §13.1)
+// ---------------------------------------------------------------------------
+
+export type RawGhlOpportunity = {
+  id: string;
+  name?: string;
+  stage?: string;
+  status?: string;
+  monetaryValue?: number;
+  amount?: number;
+  pipelineId?: string;
+  pipelineStageId?: string;
+  assignedTo?: string;
+  contactId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type RawGhlAppointment = {
+  id: string;
+  title?: string;
+  startTime?: string;
+  endTime?: string;
+  status?: string;
+  contactId?: string;
+  calendarId?: string;
+  appointmentType?: string;
+  assignedUserId?: string;
+};
+
+export type RawGhlConversation = {
+  id: string;
+  type?: string;
+  status?: string;
+  lastMessageAt?: string;
+  contactId?: string;
+  assignedUserId?: string;
+  unreadCount?: number;
+};
+
+export type RawGhlTask = {
+  id: string;
+  title?: string;
+  status?: string;
+  dueDate?: string;
+  completedAt?: string;
+  assignedUserId?: string;
+  contactId?: string;
+};
+
+export async function listGhlOpportunities(
+  ctx: GhlContext,
+  query?: { limit?: number; status?: string; pipelineId?: string },
+): Promise<GhlReadResult<RawGhlOpportunity>> {
+  return getJson<RawGhlOpportunity>({
+    ctx,
+    path: '/opportunities/search',
+    query: { limit: query?.limit ?? 50, ...(query?.status ? { status: query.status } : {}), ...(query?.pipelineId ? { pipelineId: query.pipelineId } : {}) },
+  });
+}
+
+export async function listGhlAppointments(
+  ctx: GhlContext,
+  query?: { limit?: number; startDate?: string; endDate?: string },
+): Promise<GhlReadResult<RawGhlAppointment>> {
+  return getJson<RawGhlAppointment>({
+    ctx,
+    path: '/appointments/',
+    query: {
+      limit: query?.limit ?? 50,
+      ...(query?.startDate ? { startDate: query.startDate } : {}),
+      ...(query?.endDate   ? { endDate:   query.endDate }   : {}),
+    },
+  });
+}
+
+export async function listGhlConversations(
+  ctx: GhlContext,
+  query?: { limit?: number; status?: string },
+): Promise<GhlReadResult<RawGhlConversation>> {
+  return getJson<RawGhlConversation>({
+    ctx,
+    path: '/conversations/',
+    query: { limit: query?.limit ?? 50, ...(query?.status ? { status: query.status } : {}) },
+  });
+}
+
+export async function listGhlTasks(
+  ctx: GhlContext,
+  query?: { limit?: number; status?: string; contactId?: string },
+): Promise<GhlReadResult<RawGhlTask>> {
+  return getJson<RawGhlTask>({
+    ctx,
+    path: '/contacts/tasks',
+    query: {
+      limit: query?.limit ?? 50,
+      ...(query?.status    ? { status:    query.status }    : {}),
+      ...(query?.contactId ? { contactId: query.contactId } : {}),
+    },
+  });
+}

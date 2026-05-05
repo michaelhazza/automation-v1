@@ -47,13 +47,32 @@ export async function collapseOutcome(input: OutcomeLearningInput): Promise<void
     const lesson = await generateLesson(input.toolSlug, diff);
     if (!lesson) return;
 
+    // Hermes Tier 1 Phase B §6.4 / §6.7.1 — this path writes a human-
+    // curated lesson from a review edit, not a true terminal-run signal.
+    const HUMAN_CURATED_OUTCOME = {
+      runResultStatus: 'partial' as const,
+      trajectoryPassed: null,
+      errorMessage: null,
+    };
+    const HUMAN_CURATED_OPTIONS = {
+      taskSlug: input.taskSlug,
+      // `partial` keeps §6.5 scoring neutral (+0.00, no promotion/demotion).
+      // Overrides preserve pre-Phase-B "run-sourced, verified" semantics so
+      // retrieval filters at memoryBlockSynthesisService.ts:126 keep including
+      // human-curated lessons.
+      overrides: {
+        isUnverified:        false,
+        provenanceConfidence: 0.7,
+      },
+    };
     await workspaceMemoryService.extractRunInsights(
       input.agentRunId,
       input.agentId,
       input.organisationId,
       input.subaccountId,
       lesson,
-      input.taskSlug,
+      HUMAN_CURATED_OUTCOME,
+      HUMAN_CURATED_OPTIONS,
     );
   } catch {
     // Fire-and-forget — never let learning errors bubble up to the caller

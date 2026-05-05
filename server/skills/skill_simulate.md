@@ -2,7 +2,7 @@
 name: Simulate Skill Version
 description: Replay proposed skill version against captured regression fixtures and return pass/fail results.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

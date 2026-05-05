@@ -1,4 +1,5 @@
-import { sql } from 'drizzle-orm';
+import { sql, and, gte, lte, eq, desc } from 'drizzle-orm';
+import { llmInflightHistory } from '../db/schema/llmInflightHistory.js';
 import type { OrgScopedTx } from '../db/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import type {
@@ -11,6 +12,7 @@ import type {
   TopCallRow,
   CallDetail,
   OverheadRow,
+  PlannerMetrics,
 } from '../../shared/types/systemPnl.js';
 import {
   computeMarginPct,
@@ -671,6 +673,81 @@ export async function getCallDetail(id: string): Promise<CallDetail | null> {
   });
 }
 
+// ── CRM Query Planner metrics subsection (P3 — spec §17.2 + §19 P3) ──────────
+// Queries llm_requests filtered by feature_tag='crm-query-planner' to surface
+// Stage 3 cost and escalation signals. PlannerMetrics shape lives in
+// shared/types/systemPnl.ts so both server and client share the same contract.
+
+export async function getPlannerMetrics(days = 30): Promise<PlannerMetrics> {
+  return adminRead('getPlannerMetrics', async (tx) => {
+    const rows = await tx.execute<{
+      total_calls:     number;
+      escalated_calls: number;
+      avg_cost_cents:  number | null;
+      total_cost_cents: number;
+      avg_latency_ms:  number | null;
+    }>(sql`
+      SELECT
+        COUNT(*)::int                                              AS total_calls,
+        COUNT(*) FILTER (WHERE was_escalated = TRUE)::int         AS escalated_calls,
+        AVG(ROUND(cost_raw * 100))                                AS avg_cost_cents,
+        COALESCE(ROUND(SUM(cost_raw * 100)), 0)                   AS total_cost_cents,
+        AVG(provider_latency_ms)                                  AS avg_latency_ms
+      FROM llm_requests_all
+      WHERE feature_tag = 'crm-query-planner'
+        AND task_type   = 'crm_query_planner'
+        AND created_at >= NOW() - INTERVAL '1 day' * ${days}
+        AND status IN ('success', 'partial')
+    `);
+
+    const r = rows[0];
+    const totalCalls     = r ? Number(r.total_calls)      || 0 : 0;
+    const escalatedCalls = r ? Number(r.escalated_calls)  || 0 : 0;
+    const avgCostCents   = r ? (Number(r.avg_cost_cents)  || null) : null;
+    const totalCostCents = r ? Number(r.total_cost_cents) || 0 : 0;
+    const avgLatencyMs   = r ? (Number(r.avg_latency_ms)  || null) : null;
+
+    return {
+      totalStage3Calls:    totalCalls,
+      escalatedCalls,
+      escalationRate:      totalCalls > 0 ? Math.round((escalatedCalls / totalCalls) * 10000) / 100 : null,
+      avgCostCentsPerCall: avgCostCents !== null ? Math.round(avgCostCents) : null,
+      avgLatencyMs:        avgLatencyMs !== null ? Math.round(avgLatencyMs) : null,
+      totalCostCents:      Math.round(totalCostCents),
+      llmSkippedRate:      null,
+      briefRefinementRate: null,
+      periodDays:          days,
+    };
+  });
+}
+
+const INFLIGHT_HISTORY_HARD_CAP = 1_000;
+
+// @rls-allowlist-bypass: llm_inflight_history listInflightHistory [ref: spec §3.3.1]
+export async function listInflightHistory(filters: {
+  from?: Date | null;
+  to?: Date | null;
+  runtimeKey?: string;
+  idempotencyKey?: string;
+  limit?: number;
+}) {
+  return adminRead('listInflightHistory', async (tx) => {
+    const conditions = [];
+    if (filters.from) conditions.push(gte(llmInflightHistory.createdAt, filters.from));
+    if (filters.to) conditions.push(lte(llmInflightHistory.createdAt, filters.to));
+    if (filters.runtimeKey) conditions.push(eq(llmInflightHistory.runtimeKey, filters.runtimeKey));
+    if (filters.idempotencyKey) conditions.push(eq(llmInflightHistory.idempotencyKey, filters.idempotencyKey));
+
+    const limit = filters.limit ?? 200;
+    return tx
+      .select()
+      .from(llmInflightHistory)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(llmInflightHistory.createdAt))
+      .limit(Math.min(limit, INFLIGHT_HISTORY_HARD_CAP));
+  });
+}
+
 export const systemPnlService = {
   getPnlSummary,
   getByOrganisation,
@@ -680,4 +757,6 @@ export const systemPnlService = {
   getDailyTrend,
   getTopCalls,
   getCallDetail,
+  getPlannerMetrics,
+  listInflightHistory,
 };

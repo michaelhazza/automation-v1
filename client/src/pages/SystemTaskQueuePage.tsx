@@ -318,19 +318,19 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
         <div className="flex gap-2">
           <button
             onClick={handleSearch}
-            className="px-5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+            className="btn btn-sm btn-primary"
           >
             Search
           </button>
           <button
             onClick={() => { setFilterOrg(''); setFilterStatus(''); setFilterEngine(''); setFilterFrom(''); setFilterTo(''); }}
-            className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[13px] cursor-pointer transition-colors"
+            className="btn btn-sm btn-secondary"
           >
             Reset
           </button>
           <button
             onClick={() => fetchExecutions(offset)}
-            className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[13px] cursor-pointer transition-colors"
+            className="btn btn-sm btn-secondary"
             title="Refresh"
           >
             ↻ Refresh
@@ -417,7 +417,7 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
                       <td className="px-3.5 py-2.5 whitespace-nowrap">
                         <button
                           onClick={() => setSelected(row)}
-                          className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[12px] cursor-pointer font-medium transition-colors"
+                          className="btn btn-xs btn-secondary"
                         >
                           Diagnose
                         </button>
@@ -440,14 +440,14 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
               <button
                 onClick={handlePrev}
                 disabled={offset === 0}
-                className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 border border-slate-200 rounded-md text-[13px] cursor-pointer transition-colors"
+                className="btn btn-sm btn-secondary disabled:opacity-50"
               >
                 Previous
               </button>
               <button
                 onClick={handleNext}
                 disabled={rows.length < LIMIT}
-                className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 border border-slate-200 rounded-md text-[13px] cursor-pointer transition-colors"
+                className="btn btn-sm btn-secondary disabled:opacity-50"
               >
                 Next
               </button>

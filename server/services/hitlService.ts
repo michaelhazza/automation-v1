@@ -18,6 +18,13 @@ export interface HitlDecision {
   comment?: string;
   /** Present when approved with human-edited args */
   editedArgs?: Record<string, unknown>;
+  /**
+   * True iff the decision came from the timeout fallback path — NOT from a
+   * human rejection whose free-text comment happens to mention "timeout".
+   * Callers must use this flag (not substring-match the comment) to
+   * classify timeout vs. rejection.
+   */
+  timedOut?: boolean;
 }
 
 export class AlreadyDecidedError extends Error {
@@ -73,6 +80,7 @@ export const hitlService = {
           pendingDecisions.delete(actionId);
           resolve({
             approved: false,
+            timedOut: true,
             comment: `No response received within ${Math.round(timeoutMs / 60000)} minutes. Action rejected by timeout.`,
           });
         }

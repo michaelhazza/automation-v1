@@ -22,15 +22,13 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, eq } from 'drizzle-orm';
 import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { webLoginConnectionService } from '../services/webLoginConnectionService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { auditService } from '../services/auditService.js';
-import { db } from '../db/index.js';
-import { subaccountAgents } from '../db/schema/subaccountAgents.js';
 
 const router = Router();
 
@@ -128,23 +126,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { agents } = await import('../db/schema/agents.js');
-    const rows = await db
-      .select({
-        id: subaccountAgents.id,
-        agentId: subaccountAgents.agentId,
-        isActive: subaccountAgents.isActive,
-        name: agents.name,
-      })
-      .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-      .where(
-        and(
-          eq(subaccountAgents.organisationId, req.orgId!),
-          eq(subaccountAgents.subaccountId, subaccount.id),
-          eq(subaccountAgents.isActive, true),
-        ),
-      );
+    const rows = await webLoginConnectionService.listTestEligibleAgents(req.orgId!, subaccount.id);
     res.json(rows);
   }),
 );
@@ -279,20 +261,7 @@ router.post(
     // guard, a crafted POST could attribute the test run to one subaccount
     // in the URL while running against another's agent link, corrupting
     // budget/config/audit attribution.
-    const [link] = await db
-      .select({
-        id: subaccountAgents.id,
-        agentId: subaccountAgents.agentId,
-        subaccountId: subaccountAgents.subaccountId,
-      })
-      .from(subaccountAgents)
-      .where(
-        and(
-          eq(subaccountAgents.id, body.subaccountAgentId),
-          eq(subaccountAgents.subaccountId, subaccount.id),
-          eq(subaccountAgents.agentId, body.agentId),
-        ),
-      );
+    const link = await subaccountAgentService.findLink(body.subaccountAgentId, subaccount.id, body.agentId);
     if (!link) {
       res.status(404).json({ error: 'subaccount_agent_not_found_for_subaccount' });
       return;

@@ -1,14 +1,16 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { llmRequests, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
+import { recordIncident } from './incidentIngestor.js';
+import { llmRequests, ieeRuns, agentRunLlmPayloads, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
 import { createGeneration, createEvent } from '../lib/tracing.js';
 import type { TaskType, SourceType, ExecutionPhase, RoutingMode, CallSite } from '../db/schema/index.js';
 import { RouterContractError } from '../../shared/iee/index.js';
+import { FailureError } from '../../shared/iee/failure.js';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProviderAdapter } from './providers/registry.js';
 import { pricingService } from './pricingService.js';
-import { budgetService, BudgetExceededError, RateLimitError } from './budgetService.js';
+import { computeBudgetService, ComputeBudgetExceededError, RateLimitError } from './computeBudgetService.js';
 import { resolveLLM } from './llmResolver.js';
 import type { ProviderMessage, ProviderTool, ProviderResponse } from './providers/types.js';
 import { env } from '../lib/env.js';
@@ -23,6 +25,14 @@ import {
 } from '../config/limits.js';
 import * as inflightRegistry from './llmInflightRegistry.js';
 import { buildRuntimeKey } from './llmInflightRegistryPure.js';
+import { generateIdempotencyKey } from './llmRouterIdempotencyPure.js';
+import { ReconciliationRequiredError } from '../lib/reconciliationRequiredError.js';
+import * as llmInflightPayloadStore from './llmInflightPayloadStore.js';
+import { logger } from '../lib/logger.js';
+import { tryEmitAgentEvent, emitAgentEvent } from './agentExecutionEventEmitter.js';
+import { buildPayloadRow } from './agentRunPayloadWriter.js';
+import { shouldEmitLaelLifecycle } from './llmRouterLaelPure.js';
+export { shouldEmitLaelLifecycle } from './llmRouterLaelPure.js';
 
 // ---------------------------------------------------------------------------
 // LLM Router — the financial chokepoint for every LLM call in the platform.
@@ -113,40 +123,40 @@ export interface RouterCallParams {
    * for caller control flow. See spec §8.3 / §19.7.
    */
   postProcess?: (content: string) => void | Promise<void>;
+  /**
+   * Deferred-items brief §5 — opt-in token-level streaming. When true,
+   * the router uses `providerAdapter.stream()` (if the adapter implements
+   * it) and forwards throttled progress events to the in-flight registry.
+   * The final ProviderResponse shape is identical to `call()` — postProcess
+   * runs on the complete accumulated response, not on each chunk. Adapters
+   * that don't implement `stream()` transparently fall through to `call()`.
+   *
+   * Streaming MUST coordinate with the partial-external-success work
+   * (brief §1) — a provider that has emitted N tokens has already billed
+   * for them, so an aborted stream is handled by the same `'started'`
+   * row + reconciliation contract as a non-streamed call.
+   */
+  stream?:      boolean;
+  /**
+   * Cached Context Infrastructure §6.6 — assembled prefix hash for this call.
+   * Optional; only passed by cachedContextOrchestrator. Phase 4 accepts the
+   * param but does NOT persist it (column lands in Phase 5 / migration 0210).
+   */
+  prefixHash?:  string;
+  /**
+   * Cached Context Infrastructure §6.6 — caller TTL hint for ephemeral cache.
+   * Passed through to the provider adapter's cache_control block. Defaults to
+   * '1h' when not provided. Resolver-narrowed TTL is deferred (§12.15).
+   */
+  cacheTtl?:    '5m' | '1h';
 }
 
 // ---------------------------------------------------------------------------
-// Idempotency key
+// Idempotency key — pure derivation lives in `llmRouterIdempotencyPure.ts`
+// so the v1:-prefixed contract (deferred-items brief §2) can be pinned by
+// a pure test without booting the env-dependent router module.
 // Includes provider + model: different provider/model = distinct financial event
 // ---------------------------------------------------------------------------
-
-function generateIdempotencyKey(
-  ctx: LLMCallContext,
-  messages: ProviderMessage[],
-  provider: string,
-  model: string,
-): string {
-  const messageHash = createHash('sha256')
-    .update(JSON.stringify(messages))
-    .digest('hex')
-    .slice(0, 32);
-
-  // Rev §6 — extend the attribution position to include ieeRunId and the
-  // polymorphic sourceId so analyzer/system callers dedupe meaningfully
-  // within the same job. Without sourceId in the key, every analyzer call
-  // for the same org would collide on 'system'. Similarly, the agent slot
-  // falls back to featureTag so non-agent callers dedupe by feature rather
-  // than colliding on 'no-agent'. See spec §6.5.
-  return [
-    ctx.organisationId,
-    ctx.runId ?? ctx.executionId ?? ctx.ieeRunId ?? ctx.sourceId ?? 'system',
-    ctx.agentName ?? ctx.featureTag ?? 'no-agent',
-    ctx.taskType,
-    provider,
-    model,
-    messageHash,
-  ].join(':');
-}
 
 // ---------------------------------------------------------------------------
 // Billing period helpers — always UTC
@@ -239,11 +249,42 @@ function isNonRetryableError(err: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// IEE run-id resolver (Hermes Tier 1 Phase C §7.6)
+// ---------------------------------------------------------------------------
+//
+// The cost breaker requires an `agent_runs.id` (`runId`) to look up the
+// per-run cost ceiling. IEE-sourced calls (`sourceType='iee'`) may or may
+// not carry `runId` directly; when they don't, `ieeRunId` is the handle
+// and the parent `agent_run_id` lives on `iee_runs`.
+//
+// Kept local to the router per §7.6: the breaker stays agnostic about how
+// its `runId` was derived, and the router already owns `iee_runs` reads
+// for other routing metadata. One indexed primary-key lookup per
+// `routeCall`; no memoisation across calls (the cache key would be
+// `routeCall` invocation itself, and each invocation runs once).
+async function resolveRunIdFromIee(ieeRunId: string | undefined): Promise<string | null> {
+  if (!ieeRunId) return null;
+  const [row] = await db
+    .select({ agentRunId: ieeRuns.agentRunId })
+    .from(ieeRuns)
+    .where(eq(ieeRuns.id, ieeRunId))
+    .limit(1);
+  return row?.agentRunId ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Main router — drop-in replacement for callAnthropic()
 // ---------------------------------------------------------------------------
 
 export async function routeCall(params: RouterCallParams): Promise<ProviderResponse> {
   const routerStart = Date.now();
+  // `queuedAt` — captured at the very top of routeCall so the gap between
+  // caller invocation and adapter dispatch (budget lock wait, provider
+  // cooldown bounce chain, model resolver) is visible to the In-Flight tab.
+  // See deferred-items brief §3. Pre-dispatch terminals (budget_blocked,
+  // rate_limited) never produce a registry entry so `queuedAt` only surfaces
+  // on entries that reach inflightRegistry.add().
+  const queuedAt = new Date(routerStart).toISOString();
 
   // ── 1. Validate context ─────────────────────────────────────────────────
   const ctx = LLMCallContextSchema.parse(params.context);
@@ -309,7 +350,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let effectiveModel: string;
   let routingTier: 'frontier' | 'economy' = 'frontier';
   let wasDowngraded = false;
-  let routingReason: string = 'ceiling';
+  let routingReason: string;
 
   const systemCallerPolicy = ctx.systemCallerPolicy ?? 'respect_routing';
   if (systemCallerPolicy === 'bypass_routing') {
@@ -388,7 +429,22 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     .update(JSON.stringify(params.messages))
     .digest('hex');
 
-  // ── 4+7. Atomic idempotency check + budget reservation ─────────────────
+  // ── 4+7. Atomic idempotency check + provisional ledger write ───────────
+  //
+  // Deferred-items brief §1 — the provisional `'started'` row MUST be
+  // inserted inside this transaction, not after. A SELECT FOR UPDATE only
+  // locks existing rows; when no row exists for `idempotencyKey`, two
+  // concurrent first-calls both pass the check, both commit, and both
+  // proceed to dispatch — the exact double-bill window §1 exists to
+  // prevent. Pulling the INSERT into the transaction makes the second
+  // caller block on the unique-constraint conflict until the first
+  // transaction commits; the second tx's own SELECT FOR UPDATE then
+  // returns the `'started'` row and correctly takes the reconciliation
+  // branch.
+  //
+  // pr-review finding #1 (2026-04-21): this contract was previously
+  // violated — the INSERT was after the transaction and the race window
+  // was open. DO NOT move the INSERT back out of this block.
   let reservationId: string | null = null;
   let budgetBlockedStatus: string | null = null;
   let budgetErrorMessage: string | null = null;
@@ -415,8 +471,105 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       };
     }
 
-    return { cached: false as const };
+    // Deferred-items brief §1 — a provisional `'started'` row means a prior
+    // attempt under the same idempotencyKey already called the provider
+    // (which has billed). A retry cannot safely re-dispatch. Surface a
+    // typed error so the caller owns the reconciliation decision.
+    //
+    // Important: this check is ONLY for rows whose status is literally
+    // 'started'. Terminal error/timeout rows are still overwritable by
+    // the usual upsert path (see `where status != 'success'` clause on
+    // the success-insert at the bottom of this function).
+    if (existing.length > 0 && existing[0].status === 'started') {
+      return { inflight: true as const } as const;
+    }
+
+    // Terminal error/terminal-failure rows from a prior attempt exist but
+    // are overwritable — fall through to write a fresh `'started'` row
+    // below. The upsert conflict target is idempotencyKey and the
+    // onConflictDoUpdate `where: status != 'success'` guard keeps any
+    // prior success row (which was already returned above) untouched.
+    const provisional = await tx
+      .insert(llmRequests)
+      .values({
+        idempotencyKey,
+        organisationId:      ctx.organisationId,
+        subaccountId:        ctx.subaccountId,
+        userId:              ctx.userId,
+        sourceType:          ctx.sourceType,
+        runId:               ctx.runId,
+        executionId:         ctx.executionId,
+        ieeRunId:            ctx.ieeRunId,
+        sourceId:            ctx.sourceId,
+        featureTag:          ctx.featureTag ?? 'unknown',
+        callSite:            ctx.callSite ?? 'app',
+        agentName:           ctx.agentName,
+        taskType:            ctx.taskType,
+        executionPhase:      ctx.executionPhase,
+        provider:            effectiveProvider,
+        model:               effectiveModel,
+        tokensIn:            0,
+        tokensOut:           0,
+        costRaw:             '0',
+        costWithMargin:      '0',
+        costWithMarginCents: 0,
+        marginMultiplier:    String(margin.multiplier),
+        fixedFeeCents:       margin.fixedFeeCents,
+        requestPayloadHash,
+        status:              'started',
+        requestedProvider:   effectiveProvider,
+        requestedModel:      effectiveModel,
+        wasEscalated:        ctx.wasEscalated ?? false,
+        escalationReason:    ctx.escalationReason,
+        billingMonth,
+        billingDay,
+      })
+      // A prior terminal-error row may still own this key. Overwrite it
+      // with a fresh `'started'` so the retry path works as expected; the
+      // `where: status != 'success'` guard protects committed successes
+      // (which have already been caught and returned above anyway).
+      //
+      // `createdAt: sql\`now()\`` resets the row's age so a revived
+      // terminal-error row (which may be hours old) doesn't appear
+      // immediately sweep-eligible to `llmStartedRowSweepJob`. Without
+      // this reset, a retry on a key whose prior error row is older than
+      // PROVIDER_CALL_TIMEOUT_MS + 60s would be reaped by the sweep while
+      // the provider call is still in flight — reopening the double-bill
+      // window this provisional-row mechanism exists to prevent.
+      .onConflictDoUpdate({
+        target: [llmRequests.idempotencyKey],
+        set: {
+          status:              'started',
+          errorMessage:        null,
+          provider:            effectiveProvider,
+          model:               effectiveModel,
+          requestPayloadHash,
+          requestedProvider:   effectiveProvider,
+          requestedModel:      effectiveModel,
+          marginMultiplier:    String(margin.multiplier),
+          fixedFeeCents:       margin.fixedFeeCents,
+          tokensIn:            0,
+          tokensOut:           0,
+          costRaw:             '0',
+          costWithMargin:      '0',
+          costWithMarginCents: 0,
+          createdAt:           sql`now()`,
+        },
+        where: sql`${llmRequests.status} != 'success'`,
+      })
+      .returning({ id: llmRequests.id });
+
+    return { cached: false as const, provisionalRowId: provisional[0]?.id ?? null };
   });
+
+  if ('inflight' in idempotencyResult) {
+    createEvent('llm.router.reconciliation_required', {
+      idempotencyKey,
+      model: effectiveModel,
+      provider: effectiveProvider,
+    });
+    throw new ReconciliationRequiredError({ idempotencyKey });
+  }
 
   if (idempotencyResult.cached) {
     createEvent('llm.router.cache_hit', {
@@ -426,9 +579,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     });
     return idempotencyResult.response;
   }
+  // `provisionalLedgerRowId` is the UUID of the `'started'` row created
+  // in the idempotency-check transaction above. The terminal upsert (both
+  // success and failure paths) writes to the same idempotencyKey, so the
+  // row's UUID does not change — `provisionalLedgerRowId` equals the final
+  // terminal `ledgerRowId`. Threaded to `llm.requested` (§1.1 LAEL-P1-1).
+  const provisionalLedgerRowId = idempotencyResult.provisionalRowId;
 
   try {
-    reservationId = await budgetService.checkAndReserve(
+    reservationId = await computeBudgetService.checkAndReserve(
       {
         organisationId:    ctx.organisationId,
         subaccountId:      ctx.subaccountId,
@@ -442,7 +601,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       idempotencyKey,
     );
   } catch (err) {
-    if (err instanceof BudgetExceededError) {
+    if (err instanceof ComputeBudgetExceededError) {
       budgetBlockedStatus = 'budget_blocked';
       budgetErrorMessage = err.message;
       createEvent('llm.router.budget_exceeded', {
@@ -457,9 +616,14 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
   }
 
-  // Write the audit record for blocked calls (budget_blocked / rate_limited)
+  // Write the audit record for blocked calls (budget_blocked / rate_limited).
+  // The provisional `'started'` row was already inserted inside the
+  // idempotency-check transaction above, so we must overwrite it here
+  // — not onConflictDoNothing — otherwise the `'started'` row stays in
+  // the table until the sweep reaps it 660s later. `where status != 'success'`
+  // preserves the invariant that a committed success is never downgraded.
   if (budgetBlockedStatus) {
-    await db
+    const budgetBlockedInsertedRows = await db
       .insert(llmRequests)
       .values({
         idempotencyKey,
@@ -496,19 +660,48 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         billingMonth,
         billingDay,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [llmRequests.idempotencyKey],
+        set: {
+          status:           budgetBlockedStatus,
+          errorMessage:     budgetErrorMessage,
+          routerOverheadMs: Date.now() - routerStart,
+        },
+        // Dual-review round 2 / reviewer feedback: tighten from
+        // `!= 'success'` to `= 'started'`. The budget-blocked path runs
+        // milliseconds after the provisional INSERT in the idempotency tx,
+        // so the row is expected to be in 'started' state. A mismatch
+        // (sweep fired, prior retry already terminalised, etc.) means
+        // something raced and the budget-block's audit record is being
+        // silently discarded — log it rather than swallow.
+        where: sql`${llmRequests.status} = 'started'`,
+      })
+      .returning({ id: llmRequests.id });
+
+    if (budgetBlockedInsertedRows.length === 0) {
+      logger.warn('llm_router.budget_block_upsert_ghost', {
+        idempotencyKey,
+        budgetBlockedStatus,
+        note: 'existing row was not in started state — audit trail dropped',
+      });
+    }
 
     throw {
       statusCode: 402,
-      code: budgetBlockedStatus === 'budget_blocked' ? 'BUDGET_EXCEEDED' : 'RATE_LIMITED',
+      code: budgetBlockedStatus === 'budget_blocked' ? 'COMPUTE_BUDGET_EXCEEDED' : 'RATE_LIMITED',
       message: budgetErrorMessage,
     };
   }
 
   // ── 8. Call the provider with retry-fallback loop ───────────────────────
+  // (The provisional `'started'` row is now written atomically inside the
+  // idempotency-check transaction above — see the brief §1 / pr-review
+  // finding #1. Do NOT re-introduce a separate post-transaction INSERT.)
   const providerStart = Date.now();
   let providerResponse: ProviderResponse | null = null;
   let callStatus: string = 'success';
+  // reason: safe default so finally-block logging is always defined regardless of which branch executes.
+  // eslint-disable-next-line no-useless-assignment
   let callError: string | null = null;
   let attemptNumber = 1;
   let actualProvider = effectiveProvider;
@@ -544,6 +737,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     terminalStatus: 'error';
   } | null = null;
 
+  // Cross-provider monotonic counter — ticks once per attempt whether the
+  // attempt succeeds, retries, or fans out to a fallback provider. Paired
+  // with the per-provider `attempt` counter so the In-Flight tab can show
+  // "#3 of the logical call" instead of misleadingly showing "#1 (again)"
+  // whenever the fallback chain advances. See deferred-items brief §4.
+  let attemptSequence = 0;
+
   // Build fallback chain: primary provider first, then others in order
   const fallbackChain = [
     effectiveProvider,
@@ -551,9 +751,28 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   ];
 
   let lastError: unknown = null;
+  let fallbackIndex = -1;
+
+  // ── §1.1 LAEL-P1-1 pairing-completeness flags ────────────────────────────
+  // INVARIANT (locked): every emitted llm.requested is paired with exactly one
+  // llm.completed. Three independent emit sites uphold this — success path
+  // (§12c below), failure path (callStatus loop exit), and the finally-block
+  // fallback. The two flags + wrapping try/finally enforce it.
+  //
+  // `laelRequestEmitted` is set to true after emitting `llm.requested` so the
+  // finally block below can guarantee a matching `llm.completed` fires even if
+  // an exception escapes between the two emission sites. `laelCompletedEmitted`
+  // is set to true at each normal `llm.completed` emit site so the finally
+  // block does not double-emit on the normal paths.
+  let laelRequestEmitted = false;
+  let laelCompletedEmitted = false;
+  // `terminalStatus` carries the final status value for the finally fallback.
+  // Initialised to null; set by the success/failure paths before they emit.
+  let terminalStatus: string | null = null;
 
   providerLoop:
   for (const provider of fallbackChain) {
+    fallbackIndex++;
     if (isProviderCoolingDown(provider)) {
       console.warn(`[llmRouter] Skipping provider ${provider} — in cooldown`);
       continue;
@@ -608,10 +827,17 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         }
         console.error(invariantMsg);
       }
+      // Tick the cross-provider sequence immediately before add() so the
+      // registry entry carries the correct "this is the Nth attempt of
+      // the logical call" value regardless of which provider is running.
+      attemptSequence++;
       inflightRegistry.add({
         idempotencyKey,
         attempt,
+        attemptSequence,
+        fallbackIndex,
         startedAt:      attemptStartedAt,
+        queuedAt,
         label:          `${provider}/${mappedModel}`,
         provider,
         model:          mappedModel,
@@ -627,21 +853,109 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         timeoutMs:      PROVIDER_CALL_TIMEOUT_MS,
       });
       currentRuntimeKey = attemptRuntimeKey;
+      // Deferred-items brief §7 — capture the payload snapshot so the
+      // admin live-row drawer can render prompt/system/tools. LRU-bounded
+      // in-memory store (see llmInflightPayloadStore.ts), cleared on
+      // registry.remove() below. Snapshot is by-reference in-memory only;
+      // the store never forwards to the socket or DB.
+      llmInflightPayloadStore.set(attemptRuntimeKey, {
+        messages:    params.messages,
+        system:      params.system,
+        tools:       params.tools,
+        maxTokens:   params.maxTokens,
+        temperature: params.temperature,
+      });
+
+      // ── §1.1 LAEL-P1-1: llm.requested emission ──────────────────────────
+      // Fired BEFORE the provider dispatch so observers can measure the
+      // dispatch-to-completion window. provisionalLedgerRowId is the UUID of
+      // the `'started'` row created above — the upsert at terminal time will
+      // overwrite the row's fields but preserve the UUID, so this ID matches
+      // the final ledger row. Only emitted for agent_run sourceType with a
+      // valid runId (see shouldEmitLaelLifecycle — pre-dispatch terminals like
+      // budget_blocked/rate_limited have already thrown above, so the only
+      // in-scope status here is 'started').
+      if (ctx.sourceType === 'agent_run' && ctx.runId && provisionalLedgerRowId) {
+        tryEmitAgentEvent({
+          runId:          ctx.runId,
+          organisationId: ctx.organisationId,
+          subaccountId:   ctx.subaccountId ?? null,
+          sourceService:  'llmRouter',
+          payload: {
+            eventType:           'llm.requested',
+            critical:            true,
+            llmRequestId:        provisionalLedgerRowId,
+            provider,
+            model:               mappedModel,
+            attempt,
+            featureTag:          ctx.featureTag ?? 'unknown',
+            payloadPreviewTokens: 0,
+          },
+          linkedEntity: { type: 'llm_request', id: provisionalLedgerRowId },
+        });
+        laelRequestEmitted = true;
+      }
 
       try {
         providerResponse = await callWithTimeout(
           `${provider}/${mappedModel}`,
           PROVIDER_CALL_TIMEOUT_MS,
           params.abortSignal,
-          (signal) => providerAdapter.call({
-            model:       mappedModel,
-            messages:    params.messages,
-            system:      params.system,
-            tools:       params.tools,
-            maxTokens:   params.maxTokens,
-            temperature: params.temperature,
-            signal,
-          }),
+          async (signal) => {
+            // Deferred-items brief §5 — opt into streaming when the caller
+            // requests it AND the adapter implements `stream()`. Fall
+            // through to `call()` otherwise. The streaming path emits
+            // throttled progress events to the in-flight registry as
+            // tokens arrive; the return shape is identical so the ledger
+            // write path is unchanged.
+            if (params.stream && typeof providerAdapter.stream === 'function') {
+              const iterable = providerAdapter.stream({
+                model:       mappedModel,
+                messages:    params.messages,
+                system:      params.system,
+                tools:       params.tools,
+                maxTokens:   params.maxTokens,
+                temperature: params.temperature,
+                signal,
+              });
+              // pr-review finding #3 (2026-04-21): if the for-await loop
+              // exits via exception, `iterable.done` is left as an
+              // unobserved Promise and Node.js emits
+              // UnhandledPromiseRejection. Attach a no-op catch FIRST so
+              // the handler is installed before any throw site, then
+              // await it normally at the end. `await iterable.done`
+              // re-observes the same Promise; a no-op handler alongside
+              // the normal await is the standard node idiom for
+              // "observe a Promise twice without double-reporting".
+              iterable.done.catch(() => { /* intentional no-op — propagated via for-await */ });
+              let tokensSoFar = 0;
+              for await (const chunk of iterable) {
+                if (typeof chunk.tokensSoFar === 'number') {
+                  tokensSoFar = chunk.tokensSoFar;
+                } else if (chunk.deltaText) {
+                  // Rough token count — 1 per ~4 chars, same heuristic as
+                  // TOKEN_INPUT_RATIO math. Adapters that surface the
+                  // accurate tokensSoFar override this estimate.
+                  tokensSoFar += Math.max(1, Math.round(chunk.deltaText.length / 4));
+                }
+                inflightRegistry.emitProgress({
+                  runtimeKey:     attemptRuntimeKey,
+                  idempotencyKey,
+                  tokensSoFar,
+                });
+              }
+              return await iterable.done;
+            }
+            return providerAdapter.call({
+              model:       mappedModel,
+              messages:    params.messages,
+              system:      params.system,
+              tools:       params.tools,
+              maxTokens:   params.maxTokens,
+              temperature: params.temperature,
+              signal,
+            });
+          },
         );
 
         // Rev §6 — post-process hook. Runs the caller's schema check with
@@ -719,6 +1033,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
             sweepReason:     null,
             evictionContext: null,
           });
+          llmInflightPayloadStore.remove(currentRuntimeKey);
           lastRemovedAttempt = {
             runtimeKey:     currentRuntimeKey,
             idempotencyKey,
@@ -746,6 +1061,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
   }
 
+  // ── §1.1 LAEL-P1-1 pairing-completeness finally guard ──────────────────────
+  // Wraps the entire post-loop body so that if an exception escapes between
+  // `llm.requested` emission and the normal `llm.completed` emit sites, the
+  // finally block fires `llm.completed` as a fallback, ensuring every emitted
+  // `llm.requested` is paired with exactly one `llm.completed`. The normal
+  // paths set `laelCompletedEmitted = true` before emitting, so the finally
+  // block no-ops on the normal paths.
+  try {
+
   if (!providerResponse) {
     const e = lastError as { message?: string } | null | undefined;
 
@@ -762,7 +1086,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     callError = (e?.message ?? 'All providers failed') + (lastError instanceof Error && lastError.message.includes('timed out') ? ' (timeout)' : '');
 
     // Release reservation — no cost incurred (tolerates null for system/analyzer)
-    await budgetService.releaseReservation(reservationId);
+    await computeBudgetService.releaseReservation(reservationId);
 
     const providerLatencyMs = Date.now() - providerStart;
     const routerOverheadMs  = Date.now() - routerStart - providerLatencyMs;
@@ -771,9 +1095,30 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       idempotencyKey, organisationId: ctx.organisationId, runId: ctx.runId,
       provider: effectiveProvider, model: effectiveModel, status: callStatus, error: callError,
     });
+    recordIncident({
+      source: 'llm',
+      summary: `LLM router failure (${callStatus}): ${callError.slice(0, 200)}`,
+      errorCode: callStatus,
+      organisationId: ctx.organisationId,
+      subaccountId: ctx.subaccountId,
+      correlationId: ctx.runId,
+      fingerprintOverride: `llm:${effectiveProvider}:${callStatus}`,
+      errorDetail: { provider: effectiveProvider, model: effectiveModel },
+    });
 
     const hasFallbackFailures = fallbackAttempts.some(a => a.error);
 
+    // Phase C breaker is NOT called on the failure path — failure rows record
+    // costWithMarginCents=0 and do not contribute to per-run spend. If partial-
+    // cost-on-failure is ever introduced, the breaker would need wiring here too.
+    // Deferred-items brief §1 — the provisional `'started'` row written
+    // at §7a above MUST be overwritten with the terminal failure status
+    // here, otherwise a crashed/failed call leaves a `'started'` ghost
+    // blocking all retries for this idempotencyKey until the sweep
+    // reaps it 660s later. `onConflictDoUpdate` with the same
+    // "never downgrade a success" guard as the success path keeps the
+    // idempotency semantics intact: a retry that somehow lands here
+    // after a success (shouldn't happen but defensive) will no-op.
     const failureInsertedRows = await db
       .insert(llmRequests)
       .values({
@@ -819,8 +1164,49 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         billingMonth,
         billingDay,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: [llmRequests.idempotencyKey],
+        set: {
+          status:                 callStatus,
+          errorMessage:           callError,
+          providerLatencyMs,
+          routerOverheadMs,
+          attemptNumber,
+          parseFailureRawExcerpt: parseFailureExcerpt,
+          abortReason:            abortReasonValue,
+          fallbackChain:          hasFallbackFailures ? JSON.stringify(fallbackAttempts) : null,
+          capabilityTier:         routingTier,
+          wasDowngraded,
+          routingReason,
+          // pr-review finding #4 (2026-04-21): mirror the success set's
+          // margin-fields policy so a future move of pricingService.getMargin
+          // inside the retry loop can't silently leave stale provisional
+          // defaults on the terminal failure row.
+          marginMultiplier:       String(margin.multiplier),
+          fixedFeeCents:          margin.fixedFeeCents,
+        },
+        // Reviewer follow-up (2026-04-21): tighten the transition guard from
+        // `!= 'success'` to `= 'started'`. The idempotency-check transaction
+        // above always leaves the row in 'started' state before this path
+        // runs — whether it's a fresh call (INSERT 'started') or a retry
+        // after a prior error (onConflictDoUpdate 'started' with fresh
+        // createdAt). A mismatch at this point means either (a) the sweep
+        // fired and claimed the row as provisional_row_expired, or (b) a
+        // second concurrent attempt already terminalised it. In either
+        // case the guard preserves the earlier terminal signal; we log
+        // the ghost so an operator can reconcile rather than silently
+        // losing the audit trail.
+        where: sql`${llmRequests.status} = 'started'`,
+      })
       .returning({ id: llmRequests.id });
+
+    if (failureInsertedRows.length === 0) {
+      logger.warn('llm_router.failure_upsert_ghost', {
+        idempotencyKey,
+        callStatus,
+        note: 'existing row was not in started state — terminal failure audit discarded (earlier sweep or race)',
+      });
+    }
 
     // Emit the terminal in-flight removal with ledger reconciliation. The
     // caller's UI uses `ledgerRowId` + `ledgerCommittedAt` to link the live
@@ -853,6 +1239,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         sweepReason:       null,
         evictionContext:   null,
       });
+      llmInflightPayloadStore.remove(currentRuntimeKey);
       currentRuntimeKey = null;
     } else if (lastRemovedAttempt && ledgerRowId && ledgerCommittedAtISO) {
       inflightRegistry.updateLedgerLink({
@@ -867,6 +1254,140 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         ),
         ledgerRowId,
         ledgerCommittedAt: ledgerCommittedAtISO,
+      });
+    }
+
+    // ── §1.1 LAEL-P1-1 — payload row + llm.completed (failure path) ─────
+    //
+    // Emitted AFTER the ledger row is written and AFTER the registry
+    // cleanup above, BEFORE rethrowing.
+    //
+    // FAILURE-PATH PAYLOAD ROW (spec
+    // 2026-04-28-pre-test-integration-harness-spec.md §1.5 Option A):
+    // We persist a row in agent_run_llm_payloads even on failure. The shape:
+    //   - `response: null` — no usable provider output (provider rejected
+    //     before stream open, network error before any bytes, response
+    //     un-parseable). Token counts are 0, cost is 0.
+    //   - `response: <partial ProviderResponse>` — provider produced a
+    //     structurally-valid partial result (e.g. streaming interrupted
+    //     mid-completion, or usage-without-content content-policy refusal).
+    //     Token counts and cost reflect the partial usage as reported by
+    //     the adapter — never zeroed out when usage is reported, even if
+    //     assistant content is empty.
+    //
+    // `shouldEmitLaelLifecycle` returns false for pre-dispatch terminals
+    // (budget_blocked / rate_limited / provider_not_configured) — those
+    // paths throw earlier and never reach here. The only failure statuses
+    // that arrive here are post-dispatch errors (timeout, parse_failure,
+    // provider_unavailable, etc.) for which emission is appropriate.
+    //
+    // Insert runs inside its own db.transaction so a thrown insert error
+    // rolls back any partial commit; the ledger row is intentionally NOT
+    // pulled into this tx (already committed). Failure to insert is
+    // best-effort — the post-commit invariant holds via the wrap-tx +
+    // payloadInsertStatus='failed' fallback in the catch handler.
+    terminalStatus = callStatus;
+    if (shouldEmitLaelLifecycle(ctx, callStatus) && ledgerRowId) {
+      // defensive dead branch — capturedProviderResponse is always null here;
+      // kept as a guard against future refactors that might make this path reachable
+      const capturedProviderResponse = providerResponse as import('./providers/types.js').ProviderResponse | null;
+      const partialResponse: Record<string, unknown> | null =
+        capturedProviderResponse !== null
+          ? (capturedProviderResponse as unknown as Record<string, unknown>)
+          : null;
+
+      // Token counts + cost on the failure path. When the adapter surfaced a
+      // partial response WITH usage, we honour the provider-reported numbers —
+      // a content-policy refusal that consumes 4k input tokens is still a 4k-
+      // token charge and must not silently record zero cost. When there is no
+      // usable response, all three collapse to 0.
+      let failureTokensIn = 0;
+      let failureTokensOut = 0;
+      let failureCostCents = 0;
+      if (capturedProviderResponse !== null) {
+        failureTokensIn = capturedProviderResponse.tokensIn ?? 0;
+        failureTokensOut = capturedProviderResponse.tokensOut ?? 0;
+        if (failureTokensIn > 0 || failureTokensOut > 0) {
+          try {
+            const failureCostResult = await pricingService.calculateCost(
+              actualProvider,
+              actualModel,
+              failureTokensIn,
+              failureTokensOut,
+              ctx.organisationId,
+              capturedProviderResponse.cachedPromptTokens ?? 0,
+              ctx.sourceType,
+            );
+            failureCostCents = failureCostResult.costWithMarginCents;
+          } catch (costErr) {
+            // Cost calculation failure on the failure path must not mask the
+            // primary error; log and fall through with cost=0.
+            logger.warn('lael_failure_path_cost_calc_failed', {
+              runId: ctx.runId,
+              ledgerRowId,
+              error: costErr instanceof Error ? costErr.message : String(costErr),
+            });
+          }
+        }
+      }
+
+      let payloadRowId: string | null = null;
+      let payloadInsertStatus: 'ok' | 'failed' = 'failed';
+      try {
+        const systemPromptStr =
+          typeof params.system === 'string'
+            ? params.system
+            : params.system
+              ? `${params.system.stablePrefix}\n${params.system.dynamicSuffix}`
+              : '';
+        const payloadRow = buildPayloadRow({
+          systemPrompt:    systemPromptStr,
+          messages:        params.messages,
+          toolDefinitions: params.tools ?? [],
+          response:        partialResponse,
+          maxBytes:        64 * 1024,
+        });
+        payloadRowId = await db.transaction(async (tx) => {
+          const [inserted] = await tx.insert(agentRunLlmPayloads).values({
+            llmRequestId:   ledgerRowId,
+            runId:          ctx.runId!,
+            organisationId: ctx.organisationId,
+            subaccountId:   ctx.subaccountId ?? null,
+            ...payloadRow,
+          }).returning({ id: agentRunLlmPayloads.llmRequestId });
+          return inserted?.id ?? null;
+        });
+        payloadInsertStatus = payloadRowId ? 'ok' : 'failed';
+      } catch (insertErr) {
+        // Best-effort: the ledger row is canonical. Wrapping tx rolled back
+        // any partial INSERT, so the post-commit invariant holds without a
+        // defensive DELETE.
+        logger.warn('lael_failure_path_payload_insert_failed', {
+          runId: ctx.runId, ledgerRowId,
+          error: insertErr instanceof Error ? insertErr.message : String(insertErr),
+        });
+        payloadInsertStatus = 'failed';
+        payloadRowId = null;
+      }
+
+      laelCompletedEmitted = true;
+      await emitAgentEvent({
+        runId:          ctx.runId!,
+        organisationId: ctx.organisationId,
+        subaccountId:   ctx.subaccountId ?? null,
+        sourceService:  'llmRouter',
+        payload: {
+          eventType:           'llm.completed',
+          critical:            true,
+          llmRequestId:        ledgerRowId,
+          status:              callStatus,
+          tokensIn:            failureTokensIn,
+          tokensOut:           failureTokensOut,
+          costWithMarginCents: failureCostCents,
+          durationMs:          Date.now() - providerStart,
+          payloadInsertStatus,
+          payloadRowId,
+        },
       });
     }
 
@@ -952,6 +1473,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       wasDowngraded,
       routingReason,
       cachedPromptTokens:  providerResponse.cachedPromptTokens ?? 0,
+      cacheCreationTokens: providerResponse.cacheCreationTokens ?? 0,
+      prefixHash:          params.prefixHash,
       provider:            actualProvider,
       model:               actualModel,
       providerRequestId:   providerResponse.providerRequestId,
@@ -980,46 +1503,286 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     })
     .onConflictDoUpdate({
       target: [llmRequests.idempotencyKey],
-      // Only overwrite if the existing row is an error state — never downgrade success.
+      // Only overwrite if the existing row is an error/provisional state —
+      // never downgrade success. Deferred-items brief §1: when a provisional
+      // `'started'` row exists, the SET clause must fully replace it with
+      // the terminal success payload — including provider/model (which may
+      // have changed via fallback), capability tier, margin, and cached-
+      // prompt tokens. Missing fields leave provisional-row defaults in
+      // place and skew downstream cost rollups.
       set: {
+        provider:            actualProvider,
+        model:               actualModel,
         providerRequestId:   providerResponse.providerRequestId,
         tokensIn:            providerResponse.tokensIn,
         tokensOut:           providerResponse.tokensOut,
         providerTokensIn:    providerResponse.tokensIn,
         providerTokensOut:   providerResponse.tokensOut,
+        cachedPromptTokens:  providerResponse.cachedPromptTokens ?? 0,
+        cacheCreationTokens: providerResponse.cacheCreationTokens ?? 0,
+        prefixHash:          params.prefixHash,
         costRaw:             String(costResult.costRaw),
         costWithMargin:      String(costResult.costWithMargin),
         costWithMarginCents: costResult.costWithMarginCents,
+        marginMultiplier:    String(costResult.marginMultiplier),
+        fixedFeeCents:       costResult.fixedFeeCents,
         responsePayloadHash,
         providerLatencyMs,
         routerOverheadMs,
         status:              callStatus,
         errorMessage:        null,
         attemptNumber,
+        capabilityTier:      routingTier,
+        wasDowngraded,
+        routingReason,
+        fallbackChain:       hasFallbackFailures ? JSON.stringify(fallbackAttempts) : null,
       },
-      // Drizzle where clause: only update if current row is not already a success
-      where: sql`${llmRequests.status} != 'success'`,
+      // Reviewer follow-up (2026-04-21): tighten from `!= 'success'` to
+      // `= 'started'`. The idempotency-check transaction always leaves
+      // the row in 'started' before this path runs. A mismatch here means
+      // another terminal transition has already happened (sweep fired and
+      // claimed as `provisional_row_expired`, or a prior retry
+      // terminalised). Tightening preserves the earlier terminal signal
+      // — the sweep's "call went long enough that something was wrong"
+      // signal is operationally more valuable than a late-arriving
+      // success that pretends everything was fine. Ghost arrivals are
+      // logged below so operators can reconcile.
+      where: sql`${llmRequests.status} = 'started'`,
     })
     .returning({ id: llmRequests.id });
 
-  // ── 12a. Remove the in-flight registry entry for the successful attempt ──
+  const successLedgerRowId = successInsertedRows[0]?.id ?? null;
+
+  if (successInsertedRows.length === 0) {
+    // Mismatch path — either (a) an identical success already exists
+    // (idempotency replay — the prior success row has status='success'
+    // which our tightened guard correctly refuses to re-overwrite), or
+    // (b) the sweep/sibling raced and terminalised with a non-success
+    // status. The breaker skip path below already tolerates a null
+    // successLedgerRowId by treating it as idempotency replay; this
+    // log surfaces the case so operators can spot the "true success
+    // was discarded by the sweep" variant from the ledger audit.
+    logger.warn('llm_router.success_upsert_ghost', {
+      idempotencyKey,
+      note: 'terminal success could not transition from started (already success, or sweep/sibling claimed it as terminal-error)',
+    });
+  }
+
+  // ── 12a. Hermes Tier 1 Phase C — runaway-loop cost breaker ───────────────
+  //
+  // Call the direct-ledger breaker AFTER the ledger row is durably written
+  // and BEFORE the in-flight registry is cleaned up. Ordering rationale
+  // pinned in tasks/hermes-audit-tier-1-spec.md §7.3 / §7.4 / §7.4.1:
+  //
+  //   1. Ledger write first → cost attribution is intact regardless of
+  //      whether the breaker trips. The money was already spent with the
+  //      provider; recording it is non-negotiable.
+  //   2. Direct-ledger read (not cost_aggregates) → cost_aggregates is
+  //      updated asynchronously by `routerJobService.enqueueAggregateUpdate`
+  //      below, so a rollup-based read would miss this call's cost and
+  //      inflate worst-case overshoot by the aggregation-interval's worth
+  //      of concurrent traffic.
+  //   3. `insertedLedgerRowId` threaded through as REQUIRED parameter →
+  //      the helper performs a row-visibility check and fails closed on
+  //      null or not-visible. Structural guarantee against a future
+  //      refactor that swaps the call above the ledger insert.
+  //   4. Skip entirely when runId cannot be resolved (sourceType ∈
+  //      {'system','analyzer'} have no run context; IEE runs map via
+  //      `resolveRunIdFromIee` below). See §7.5 / §7.6.
+  //   5. Fail-open on infra errors (non-'cost_limit_exceeded' throws) →
+  //      the breaker is secondary protection; a DB hiccup in the breaker's
+  //      own read must not take down the LLM path, which is the primary
+  //      business function. `costBreaker.infra_failure` is the signal ops
+  //      uses to notice.
+  //
+  // If the breaker throws `cost_limit_exceeded`, the in-flight registry
+  // entry is orphaned until the sweep runs — acceptable per §7.3.2 because
+  // the sweep is the existing safety net for orphaned entries and the
+  // three-branch cleanup pattern above predates Phase C.
+  const breakerRunId = ctx.runId ?? (await resolveRunIdFromIee(ctx.ieeRunId));
+  if (breakerRunId) {
+    if (!successLedgerRowId) {
+      // Upsert hit the `where status = 'started'` guard — existing row is
+      // not in 'started' state. Either an idempotency replay against a
+      // prior success, or the sweep / sibling claimed the row with a
+      // terminal-error status (see ghost log above). Skip the breaker
+      // either way — the first insert owns the cost attribution.
+      console.debug('[llmRouter] costBreaker.skip_terminal_preempted', { correlationId: idempotencyKey });
+    } else {
+      try {
+        const { assertWithinRunBudgetFromLedger } = await import('../lib/runCostBreaker.js');
+        await assertWithinRunBudgetFromLedger({
+          runId:               breakerRunId,
+          insertedLedgerRowId: successLedgerRowId,
+          subaccountAgentId:   ctx.subaccountAgentId ?? null,
+          organisationId:      ctx.organisationId,
+          // The router ctx does not carry a distinct correlationId; the LLM
+          // idempotencyKey is the stable per-call identifier we thread
+          // through downstream logs and the breaker's trip payload.
+          correlationId:       idempotencyKey,
+        });
+        console.debug('[llmRouter] costBreaker.checked', {
+          runId:         breakerRunId,
+          correlationId: idempotencyKey,
+        });
+      } catch (err) {
+        const isExpectedBreakerTrip =
+          err instanceof FailureError &&
+          err.failure.failureReason === 'internal_error' &&
+          err.failure.failureDetail === 'cost_limit_exceeded';
+        if (isExpectedBreakerTrip) {
+          // Commit the reservation and enqueue the aggregate update before
+          // rethrowing — without these calls the over-budget call's cost stays
+          // locked in an active reservation and cost_aggregates never receives
+          // the row, so RunCostPanel and aggregate-backed readers permanently
+          // undercount the triggering call's spend. Both calls are best-effort:
+          // failures here must not mask the cost_limit_exceeded error.
+          computeBudgetService.commitReservation(reservationId, costResult.costWithMarginCents).catch((e) => {
+            console.error('[llmRouter] costBreaker.commit_reservation_failed', {
+              runId: breakerRunId, correlationId: idempotencyKey,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+          enqueueAggregateUpdate(idempotencyKey).catch((e) => {
+            console.error('[llmRouter] costBreaker.enqueue_aggregate_failed', {
+              runId: breakerRunId, correlationId: idempotencyKey,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+          throw err;
+        }
+        console.error('[llmRouter] costBreaker.infra_failure', {
+          runId:         breakerRunId,
+          correlationId: idempotencyKey,
+          error:         err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  // ── 12b. Remove the in-flight registry entry for the successful attempt ──
   // Emitted AFTER the ledger upsert so `ledgerRowId` + `ledgerCommittedAt`
   // are populated on the removal payload (spec §5). When the upsert hits
   // the `where: status != 'success'` guard on an already-success row,
   // `.returning()` comes back empty — we fall back to `null` and the UI
   // retries via idempotencyKey.
   if (currentRuntimeKey) {
-    const ledgerRowId = successInsertedRows[0]?.id ?? null;
     inflightRegistry.remove({
       runtimeKey:        currentRuntimeKey,
       terminalStatus:    'success',
       completedAt:       new Date().toISOString(),
-      ledgerRowId,
-      ledgerCommittedAt: ledgerRowId ? new Date().toISOString() : null,
+      ledgerRowId:       successLedgerRowId,
+      ledgerCommittedAt: successLedgerRowId ? new Date().toISOString() : null,
       sweepReason:       null,
       evictionContext:   null,
     });
+    llmInflightPayloadStore.remove(currentRuntimeKey);
     currentRuntimeKey = null;
+  }
+
+  // ── 12c. §1.1 LAEL-P1-1 — payload row + llm.completed (success path) ────
+  //
+  // PAYLOAD CONTRACT (locked): an agent_run_llm_payloads row exists IFF the
+  // emitted llm.completed event carries `payloadInsertStatus === 'ok'`.
+  //
+  // Three sites emit llm.completed; all observe the contract:
+  //   (a) success path (this section) — payload row attempted with the full
+  //       provider response. payloadInsertStatus reflects insert outcome:
+  //       'ok' on success, 'failed' if the wrap-tx catches an INSERT error.
+  //   (b) failure path (separate block above, ~lines 1329-1366) — payload
+  //       row is ALWAYS attempted on provider failure (best-effort). The
+  //       persisted `response` may be null (provider returned nothing usable)
+  //       or partial (provider surfaced usage-only / refusal data). The
+  //       payloadInsertStatus reflects the insert outcome independently — a
+  //       successful insert under provider failure produces 'ok' + a real
+  //       rowId, NOT 'failed'.
+  //   (c) finally-block fallback — request emitted but completion did not
+  //       reach (a) or (b); emits with payloadInsertStatus='failed' and no
+  //       insert is attempted.
+  //
+  // Disjoint warn signatures distinguish the sites for debugging:
+  //   `lael_payload_insert_failed`              → (a) catch handler only
+  //   `lael_failure_path_payload_insert_failed` → (b) catch handler only
+  //
+  // Ordering: AFTER the ledger upsert (§12), AFTER the registry removal (§12b),
+  // BEFORE Langfuse / reservation commit. The payload insert is best-effort
+  // inside its own try/catch — a failure does NOT roll back the ledger row.
+  // `shouldEmitLaelLifecycle` gates on sourceType='agent_run' + runId present
+  // + terminalStatus not in the pre-dispatch blocked set. On the success path
+  // terminalStatus is always 'success', so the gate is effectively
+  // (sourceType === 'agent_run' && runId present).
+  //
+  // The payload INSERT runs inside its own db.transaction so that any thrown
+  // error during the insert (or while reading .returning()) triggers automatic
+  // rollback — guaranteeing the post-commit invariant
+  // (payloadInsertStatus === 'failed' iff no agent_run_llm_payloads row exists).
+  // The ledger row is intentionally NOT pulled into this tx — it was already
+  // committed above, and wrapping ledger + payload together would change cost-
+  // breaker ordering semantics (spec §4.5).
+  terminalStatus = 'success';
+  if (shouldEmitLaelLifecycle(ctx, 'success') && successLedgerRowId) {
+    let payloadRowId: string | null = null;
+    let payloadInsertStatus: 'ok' | 'failed' = 'failed';
+    try {
+      const systemPromptStr =
+        typeof params.system === 'string'
+          ? params.system
+          : params.system
+            ? `${params.system.stablePrefix}\n${params.system.dynamicSuffix}`
+            : '';
+      const payloadRow = buildPayloadRow({
+        systemPrompt:    systemPromptStr,
+        messages:        params.messages,
+        toolDefinitions: params.tools ?? [],
+        response:        providerResponse as unknown as Record<string, unknown>,
+        maxBytes:        64 * 1024,
+      });
+      payloadRowId = await db.transaction(async (tx) => {
+        const [inserted] = await tx.insert(agentRunLlmPayloads).values({
+          llmRequestId:   successLedgerRowId,
+          runId:          ctx.runId!,
+          organisationId: ctx.organisationId,
+          subaccountId:   ctx.subaccountId ?? null,
+          ...payloadRow,
+        }).returning({ id: agentRunLlmPayloads.llmRequestId });
+        return inserted?.id ?? null;
+      });
+      payloadInsertStatus = payloadRowId ? 'ok' : 'failed';
+    } catch (err) {
+      // Payload is best-effort; ledger is canonical. The wrapping tx rolled back
+      // any partial INSERT, so the post-commit invariant holds without a defensive DELETE.
+      logger.warn('lael_payload_insert_failed', {
+        runId: ctx.runId, ledgerRowId: successLedgerRowId, error: err,
+      });
+      payloadInsertStatus = 'failed';
+      payloadRowId = null;
+    }
+
+    laelCompletedEmitted = true;
+    await emitAgentEvent({
+      runId:          ctx.runId!,
+      organisationId: ctx.organisationId,
+      subaccountId:   ctx.subaccountId ?? null,
+      sourceService:  'llmRouter',
+      payload: {
+        eventType:            'llm.completed',
+        critical:             true,
+        llmRequestId:         successLedgerRowId,
+        status:               'success',
+        tokensIn:             providerResponse.tokensIn,
+        tokensOut:            providerResponse.tokensOut,
+        costWithMarginCents:  costResult.costWithMarginCents,
+        durationMs:           providerLatencyMs,
+        payloadInsertStatus,
+        payloadRowId,
+      },
+    });
+
+    if (payloadInsertStatus === 'failed') {
+      logger.warn('lael_payload_insert_status', {
+        runId: ctx.runId, ledgerRowId: successLedgerRowId, payloadInsertStatus,
+      });
+    }
   }
 
   // ── 13. Emit Langfuse generation span (dual-write — does not replace ledger) ──
@@ -1049,7 +1812,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
   // ── 14. Commit reservation with actual cost (releases delta) ─────────────
   // commitReservation tolerates null (system/analyzer paths never reserve).
-  await budgetService.commitReservation(reservationId, costResult.costWithMarginCents);
+  await computeBudgetService.commitReservation(reservationId, costResult.costWithMarginCents);
 
   // ── 15. Enqueue aggregate update (async — do not await) ──────────────────
   enqueueAggregateUpdate(idempotencyKey).catch((err) => {
@@ -1064,6 +1827,42 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   };
 
   return providerResponse;
+
+  } finally {
+    // Pairing-completeness safety net (§1.1 LAEL-P1-1). Fires only when
+    // `llm.requested` was emitted but `llm.completed` was NOT emitted by
+    // either the success or failure path — i.e., an unexpected exception
+    // escaped between the two emission sites. Uses fallback values:
+    // payloadInsertStatus='failed', payloadRowId=null, tokensIn/Out=0,
+    // costWithMarginCents=0. provisionalLedgerRowId is the row that was
+    // created before the provider call, so it is always available here.
+    if (
+      laelRequestEmitted &&
+      !laelCompletedEmitted &&
+      ctx.runId &&
+      provisionalLedgerRowId &&
+      shouldEmitLaelLifecycle(ctx, terminalStatus ?? 'failed')
+    ) {
+      await emitAgentEvent({
+        runId:          ctx.runId,
+        organisationId: ctx.organisationId,
+        subaccountId:   ctx.subaccountId ?? null,
+        sourceService:  'llmRouter',
+        payload: {
+          eventType:           'llm.completed',
+          critical:            true,
+          llmRequestId:        provisionalLedgerRowId,
+          status:              terminalStatus ?? 'failed',
+          tokensIn:            0,
+          tokensOut:           0,
+          costWithMarginCents: 0,
+          durationMs:          Date.now() - providerStart,
+          payloadInsertStatus: 'failed',
+          payloadRowId:        null,
+        },
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,3 +1893,10 @@ async function enqueueAggregateUpdate(idempotencyKey: string): Promise<void> {
 // ---------------------------------------------------------------------------
 export type { TaskType, SourceType, ExecutionPhase, RoutingMode };
 export { TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES };
+
+// ---------------------------------------------------------------------------
+// Token counting — re-exported from anthropicAdapter so callers import from
+// one place (llmRouter) instead of reaching into the provider layer directly.
+// ---------------------------------------------------------------------------
+export { countTokens, SUPPORTED_MODEL_FAMILIES } from './providers/anthropicAdapter.js';
+export type { SupportedModelFamily } from './providers/anthropicAdapter.js';

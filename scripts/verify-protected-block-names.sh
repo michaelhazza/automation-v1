@@ -115,8 +115,10 @@ if [ $FAIL -eq 1 ]; then
   echo "  The guard must be present in both server/routes/memoryBlocks.ts"
   echo "  and the demote handler in server/routes/knowledge.ts, and must"
   echo "  use the shared allowlist from server/lib/protectedBlocks.ts."
+  echo "[GATE] protected-block-names: violations=1"
   exit 1
 fi
 
 echo "[PASS] All protected-block-names checks passed."
+echo "[GATE] protected-block-names: violations=0"
 exit 0

@@ -7,4 +7,7 @@ export const CURRENCY_DEFAULT = 'AUD' as const;
 
 export const PULSE_MAJOR_THRESHOLD_MAX_MINOR = 1_000_000;  // AUD $10,000
 
-export type PulseMajorThresholds = typeof PULSE_MAJOR_THRESHOLD_DEFAULTS;
+export type PulseMajorThresholds = {
+  perActionMinor: number;
+  perRunMinor: number;
+};

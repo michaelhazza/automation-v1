@@ -2,7 +2,7 @@
 name: Config View History
 description: List version history for a given entity (entity type + entity ID).
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

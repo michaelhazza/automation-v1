@@ -20,6 +20,7 @@ import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { taskService } from '../services/taskService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
+import { recordIncident } from '../services/incidentIngestor.js';
 
 const router = Router();
 
@@ -121,6 +122,17 @@ router.post('/api/webhooks/github', (req, res, next) => {
     // ping, installation, push etc. are silently ignored
   } catch (err) {
     logger.error('github_webhook.handler_error', { event, delivery, error: err instanceof Error ? err.message : String(err) });
+
+    // The response was already sent at line 112 (early-ack pattern). This
+    // emission is purely for observability — it never affects the response.
+    recordIncident({
+      source: 'route',
+      summary: `GitHub webhook handler failed for event ${event}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      errorCode: 'webhook_handler_failed',
+      stack: err instanceof Error ? err.stack : undefined,
+      fingerprintOverride: 'webhook:github:handler_failed',
+      errorDetail: { event, delivery },
+    });
   }
 });
 

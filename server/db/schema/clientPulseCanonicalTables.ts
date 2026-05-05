@@ -176,11 +176,11 @@ export type CanonicalConversationProvider = typeof canonicalConversationProvider
 export type NewCanonicalConversationProvider = typeof canonicalConversationProviders.$inferInsert;
 
 // ===========================================================================
-// canonical_workflow_definitions (§2.0c)
+// canonical_flow_definitions (§2.0c) — renamed from canonical_workflow_definitions via M1
 // ===========================================================================
 
-export const canonicalWorkflowDefinitions = pgTable(
-  'canonical_workflow_definitions',
+export const canonicalFlowDefinitions = pgTable(
+  'canonical_flow_definitions',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
@@ -196,7 +196,7 @@ export const canonicalWorkflowDefinitions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    uniq: uniqueIndex('canonical_workflow_definitions_unique').on(
+    uniq: uniqueIndex('canonical_flow_definitions_unique').on(
       table.organisationId,
       table.providerType,
       table.externalId,
@@ -204,8 +204,8 @@ export const canonicalWorkflowDefinitions = pgTable(
   }),
 );
 
-export type CanonicalWorkflowDefinition = typeof canonicalWorkflowDefinitions.$inferSelect;
-export type NewCanonicalWorkflowDefinition = typeof canonicalWorkflowDefinitions.$inferInsert;
+export type CanonicalFlowDefinition = typeof canonicalFlowDefinitions.$inferSelect;
+export type NewCanonicalFlowDefinition = typeof canonicalFlowDefinitions.$inferInsert;
 
 // ===========================================================================
 // canonical_tag_definitions (§2.0c)

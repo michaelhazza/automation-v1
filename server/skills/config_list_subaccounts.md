@@ -2,12 +2,12 @@
 name: Config List Subaccounts
 description: List all subaccounts with name, slug, and status.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters
 
-None.
+- scope: string (optional) — Accepted for signature consistency across list skills; has no filter effect in v1.
 
 ## Instructions
 

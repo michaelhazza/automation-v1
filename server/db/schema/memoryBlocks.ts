@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -26,6 +26,10 @@ const vector = customType<{ data: number[] | null }>({
 // Typed enums for migration 0129 columns
 export type MemoryBlockStatus = 'active' | 'draft' | 'pending_review' | 'rejected';
 export type MemoryBlockSource = 'manual' | 'auto_synthesised';
+// Phase 5 / W3a types
+export type MemoryBlockPriority = 'low' | 'medium' | 'high';
+export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion';
+export type MemoryBlockDeprecationReason = 'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted';
 
 // ---------------------------------------------------------------------------
 // Memory Blocks — shared named context blocks attached to multiple agents.
@@ -56,15 +60,15 @@ export const memoryBlocks = pgTable(
     // so the Knowledge page can surface "review recommended". Reset to
     // 'normal' on any human save.
     confidence: text('confidence').notNull().default('normal').$type<'low' | 'normal'>(),
-    // Backlink to the playbookRun that last wrote this block; drives the
+    // Backlink to the WorkflowRun that last wrote this block; drives the
     // per-run rate limit (§7.5 — 10 blocks per run).
     sourceRunId: uuid('source_run_id'),
     // Null = last-edited by a human (Knowledge page). Non-null = last-edited
-    // by an agent/playbook. Drives the HITL overwrite rule (§7.5).
+    // by an agent/Workflow. Drives the HITL overwrite rule (§7.5).
     lastEditedByAgentId: uuid('last_edited_by_agent_id').references(() => agents.id),
-    // Slug of the playbook that last wrote this block. A playbook can freely
+    // Slug of the Workflow that last wrote this block. A Workflow can freely
     // rewrite its own blocks without tripping the HITL overwrite rule.
-    lastWrittenByPlaybookSlug: text('last_written_by_playbook_slug'),
+    lastWrittenByWorkflowSlug: text('last_written_by_workflow_slug'),
     // Phase G / spec §7.4 / G7.1 — when true, creating this block or linking
     // a new agent to the sub-account materialises read-only attachments for
     // every linked agent, tagged `source='auto_attach'`. Added in migration 0125.
@@ -98,6 +102,20 @@ export const memoryBlocks = pgTable(
     // FK columns where the referenced table cannot be imported here).
     activeVersionId: uuid('active_version_id'),
 
+    // Phase 5 / W3a — Learned Rules precedence + deprecation (migration 0197)
+    priority: text('priority').default('medium').$type<MemoryBlockPriority>(),
+    isAuthoritative: boolean('is_authoritative').notNull().default(false),
+    pausedAt: timestamp('paused_at', { withTimezone: true }),
+    deprecatedAt: timestamp('deprecated_at', { withTimezone: true }),
+    deprecationReason: text('deprecation_reason').$type<MemoryBlockDeprecationReason>(),
+    qualityScore: numeric('quality_score', { precision: 3, scale: 2 }).notNull().default('0.50'),
+    capturedVia: text('captured_via').notNull().default('manual_edit').$type<MemoryBlockCapturedVia>(),
+
+    // F1 baseline artefacts (migration 0277, spec §3) — tier classification
+    // (1 = foundational, 2 = strategic) and domain-scoping for injection filtering.
+    tier: smallint('tier').$type<1 | 2>(),
+    appliesToDomains: text('applies_to_domains').array(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -118,6 +136,10 @@ export const memoryBlocks = pgTable(
     activeIdx: index('memory_blocks_active_idx')
       .on(table.organisationId, table.subaccountId)
       .where(sql`${table.status} = 'active' AND ${table.deletedAt} IS NULL`),
+    // F1 baseline artefacts (migration 0277) — tier lookup for injection filtering.
+    tierIdx: index('memory_blocks_tier_idx')
+      .on(table.organisationId, table.subaccountId, table.tier)
+      .where(sql`${table.tier} IS NOT NULL`),
   })
 );
 

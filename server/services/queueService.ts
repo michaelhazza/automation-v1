@@ -1,9 +1,9 @@
 import { db } from '../db/index.js';
-import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
+import { executions, executionPayloads, executionFiles, computeReservations, automationEngines, users } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
-import { processResolutionService } from './processResolutionService.js';
+import { automationResolutionService } from './automationResolutionService.js';
 import { env } from '../lib/env.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
@@ -169,17 +169,17 @@ async function processExecution(executionId: string): Promise<void> {
 
   // ------------------------------------------------------------------
   // Resolve execution context via the three-level framework.
-  // If subaccountId is set, use processResolutionService for full
+  // If subaccountId is set, use automationResolutionService for full
   // connection/engine/config resolution. Otherwise fall back to legacy.
   // ------------------------------------------------------------------
-  let engine: { id: string; baseUrl: string; engineType: string; apiKey: string | null; hmacSecret: string } | null = null;
+  let engine: { id: string; baseUrl: string; engineType: string; apiKey: string | null; hmacSecret: string } | null;
   let authPayload: Record<string, { access_token: string }> | undefined;
   let resolvedConfig: Record<string, unknown> | undefined;
   let resolvedConnections: Record<string, unknown> | undefined;
 
   if (execution.subaccountId && execution.organisationId) {
     try {
-      const context = await processResolutionService.resolveForExecution(
+      const context = await automationResolutionService.resolveForExecution(
         execution.processId,
         execution.subaccountId,
         execution.organisationId,
@@ -206,10 +206,10 @@ async function processExecution(executionId: string): Promise<void> {
   } else {
     // Legacy path: look up engine from process snapshot
     const [legacyEngine] = await db.select()
-      .from(workflowEngines)
+      .from(automationEngines)
       .where(and(
-        eq(workflowEngines.id, processSnapshot.workflowEngineId as string),
-        eq(workflowEngines.organisationId, execution.organisationId),
+        eq(automationEngines.id, processSnapshot.automationEngineId as string),
+        eq(automationEngines.organisationId, execution.organisationId),
       ));
 
     if (!legacyEngine) {
@@ -445,12 +445,12 @@ export const queueService = {
    * Reservations expire after 5 minutes if the billing flow crashes.
    * Mark them as 'released' so they no longer inflate projected spend.
    */
-  async cleanupExpiredBudgetReservations(): Promise<number> {
+  async cleanupExpiredComputeReservations(): Promise<number> {
     const result = await db
-      .update(budgetReservations)
+      .update(computeReservations)
       .set({ status: 'released' })
       .where(
-        sql`${budgetReservations.status} = 'active' AND ${budgetReservations.expiresAt} < NOW()`
+        sql`${computeReservations.status} = 'active' AND ${computeReservations.expiresAt} < NOW()`
       );
     const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
     if (count > 0) console.log(JSON.stringify({ event: 'maintenance:release_budget_reservations', rows_released: count }));
@@ -479,8 +479,8 @@ export const queueService = {
     }
 
     // Synchronous fallback — resume inline (no restart resilience, but functional)
-    const { resumeWorkflow } = await import('./workflowExecutorService.js');
-    resumeWorkflow(params.workflowRunId, {
+    const { resumeFlow } = await import('./flowExecutorService.js');
+    resumeFlow(params.workflowRunId, {
       organisationId: params.organisationId,
       subaccountId: params.subaccountId,
       agentId: params.agentId,
@@ -561,7 +561,7 @@ export const queueService = {
       await (boss as any).work('maintenance:cleanup-budget-reservations', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
         try {
           await withTimeout(
-            queueService.cleanupExpiredBudgetReservations().then(() => undefined),
+            queueService.cleanupExpiredComputeReservations().then(() => undefined),
             90_000,
           );
         } catch (err) {
@@ -595,6 +595,42 @@ export const queueService = {
           throw err;
         }
       });
+      // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner.
+      await (boss as any).work('maintenance:fast-path-decisions-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { pruneFastPathDecisions } = await import('../jobs/fastPathDecisionsPruneJob.js');
+          await withTimeout(pruneFastPathDecisions().then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:fast-path-decisions-prune', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Universal Brief Phase 6 — nightly rule quality decay + auto-deprecation.
+      await (boss as any).work('maintenance:rule-auto-deprecate', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runRuleAutoDeprecate } = await import('../jobs/ruleAutoDeprecateJob.js');
+          await withTimeout(runRuleAutoDeprecate().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:rule-auto-deprecate', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      // Universal Brief Phase 3 — nightly recalibration log for classifier drift detection.
+      await (boss as any).work('maintenance:fast-path-recalibrate', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runFastPathRecalibrate } = await import('../jobs/fastPathRecalibrateJob.js');
+          await withTimeout(runFastPathRecalibrate().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:fast-path-recalibrate', jobId: job.id });
+          }
+          throw err;
+        }
+      });
       // LLM observability spec §12 — nightly llm_requests retention sweep.
       // Moves rows older than env.LLM_LEDGER_RETENTION_MONTHS (default 12)
       // to llm_requests_archive in 10k-row chunks. Bounded transaction size;
@@ -606,6 +642,57 @@ export const queueService = {
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'maintenance:llm-ledger-archive', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Deferred-items brief §1 — reap aged-out provisional `'started'` rows
+      // so a crashed mid-write doesn't permanently block retries under the
+      // same idempotencyKey. Cadence: every 2 minutes. Telescopes with the
+      // in-memory registry sweep (30s past timeoutMs) — this is the
+      // durable-layer backstop (providerTimeoutMs + 60s).
+      await (boss as any).work('maintenance:llm-started-row-sweep', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { sweepExpiredStartedRows } = await import('../jobs/llmStartedRowSweepJob.js');
+          await withTimeout(sweepExpiredStartedRows().then(() => undefined), 110_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-started-row-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Skill-analyzer resilience — reap mid-flight skill_analyzer_jobs
+      // rows that have stalled (no `updated_at` progress for 15 min). On a
+      // worker crash mid-run the DB row stays in `classifying` and the
+      // pg-boss job stays `active` for `expireInSeconds` (4 hours). This
+      // sweep marks the DB row failed + expires the pg-boss ghost so the
+      // built-in retryLimit/retryDelay can pick the job up under the v5
+      // resume-seeding contract. See KNOWLEDGE.md (2026-04-24) for the
+      // failure mode this codifies.
+      await (boss as any).work('maintenance:stale-analyzer-job-sweep', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { sweepStaleAnalyzerJobs } = await import('../jobs/staleAnalyzerJobSweepJob.js');
+          await withTimeout(sweepStaleAnalyzerJobs().then(() => undefined), 110_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:stale-analyzer-job-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Deferred-items brief §6 — purge llm_inflight_history rows older
+      // than env.LLM_INFLIGHT_HISTORY_RETENTION_DAYS (default 7).
+      await (boss as any).work('maintenance:llm-inflight-history-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { cleanOldInflightHistoryRows } = await import('../jobs/llmInflightHistoryCleanupJob.js');
+          await withTimeout(cleanOldInflightHistoryRows().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:llm-inflight-history-cleanup', jobId: job.id });
           }
           throw err;
         }
@@ -633,6 +720,19 @@ export const queueService = {
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'priority-feed-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Workflows V1 — daily purge of unconsumed workflow_drafts older than 7 days.
+      await (boss as any).work('workflow-drafts-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runWorkflowDraftsCleanup } = await import('../jobs/workflowDraftsCleanupJob.js');
+          await withTimeout(runWorkflowDraftsCleanup().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'workflow-drafts-cleanup', jobId: job.id });
           }
           throw err;
         }
@@ -711,6 +811,21 @@ export const queueService = {
         }
       });
 
+      // Chunk E — integration block expiry sweep (every 5 minutes).
+      // Cancels agent_runs whose blocked_expires_at has passed without the
+      // user connecting the required integration.
+      await (boss as any).work('maintenance:blocked-run-expiry', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runFn } = await import('../jobs/blockedRunExpiryJob.js');
+          await withTimeout(runFn().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:blocked-run-expiry', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // IEE Phase 0 — main-app reconciliation for "Class 2" stuck runs.
       // See docs/iee-delegation-lifecycle-spec.md Step 4. The worker-side
       // cleanup-orphans sweep already handles Class 1 (unemitted events) and
@@ -751,6 +866,21 @@ export const queueService = {
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'maintenance:memory-block-synthesis', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Cached Context Infrastructure Phase 2 — bundle utilization metric computation.
+      // Worker registered here; schedule NOT enabled until Phase 6 (pilot validation).
+      // To trigger manually: boss.send('maintenance:bundle-utilization', {})
+      await (boss as any).work('maintenance:bundle-utilization', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runBundleUtilization } = await import('../jobs/bundleUtilizationJob.js');
+          await withTimeout(runBundleUtilization(), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:bundle-utilization', jobId: job.id });
           }
           throw err;
         }
@@ -903,9 +1033,9 @@ export const queueService = {
               agentRunId?: string;
             };
 
-          const { resumeWorkflow } = await import('./workflowExecutorService.js');
+          const { resumeFlow } = await import('./flowExecutorService.js');
           await withTimeout(
-            resumeWorkflow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
+            resumeFlow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
             270_000, // 300 - 30
           );
         } catch (err) {
@@ -947,10 +1077,24 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
+      // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner + recalibrator
+      await boss.schedule('maintenance:fast-path-decisions-prune', '30 3 * * *', {}); // 3:30am UTC daily
+      await boss.schedule('maintenance:fast-path-recalibrate', '0 4 * * *', {}); // 4am UTC daily
+      await boss.schedule('maintenance:rule-auto-deprecate', '0 3 * * *', {}); // 3am UTC daily
       // LLM observability spec §12 — retention archival at 03:45 UTC so it
       // runs after the 03:00 memory-decay and 03:30 security-events sweeps
       // without contending on the same connection pool.
       await boss.schedule('maintenance:llm-ledger-archive', '45 3 * * *', {});
+      // Deferred-items brief §1 — reap aged-out provisional 'started' rows
+      // every 2 minutes. Cadence matches the in-flight clarification sweep.
+      await boss.schedule('maintenance:llm-started-row-sweep', '*/2 * * * *', {});
+      // Skill-analyzer resilience — sweep stalled mid-flight rows every
+      // 10 min. Threshold: 15-min `updated_at` silence (see
+      // staleAnalyzerJobSweepJobPure.ts header).
+      await boss.schedule('maintenance:stale-analyzer-job-sweep', '*/10 * * * *', {});
+      // Deferred-items brief §6 — daily 04:15 UTC cleanup of
+      // llm_inflight_history rows older than the retention window.
+      await boss.schedule('maintenance:llm-inflight-history-cleanup', '15 4 * * *', {});
       // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at
       // 04:00 UTC. Staggered out of the 03:00 slot so memory-decay has
       // a clean shot at the same per-org row set without contending on
@@ -959,11 +1103,14 @@ export const queueService = {
       await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
+      await boss.schedule('workflow-drafts-cleanup', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
       // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
       await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
       // Memory & Briefings Phase 2 — clarification timeout sweep (every 2 minutes)
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
+      // Chunk E — integration block expiry sweep (every 5 minutes)
+      await boss.schedule('maintenance:blocked-run-expiry', '*/5 * * * *', {});
       // IEE Phase 0 — main-app reconciliation for stuck 'delegated' runs (every 2 minutes)
       await boss.schedule('maintenance:iee-main-app-reconciliation', '*/2 * * * *', {});
       // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
@@ -977,6 +1124,17 @@ export const queueService = {
       await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
       // ClientPulse Phase 4 — hourly outcome-measurement cron (B2 ship gate).
       await boss.schedule('clientpulse:measure-outcomes', '7 * * * *', {});
+
+      // System Monitor — self-check (every 5 minutes)
+      await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});
+      await (boss as any).work('system-monitor-self-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { runSystemMonitorSelfCheck } = await import('../jobs/systemMonitorSelfCheckJob.js');
+          await runSystemMonitorSelfCheck();
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-self-check', error: String(err) });
+        }
+      });
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});
@@ -992,6 +1150,42 @@ export const queueService = {
           console.error(JSON.stringify({ event: 'subscription-trial-check:error', error: String(err) }));
           throw err;
         }
+      });
+
+      // Workspace seat rollup (agents-as-employees D9) — hourly billing snapshot
+      await boss.schedule('seat-rollup', '0 * * * *', {});
+      await (boss as any).work('seat-rollup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
+          await withTimeout(runSeatRollup().then(() => undefined), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'seat-rollup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Workspace identity migration — per-identity job dispatched by workspaceMigrationService.start()
+      // Uses createWorker so the handler runs inside an org-scoped tx pulled from job.data.organisationId.
+      const migrationConcurrency = Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8);
+      await createWorker<import('./workspace/workspaceMigrationService.js').MigrateIdentityJob>({
+        queue: 'workspace.migrate-identity',
+        boss: boss as any,
+        concurrency: migrationConcurrency,
+        timeoutMs: 270_000,
+        handler: async (job) => {
+          const { processIdentityMigration, WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT } = await import('./workspace/workspaceMigrationService.js');
+          const adapter = await resolveMigrationAdapter(job.data.targetBackend);
+          // Codex P1 round 2 (2026-04-30): forward pg-boss retry counter so
+          // the failure path defers writing the (`ON CONFLICT DO NOTHING`-locked)
+          // `subaccount.migration_completed` row until the final attempt. See
+          // workspaceMigrationService.persistTerminalFailure for rationale.
+          await processIdentityMigration(job.data, { adapter }, {
+            retrycount: getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>),
+            retryLimit: WORKSPACE_MIGRATE_IDENTITY_RETRY_LIMIT,
+          });
+        },
       });
 
       // Feature 4 — Slack inbound message processing (event-driven, no schedule)
@@ -1025,6 +1219,72 @@ export const queueService = {
         });
       }
 
+      // Agentic Commerce — execution-window timeout sweep (every minute).
+      // Transitions approved agent_charges past expires_at → failed/execution_timeout.
+      // Admin-bypass cross-org sweep; teamSize=1 (pg-boss deduplicates across instances).
+      await (boss as any).work('maintenance:execution-window-timeout', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runExecutionWindowTimeoutSweep } = await import('../jobs/executionWindowTimeoutJob.js');
+          await withTimeout(runExecutionWindowTimeoutSweep().then(() => undefined), 55_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:execution-window-timeout', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:execution-window-timeout', '* * * * *', {});
+
+      // Agentic Commerce — approval-expiry sweep (every minute).
+      // Transitions pending_approval agent_charges past approval_expires_at → denied/approval_expired.
+      // Admin-bypass cross-org sweep; teamSize=1.
+      await (boss as any).work('maintenance:approval-expiry', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runApprovalExpirySweep } = await import('../jobs/approvalExpiryJob.js');
+          await withTimeout(runApprovalExpirySweep().then(() => undefined), 55_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:approval-expiry', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:approval-expiry', '* * * * *', {});
+
+      // Agentic Commerce — Stripe agent reconciliation poll (every 5 minutes).
+      // Polls Stripe for executed agent_charges that haven't received a webhook
+      // confirmation within 30 minutes. Drives equivalent transitions on terminal results.
+      // Admin-bypass cross-org sweep; teamSize=1.
+      await (boss as any).work('maintenance:stripe-agent-reconciliation-poll', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runStripeAgentReconciliationPoll } = await import('../jobs/stripeAgentReconciliationPollJob.js');
+          await withTimeout(runStripeAgentReconciliationPoll().then(() => undefined), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:stripe-agent-reconciliation-poll', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:stripe-agent-reconciliation-poll', '*/5 * * * *', {});
+
+      // Agentic Commerce — shadow charge retention purge (daily 03:30 UTC).
+      // Deletes shadow_settled agent_charges rows past the per-org retention window.
+      // Retention job is the ONLY DB path that may delete agent_charges rows.
+      // Sets app.spend_caller = 'retention_purge' before each DELETE.
+      await (boss as any).work('maintenance:shadow-charge-retention', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runShadowChargeRetentionSweep } = await import('../jobs/shadowChargeRetentionJob.js');
+          await withTimeout(runShadowChargeRetentionSweep().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:shadow-charge-retention', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('maintenance:shadow-charge-retention', '30 3 * * *', {});
+
       // Canonical Data Platform P1 — connector polling tick (every-minute cron).
       // Cross-org sweep: selects connections due for sync across all orgs and
       // fan-outs one connector-polling-sync job per connection via boss.send().
@@ -1054,6 +1314,55 @@ export const queueService = {
         },
       });
 
+      // Pre-launch hardening D-P0-1 — GHL auto-start onboarding (event-driven).
+      // Dequeued after subaccount creation from webhook/OAuth-callback paths.
+      // The default resolveOrgContext reads `organisationId` from the payload and
+      // opens an org-scoped tx with `app.organisation_id` set, so the FORCE-RLS
+      // tenant-table reads inside subaccountOnboardingService (now using
+      // getOrgScopedDb) pass policy checks.
+      await createWorker<import('../jobs/ghlAutoStartOnboardingJob.js').GhlAutoStartOnboardingPayload>({
+        queue: 'ghl:auto-start-onboarding',
+        boss: boss as any,
+        handler: async (job) => {
+          const { ghlAutoStartOnboardingWorker } = await import('../jobs/ghlAutoStartOnboardingJob.js');
+          await ghlAutoStartOnboardingWorker(job.data);
+        },
+      });
+
+      // Pre-launch hardening C-P0-2 — OAuth resume restart (event-driven).
+      // Dequeued after a successful OAuth token exchange when a pendingRunId was
+      // stored on the state nonce. Default resolveOrgContext reads organisationId
+      // from the payload and opens an org-scoped tx with the GUC set so that
+      // WorkflowRunPauseStopService (now using getOrgScopedDb) can read workflow_runs.
+      await createWorker<import('../jobs/resumeRunAfterOAuthJob.js').ResumeRunAfterOAuthPayload>({
+        queue: 'run:resumeAfterOAuth',
+        boss: boss as any,
+        handler: async (job) => {
+          const { resumeRunAfterOAuthWorker } = await import('../jobs/resumeRunAfterOAuthJob.js');
+          await resumeRunAfterOAuthWorker(job.data);
+        },
+      });
+
+      // Agentic Commerce — agent-spend-request handler (worker→main, Chunk 11)
+      // Receives WorkerSpendRequest, recomputes idempotency key, calls proposeCharge,
+      // emits WorkerSpendResponse on agent-spend-response by correlationId.
+      {
+        const { registerAgentSpendRequestHandler } = await import('../jobs/agentSpendRequestHandler.js');
+        await registerAgentSpendRequestHandler(boss as any);
+      }
+
+      // Agentic Commerce — agent-spend-completion handler (worker→main, Chunk 11)
+      // Receives WorkerSpendCompletion after worker fills merchant form.
+      // Implements invariant 20: sets provider_charge_id or transitions executed → failed only.
+      {
+        const { registerAgentSpendCompletionHandler } = await import('../jobs/agentSpendCompletionHandler.js');
+        await registerAgentSpendCompletionHandler(boss as any);
+      }
+
+      // Agentic Commerce — agent-spend-response queue (main→worker, Chunk 11)
+      // Consumed by the IEE worker; main app does not register a handler for this queue.
+      // Declared here for documentation completeness. The worker polls by correlationId.
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs
@@ -1067,7 +1376,7 @@ export const queueService = {
 
       setInterval(async () => {
         await withAdvisoryLock(LOCK_ID_CLEANUP_RESERVATIONS, () =>
-          queueService.cleanupExpiredBudgetReservations().then(() => undefined)
+          queueService.cleanupExpiredComputeReservations().then(() => undefined)
         ).catch((err: unknown) => {
           console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', ...serializeError(err) }));
         });
@@ -1107,7 +1416,31 @@ export const queueService = {
         });
       }, 24 * 60 * 60 * 1000); // daily
 
+      // Workspace seat rollup — hourly billing snapshot (in-memory fallback)
+      setInterval(async () => {
+        const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
+        runSeatRollup().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'seat-rollup:error', ...serializeError(err) }));
+        });
+      }, 60 * 60 * 1000); // hourly
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// resolveMigrationAdapter — inline helper for workspace.migrate-identity worker
+// ---------------------------------------------------------------------------
+
+async function resolveMigrationAdapter(backend: string) {
+  if (backend === 'synthetos_native') {
+    const { nativeWorkspaceAdapter } = await import('../adapters/workspace/nativeWorkspaceAdapter.js');
+    return nativeWorkspaceAdapter;
+  }
+  if (backend === 'google_workspace') {
+    const { googleWorkspaceAdapter } = await import('../adapters/workspace/googleWorkspaceAdapter.js');
+    return googleWorkspaceAdapter;
+  }
+  throw new Error(`unknown migration backend: ${backend}`);
+}

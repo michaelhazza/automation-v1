@@ -164,12 +164,9 @@ export function parseMarkdownFile(filename: string, content: string): ParsedSkil
     null;
 
   // Merge methodology into instructions (single field)
-  let instructions: string | null = null;
-  if (instructionsSection && methodologySection) {
-    instructions = instructionsSection + '\n\n' + methodologySection;
-  } else {
-    instructions = instructionsSection ?? methodologySection ?? null;
-  }
+  let instructions: string | null = (instructionsSection && methodologySection)
+    ? instructionsSection + '\n\n' + methodologySection
+    : (instructionsSection ?? methodologySection ?? null);
 
   // Fallback: Anthropic-Plugin-style SKILL.md files put the full skill content
   // in the body without a dedicated `## Instructions` section. When we found

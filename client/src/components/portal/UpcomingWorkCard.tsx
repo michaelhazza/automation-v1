@@ -26,7 +26,7 @@ interface UpcomingWorkCardProps {
 const SOURCE_LABELS: Record<ScheduleOccurrence['source'], string> = {
   heartbeat: 'Heartbeat',
   cron: 'Cron',
-  playbook: 'Playbook',
+  workflow: 'Workflow',
   scheduled_task: 'Scheduled task',
 };
 

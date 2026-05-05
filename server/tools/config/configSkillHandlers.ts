@@ -16,8 +16,10 @@ import { skillService } from '../../services/skillService.js';
 import { configHistoryService } from '../../services/configHistoryService.js';
 import { boardService } from '../../services/boardService.js';
 import { db } from '../../db/index.js';
-import { subaccounts, agents } from '../../db/schema/index.js';
+import { subaccounts, agents, subaccountAgents } from '../../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
+import { logger } from '../../lib/logger.js';
+import { computeDescendantIds, mapSubaccountAgentIdsToAgentIds, resolveEffectiveScope, type RosterEntry } from './configSkillHandlersPure.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,7 +31,7 @@ async function getConfigAgentId(orgId: string): Promise<string | null> {
   const rows = await db
     .select({ agentId: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
     .where(and(eq(agents.organisationId, orgId), eq(systemAgents.slug, 'configuration-assistant')));
   return rows[0]?.agentId ?? null;
 }
@@ -344,8 +346,8 @@ export async function executeConfigCreateScheduledTask(
       timezone: input.timezone ? String(input.timezone) : undefined,
       scheduleTime: input.scheduleTime ? String(input.scheduleTime) : '09:00',
       taskSlug,
-      createdByPlaybookSlug: input.createdByPlaybookSlug
-        ? String(input.createdByPlaybookSlug)
+      createdByWorkflowSlug: input.createdByWorkflowSlug
+        ? String(input.createdByWorkflowSlug)
         : undefined,
       firstRunAt: input.firstRunAt ? new Date(String(input.firstRunAt)) : undefined,
       firstRunAtTz: input.firstRunAtTz ? String(input.firstRunAtTz) : undefined,
@@ -448,7 +450,7 @@ export async function executeConfigUpdateDataSource(
     const [ds] = await db
       .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
       .from(agentDataSources)
-      .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
       .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
@@ -472,7 +474,7 @@ export async function executeConfigRemoveDataSource(
     const [ds] = await db
       .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
       .from(agentDataSources)
-      .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
       .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
@@ -489,21 +491,85 @@ export async function executeConfigRemoveDataSource(
 // ---------------------------------------------------------------------------
 
 export async function executeConfigListAgents(
-  _input: Record<string, unknown>,
+  input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<unknown> {
+  // Determine effectiveScope
+  const effectiveScope = resolveEffectiveScope({ rawScope: input.scope, hierarchy: context.hierarchy });
+
+  // Warn when hierarchy is missing (falls through to subaccount behaviour)
+  if (!context.hierarchy) {
+    logger.warn('hierarchy_missing_read_skill_fallthrough', { skill: 'config_list_agents', runId: context.runId });
+  }
+
   try {
     const list = await agentService.listAllAgents(context.organisationId);
+
+    // Apply hierarchy-based filtering when scope is children or descendants
+    let filteredList = list as Record<string, unknown>[];
+
+    if ((effectiveScope === 'children' || effectiveScope === 'descendants') && context.hierarchy) {
+      // Load roster: subaccountAgents for this subaccount (active rows only)
+      const subaccountId = context.subaccountId;
+      let agentIdSet: Set<string>;
+
+      if (subaccountId) {
+        const rosterRows = await db
+          .select({
+            subaccountAgentId: subaccountAgents.id,
+            agentId: subaccountAgents.agentId,
+            parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,
+          })
+          .from(subaccountAgents)
+          .where(
+            and(
+              eq(subaccountAgents.organisationId, context.organisationId),
+              eq(subaccountAgents.subaccountId, subaccountId),
+              eq(subaccountAgents.isActive, true),
+            ),
+          );
+
+        const roster: RosterEntry[] = rosterRows.map((r) => ({
+          subaccountAgentId: r.subaccountAgentId,
+          agentId: r.agentId,
+          parentSubaccountAgentId: r.parentSubaccountAgentId ?? null,
+        }));
+
+        let targetSubaccountAgentIds: string[];
+        if (effectiveScope === 'children') {
+          targetSubaccountAgentIds = context.hierarchy.childIds;
+        } else {
+          // descendants
+          targetSubaccountAgentIds = computeDescendantIds({
+            callerSubaccountAgentId: context.hierarchy.agentId,
+            roster,
+          });
+        }
+
+        const targetAgentIds = mapSubaccountAgentIdsToAgentIds({
+          subaccountAgentIds: targetSubaccountAgentIds,
+          roster,
+        });
+        agentIdSet = new Set(targetAgentIds);
+      } else {
+        // No subaccount context — cannot scope by hierarchy; return empty
+        agentIdSet = new Set();
+      }
+
+      filteredList = filteredList.filter((a) => agentIdSet.has(a.id as string));
+    }
+    // effectiveScope === 'subaccount': return all agents (existing behaviour)
+
     return {
       success: true,
-      agents: list.map((a: Record<string, unknown>) => ({
+      agents: filteredList.map((a) => ({
         id: a.id,
         name: a.name,
-        slug: (a as Record<string, unknown>).slug,
+        slug: a.slug,
         status: a.status,
-        modelId: (a as Record<string, unknown>).modelId,
-        defaultSkillSlugs: (a as Record<string, unknown>).defaultSkillSlugs,
-        description: (a as Record<string, unknown>).description,
+        modelId: a.modelId,
+        defaultSkillSlugs: a.defaultSkillSlugs,
+        description: a.description,
       })),
     };
   } catch (err) {
@@ -512,6 +578,7 @@ export async function executeConfigListAgents(
 }
 
 export async function executeConfigListSubaccounts(
+  // scope is accepted for signature consistency; has no filter effect in v1
   _input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<unknown> {
@@ -527,6 +594,7 @@ export async function executeConfigListSubaccounts(
 }
 
 export async function executeConfigListLinks(
+  // scope is accepted for signature consistency; has no filter effect in v1
   input: Record<string, unknown>,
   context: SkillExecutionContext,
 ): Promise<unknown> {
@@ -594,7 +662,7 @@ export async function executeConfigListDataSources(
           loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
         })
         .from(agentDataSources)
-        .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+        .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
         .where(and(eq(agentDataSources.agentId, String(input.agentId)), eq(agents.organisationId, context.organisationId)));
     } else if (input.subaccountAgentId) {
       // Org-scoped: subaccountAgentService.getLinkById verifies org ownership
@@ -606,8 +674,8 @@ export async function executeConfigListDataSources(
           loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
         })
         .from(agentDataSources)
-        .innerJoin(subaccountAgents, eq(agentDataSources.subaccountAgentId, subaccountAgents.id))
-        .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+        .innerJoin(subaccountAgents, and(eq(agentDataSources.subaccountAgentId, subaccountAgents.id), eq(subaccountAgents.isActive, true)))
+        .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isNull(agents.deletedAt)))
         .where(and(eq(agentDataSources.subaccountAgentId, String(input.subaccountAgentId)), eq(agents.organisationId, context.organisationId)));
     } else {
       return { success: false, error: 'One of agentId or subaccountAgentId is required' };

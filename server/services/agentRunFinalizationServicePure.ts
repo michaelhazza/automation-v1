@@ -79,6 +79,27 @@ export function buildSummaryFromIeeRun(run: SummaryInput): string {
   return summary;
 }
 
+// ---------------------------------------------------------------------------
+// F22 — Meaningful output definition (Phase 2 schema decisions spec § 4.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * A run is "meaningful" when status='completed' AND at least one action was
+ * proposed OR at least one memory block was written. Pure function; callers
+ * (run-completion hooks) supply the counts from DB queries.
+ *
+ * Rejected proposals count as meaningful — the proposal is the signal.
+ * Memory blocks soft-deleted after writing are still meaningful at write time.
+ */
+export function computeMeaningfulOutputPure(input: {
+  status: string;
+  actionProposedCount: number;
+  memoryBlockWrittenCount: number;
+}): boolean {
+  if (input.status !== 'completed') return false;
+  return input.actionProposedCount >= 1 || input.memoryBlockWrittenCount >= 1;
+}
+
 function formatObjectOutput(
   output: Record<string, unknown>,
   run: SummaryInput,

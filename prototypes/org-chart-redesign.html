@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Org Chart — proposed redesign mockup (stacked leaves)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f8fafc;
+    color: #0f172a;
+    min-height: 100vh;
+  }
+  .page {
+    padding: 24px 40px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 16px;
+  }
+  .header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.2;
+  }
+  .header .subtitle {
+    font-size: 13px;
+    color: #64748b;
+    margin-top: 2px;
+  }
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toggle-group {
+    display: flex;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+  }
+  .toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #64748b;
+    background: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .toggle-btn.active {
+    background: #eef2ff;
+    color: #4f46e5;
+  }
+  .toggle-btn + .toggle-btn { border-left: 1px solid #e2e8f0; }
+  .icon-btn {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: white;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    background: #4f46e5;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .divider { width: 1px; height: 22px; background: #e2e8f0; }
+  .canvas {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    overflow: hidden;
+    height: calc(100vh - 140px);
+    position: relative;
+  }
+  .canvas-inner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+  }
+  .card {
+    position: absolute;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    cursor: pointer;
+    transition: all 0.18s;
+  }
+  .card:hover {
+    border-color: #c7d2fe;
+    box-shadow: 0 4px 10px rgba(79, 70, 229, 0.08);
+  }
+  /* All cards — uniform horizontal layout */
+  .card {
+    width: 240px;
+    height: 70px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+  }
+  .card .icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+  .card .text {
+    flex: 1;
+    min-width: 0;
+  }
+  .card .name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card .role {
+    font-size: 10.5px;
+    color: #94a3b8;
+    margin-top: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card .live-dot {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    top: 10px;
+    right: 10px;
+  }
+  .card.dim .live-dot { background: #cbd5e1; }
+  svg.connectors {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .mockup-banner {
+    background: #fef3c7;
+    border-bottom: 1px solid #fde68a;
+    color: #92400e;
+    text-align: center;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">
+  Static mockup v3 — leaves stacked vertically under each head. Auto-fits viewport.
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Org Chart</h1>
+      <div class="subtitle">Synthetos Workspace — 21 agents</div>
+    </div>
+    <div class="header-controls">
+      <div class="toggle-group">
+        <button class="toggle-btn active">⌥ Chart</button>
+        <button class="toggle-btn">▦ List</button>
+        <button class="toggle-btn">⏱ Schedule</button>
+      </div>
+      <div class="divider"></div>
+      <button class="icon-btn" title="Zoom in">+</button>
+      <button class="icon-btn" title="Zoom out">−</button>
+      <button class="icon-btn" title="Fit to view">⛶</button>
+      <div class="divider"></div>
+      <button class="add-btn">+ Add Agent</button>
+    </div>
+  </div>
+
+  <div class="canvas" id="canvas">
+    <div class="canvas-inner" id="inner">
+      <svg class="connectors" id="svg"></svg>
+      <!-- cards rendered by JS -->
+    </div>
+  </div>
+</div>
+
+<script>
+  // --- Real agent hierarchy (Synthetos Workspace, 21 agents) ---
+  const agents = [
+    { id: 'orch',  parent: null,   name: 'Chief Operating Officer',     role: 'COO',                  emoji: '🧭' },
+    { id: 'hope',  parent: 'orch', name: 'Head of Product Engineering', role: 'CTO',                  emoji: '💻' },
+    { id: 'admin', parent: 'orch', name: 'Admin-Ops Agent',             role: 'Operations',           emoji: '📋' },
+    { id: 'hocs',  parent: 'orch', name: 'Head of Client Services',     role: 'CCO',                  emoji: '🤝' },
+    { id: 'hocom', parent: 'orch', name: 'Head of Commercial',          role: 'CRO',                  emoji: '💼' },
+    { id: 'hogr',  parent: 'orch', name: 'Head of Growth',              role: 'CMO',                  emoji: '📈' },
+    { id: 'sint',  parent: 'orch', name: 'Strategic Intelligence',      role: 'Intelligence',         emoji: '🧠' },
+    { id: 'ba',    parent: 'hope', name: 'Business Analyst',            role: 'Engineering',          emoji: '📊' },
+    { id: 'qa',    parent: 'hope', name: 'QA Agent',                    role: 'Engineering',          emoji: '🐛' },
+    { id: 'dev',   parent: 'hope', name: 'Dev Agent',                   role: 'Engineering',          emoji: '⚙️' },
+    { id: 'km',    parent: 'hope', name: 'Knowledge Management',        role: 'Engineering',          emoji: '📚' },
+    { id: 'sup',   parent: 'hocs', name: 'Support Agent',               role: 'Client Services',      emoji: '🎧' },
+    { id: 'onb',   parent: 'hocs', name: 'Onboarding Agent',            role: 'Client Services',      emoji: '🚀' },
+    { id: 'ret',   parent: 'hocs', name: 'Retention/Success',           role: 'Client Services',      emoji: '💚' },
+    { id: 'crm',   parent: 'hocom', name: 'CRM/Pipeline Agent',         role: 'Commercial',           emoji: '🔗' },
+    { id: 'sdr',   parent: 'hocom', name: 'SDR Agent',                  role: 'Commercial',           emoji: '📞' },
+    { id: 'fin',   parent: 'hocom', name: 'Finance Agent',              role: 'Commercial',           emoji: '💰' },
+    { id: 'ads',   parent: 'hogr', name: 'Ads Management Agent',        role: 'Growth',               emoji: '📢' },
+    { id: 'em',    parent: 'hogr', name: 'Email Outreach Agent',        role: 'Growth',               emoji: '📧' },
+    { id: 'soc',   parent: 'hogr', name: 'Social Media Agent',          role: 'Growth',               emoji: '📱' },
+    { id: 'seo',   parent: 'hogr', name: 'Content/SEO Agent',           role: 'Growth',               emoji: '✍️' },
+  ];
+
+  // All cards are the same size — uniform horizontal mini-cards.
+  const CARD_W = 240, CARD_H = 70;
+  const COL_GAP = 32;        // horizontal gap between branches at level 1
+  const ROOT_GAP = 70;       // vertical gap between root (orchestrator) and the heads
+  const HEAD_TO_LEAF = 36;   // vertical gap between head card and first leaf
+  const LEAF_GAP = 10;       // vertical gap between stacked leaves
+  const PAD = 32;
+
+  // Build tree
+  const byId = Object.fromEntries(agents.map(a => [a.id, { ...a, children: [] }]));
+  for (const a of agents) {
+    if (a.parent && byId[a.parent]) byId[a.parent].children.push(byId[a.id]);
+  }
+
+  const root = byId['orch'];
+  const heads = root.children;
+
+  // Positions: orchestrator at top center, heads in a row below, leaves stacked under each head
+  const placed = []; // { node, x, y, kind: 'vert' | 'horiz' }
+
+  // Lay heads + their leaves left-to-right
+  const headCount = heads.length;
+  const totalHeadsW = headCount * CARD_W + (headCount - 1) * COL_GAP;
+  let cx = 0;
+  for (const h of heads) {
+    const headX = cx + CARD_W / 2;
+    const headY = CARD_H + ROOT_GAP; // below the root
+    placed.push({ node: h, x: headX, y: headY, w: CARD_W, h: CARD_H });
+    // leaves
+    let leafY = headY + CARD_H + HEAD_TO_LEAF;
+    for (const c of h.children) {
+      placed.push({ node: c, x: headX, y: leafY, w: CARD_W, h: CARD_H });
+      leafY += CARD_H + LEAF_GAP;
+    }
+    cx += CARD_W + COL_GAP;
+  }
+
+  // Place root centered above heads
+  const rootX = totalHeadsW / 2;
+  const rootY = 0;
+  placed.unshift({ node: root, x: rootX, y: rootY, w: CARD_W, h: CARD_H });
+
+  // Render cards
+  const inner = document.getElementById('inner');
+  let minX = Infinity, maxX = -Infinity, maxY = 0;
+  for (const p of placed) {
+    const { node, x, y, w, h } = p;
+    const card = document.createElement('div');
+    card.className = 'card' + (Math.random() < 0.6 ? ' dim' : '');
+    card.style.left = (x - w / 2) + 'px';
+    card.style.top = y + 'px';
+    card.innerHTML = `
+      <div class="live-dot"></div>
+      <div class="icon">${node.emoji}</div>
+      <div class="text">
+        <div class="name">${node.name}</div>
+        <div class="role">${node.role}</div>
+      </div>
+    `;
+    inner.appendChild(card);
+    minX = Math.min(minX, x - w / 2);
+    maxX = Math.max(maxX, x + w / 2);
+    maxY = Math.max(maxY, y + h);
+  }
+
+  // Render connectors
+  const svg = document.getElementById('svg');
+  const totalW = maxX - minX + PAD * 2;
+  const totalH = maxY + PAD * 2;
+  svg.setAttribute('width', totalW);
+  svg.setAttribute('height', totalH);
+
+  const byNode = new Map(placed.map(p => [p.node, p]));
+
+  // 1) Root → heads — straight orthogonal connectors (vertical down,
+  //    horizontal across, vertical down). No curves.
+  const rootP = byNode.get(root);
+  for (const h of heads) {
+    const hp = byNode.get(h);
+    const fromX = rootP.x;
+    const fromY = rootP.y + rootP.h;
+    const toX = hp.x;
+    const toY = hp.y;
+    const midY = fromY + (toY - fromY) / 2;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${fromX} ${fromY} L ${fromX} ${midY} L ${toX} ${midY} L ${toX} ${toY}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#cbd5e1');
+    path.setAttribute('stroke-width', '1.5');
+    svg.appendChild(path);
+  }
+
+  // 2) Each head → its leaves: a single trunk down the centerline of the
+  //    column. The trunk passes behind each leaf card; only the gaps between
+  //    cards show, which gives a clean "spine" connecting head to children.
+  for (const h of heads) {
+    if (h.children.length === 0) continue;
+    const hp = byNode.get(h);
+    const trunkX = hp.x; // centered — same x as the cards
+    const trunkTop = hp.y + hp.h;
+    const lastChild = h.children[h.children.length - 1];
+    const lastP = byNode.get(lastChild);
+    const trunkBottom = lastP.y; // stop at top of last leaf so we don't draw inside it
+
+    const trunk = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    trunk.setAttribute('d', `M ${trunkX} ${trunkTop} L ${trunkX} ${trunkBottom}`);
+    trunk.setAttribute('fill', 'none');
+    trunk.setAttribute('stroke', '#cbd5e1');
+    trunk.setAttribute('stroke-width', '1.5');
+    svg.appendChild(trunk);
+  }
+
+  inner.style.width = totalW + 'px';
+  inner.style.height = totalH + 'px';
+
+  // Auto-fit so the whole chart is visible without scrollbars
+  function fit() {
+    const canvas = document.getElementById('canvas');
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / totalW;
+    const scaleY = rect.height / totalH;
+    const scale = Math.min(scaleX, scaleY, 1);
+    const offsetX = (rect.width - totalW * scale) / 2 + (-minX + PAD) * scale;
+    const offsetY = (rect.height - totalH * scale) / 2 + PAD * scale;
+    inner.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+  }
+  fit();
+  window.addEventListener('resize', fit);
+</script>
+
+</body>
+</html>

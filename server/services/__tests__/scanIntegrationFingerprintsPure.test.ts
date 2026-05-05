@@ -7,31 +7,13 @@
  *   npx tsx server/services/__tests__/scanIntegrationFingerprintsPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   scanFingerprintsPure,
   matchesFingerprint,
   type FingerprintLibraryEntry,
   type Observation,
 } from '../scanIntegrationFingerprintsPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(msg);
-}
 
 function entry(overrides: Partial<FingerprintLibraryEntry> & Pick<FingerprintLibraryEntry, 'id' | 'fingerprintType'>): FingerprintLibraryEntry {
   return {
@@ -48,25 +30,25 @@ function entry(overrides: Partial<FingerprintLibraryEntry> & Pick<FingerprintLib
 
 test('matchesFingerprint — exact value match', () => {
   const e = entry({ id: 'a', fingerprintType: 'outbound_webhook_domain', fingerprintValue: 'api.closebot.ai' });
-  assert(matchesFingerprint(e, 'api.closebot.ai'), 'exact should match');
-  assert(!matchesFingerprint(e, 'api.closebot.io'), 'non-match should fail');
+  expect(matchesFingerprint(e, 'api.closebot.ai'), 'exact should match').toBeTruthy();
+  expect(!matchesFingerprint(e, 'api.closebot.io'), 'non-match should fail').toBeTruthy();
 });
 
 test('matchesFingerprint — regex pattern match', () => {
   const e = entry({ id: 'b', fingerprintType: 'workflow_action_type', fingerprintPattern: '^closebot\\.' });
-  assert(matchesFingerprint(e, 'closebot.send_sms'), 'prefix matches');
-  assert(!matchesFingerprint(e, 'uphex.send_sms'), 'different prefix does not match');
+  expect(matchesFingerprint(e, 'closebot.send_sms'), 'prefix matches').toBeTruthy();
+  expect(!matchesFingerprint(e, 'uphex.send_sms'), 'different prefix does not match').toBeTruthy();
 });
 
 test('matchesFingerprint — malformed regex does not throw', () => {
   const e = entry({ id: 'c', fingerprintType: 'tag_prefix', fingerprintPattern: '[broken' });
   // Should return false, not throw
-  assert(!matchesFingerprint(e, 'anything'), 'malformed regex returns false');
+  expect(!matchesFingerprint(e, 'anything'), 'malformed regex returns false').toBeTruthy();
 });
 
 test('matchesFingerprint — no value and no pattern returns false', () => {
   const e = entry({ id: 'd', fingerprintType: 'tag_prefix' });
-  assert(!matchesFingerprint(e, 'anything'), 'no criteria → no match');
+  expect(!matchesFingerprint(e, 'anything'), 'no criteria → no match').toBeTruthy();
 });
 
 // ── scanFingerprintsPure integration-ish ───────────────────────────────
@@ -81,9 +63,9 @@ test('scan collapses multiple pattern matches per integration into one detection
     { signalType: 'workflow_action_type', signalValue: 'closebot.send_sms' },
   ];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.detections.length === 1, `expected 1 detection, got ${result.detections.length}`);
-  assert(result.detections[0].integrationSlug === 'closebot', 'closebot detected');
-  assert(result.unclassified.length === 0, 'no unclassified');
+  expect(result.detections.length === 1, `expected 1 detection, got ${result.detections.length}`).toBeTruthy();
+  expect(result.detections[0].integrationSlug === 'closebot', 'closebot detected').toBeTruthy();
+  expect(result.unclassified.length === 0, 'no unclassified').toBeTruthy();
 });
 
 test('scan emits unclassified for non-matching observations', () => {
@@ -94,9 +76,9 @@ test('scan emits unclassified for non-matching observations', () => {
     { signalType: 'conversation_provider_id', signalValue: 'mystery-tool:xyz' },
   ];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.detections.length === 0, 'no matches');
-  assert(result.unclassified.length === 1, 'one unclassified');
-  assert(result.unclassified[0].signalValue === 'mystery-tool:xyz', 'value preserved');
+  expect(result.detections.length === 0, 'no matches').toBeTruthy();
+  expect(result.unclassified.length === 1, 'one unclassified').toBeTruthy();
+  expect(result.unclassified[0].signalValue === 'mystery-tool:xyz', 'value preserved').toBeTruthy();
 });
 
 test('scan picks highest-confidence pattern when multiple library rows match', () => {
@@ -106,9 +88,9 @@ test('scan picks highest-confidence pattern when multiple library rows match', (
   ];
   const observations: Observation[] = [{ signalType: 'tag_prefix', signalValue: 'closebot:ft-test' }];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.detections.length === 1, 'one detection');
-  assert(result.detections[0].matchedFingerprintId === 'high', 'higher-confidence row wins');
-  assert(result.detections[0].confidence === 0.95, 'confidence carried through');
+  expect(result.detections.length === 1, 'one detection').toBeTruthy();
+  expect(result.detections[0].matchedFingerprintId === 'high', 'higher-confidence row wins').toBeTruthy();
+  expect(result.detections[0].confidence === 0.95, 'confidence carried through').toBeTruthy();
 });
 
 test('scan tie-breaks on equal confidence by smallest fingerprint id (deterministic)', () => {
@@ -120,11 +102,8 @@ test('scan tie-breaks on equal confidence by smallest fingerprint id (determinis
   ];
   const observations: Observation[] = [{ signalType: 'tag_prefix', signalValue: 'closebot:ft-test' }];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.detections.length === 1, 'one detection');
-  assert(
-    result.detections[0].matchedFingerprintId === 'alpha',
-    `deterministic tie-breaker should pick 'alpha', got ${result.detections[0].matchedFingerprintId}`,
-  );
+  expect(result.detections.length === 1, 'one detection').toBeTruthy();
+  expect(result.detections[0].matchedFingerprintId === 'alpha', `deterministic tie-breaker should pick 'alpha', got ${result.detections[0].matchedFingerprintId}`).toBeTruthy();
 });
 
 test('scan cross-observation tie-break preserves smallest-id winner', () => {
@@ -140,11 +119,8 @@ test('scan cross-observation tie-break preserves smallest-id winner', () => {
     { signalType: 'conversation_provider_id', signalValue: 'closebot:y' },
   ];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.detections.length === 1, 'one detection per slug');
-  assert(
-    result.detections[0].matchedFingerprintId === 'alpha',
-    `alpha wins the per-slug tie, got ${result.detections[0].matchedFingerprintId}`,
-  );
+  expect(result.detections.length === 1, 'one detection per slug').toBeTruthy();
+  expect(result.detections[0].matchedFingerprintId === 'alpha', `alpha wins the per-slug tie, got ${result.detections[0].matchedFingerprintId}`).toBeTruthy();
 });
 
 test('scan handles multiple integrations matched independently', () => {
@@ -157,9 +133,9 @@ test('scan handles multiple integrations matched independently', () => {
     { signalType: 'outbound_webhook_domain', signalValue: 'api.uphex.com' },
   ];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.detections.length === 2, 'two integrations detected');
+  expect(result.detections.length === 2, 'two integrations detected').toBeTruthy();
   const slugs = result.detections.map((d) => d.integrationSlug).sort();
-  assert(slugs[0] === 'closebot' && slugs[1] === 'uphex', `got ${slugs.join(',')}`);
+  expect(slugs[0] === 'closebot' && slugs[1] === 'uphex', `got ${slugs.join(',')}`).toBeTruthy();
 });
 
 test('scan — empty library returns everything as unclassified', () => {
@@ -168,8 +144,8 @@ test('scan — empty library returns everything as unclassified', () => {
     { signalType: 'tag_prefix', signalValue: 'baz' },
   ];
   const result = scanFingerprintsPure(observations, []);
-  assert(result.detections.length === 0, 'no detections');
-  assert(result.unclassified.length === 2, 'both unclassified');
+  expect(result.detections.length === 0, 'no detections').toBeTruthy();
+  expect(result.unclassified.length === 2, 'both unclassified').toBeTruthy();
 });
 
 test('scan — observations of a type absent from library fall through as unclassified', () => {
@@ -178,9 +154,7 @@ test('scan — observations of a type absent from library fall through as unclas
   ];
   const observations: Observation[] = [{ signalType: 'contact_source', signalValue: 'google-ads' }];
   const result = scanFingerprintsPure(observations, library);
-  assert(result.unclassified.length === 1, 'type mismatch → unclassified');
+  expect(result.unclassified.length === 1, 'type mismatch → unclassified').toBeTruthy();
 });
 
 console.log('');
-console.log(`scanIntegrationFingerprintsPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

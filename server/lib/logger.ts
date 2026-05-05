@@ -40,6 +40,45 @@ function emit(entry: LogEntry): void {
   } else {
     console.log(output);
   }
+
+  // Feed the System Monitor's log buffer for correlation-ID-scoped retrieval.
+  // Lazy import keeps the logger module free of systemMonitor deps.
+  // Errors are swallowed — the buffer is a best-effort observability surface.
+  appendLogLineSafe(entry);
+}
+
+type AppendLogLineFn = (line: import('../services/systemMonitor/logBuffer.js').LogLine) => void;
+let _appendLogLineCache: AppendLogLineFn | null = null;
+let _appendLogLineLoading: Promise<AppendLogLineFn> | null = null;
+
+async function loadAppendLogLine(): Promise<AppendLogLineFn> {
+  if (_appendLogLineCache) return _appendLogLineCache;
+  if (_appendLogLineLoading) return _appendLogLineLoading;
+
+  _appendLogLineLoading = import('../services/systemMonitor/logBuffer.js').then((m) => {
+    _appendLogLineCache = m.appendLogLine;
+    _appendLogLineLoading = null;
+    return _appendLogLineCache;
+  }).catch((err) => {
+    _appendLogLineLoading = null;
+    throw err;
+  });
+
+  return _appendLogLineLoading;
+}
+
+function appendLogLineSafe(entry: LogEntry): void {
+  void (async () => {
+    try {
+      const { buildLogLineForBuffer } = await import('./loggerBufferAdapterPure.js');
+      const line = buildLogLineForBuffer(entry);
+      if (line === null) return;
+      const fn = await loadAppendLogLine();
+      fn(line);
+    } catch {
+      // Never let buffer-write failures surface to the logger caller.
+    }
+  })();
 }
 
 export const logger = {

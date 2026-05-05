@@ -87,7 +87,7 @@ export default function AdminPermissionSetsPage({ user: _user }: { user: User })
         </div>
         <button
           onClick={() => { setShowCreateForm(true); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           + New set
         </button>
@@ -109,8 +109,8 @@ export default function AdminPermissionSetsPage({ user: _user }: { user: User })
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Create</button>
-            <button onClick={() => setShowCreateForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+            <button onClick={handleCreate} className="btn btn-primary">Create</button>
+            <button onClick={() => setShowCreateForm(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -148,14 +148,14 @@ export default function AdminPermissionSetsPage({ user: _user }: { user: User })
             <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => setEditSet(ps)}
-                className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors"
+                className="btn btn-sm btn-secondary"
               >
                 Edit permissions
               </button>
               {!ps.isDefault && (
                 <button
                   onClick={() => setDeleteId(ps.id)}
-                  className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[13px] font-medium transition-colors"
+                  className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
                 >
                   Delete
                 </button>
@@ -225,10 +225,10 @@ function PermissionSetEditor({
         })}
       </div>
       <div className="flex gap-3">
-        <button onClick={() => onSave([...selected])} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+        <button onClick={() => onSave([...selected])} className="btn btn-primary">
           Save ({selected.size} selected)
         </button>
-        <button onClick={onClose} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+        <button onClick={onClose} className="btn btn-secondary">Cancel</button>
       </div>
     </Modal>
   );

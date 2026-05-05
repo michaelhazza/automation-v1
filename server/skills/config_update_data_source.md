@@ -2,7 +2,7 @@
 name: Config Update Data Source
 description: Update an existing data source's priority, loading mode, or content type.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

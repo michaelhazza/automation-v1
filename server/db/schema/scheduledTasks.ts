@@ -1,9 +1,10 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { users } from './users';
+import { workflowTemplateVersions } from './workflowTemplates';
 
 // ---------------------------------------------------------------------------
 // Scheduled Tasks — user-configured recurring tasks
@@ -37,7 +38,7 @@ export const scheduledTasks = pgTable(
 
     // Phase B2 — logical identity + lifecycle metadata (spec §5.4.1, §5.4.2)
     taskSlug: text('task_slug'),
-    createdByPlaybookSlug: text('created_by_playbook_slug'),
+    createdByWorkflowSlug: text('created_by_workflow_slug'),
     firstRunAt: timestamp('first_run_at', { withTimezone: true }),
     firstRunAtTz: text('first_run_at_tz'),
 
@@ -64,7 +65,7 @@ export const scheduledTasks = pgTable(
     endsAfterRuns: integer('ends_after_runs'),
 
     // Memory & Briefings spec Phase 1 (migration 0143, §10.4 S22)
-    // Per-task delivery channel override. Null = use the playbook default.
+    // Per-task delivery channel override. Null = use the Workflow default.
     // Shape is a subset of DeliveryConfig from deliveryService (Phase 1).
     deliveryChannels: jsonb('delivery_channels').$type<{
       email?: boolean;
@@ -72,6 +73,10 @@ export const scheduledTasks = pgTable(
       slack?: boolean;
     } | null>(),
 
+    // Workflows V1 (migration 0270) — pin a specific template version for scheduled runs
+    pinnedTemplateVersionId: uuid('pinned_template_version_id').references(
+      () => workflowTemplateVersions.id
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -90,9 +95,12 @@ export const scheduledTasks = pgTable(
     subaccountSlugActiveUniq: uniqueIndex('scheduled_tasks_subaccount_slug_active_uniq')
       .on(table.subaccountId, table.taskSlug)
       .where(sql`${table.taskSlug} IS NOT NULL AND ${table.isActive} = true`),
-    playbookSlugIdx: index('scheduled_tasks_playbook_slug_idx')
-      .on(table.createdByPlaybookSlug)
-      .where(sql`${table.createdByPlaybookSlug} IS NOT NULL`),
+    workflowSlugIdx: index('scheduled_tasks_workflow_slug_idx')
+      .on(table.createdByWorkflowSlug)
+      .where(sql`${table.createdByWorkflowSlug} IS NOT NULL`),
+    pinnedTemplateVersionIdx: index('scheduled_tasks_pinned_template_version_idx')
+      .on(table.pinnedTemplateVersionId)
+      .where(sql`${table.pinnedTemplateVersionId} IS NOT NULL`),
   })
 );
 

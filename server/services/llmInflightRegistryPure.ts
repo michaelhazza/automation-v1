@@ -112,7 +112,10 @@ export function buildDeadlineAt(params: {
 export interface BuildEntryInput {
   idempotencyKey:   string;
   attempt:          number;
+  attemptSequence:  number;
+  fallbackIndex:    number;
   startedAt:        string;
+  queuedAt:         string;
   label:            string;
   provider:         string;
   model:            string;
@@ -129,6 +132,23 @@ export interface BuildEntryInput {
   deadlineBufferMs: number;
 }
 
+/**
+ * `startedAt - queuedAt` in ms. Clamped to 0 on negative (clock drift).
+ *
+ * Spec/brief §3: the gap between "caller invoked routeCall" and "adapter
+ * dispatch" covers pre-dispatch work (budget lock wait, provider-cooldown
+ * bounce chain, model resolver, pricing lookups). Exposed per-entry so the
+ * UI can render "we spent 43s waiting before dispatch" as a first-class
+ * signal rather than admins guessing from elapsed-ms alone.
+ */
+export function computeDispatchDelayMs(params: {
+  queuedAt:  string;
+  startedAt: string;
+}): number {
+  const delay = Date.parse(params.startedAt) - Date.parse(params.queuedAt);
+  return Math.max(0, delay);
+}
+
 export function buildEntry(input: BuildEntryInput): InFlightEntry {
   return {
     runtimeKey: buildRuntimeKey({
@@ -138,7 +158,14 @@ export function buildEntry(input: BuildEntryInput): InFlightEntry {
     }),
     idempotencyKey:   input.idempotencyKey,
     attempt:          input.attempt,
+    attemptSequence:  input.attemptSequence,
+    fallbackIndex:    input.fallbackIndex,
     startedAt:        input.startedAt,
+    queuedAt:         input.queuedAt,
+    dispatchDelayMs:  computeDispatchDelayMs({
+      queuedAt:  input.queuedAt,
+      startedAt: input.startedAt,
+    }),
     stateVersion:     1,
     deadlineAt:       buildDeadlineAt({
       startedAt:        input.startedAt,
@@ -346,7 +373,11 @@ export function applyIncomingEvent(input: IncomingEventInput): IncomingEventOutc
     runtimeKey:       input.runtimeKey,
     idempotencyKey:   input.removal.idempotencyKey,
     attempt:          input.removal.attempt,
+    attemptSequence:  input.removal.attempt,
+    fallbackIndex:    0,
     startedAt:        input.startedAt,
+    queuedAt:         input.startedAt,
+    dispatchDelayMs:  0,
     stateVersion:     1,
     // We don't have the full entry on a remove-only event — leave
     // placeholder fields that downstream consumers tolerate. The UI never

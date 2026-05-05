@@ -7,6 +7,9 @@ import {
   boardConfigs,
   agents,
 } from '../db/schema/index.js';
+import type { Task } from '../db/schema/tasks.js';
+
+type TaskStatus = Task['status'];
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { triggerService } from './triggerService.js';
 import { subtaskWakeupService } from './subtaskWakeupService.js';
@@ -37,6 +40,23 @@ function mergeAgentIds(
 export const taskService = {
   // ─── Tasks (Kanban Cards) ──────────────────────────────────────────────────
 
+  /**
+   * Returns true iff a task with the given id exists in the org. Soft-deleted
+   * tasks are still considered owned (for audit / replay paths). Routes use
+   * this to scope task-id paths without leaking existence across orgs.
+   *
+   * Per DEVELOPMENT_GUIDELINES §2 routes never import `db` directly — call
+   * this from the route layer instead of inlining a select.
+   */
+  async assertOrgOwnsTask(taskId: string, organisationId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId)))
+      .limit(1);
+    return row != null;
+  },
+
   async listTasks(
     organisationId: string,
     subaccountId: string,
@@ -48,7 +68,7 @@ export const taskService = {
       isNull(tasks.deletedAt),
     ];
 
-    if (filters?.status) conditions.push(eq(tasks.status, filters.status));
+    if (filters?.status) conditions.push(eq(tasks.status, filters.status as TaskStatus));
     if (filters?.priority) conditions.push(eq(tasks.priority, filters.priority as 'low' | 'normal' | 'high' | 'urgent'));
     if (filters?.assignedAgentId) conditions.push(eq(tasks.assignedAgentId, filters.assignedAgentId));
     if (filters?.search) conditions.push(ilike(tasks.title, `%${filters.search}%`));
@@ -128,7 +148,7 @@ export const taskService = {
     },
     userId?: string
   ) {
-    const status = data.status ?? 'inbox';
+    const status = (data.status ?? 'inbox') as TaskStatus;
 
     await this._validateStatus(organisationId, subaccountId, status);
     const position = await this._nextPosition(subaccountId, status);
@@ -148,6 +168,7 @@ export const taskService = {
         assignedAgentId: agentId,
         assignedAgentIds: agentIds,
         createdByAgentId: data.createdByAgentId ?? null,
+        createdByUserId: userId ?? null,
         processId: data.processId ?? null,
         position,
         dueDate: data.dueDate ?? null,
@@ -326,7 +347,7 @@ export const taskService = {
 
     const [updated] = await db
       .update(tasks)
-      .set({ status: data.status, position: data.position, updatedAt: new Date() })
+      .set({ status: data.status as TaskStatus, position: data.position, updatedAt: new Date() })
       // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
       .where(eq(tasks.id, id))
       .returning();
@@ -478,7 +499,7 @@ export const taskService = {
     }
   },
 
-  async _nextPosition(subaccountId: string, status: string) {
+  async _nextPosition(subaccountId: string, status: TaskStatus) {
     const [last] = await db
       .select({ position: tasks.position })
       .from(tasks)

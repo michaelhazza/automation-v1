@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentDataSources, agents } from '../db/schema/index.js';
 import {
@@ -179,7 +179,7 @@ export async function executeReadDataSource(
       const [row] = await db
         .select({ ds: agentDataSources })
         .from(agentDataSources)
-        .innerJoin(agents, eq(agents.id, agentDataSources.agentId))
+        .innerJoin(agents, and(eq(agents.id, agentDataSources.agentId), isNull(agents.deletedAt)))
         .where(
           and(
             eq(agentDataSources.id, source.id),

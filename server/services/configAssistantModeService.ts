@@ -57,7 +57,7 @@ const MODE_ALLOWED_ACTIONS: Readonly<Record<ConfigAssistantMode, ReadonlyArray<s
     'config_attach_data_source',
     'config_create_scheduled_task',
     'update_memory_block',
-    'config_deliver_playbook_output',
+    'config_deliver_workflow_output',
   ],
   'task-creation': [
     'ask_clarifying_question',
@@ -71,7 +71,7 @@ export function resolveMode(mode: ConfigAssistantMode): ConfigAssistantModeResol
   const filename = MODE_PROMPT_FILES[mode];
   const promptPath = resolve(PROMPT_DIR, filename);
 
-  let promptContents = '';
+  let promptContents: string;
   try {
     promptContents = readFileSync(promptPath, 'utf-8');
   } catch {

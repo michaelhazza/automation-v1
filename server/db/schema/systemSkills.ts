@@ -19,6 +19,11 @@ export const systemSkills = pgTable('system_skills', {
   // Contains all guidance: workflow phases, decision rules, quality criteria.
   instructions: text('instructions'),
 
+  // F11 — whether this skill produces side-effects at runtime (Riley §6.4).
+  // Default true (safe) — treat unmigrated rows as side-effecting, forcing
+  // review under Explore Mode. Backfilled from markdown frontmatter at seed time.
+  sideEffects: boolean('side_effects').notNull().default(true),
+
   isActive: boolean('is_active').notNull().default(true),
 
   // Three-state visibility cascade: 'none' hides from agents entirely,

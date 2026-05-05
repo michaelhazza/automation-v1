@@ -3,6 +3,7 @@
  * Runnable via: npx tsx server/services/__tests__/skillAnalyzerServicePureValidation.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   validateMergeOutput,
   extractTables,
@@ -14,25 +15,6 @@ import {
 } from '../skillAnalyzerServicePure.js';
 import type { MergeWarningCode } from '../skillAnalyzerServicePure.js';
 import type { ProposedMerge } from '../skillAnalyzerServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEq<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -91,9 +73,9 @@ test('REQUIRED_FIELD_DEMOTED: base field dropped from merged required array', ()
   const nonBase = { definition: baseDef([]), instructions: 'Also.' };
   const merged = cleanMerge({ definition: baseDef(['prompt']) });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'REQUIRED_FIELD_DEMOTED'), 'should have REQUIRED_FIELD_DEMOTED');
+  expect(hasCode(result, 'REQUIRED_FIELD_DEMOTED'), 'should have REQUIRED_FIELD_DEMOTED').toBeTruthy();
   const w = result.find(w => w.code === 'REQUIRED_FIELD_DEMOTED')!;
-  assert(w.detail?.includes('tone'), 'detail should mention dropped field');
+  expect(w.detail?.includes('tone'), 'detail should mention dropped field').toBeTruthy();
 });
 
 test('REQUIRED_FIELD_DEMOTED: non-base field dropped', () => {
@@ -101,7 +83,7 @@ test('REQUIRED_FIELD_DEMOTED: non-base field dropped', () => {
   const nonBase = { definition: baseDef(['platform']), instructions: 'Also.' };
   const merged = cleanMerge({ definition: baseDef(['prompt']) });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'REQUIRED_FIELD_DEMOTED'), 'should have REQUIRED_FIELD_DEMOTED for non-base field');
+  expect(hasCode(result, 'REQUIRED_FIELD_DEMOTED'), 'should have REQUIRED_FIELD_DEMOTED for non-base field').toBeTruthy();
 });
 
 test('no REQUIRED_FIELD_DEMOTED when all required fields preserved', () => {
@@ -109,7 +91,7 @@ test('no REQUIRED_FIELD_DEMOTED when all required fields preserved', () => {
   const nonBase = { definition: baseDef(['platform']), instructions: 'Also.' };
   const merged = cleanMerge({ definition: baseDef(['prompt', 'platform']) });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'REQUIRED_FIELD_DEMOTED'), 'should have no demotion warning');
+  expect(!hasCode(result, 'REQUIRED_FIELD_DEMOTED'), 'should have no demotion warning').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -123,7 +105,7 @@ test('CAPABILITY_OVERLAP critical: merged name matches library name', () => {
   const names = new Set(['existing-skill']);
   const result = validateMergeOutput(base, nonBase, merged, names, new Set(), emptyLibrary.skills, null);
   const w = result.find(w => w.code === 'CAPABILITY_OVERLAP');
-  assert(w !== undefined, 'should have CAPABILITY_OVERLAP');
+  expect(w !== undefined, 'should have CAPABILITY_OVERLAP').toBeTruthy();
   assertEq(w!.severity, 'critical', 'severity should be critical for name collision');
 });
 
@@ -135,7 +117,7 @@ test('CAPABILITY_OVERLAP warning: significant description bigram overlap', () =>
     { id: 'other-id', name: 'FB Ads Manager', description: 'facebook ads specialist campaign targeting manager' },
   ];
   const result = validateMergeOutput(base, nonBase, merged, new Set(), new Set(), librarySkills, null);
-  assert(hasCode(result, 'CAPABILITY_OVERLAP'), 'should detect bigram overlap');
+  expect(hasCode(result, 'CAPABILITY_OVERLAP'), 'should detect bigram overlap').toBeTruthy();
 });
 
 test('no CAPABILITY_OVERLAP when only generic bigrams overlap', () => {
@@ -146,7 +128,7 @@ test('no CAPABILITY_OVERLAP when only generic bigrams overlap', () => {
     { id: 'other-id', name: 'Email Tool', description: 'email marketing content strategy automation' },
   ];
   const result = validateMergeOutput(base, nonBase, merged, new Set(), new Set(), librarySkills, null);
-  assert(!hasCode(result, 'CAPABILITY_OVERLAP'), 'should not flag generic bigrams as overlap');
+  expect(!hasCode(result, 'CAPABILITY_OVERLAP'), 'should not flag generic bigrams as overlap').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -158,8 +140,8 @@ test('SCOPE_EXPANSION (amber): merged 45% longer than richer source', () => {
   const nonBase = { definition: null, instructions: 'word '.repeat(50).trim() };
   const merged = cleanMerge({ instructions: 'word '.repeat(145).trim() });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'SCOPE_EXPANSION'), 'should have amber scope warning');
-  assert(!hasCode(result, 'SCOPE_EXPANSION_CRITICAL'), 'should not have critical scope warning');
+  expect(hasCode(result, 'SCOPE_EXPANSION'), 'should have amber scope warning').toBeTruthy();
+  expect(!hasCode(result, 'SCOPE_EXPANSION_CRITICAL'), 'should not have critical scope warning').toBeTruthy();
 });
 
 test('SCOPE_EXPANSION_CRITICAL (red): merged 100% longer than richer source', () => {
@@ -167,8 +149,8 @@ test('SCOPE_EXPANSION_CRITICAL (red): merged 100% longer than richer source', ()
   const nonBase = { definition: null, instructions: 'word '.repeat(50).trim() };
   const merged = cleanMerge({ instructions: 'word '.repeat(200).trim() });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'SCOPE_EXPANSION_CRITICAL'), 'should have critical scope warning');
-  assert(!hasCode(result, 'SCOPE_EXPANSION'), 'should not also have amber warning');
+  expect(hasCode(result, 'SCOPE_EXPANSION_CRITICAL'), 'should have critical scope warning').toBeTruthy();
+  expect(!hasCode(result, 'SCOPE_EXPANSION'), 'should not also have amber warning').toBeTruthy();
 });
 
 test('no scope warning when merged within 30% of richer source', () => {
@@ -176,8 +158,8 @@ test('no scope warning when merged within 30% of richer source', () => {
   const nonBase = { definition: null, instructions: 'word '.repeat(50).trim() };
   const merged = cleanMerge({ instructions: 'word '.repeat(125).trim() });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'SCOPE_EXPANSION'), 'should have no scope warning');
-  assert(!hasCode(result, 'SCOPE_EXPANSION_CRITICAL'), 'should have no critical scope warning');
+  expect(!hasCode(result, 'SCOPE_EXPANSION'), 'should have no scope warning').toBeTruthy();
+  expect(!hasCode(result, 'SCOPE_EXPANSION_CRITICAL'), 'should have no critical scope warning').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -191,7 +173,7 @@ test('TABLE_ROWS_DROPPED: source table has 4 rows, merged has 2', () => {
   const nonBase = { definition: null, instructions: null };
   const merged = cleanMerge({ instructions: tableWith2Rows });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'TABLE_ROWS_DROPPED'), 'should detect dropped rows');
+  expect(hasCode(result, 'TABLE_ROWS_DROPPED'), 'should detect dropped rows').toBeTruthy();
 });
 
 test('no TABLE_ROWS_DROPPED when merged has same or more rows', () => {
@@ -201,7 +183,7 @@ test('no TABLE_ROWS_DROPPED when merged has same or more rows', () => {
   const nonBase = { definition: null, instructions: null };
   const merged = cleanMerge({ instructions: table4 });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'TABLE_ROWS_DROPPED'), 'should not warn when rows are preserved or added');
+  expect(!hasCode(result, 'TABLE_ROWS_DROPPED'), 'should not warn when rows are preserved or added').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -214,7 +196,7 @@ test('INVOCATION_LOST: source has invocation block, merged does not', () => {
   const nonBase = { definition: null, instructions: 'Do something else.' };
   const merged = cleanMerge({ instructions: 'Do the thing merged.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'INVOCATION_LOST'), 'should detect missing invocation block');
+  expect(hasCode(result, 'INVOCATION_LOST'), 'should detect missing invocation block').toBeTruthy();
 });
 
 test('no INVOCATION_LOST when neither source has invocation block', () => {
@@ -222,7 +204,7 @@ test('no INVOCATION_LOST when neither source has invocation block', () => {
   const nonBase = { definition: null, instructions: 'Do something else.', invocationBlock: null };
   const merged = cleanMerge({ instructions: 'Do the thing merged.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'INVOCATION_LOST'), 'should not warn when no source had invocation block');
+  expect(!hasCode(result, 'INVOCATION_LOST'), 'should not warn when no source had invocation block').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -234,7 +216,7 @@ test('HITL_LOST: source has HITL phrase, merged has neither phrase nor intent', 
   const nonBase = { definition: null, instructions: 'Help write emails.' };
   const merged = cleanMerge({ instructions: 'Write and send the email.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'HITL_LOST'), 'should detect missing HITL gate');
+  expect(hasCode(result, 'HITL_LOST'), 'should detect missing HITL gate').toBeTruthy();
 });
 
 test('no HITL_LOST when merged contains approval intent fallback', () => {
@@ -242,7 +224,7 @@ test('no HITL_LOST when merged contains approval intent fallback', () => {
   const nonBase = { definition: null, instructions: 'Help write.' };
   const merged = cleanMerge({ instructions: 'Write the email and await user confirmation before sending.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'HITL_LOST'), 'should not warn when approval intent is present');
+  expect(!hasCode(result, 'HITL_LOST'), 'should not warn when approval intent is present').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -276,19 +258,19 @@ test('extractTables: two tables with distinct headers', () => {
 test('extractInvocationBlock: returns block when present at top', () => {
   const text = 'Invoke this skill when the user needs email help.\n\nDo the other things.';
   const block = extractInvocationBlock(text);
-  assert(block !== null, 'should return non-null block');
-  assert(block!.startsWith('Invoke this skill'), 'should start with invocation keyword');
+  expect(block !== null, 'should return non-null block').toBeTruthy();
+  expect(block!.startsWith('Invoke this skill'), 'should start with invocation keyword').toBeTruthy();
 });
 
 test('extractInvocationBlock: returns null when no trigger block', () => {
   const block = extractInvocationBlock('Just a regular skill body.');
-  assert(block === null, 'should return null when no trigger block');
+  expect(block === null, 'should return null when no trigger block').toBeTruthy();
 });
 
 test('extractInvocationBlock: matches when block is not followed by blank line', () => {
   const text = 'Invoke this skill when the user asks for a report.\nStep 1: Gather data.';
   const block = extractInvocationBlock(text);
-  assert(block !== null, 'should return non-null block even without trailing blank line');
+  expect(block !== null, 'should return non-null block even without trailing blank line').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -300,7 +282,7 @@ test('OUTPUT_FORMAT_LOST: source has output format heading, merged omits it', ()
   const nonBase = { definition: null, instructions: 'Do the thing.' };
   const merged = cleanMerge({ instructions: 'Do the thing.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should detect missing output format section');
+  expect(hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should detect missing output format section').toBeTruthy();
   const w = result.find(w => w.code === 'OUTPUT_FORMAT_LOST');
   assertEq(w!.severity, 'warning', 'OUTPUT_FORMAT_LOST should be warning severity');
 });
@@ -310,7 +292,7 @@ test('no OUTPUT_FORMAT_LOST when merged preserves output format heading', () => 
   const nonBase = { definition: null, instructions: 'Also help.' };
   const merged = cleanMerge({ instructions: 'Do the thing.\n\n## Output Format\n\nReturn JSON.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should not warn when output format is preserved');
+  expect(!hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should not warn when output format is preserved').toBeTruthy();
 });
 
 test('no OUTPUT_FORMAT_LOST when neither source has output format block', () => {
@@ -318,7 +300,7 @@ test('no OUTPUT_FORMAT_LOST when neither source has output format block', () => 
   const nonBase = { definition: null, instructions: 'Also help.' };
   const merged = cleanMerge({ instructions: 'Do the thing merged.' });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should not warn when no source had output format');
+  expect(!hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should not warn when no source had output format').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -332,7 +314,7 @@ test('richnessScore: null input returns 0', () => {
 test('richnessScore: headings boost score above word count', () => {
   const withHeadings = '## Section\nword word word\n## Section 2\nword word word';
   const withoutHeadings = 'word word word word word word';
-  assert(richnessScore(withHeadings) > richnessScore(withoutHeadings), 'headings should boost score');
+  expect(richnessScore(withHeadings) > richnessScore(withoutHeadings), 'headings should boost score').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -347,7 +329,7 @@ test('NAME_MISMATCH: top-level name differs from definition.name', () => {
     definition: baseDef([], 'library_name'),
   });
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(hasCode(result, 'NAME_MISMATCH'), 'should emit NAME_MISMATCH');
+  expect(hasCode(result, 'NAME_MISMATCH'), 'should emit NAME_MISMATCH').toBeTruthy();
 });
 
 test('no NAME_MISMATCH when names align', () => {
@@ -355,12 +337,9 @@ test('no NAME_MISMATCH when names align', () => {
   const nonBase = { definition: baseDef([]), instructions: 'Also.' };
   const merged = cleanMerge();
   const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
-  assert(!hasCode(result, 'NAME_MISMATCH'), 'should not emit NAME_MISMATCH on aligned names');
+  expect(!hasCode(result, 'NAME_MISMATCH'), 'should not emit NAME_MISMATCH on aligned names').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

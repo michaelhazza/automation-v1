@@ -116,7 +116,7 @@ export async function listInsights(
       runStartedAt: agentRuns.startedAt,
     })
     .from(workspaceMemoryEntries)
-    .leftJoin(agents, eq(agents.id, workspaceMemoryEntries.agentId))
+    .leftJoin(agents, and(eq(agents.id, workspaceMemoryEntries.agentId), isNull(agents.deletedAt)))
     .leftJoin(agentRuns, eq(agentRuns.id, workspaceMemoryEntries.agentRunId))
     .where(and(...conditions))
     .orderBy(desc(workspaceMemoryEntries.createdAt))

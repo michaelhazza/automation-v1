@@ -1,11 +1,12 @@
 # LLM In-Flight Real-Time Tracker — Spec
 
-**Status:** Approved for build — spec-review round 3 sign-off (2026-04-20).
+**Status:** Merged to main via PR #161 on 2026-04-21. Post-merge hardening landed on branch `claude/build-llm-inflight-tracker-m3l2x` across three independent review rounds (pr-reviewer, dual-reviewer, final reviewer pass) — captured in §12 Round 4. This spec document now reflects the fully-implemented state including post-merge hardening; further changes will land as amendments tied to the deferred items in `tasks/llm-inflight-deferred-items-brief.md`.
 **Author:** Main session.
 **Date:** 2026-04-20.
-**Last revised:** 2026-04-20 — round 3 polish folded in (§12 round 3 table): `stateVersion` monotonic guard, `evictionContext` on overflow emissions, active-count gauge tagged by `callSite` + `provider`, client-side 100 ms snapshot-consistency buffer, `deadlineBufferMs` exposed on entries for UI clarity.
-**Branch when built:** new branch — do not bundle with `claude/build-llm-observability-ledger-iiTcC`.
+**Last revised:** 2026-04-21 — Round 4 (post-build hardening) folded in: client-side `stateVersion` monotonic mirror guard, overflow check scoped to `countActive()` rather than `slots.size`, Redis-fanout overflow drops silently instead of evict-and-republish, noop-check precedes eviction in `add()`, `updateLedgerLink()` ledger-link rehydration for retryable-error-only failure chains, 100 ms client buffer extended to full-fetch lifetime during snapshot GET.
+**Branch when built:** `claude/build-llm-inflight-tracker-m3l2x` — merged to main 2026-04-21 (PR #161).
 **Predecessor:** `tasks/llm-observability-ledger-generalisation-spec.md` — completed 2026-04-20. That spec generalised the completed-call ledger (`llm_requests`) for all consumers. This spec extends observability to **in-flight calls** — the gap between dispatch and completion.
+**Follow-up:** `tasks/llm-inflight-deferred-items-brief.md` — briefs the eight deferred items from §9 with per-item problem statements, minimal viable shapes, key files, and tripwires for future sessions.
 
 ---
 
@@ -15,14 +16,20 @@
 2. Goal
 3. Primitives search (existing reuse)
 4. Execution model
+   - 4.1 Lifecycle
+   - 4.2 Runtime key
+   - 4.3 Entry state machine (server + client-side mirror)
+   - 4.4 Broadcast + multi-instance fanout (bounded memory, overflow hardening)
+   - 4.5 Stale-entry sweep
+   - 4.6 Ledger-link rehydration (Round 4)
 5. Contracts
 6. Files to change
 7. Permissions / RLS
 8. Phase sequencing
-9. Deferred Items
+9. Deferred Items (briefed in `tasks/llm-inflight-deferred-items-brief.md`)
 10. Testing posture
 11. Self-consistency check
-12. Resolved during spec review
+12. Resolved during spec review (rounds 1–4)
 
 ---
 
@@ -97,6 +104,10 @@ The no-op logs are normal during steady-state (local + Redis double-delivery) �
 
 This eliminates the out-of-order flicker class from spec-review round 1 feedback item 1, covers the "no-op removal guard reason" ask from round 2 feedback item 6, and closes the same-`startedAt` reorder hole from round 3 feedback item 1.
 
+**Client-side mirror of the monotonic guard (Round 4).** The client implements the same `stateVersion` ladder in `client/src/components/system-pnl/PnlInFlightTable.tsx` via a bounded `stateVersionByKeyRef: Map<runtimeKey, 1 | 2>` (256-entry LRU, matching the `recentlyRemovedRef` sibling). `applyAddEntry` rejects any incoming `added` event whose `stateVersion` is not strictly greater than the stored value; `applyRemoveEntry` stamps version 2 unconditionally so duplicate removes for the same runtimeKey still merge ledger-link fields (see §4.6). The snapshot fetch seeds version 1 for every returned entry so a buffered `added` event arriving mid-fetch can't double-insert after the snapshot render.
+
+The client guard is strictly belt-and-braces — the server already refuses to emit a lower-version event for a given `(runtimeKey, startedAt)` tuple. The client mirror catches the residual cases: (a) a stale replay slipping past socket-layer dedup, (b) a delayed `added` arriving after its `removed` has aged out of the bounded `recentlyRemovedRef` set but while the runtimeKey is still within the `stateVersionByKeyRef` window. Defence in depth across both bounded sets keeps the resurrection class closed for the entire practical event horizon.
+
 ### 4.4 Broadcast + multi-instance fanout
 
 `server/services/llmInflightRegistry.ts` maintains a per-process `Map<runtimeKey, { entry: InFlightEntry, state: EntryState }>` + emits socket events to room `system:llm-inflight`.
@@ -114,6 +125,12 @@ When `REDIS_URL` is set (production default), the registry publishes add/remove 
 
 Without this cap, a pathological Redis-down + sweep-delayed combo could accumulate entries unbounded. With it, the worst case is a bounded memory footprint + a visible overflow signal.
 
+**Three hardening rules on the overflow path (Round 4).** The simple description above hides three invariants that pr-reviewer and dual-reviewer each pinned as real bugs in the initial build:
+
+1. **Noop-before-eviction ordering.** `add()` runs the `applyAdd` state-machine check *first*, and only runs the overflow-eviction branch when the incoming runtimeKey is a genuine new entry. Evicting first and then discovering the add was a no-op (e.g. a race from Redis fanout, or a caller that bypassed the router-side `assert(!registry.has(runtimeKey))` guard via the prod `console.error` fallback) would silently evict an unrelated active entry and emit a spurious `evicted_overflow` event to every admin. The ordering makes the noop path a literal no-op — no eviction, no emission.
+2. **Overflow predicate uses `countActive()`, not `slots.size`.** `remove()` keeps victim slots in the map as `state: 'removed'` for a 30-second retention window (so late duplicate add/remove events are caught by the state-machine guard rather than accepted as fresh). If the overflow predicate counted those retained slots, a high-churn workload would trigger premature eviction of still-active entries even when the live count was well below capacity. Scoping the predicate to active-only slots — at the cost of allowing the map to grow to at most 2× capacity transiently — keeps live-entry eviction gated on genuine live-entry pressure.
+3. **Redis-fanout overflow drops silently.** When an `apply_add` arrives from a remote instance and the local map is at capacity, the local instance does NOT evict-and-republish. A republished `evicted_overflow` event would echo back to the origin instance, flip an active call to "evicted" from its owner's perspective, and render its real completion a noop. Instead the local add is dropped silently with a debug log; the origin instance remains the single source of truth for its own calls. The local admin connected to the remote instance temporarily under-reports by the dropped entry, which is acceptable — the snapshot endpoint (§5) provides authoritative recovery on demand.
+
 **Active-count gauge.** Every add/remove emits `llm.inflight.active_count` via the existing `createEvent` pattern, carrying:
 
 - `activeCount: number` — current local map size.
@@ -129,6 +146,29 @@ Each entry records a `deadlineAt = startedAt + timeoutMs + 30_000` at add-time. 
 In practice any deadline-exceeded entry is overwhelmingly a process crash between `registry.add()` and the `finally`-block `registry.remove()`. The router's own `callWithTimeout` (`llmRouterTimeoutPure.ts`) would have aborted the provider call at `timeoutMs` — the extra 30s buffer past that is precisely the window where only a crash can leave the entry alive. We surface `'deadline_exceeded'` as the reason rather than labelling it `'crash_orphaned'` because the sweep cannot positively prove a crash; the operational inference is the right place to draw that conclusion. The reason field leaves room for future sweep causes without a status-enum migration.
 
 Capturing the deadline at add-time makes the sweep robust to `PROVIDER_CALL_TIMEOUT_MS` changes mid-run and to small clock drift across instances. Sweep removals are logged at `warn` with the runtimeKey so a crash loop is detectable from logs alone.
+
+### 4.6 Ledger-link rehydration for retryable-error-only failure chains (Round 4)
+
+The §4.1 lifecycle assumes the final attempt's `remove()` carries the ledger row id — the outer failure-path ledger write runs first, then `remove()` fires with `ledgerRowId` + `ledgerCommittedAt` populated. That contract holds for the common cases (success; non-retryable terminal failure) but breaks for one specific retry shape: **every attempt fails with a retryable error**.
+
+In that shape, the router's inner retry-loop catch removes each attempt's entry mid-loop (so the registry doesn't accumulate ghosts during backoff sleeps) with `ledgerRowId: null` — the ledger row hasn't been written yet, there's no id to link. When all providers exhaust their retries, `currentRuntimeKey` is null (last iteration's catch cleared it), and the outer failure path writes the ledger row but has no live registry entry to remove. The UI's "Recently landed" strip shows a row with `terminalStatus='error'` but no `[ledger]` button — the operator has no one-click navigation to the ledger detail for that failure.
+
+**Rehydration mechanic.** The router captures a `lastRemovedAttempt: { runtimeKey, idempotencyKey, attempt, startedAt, terminalStatus }` handle in the inner catch whenever it removes an attempt with `ledgerRowId: null`. After the outer failure-path ledger write returns the row id via `.returning({ id: llmRequests.id })`, the router calls `inflightRegistry.updateLedgerLink()` — a purpose-built method that emits a second `removed` socket event for the same runtimeKey with the ledger fields populated. The client's `applyRemoveEntry` merges the populated fields over the earlier `null` values on the `recentlyLanded` map entry, and the `[ledger]` button appears.
+
+**Contract boundaries on `updateLedgerLink()`.** The method is deliberately narrow:
+
+- It emits *only* when the runtimeKey has already been removed via the normal state-machine path — it does not add, does not change the map, does not publish to Redis (the origin instance already fanned out the first removal), and does not bump `stateVersion` (stays at 2).
+- The emitted event uses an eventId suffix `:ledger-link` so dedup caches don't swallow it as a duplicate of the original removal.
+- The client merge is "once linked, stay linked" — if the original removal arrived with a populated `ledgerRowId` and a later rehydration event carries `null`, the populated value is preserved. This protects against stray replays after the real link has already been delivered.
+- It is **not a general-purpose second terminal transition**. The state machine (§4.3) remains the single source of truth for `active(1) → removed(2)`. The header comment on `updateLedgerLink()` in the registry calls this out explicitly with a "DO NOT call this" list covering the misuse vectors a future contributor might reach for (changing `terminalStatus`, updating non-ledger fields, calling more than once, fixing a wrong-runtimeKey removal).
+
+**Why a second event and not a state-machine redesign?** Three alternatives were considered and rejected:
+
+1. *Keep `currentRuntimeKey` alive across retries and remove once at the end.* Requires look-ahead into "is there a next eligible provider" which depends on cooldown state and model mapping — not cleanly computable at the inner-catch decision point. Creates transient registry ghosts between providers.
+2. *Detect "final attempt" inside the inner catch and defer removal.* Same look-ahead problem, plus it couples the inner-loop logic to the outer-loop termination conditions.
+3. *Never remove in the inner catch; only remove once at the end with terminal classification.* Leaves orphaned runtime keys alive during backoff sleeps, inflating the registry's apparent live count for the sweep and active-count gauge — defeats the single-entry-per-attempt design.
+
+The rehydration approach keeps the inner-catch removal ghost-free, preserves single-entry semantics, and confines the post-hoc linkage to a single narrow method with an explicit contract. The alternative designs push complexity into the hot path; the rehydration approach pushes it to a cold path that fires once per terminal-failure `routeCall` — a better tradeoff.
 
 ## 5. Contracts
 
@@ -200,6 +240,8 @@ interface InFlightRemoval {
 
 Every emitted socket event carries `eventId = ${runtimeKey}:${type}` where `type ∈ { added, removed }`. Clients de-duplicate by `eventId` via a small LRU (~256) so reconnect replay and multi-instance bridging can't double-render a row.
 
+**Ledger-link rehydration event (Round 4).** The rehydration emission from §4.6 shares the `removed` type but carries an extended eventId `${runtimeKey}:removed:ledger-link`. The suffix keeps dedup caches from swallowing it as a duplicate of the original removal. Client merge semantics: `applyRemoveEntry` stamps `stateVersion: 2` unconditionally and overwrites the `recentlyLanded` entry with populated ledger fields, preserving any already-populated values from the original removal ("once linked, stay linked"). The `setEntries(prev.filter(...))` call inside `applyRemoveEntry` is idempotent — filtering an already-filtered array is a cheap no-op.
+
 ### Admin snapshot endpoint
 
 `GET /api/admin/llm-pnl/in-flight?limit=500` → `{ entries: InFlightEntry[], generatedAt: string, capped: boolean }`.
@@ -211,7 +253,12 @@ Every emitted socket event carries `eventId = ${runtimeKey}:${type}` where `type
 
 `limit` is accepted as a query param (1–500) so an admin can intentionally narrow the snapshot during a reconnect storm; values above the hard cap are clamped silently.
 
-**Client-side consistency window.** On first paint / reconnect the client fetches the snapshot and subscribes to the socket room, but incoming socket events are **buffered** for 100 ms before merge. This closes a tiny UX flicker: a `remove` event arriving between "snapshot GET returned" and "React rendered the snapshot" could make a row appear and instantly disappear. The 100 ms buffer lets the snapshot render first, then drains the buffer through the same state machine as live events. No server change — the buffer lives in `PnlInFlightTable.tsx` (§6).
+**Client-side consistency window.** On first paint / reconnect the client fetches the snapshot and subscribes to the socket room, but incoming socket events are **buffered** before merge. The buffer is held open for the full lifetime of the snapshot GET — `bufferingUntilRef = Number.MAX_SAFE_INTEGER` at fetch start, reset to `Date.now() + 100 ms` in the `finally` block — then drained once the snapshot render catches up. This closes two flicker classes:
+
+1. **Fetch-completion race.** A `remove` event arriving between "snapshot GET returned" and "React rendered the snapshot" could make a row appear and instantly disappear. The 100 ms post-fetch window lets the snapshot render first, then drains the buffer through the same state machine as live events.
+2. **Long-fetch race (Round 4).** If the snapshot GET takes longer than 100 ms (cold start, load), events arriving during the fetch would otherwise merge *before* the snapshot render completes — so `setEntries(data.entries...)` overwrites them. Holding the buffer open for the full fetch lifetime eliminates that race at the cost of briefly queueing events during slow fetches.
+
+No server change — the buffer lives in `PnlInFlightTable.tsx` (§6). Snapshot-seeding of the `stateVersionByKeyRef` map (§4.3) complements the buffer by guaranteeing a buffered `added` event for an already-snapshotted runtimeKey is rejected at drain time.
 
 ---
 
@@ -219,18 +266,23 @@ Every emitted socket event carries `eventId = ${runtimeKey}:${type}` where `type
 
 | File | Change |
 |---|---|
-| `server/services/llmInflightRegistry.ts` | **New** — per-process `Map<runtimeKey, { entry, state }>` + Redis pub/sub + socket broadcast. Enforces the §4.3 state machine at every add/remove/subscribe boundary. Exposes `has(runtimeKey): boolean` for the router-side pre-add invariant assert (see llmRouter.ts row below). |
+| `server/services/llmInflightRegistry.ts` | **New** — per-process `Map<runtimeKey, { entry, state }>` + Redis pub/sub + socket broadcast. Enforces the §4.3 state machine at every add/remove/subscribe boundary. Exposes `has(runtimeKey): boolean` for the router-side pre-add invariant assert (see llmRouter.ts row below). Overflow path uses `countActive()` rather than `slots.size` (§4.4 hardening rule 2); Redis-fanout overflow drops silently rather than evict-and-republish (§4.4 hardening rule 3). Exposes `updateLedgerLink()` for the §4.6 rehydration contract. |
 | `server/services/llmInflightRegistryPure.ts` | **New** — pure logic: entry-shape builder, `runtimeKey` derivation (`idempotencyKey:attempt:startedAt`), `deadlineAt` calc, terminal-status → `ledgerRowId`-expected mapping, state-machine transition rules, LRU overflow selection (oldest `startedAt` wins eviction), snapshot sort comparator. Testable without Redis/socket. |
-| `server/config/limits.ts` | **Modify** — add `MAX_INFLIGHT_ENTRIES = 5_000` + `INFLIGHT_SWEEP_INTERVAL_MS = 60_000` + `INFLIGHT_SWEEP_JITTER_MS = 5_000` + `INFLIGHT_DEADLINE_BUFFER_MS = 30_000`. Keeps tunables alongside existing limits rather than scattering them. |
-| `server/services/llmRouter.ts` | **Modify** — call `registry.add()` **inside the provider-retry loop, after budget reservation, immediately before `providerAdapter.call()`**; call `registry.remove()` in the `finally` block adjacent to the ledger write, with `ledgerCommittedAt` set to the post-insert timestamp. Pre-dispatch terminal paths (`budget_blocked`, `rate_limited`) must **not** add. **Pre-add invariant**: assert `!registry.has(runtimeKey)` immediately before `registry.add()` — catches accidental double-add from future refactors at the call site rather than swallowing it as a registry-layer no-op. Registry-layer no-ops stay silent for Redis fanout races; router-layer double-add is a programmer bug and must fail fast in dev (assert behind `process.env.NODE_ENV !== 'production'` so we don't crash prod on a hot-path anomaly — instead log at `error`). |
-| `server/routes/systemPnl.ts` | **Modify** — add `GET /api/admin/llm-pnl/in-flight?limit=500` snapshot endpoint. Hard cap 500, sorted `startedAt DESC`, `capped: boolean` flag. |
-| `server/websocket/rooms.ts` | **Modify** — new handler `join:system-llm-inflight` that rejects non-system-admin sockets and joins the `system:llm-inflight` room. |
-| `server/services/__tests__/llmInflightRegistryPure.test.ts` | **New** — pure tests: runtimeKey derivation, state-machine transitions (add→active, add-while-active = no-op, remove→removed, remove-while-removed = no-op, stale-startedAt event ignored), deadline calc, snapshot cap + sort. |
-| `client/src/pages/SystemPnlPage.tsx` | **Modify** — new first tab **In-Flight**, renders live table from socket events + snapshot fetch. Local `eventId` LRU for dedup. Client-side 1–2s retry on ledger-row fetch when `ledgerCommittedAt == null`. |
-| `client/src/components/system-pnl/PnlInFlightTable.tsx` | **New** — live table component. Client-local elapsed-time ticking (setInterval 1s, not socket spam). 100 ms socket-event buffer on mount / reconnect before merging with the snapshot (§5 consistency window). UI surfaces `deadlineBufferMs` so entries past `startedAt + timeoutMs` but before `deadlineAt` are visibly labelled "past timeout — sweep pending" rather than looking like a stuck happy-path call. |
-| `shared/types/systemPnl.ts` | **Modify** — export `InFlightEntry`, `InFlightRemoval`, `EntryState`, the socket event envelope type. |
+| `server/config/limits.ts` | **Modify** — add `MAX_INFLIGHT_ENTRIES = 5_000` + `INFLIGHT_SWEEP_INTERVAL_MS = 60_000` + `INFLIGHT_SWEEP_JITTER_MS = 5_000` + `INFLIGHT_DEADLINE_BUFFER_MS = 30_000` + `INFLIGHT_SNAPSHOT_HARD_CAP = 500`. Keeps tunables alongside existing limits rather than scattering them. |
+| `server/services/llmRouter.ts` | **Modify** — call `registry.add()` **inside the provider-retry loop, after budget reservation, immediately before `providerAdapter.call()`**; call `registry.remove()` in the `finally` block adjacent to the ledger write, with `ledgerCommittedAt` set to the post-insert timestamp. Pre-dispatch terminal paths (`budget_blocked`, `rate_limited`) must **not** add. **Pre-add invariant**: assert `!registry.has(runtimeKey)` immediately before `registry.add()` — catches accidental double-add from future refactors at the call site rather than swallowing it as a registry-layer no-op. Registry-layer no-ops stay silent for Redis fanout races; router-layer double-add is a programmer bug and must fail fast in dev (assert behind `process.env.NODE_ENV !== 'production'` so we don't crash prod on a hot-path anomaly — instead log at `error`). Tracks `lastRemovedAttempt` across retryable-error catches for §4.6 rehydration; failure path calls `inflightRegistry.updateLedgerLink()` when `currentRuntimeKey` is null but `lastRemovedAttempt` is set. Captures ledger row id via `.returning({ id: llmRequests.id })` on both success and failure inserts. |
+| `server/routes/systemPnl.ts` | **Modify** — add `GET /api/admin/llm-pnl/in-flight?limit=500` snapshot endpoint. Hard cap 500, sorted `startedAt DESC`, `capped: boolean` flag. Intentionally does NOT use the `wrap({ data, meta })` helper used by other P&L routes — the in-flight response is its own envelope shape (`{ entries, generatedAt, capped }`) per §5. |
+| `server/websocket/rooms.ts` | **Modify** — new handler `join:system-llm-inflight` that rejects non-system-admin sockets and joins the `system:llm-inflight` room. Companion `leave:system-llm-inflight` handler. |
+| `server/services/__tests__/llmInflightRegistryPure.test.ts` | **New** — 27 pure tests: runtimeKey derivation, state-machine transitions (add→active, add-while-active = no-op, remove→removed, remove-while-removed = no-op, stale-startedAt event ignored), deadline calc, snapshot cap + sort, LRU selection, stateVersion monotonic guard, active-count gauge payload shape, sweep selection, noop-at-capacity boundary test (Round 4 — pinning the noop-before-eviction ordering at the pure-layer level). |
+| `server/index.ts` | **Modify** — `llmInflightRegistry.init()` in boot sequence after `initWebSocket`; `llmInflightRegistry.shutdown()` in graceful-shutdown handler between Socket.IO close and pg-boss stop. |
+| `server/lib/tracing.ts` | **Modify** — add `'llm.inflight.active_count'` to the `EVENT_NAMES` tuple for the §4.4 gauge emission. |
+| `client/src/pages/SystemPnlPage.tsx` | **Modify** — new first tab **In-Flight**, renders live table from socket events + snapshot fetch. Local `eventId` LRU for dedup. Client-side 1–2s retry on ledger-row fetch when `ledgerCommittedAt == null`. Passes `onOpenDetail={setSelectedCallId}` into the table so the `[ledger]` button in the "Recently landed" strip opens the existing `PnlCallDetailDrawer`. |
+| `client/src/components/system-pnl/PnlInFlightTable.tsx` | **New** — live table component. Client-local elapsed-time ticking (setInterval 1s, not socket spam). Socket-event buffer held open for full-fetch lifetime + 100 ms after fetch resolution before merging with the snapshot (§5 consistency window). Bounded `recentlyRemovedRef: Set<runtimeKey>` (256 entries) + `stateVersionByKeyRef: Map<runtimeKey, 1\|2>` (256 entries) implement the client-side monotonic guard (§4.3). `onOpenDetail?: (ledgerRowId) => void` prop wires the `[ledger]` link to the parent page's call-detail drawer. UI surfaces `deadlineBufferMs` so entries past `startedAt + timeoutMs` but before `deadlineAt` are visibly labelled "past timeout — sweep pending" rather than looking like a stuck happy-path call. |
+| `shared/types/systemPnl.ts` | **Modify** — export `InFlightEntry`, `InFlightRemoval`, `InFlightEventEnvelope<T>`, `InFlightSnapshotResponse`, `InFlightActiveCountPayload`, `InFlightSourceType`, `InFlightTerminalStatus`, `InFlightSweepReason`, `InFlightEvictionContext`. |
 | `architecture.md` | **Modify** — add "LLM in-flight registry" subsection under the LLM router contract. |
 | `docs/capabilities.md` | **Modify** — add bullet under "LLM Spend Observability": real-time in-flight tracker for system admins. |
+| `tasks/pr-review-log-llm-inflight-tracker-2026-04-20T00-00-00Z.md` | **New** (persistence artefact) — pr-reviewer log per CLAUDE.md review-log convention. |
+| `tasks/dual-review-log-llm-inflight-tracker-2026-04-21T01-13-02Z.md` | **New** (persistence artefact) — dual-reviewer 3-iteration log. |
+| `tasks/llm-inflight-deferred-items-brief.md` | **New** (follow-up artefact) — per-item briefs for the eight §9 deferred items, so future sessions can jump straight into draft specs. |
 
 No migration. No schema change. No new table.
 
@@ -323,6 +375,12 @@ Smoke-test posture for reviewer (manual, not a CI gate): run a long skill-analyz
   - UI doesn't flicker on snapshot + live-event race → client buffers socket events 100 ms on mount/reconnect before merging with snapshot.
   - UI can explain "why is this still in-flight after timeout?" → `deadlineBufferMs` explicit on the entry, labelled "past timeout — sweep pending" by the client between `startedAt+timeoutMs` and `deadlineAt`.
   - Operational visibility into steady-state anomalies → structured no-op logs (`add_noop_already_exists`, `remove_noop_already_removed`, `remove_noop_missing_key`, `event_stale_ignored`) + `llm.inflight.active_count` gauge tagged by `callSite` and `provider` (spots stuck workers + provider-specific hangs without digging).
+  - Client-side monotonic guarantee matches the server's (Round 4) → `stateVersionByKeyRef` mirror on the client (256-entry LRU) + snapshot-seeding of version 1 on mount. Belt-and-braces over the 256-entry `recentlyRemovedRef` set.
+  - Noop add under capacity pressure can't corrupt live state (Round 4) → `applyAdd` check runs before the overflow-eviction branch in `add()`; eviction only fires for genuine new entries. Pinned by pure test at the state-machine layer.
+  - Removed-slot retention can't cause premature active-entry eviction (Round 4) → overflow predicate uses `countActive()`, not `slots.size`. The map can hold up to 2× capacity transiently; the *live* count is bounded at exactly `MAX_INFLIGHT_ENTRIES`.
+  - Redis fanout can't echo false evictions back to the origin (Round 4) → remote-add overflow drops silently; origin instance remains the single source of truth for its own calls.
+  - Retryable-error-only failure chains still link the ledger row (Round 4) → router captures `lastRemovedAttempt`; failure path calls `inflightRegistry.updateLedgerLink()` for post-hoc ledger linkage. Client merge preserves "once linked, stay linked" semantics.
+  - Long snapshot GET doesn't allow premature event merge (Round 4) → buffer held open for full fetch lifetime (`Number.MAX_SAFE_INTEGER`), reset in `finally`.
 - Non-functional claims consistent with execution model: real-time push = socket, not polling; multi-instance consistency = Redis pub/sub + state-machine-guarded merge, not DB reads; bounded memory = hard cap + LRU eviction, not hope.
 
 ---
@@ -387,3 +445,45 @@ Reviewer signed off ("Ready for build") after round 2 and flagged 5 final polish
 > This spec shows a clear shift from feature design → to failure-mode engineering.
 
 The round-3 additions preserve that framing — each one is specifically about making degraded-state behaviour legible to an operator under pressure, not about adding happy-path features.
+
+### Round 4 (2026-04-20 → 2026-04-21) — post-build hardening
+
+Three independent review passes ran against the implementation after round-3 sign-off, each finding real bugs or legitimate gaps. Fixes landed on branch `claude/build-llm-inflight-tracker-m3l2x` with the feature merged via PR #161 on 2026-04-21. Review logs persisted at `tasks/pr-review-log-llm-inflight-tracker-2026-04-20T00-00-00Z.md` and `tasks/dual-review-log-llm-inflight-tracker-2026-04-21T01-13-02Z.md` per CLAUDE.md convention.
+
+**Pass 4a — `pr-reviewer` (1 blocking + 3 strong + 5 non-blocking):**
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | Blocking | Overflow eviction fired before the noop-already-exists check in `add()` — a double-add at capacity (e.g. stale Redis race, or prod `console.error` fallback path after dev assert) would evict an unrelated entry + emit a spurious `evicted_overflow` event | §4.4 hardening rule 1 — noop check moved before overflow branch. Pinned by new pure test `add() boundary — noop_already_exists must short-circuit BEFORE overflow eviction`. |
+| 2 | Strong | Client's `applyAddEntry` only checked `entries` array presence, not stateVersion — a delayed add arriving after its remove had aged out of the 256-entry `recentlyRemovedRef` could resurrect a landed row | §4.3 client-side mirror guard — `stateVersionByKeyRef: Map<runtimeKey, 1\|2>` with strict monotonic check in `applyAddEntry`. Snapshot seeds version 1 for all returned entries. |
+| 3 | Strong | No pure test for the noop-at-capacity boundary case (the very condition that triggered blocking #1) | Added boundary test explicitly pinning the ordering contract at the pure-layer level. |
+| 4 | Non-blocking | `attempt` counter reset per-provider in fallback chain gives admins a confusing "#1 → #2 → #1" sequence | Documented as UX gap in the spec and in a code comment at the call site; follow-up item #4 in `tasks/llm-inflight-deferred-items-brief.md` covers the fix (add `globalAttemptSequence`). |
+| 5 | Non-blocking | `bufferingUntilRef` set to fetch-start + 1s rather than held for full fetch lifetime | Replaced with `Number.MAX_SAFE_INTEGER` during fetch, reset in `finally`. See §5 consistency window. |
+
+**Pass 4b — `dual-reviewer` (3 iterations, 3 accepted, 3 rejected):**
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | P1 | Overflow check used `slots.size` which counted 30s-retained removed slots, causing premature eviction of still-active entries under high churn | §4.4 hardening rule 2 — predicate scoped to `countActive()`. |
+| 2 | P2 | Redis-fanout overflow path called `evictVictim()` which `remove()`-d and republished the eviction back to Redis — the origin instance received its own victim back as a remove event, flipping its active call to "evicted" | §4.4 hardening rule 3 — remote-add overflow drops silently with a debug log instead of evicting. |
+| 3 | P2 | "Recently landed" `[ledger]` link was a `<a href="#call-${id}">` anchor that changed `location.hash` but didn't open the call-detail drawer | Replaced with `<button onClick>` wired through new `onOpenDetail?: (ledgerRowId) => void` prop on `PnlInFlightTable`. `SystemPnlPage` passes `setSelectedCallId`. |
+| 4 | P2 | *Rejected.* Removed-slot retention map growth under churn — reviewer flagged `countActive()` alone doesn't bound total map size, only live count | Intentional design — 30s retention is explicitly documented at the `scheduleSlotPrune` call site. Active-count cap is the correct bound for what the operator observes. |
+| 5 | P2 | *Rejected.* Last retryable failure removes with `ledgerRowId: null` because inner-catch clears `currentRuntimeKey` before the ledger row is written | Initially rejected as out-of-scope; re-raised and accepted in Pass 4c below. |
+| 6 | P3 | *Rejected.* Same-millisecond fallback attempts could in principle share a runtimeKey | Pre-existing documented UX gap; not a correctness issue because `idempotencyKey` varies by `provider+model` (derivation at `llmRouter.ts:121-147`). Not re-litigated. |
+
+**Pass 4c — final reviewer (2 high-priority + 1 optional, all accepted):**
+
+| # | Priority | Finding | Resolution |
+|---|---|---|---|
+| 1 | High | Client `stateVersion` guard missing — spec §4.3 describes the server side but the client has no explicit monotonic check | Implemented as Pass 4a item 2 above. Reviewer re-confirmed acceptance in final pass. |
+| 2 | High | Noop-add precedes eviction | Confirmed already addressed in Pass 4a item 1. |
+| 3 | Optional | Retryable-error-only failure chains leave "Recently landed" without a `[ledger]` button | §4.6 ledger-link rehydration — new `inflightRegistry.updateLedgerLink()` method + router `lastRemovedAttempt` capture. This reverses the Pass 4b item 5 rejection on reviewer re-evaluation: the original rejection rationale ("out of scope, requires look-ahead") was correct for the proposed inner-loop fix; the rehydration approach confines the change to a cold path. |
+
+**Pass 4d — final reviewer cleanup (non-blocking, accepted):**
+
+The reviewer's last pass flagged that `updateLedgerLink()`'s narrow-use-case contract was documented only in the call-site comment; future contributors could plausibly reach for it as a general "update a removed event" escape hatch. Fix: expanded the registry-layer method header with a header warning, an explicit "DO NOT call this" misuse list (change non-ledger fields, mutate terminalStatus after remove, call more than once, fix wrong-runtimeKey removals), and guidance that richer semantics should go in a new method with its own contract. Comment-only change; no behaviour change.
+
+**Overall Round 4 reviewer framing** (final pass, kept for posterity):
+> You've built this correctly at a systems level: clean separation of concerns, correct lifecycle hooks, production-aware constraints, thoughtful UI reconciliation. [...] One of those rare cases where correctness is tight, edge cases are explicitly handled, tradeoffs are conscious and documented. You're not carrying hidden debt into main.
+
+Round 4 extended the round-3 "feature design → failure-mode engineering" framing into post-build hardening territory. Every accepted finding closed a real race or legibility gap; every rejected finding was rejected with explicit rationale pinned either in the spec or in a code comment. The spec is now a living record of the implemented state, not just the intent.

@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 import { getIO } from './index.js';
+import type { TaskEventEnvelope } from '../../shared/types/taskEvent.js';
 
 // ─── Observability counters ───────────────────────────────────────────────────
 
@@ -92,6 +93,29 @@ export function emitAgentRunUpdate(
   emitToRoom(`agent-run:${runId}`, event, runId, data);
 }
 
+// ─── Live Agent Execution Log — per-run execution event ─────────────────────
+// Spec: tasks/live-agent-execution-log-spec.md §5.10. The `eventId` carries
+// a deterministic `${runId}:${sequenceNumber}:${eventType}` shape so the
+// existing client dedup LRU works without changes. NOT routed through
+// buildEnvelope because the envelope is pre-assembled upstream.
+
+export function emitAgentExecutionEvent(
+  runId: string,
+  envelope: {
+    eventId: string;
+    type: 'agent-run:execution-event';
+    entityId: string;
+    timestamp: string;
+    payload: Record<string, unknown>;
+  },
+): void {
+  const io = getIO();
+  if (!io) return;
+  io.to(`agent-run:${runId}`).emit(envelope.type, envelope);
+  totalEventsEmitted++;
+  logStats();
+}
+
 // ─── Conversation events ──────────────────────────────────────────────────────
 
 export function emitConversationUpdate(
@@ -112,16 +136,16 @@ export function emitSubaccountUpdate(
   emitToRoom(`subaccount:${subaccountId}`, event, subaccountId, data);
 }
 
-// ─── Playbook run events ──────────────────────────────────────────────────────
+// ─── Workflow run events ──────────────────────────────────────────────────────
 // Spec: tasks/playbooks-spec.md §8.2. Per-run room with monotonic
 // sequence number plus a coarse subaccount-level event for dashboards.
 
-export function emitPlaybookRunUpdate(
+export function emitWorkflowRunUpdate(
   runId: string,
   event: string,
   data: Record<string, unknown>
 ): void {
-  emitToRoom(`playbook-run:${runId}`, event, runId, data);
+  emitToRoom(`workflow-run:${runId}`, event, runId, data);
 }
 
 // ─── Org-wide events ──────────────────────────────────────────────────────────
@@ -150,6 +174,45 @@ export function emitAgentRunPlan(
   data: { plan: unknown }
 ): void {
   emitToRoom(`agent-run:${runId}`, 'agent:run:plan', runId, data);
+}
+
+// ─── Universal Brief events ───────────────────────────────────────────────────
+
+export function emitBriefArtefactNew(
+  briefId: string,
+  data: Record<string, unknown>,
+): void {
+  emitToRoom(`brief:${briefId}`, 'brief-artefact:new', briefId, data);
+}
+
+export function emitBriefArtefactUpdated(
+  briefId: string,
+  data: Record<string, unknown>,
+): void {
+  emitToRoom(`brief:${briefId}`, 'brief-artefact:updated', briefId, data);
+}
+
+// ─── System-admin incident events ────────────────────────────────────────────
+
+export function emitToSysadmin(
+  event: string,
+  entityId: string,
+  data: Record<string, unknown>
+): void {
+  emitToRoom('system:sysadmin', event, entityId, data);
+}
+
+// ─── Task execution event stream ─────────────────────────────────────────────
+// Spec: tasks/builds/workflows-v1-phase-2/spec.md Chunk 9.
+// Emits to the `task:${taskId}` room. The envelope is pre-assembled by
+// taskEventService so we emit it directly (not through buildEnvelope).
+
+export function emitTaskEvent(taskId: string, envelope: TaskEventEnvelope): void {
+  const io = getIO();
+  if (!io) return;
+  io.to(`task:${taskId}`).emit(envelope.type, envelope);
+  totalEventsEmitted++;
+  logStats();
 }
 
 // ─── Observability exports (for health endpoint or admin) ─────────────────────

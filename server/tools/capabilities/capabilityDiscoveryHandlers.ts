@@ -193,7 +193,7 @@ export async function executeListConnections(
   const budgetCheck = await incrementBudget(context, 'list_connections');
   if (budgetCheck.exhausted) return budgetExhaustedResponse('list_connections', budgetCheck.budget, budgetCheck.used);
 
-  const typed = input as ListConnectionsInput;
+  const typed = input as unknown as ListConnectionsInput;
 
   const orgId = typed.orgId ?? context.organisationId;
   if (!orgId) return { success: false, error: 'orgId is required (or must be resolvable from context)' };
@@ -330,7 +330,7 @@ export async function executeCheckCapabilityGap(
   const budgetCheck = await incrementBudget(context, 'check_capability_gap');
   if (budgetCheck.exhausted) return budgetExhaustedResponse('check_capability_gap', budgetCheck.budget, budgetCheck.used);
 
-  const typed = input as CheckCapabilityGapInput;
+  const typed = input as unknown as CheckCapabilityGapInput;
   if (!Array.isArray(typed.required_capabilities) || typed.required_capabilities.length === 0) {
     return { success: false, error: 'required_capabilities is required and must be non-empty' };
   }

@@ -5,7 +5,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   EMAIL_FROM: z.string(),
   PORT: z.coerce.number().optional().default(3000),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'production', 'test', 'integration']).default('development'),
   FILE_STORAGE_BACKEND: z.enum(['r2', 's3']).default('r2'),
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
@@ -67,6 +67,17 @@ const envSchema = z.object({
   // (see server/jobs/llmLedgerArchiveJob.ts). Infrastructure tunable, not
   // a per-org business decision.
   LLM_LEDGER_RETENTION_MONTHS: z.coerce.number().int().positive().optional().default(12),
+  // llm_inflight_history fire-and-forget persistence (deferred-items brief §6).
+  // Defaults to true; set to 'false' to disable writes without a deploy if the
+  // history table becomes temporarily unhealthy.
+  LLM_INFLIGHT_HISTORY_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .default(true)
+    .transform((v) => v === true || v === 'true' || v === '1'),
+  // Retention window (days) for llm_inflight_history rows. Short by design —
+  // the archive is for recent-incident forensics, not long-term storage.
+  LLM_INFLIGHT_HISTORY_RETENTION_DAYS: z.coerce.number().int().positive().optional().default(7),
   // Maximum messages to include in chat context (recent N messages)
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
   // Tavily AI search API key for agent web search skill
@@ -98,19 +109,69 @@ const envSchema = z.object({
   SYNTHETOS_INTERNAL_SLACK_WEBHOOK: z.string().optional(),
   OAUTH_GHL_CLIENT_ID: z.string().optional(),
   OAUTH_GHL_CLIENT_SECRET: z.string().optional(),
+  // GHL app-level webhook signing secret (set in GHL Marketplace app settings).
+  // Used to verify HMAC-SHA256 signatures on agency lifecycle webhooks
+  // (INSTALL/UNINSTALL/LocationCreate/LocationUpdate). When unset, lifecycle
+  // webhooks are processed without signature verification (development only).
+  GHL_WEBHOOK_SIGNING_SECRET: z.string().optional(),
   // GitHub App — fine-grained, per-repo access (replaces OAUTH_GITHUB_* OAuth App)
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(), // PEM key, base64-encoded for env vars
   GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
 
-  // Playbook Studio — PR creation against the platform's own repo
-  // (spec tasks/playbooks-spec.md §10.8.6). Optional: when unset, the
+  // Workflow Studio — PR creation against the platform's own repo
+  // (spec tasks/workflows-spec.md §10.8.6). Optional: when unset, the
   // Save & Open PR endpoint returns a structured error explaining how
-  // to configure it. The token must have repo scope on PLAYBOOK_STUDIO_REPO.
-  PLAYBOOK_STUDIO_GITHUB_TOKEN: z.string().optional(),
-  PLAYBOOK_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
-  PLAYBOOK_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
+  // to configure it. The token must have repo scope on WORKFLOW_STUDIO_REPO.
+  WORKFLOW_STUDIO_GITHUB_TOKEN: z.string().optional(),
+  WORKFLOW_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
+  WORKFLOW_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
+
+  // ── Live Agent Execution Log (spec: tasks/live-agent-execution-log-spec.md) ──
+  // Retention tiers. P1 ships with rotation disabled; P3 adds the archive job.
+  AGENT_EXECUTION_LOG_HOT_MONTHS: z.coerce.number().int().positive().optional().default(6),
+  AGENT_EXECUTION_LOG_WARM_MONTHS: z.coerce.number().int().positive().optional().default(12),
+  AGENT_EXECUTION_LOG_COLD_YEARS: z.coerce.number().int().positive().optional().default(7),
+  AGENT_EXECUTION_LOG_ARCHIVE_BATCH_SIZE: z.coerce.number().int().positive().optional().default(500),
+  // Per-row hard cap on agent_run_llm_payloads (bytes). Fields truncated
+  // greatest-first; every truncation is recorded in the modifications column.
+  AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(1_048_576),
+  // Per-run hard cap on agent_execution_events. Above cap, non-critical events
+  // drop + the one-shot run.event_limit_reached signal is emitted. Critical
+  // events (run lifecycle, LLM call bookends, handoff) bypass.
+  AGENT_EXECUTION_LOG_MAX_EVENTS_PER_RUN: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(10_000),
+  // Grace window (days) after a run's archive is restored during which the
+  // rotation job skips re-rotation. P3.1 wires this in when the restore
+  // trigger endpoint lands.
+  AGENT_EXECUTION_LOG_RESTORE_GRACE_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .default(30),
+  // Workspace — Native backend
+  // Domain used for agent email addresses provisioned by the native backend.
+  // Example: workspace.acme.com  Falls back to 'workspace.local' when unset.
+  NATIVE_EMAIL_DOMAIN: z.string().optional().default(''),
+  // HMAC-SHA256 shared secret for verifying inbound email webhook payloads from the provider.
+  NATIVE_EMAIL_INBOUND_WEBHOOK_SECRET: z.string().optional().default(''),
+
+  // Workspace — Google Workspace backend
+  // Service account JSON (path to file or inline JSON string) used for domain-wide delegation.
+  GOOGLE_WORKSPACE_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
+  // Email of the Workspace admin that the service account impersonates for Admin SDK calls.
+  GOOGLE_WORKSPACE_ADMIN_DELEGATED_USER: z.string().optional().default(''),
 });
 
 export const env = envSchema.parse(process.env);

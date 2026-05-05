@@ -48,11 +48,13 @@ try {
   files = readdirSync(PLAYBOOKS_DIR).filter((f) => f.endsWith('.playbook.ts'));
 } catch {
   console.log('[GUARD] verify-playbook-portal-presentation: no playbooks dir found — skipping');
+  console.log('[GATE] playbook-portal-presentation: violations=0');
   process.exit(0);
 }
 
 if (files.length === 0) {
   console.log('[GUARD] verify-playbook-portal-presentation: no playbook files found — skipping');
+  console.log('[GATE] playbook-portal-presentation: violations=0');
   process.exit(0);
 }
 
@@ -81,6 +83,7 @@ for (const file of files.sort()) {
 }
 
 console.log(`\nSummary: ${filesScanned} files scanned, ${violations} violations found`);
+console.log(`[GATE] playbook-portal-presentation: violations=${violations}`);
 
 if (violations > 0) {
   process.exit(1);

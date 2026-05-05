@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/trustCalibrationServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   applyTrustEvent,
   initialTrustState,
@@ -18,21 +19,6 @@ import {
   type TrustState,
 } from '../trustCalibrationServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
@@ -41,14 +27,6 @@ function assertEqual<T>(a: T, b: T, label: string) {
 
 function approxEqual(a: number, b: number, label: string, eps = 1e-9) {
   if (Math.abs(a - b) > eps) throw new Error(`${label} — expected ${b}, got ${a}`);
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
-}
-
-function assertFalse(cond: boolean, label: string) {
-  if (cond) throw new Error(`${label} — expected false`);
 }
 
 console.log('');
@@ -63,8 +41,8 @@ console.log('initialTrustState:');
 
 test('fresh state at defaults', () => {
   const s = initialTrustState(new Date('2026-04-16T00:00:00Z'));
-  assertEqual(s.consecutiveValidated, 0, 'counter');
-  assertEqual(s.autoThreshold, TRUST_AUTO_THRESHOLD_DEFAULT, 'default threshold');
+  expect(s.consecutiveValidated, 'counter').toBe(0);
+  expect(s.autoThreshold, 'default threshold').toEqual(TRUST_AUTO_THRESHOLD_DEFAULT);
 });
 
 // ---------------------------------------------------------------------------
@@ -82,9 +60,9 @@ test('single validated event does not cross threshold', () => {
     currentState: s0,
     now,
   });
-  assertEqual(nextState.consecutiveValidated, 1, 'counter +1');
-  assertFalse(thresholdChanged, 'no change');
-  assertEqual(nextState.autoThreshold, TRUST_AUTO_THRESHOLD_DEFAULT, 'threshold unchanged');
+  expect(nextState.consecutiveValidated, 'counter +1').toBe(1);
+  expect(thresholdChanged, 'no change').toBe(false);
+  expect(nextState.autoThreshold, 'threshold unchanged').toEqual(TRUST_AUTO_THRESHOLD_DEFAULT);
 });
 
 test(`${TRUST_VALIDATION_COUNT} validated events lower threshold by ${TRUST_THRESHOLD_STEP}`, () => {
@@ -95,10 +73,10 @@ test(`${TRUST_VALIDATION_COUNT} validated events lower threshold by ${TRUST_THRE
     state = d.nextState;
     changed = changed || d.thresholdChanged;
   }
-  assertTrue(changed, 'threshold changed at least once');
+  expect(changed, 'threshold changed at least once').toBe(true);
   approxEqual(state.autoThreshold, TRUST_AUTO_THRESHOLD_DEFAULT - TRUST_THRESHOLD_STEP, 'lowered by step');
   // counter resets after lowering
-  assertEqual(state.consecutiveValidated, 0, 'counter reset');
+  expect(state.consecutiveValidated, 'counter reset').toBe(0);
 });
 
 test('threshold floors at TRUST_AUTO_THRESHOLD_FLOOR', () => {
@@ -118,7 +96,7 @@ test('ladder: 3x floor drops → 0.85 → 0.80 → 0.75 → 0.70', () => {
     if (d.thresholdChanged) drops += 1;
     state = d.nextState;
   }
-  assertEqual(drops, 3, 'three threshold drops before floor');
+  expect(drops, 'three threshold drops before floor').toBe(3);
   approxEqual(state.autoThreshold, TRUST_AUTO_THRESHOLD_FLOOR, 'lands on floor');
 });
 
@@ -143,15 +121,15 @@ test('override resets counter and restores default', () => {
     currentState: state,
     now,
   });
-  assertEqual(nextState.consecutiveValidated, 0, 'counter reset');
-  assertEqual(nextState.autoThreshold, TRUST_AUTO_THRESHOLD_DEFAULT, 'threshold restored');
-  assertTrue(thresholdChanged, 'threshold was at 0.80, now 0.85');
+  expect(nextState.consecutiveValidated, 'counter reset').toBe(0);
+  expect(nextState.autoThreshold, 'threshold restored').toEqual(TRUST_AUTO_THRESHOLD_DEFAULT);
+  expect(thresholdChanged, 'threshold was at 0.80, now 0.85').toBe(true);
 });
 
 test('override with threshold already at default → no change', () => {
   const state = initialTrustState(now);
   const { thresholdChanged } = applyTrustEvent({ event: 'override', currentState: state, now });
-  assertFalse(thresholdChanged, 'already at default');
+  expect(thresholdChanged, 'already at default').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -174,8 +152,8 @@ test('validated event after window expiry resets counter', () => {
     now: laterNow,
   });
   // Window expired: counter reset to 0 then +1 from the validated event
-  assertEqual(nextState.consecutiveValidated, 1, 'counter reset + incremented');
-  assertFalse(thresholdChanged, 'no threshold change');
+  expect(nextState.consecutiveValidated, 'counter reset + incremented').toBe(1);
+  expect(thresholdChanged, 'no threshold change').toBe(false);
 });
 
 test('auto_applied event within window does not affect threshold', () => {
@@ -185,8 +163,8 @@ test('auto_applied event within window does not affect threshold', () => {
     currentState: state,
     now,
   });
-  assertEqual(nextState.consecutiveValidated, 0, 'unchanged');
-  assertFalse(thresholdChanged, 'no change');
+  expect(nextState.consecutiveValidated, 'unchanged').toBe(0);
+  expect(thresholdChanged, 'no change').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -200,11 +178,11 @@ test('4 validated → 1 override → counter=0, threshold=default', () => {
   for (let i = 0; i < 4; i++) {
     state = applyTrustEvent({ event: 'validated_no_override', currentState: state, now }).nextState;
   }
-  assertEqual(state.consecutiveValidated, 4, 'counter at 4');
+  expect(state.consecutiveValidated, 'counter at 4').toBe(4);
 
   const { nextState } = applyTrustEvent({ event: 'override', currentState: state, now });
-  assertEqual(nextState.consecutiveValidated, 0, 'reset by override');
-  assertEqual(nextState.autoThreshold, TRUST_AUTO_THRESHOLD_DEFAULT, 'default restored');
+  expect(nextState.consecutiveValidated, 'reset by override').toBe(0);
+  expect(nextState.autoThreshold, 'default restored').toEqual(TRUST_AUTO_THRESHOLD_DEFAULT);
 });
 
 test('exactly TRUST_AUTO_THRESHOLD_FLOOR stays at floor', () => {
@@ -219,10 +197,8 @@ test('exactly TRUST_AUTO_THRESHOLD_FLOOR stays at floor', () => {
     now,
   });
   approxEqual(nextState.autoThreshold, TRUST_AUTO_THRESHOLD_FLOOR, 'floor holds');
-  assertFalse(thresholdChanged, 'already floored');
+  expect(thresholdChanged, 'already floored').toBe(false);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

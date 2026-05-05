@@ -150,7 +150,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
         <h1 className="text-[28px] font-bold text-slate-800 mb-2">Workspace Board</h1>
         <p className="text-slate-500">
           This subaccount has no board configuration yet.{' '}
-          <Link to={`/admin/subaccounts/${subaccountId}`} className="text-indigo-500 no-underline hover:underline">
+          <Link to={`/admin/subaccounts/${subaccountId}?tab=board`} className="text-indigo-500 no-underline hover:underline">
             Go to subaccount settings
           </Link>{' '}
           to initialise the board, or configure the{' '}

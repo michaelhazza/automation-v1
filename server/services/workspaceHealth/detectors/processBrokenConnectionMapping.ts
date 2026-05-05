@@ -2,7 +2,7 @@
  * processBrokenConnectionMapping.ts — Brain Tree OS adoption P4 detector.
  *
  * For each (processId, subaccountId) pair where at least one row exists in
- * processConnectionMappings, the detector emits a critical finding if any
+ * automationConnectionMappings, the detector emits a critical finding if any
  * required key from processes[processId].requiredConnections has no row in
  * that pair's mapping set. One finding per (processId, subaccountId) pair.
  *
@@ -19,13 +19,13 @@ export const processBrokenConnectionMapping: Detector = (ctx) => {
   const findings: WorkspaceHealthFinding[] = [];
 
   // Index processes by id for O(1) lookup of required connections
-  const processById = new Map<string, typeof ctx.processes[number]>();
-  for (const p of ctx.processes) processById.set(p.id, p);
+  const processById = new Map<string, typeof ctx.automations[number]>();
+  for (const p of ctx.automations) processById.set(p.id, p);
 
   // Group mappings by (processId, subaccountId)
   type Pair = { processId: string; subaccountId: string; subaccountName: string; keys: Set<string> };
   const pairs = new Map<string, Pair>();
-  for (const m of ctx.processConnectionMappings) {
+  for (const m of ctx.automationConnectionMappings) {
     const key = `${m.processId}:${m.subaccountId}`;
     let pair = pairs.get(key);
     if (!pair) {
@@ -48,7 +48,7 @@ export const processBrokenConnectionMapping: Detector = (ctx) => {
     findings.push({
       detector: 'process.broken_connection_mapping',
       severity: 'critical',
-      resourceKind: 'process',
+      resourceKind: 'automation',
       // Composite key — see file header for rationale.
       resourceId: `${pair.processId}:${pair.subaccountId}`,
       resourceLabel: `${proc.name} @ ${pair.subaccountName}`,

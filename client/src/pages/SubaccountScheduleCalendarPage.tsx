@@ -77,7 +77,7 @@ export default function SubaccountScheduleCalendarPage({
   }, [subaccountId, startISO, endISO]);
 
   const onClick = (occ: ScheduleOccurrence) => {
-    if (occ.source === 'scheduled_task' || occ.source === 'playbook') {
+    if (occ.source === 'scheduled_task' || occ.source === 'workflow') {
       navigate(`/admin/subaccounts/${subaccountId}/scheduled-tasks/${occ.sourceId}`);
     } else if (occ.agentId) {
       // Deep-link to the agent edit page so the admin can edit schedule inline.
@@ -91,7 +91,7 @@ export default function SubaccountScheduleCalendarPage({
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Scheduled runs</h1>
           <p className="text-sm text-slate-500">
-            Projected next {windowDays} days across heartbeat, cron, scheduled tasks, and playbooks in this subaccount.
+            Projected next {windowDays} days across heartbeat, cron, scheduled tasks, and workflows in this subaccount.
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 text-xs">

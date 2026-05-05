@@ -23,7 +23,7 @@
  *   2. Keeps the unique-index violation path cold. The invariant is
  *      enforced in SQL (see migration 0084), and we want the service
  *      layer to never fire it under normal operation.
- *   3. Matches the pattern used by `budgetService.acquireOrgBudgetLock`
+ *   3. Matches the pattern used by `computeBudgetService.acquireOrgComputeBudgetLock`
  *      so reviewers have one precedent to check rather than two.
  *
  * The lock is released automatically when the surrounding `withOrgTx`

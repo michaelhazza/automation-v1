@@ -165,7 +165,7 @@
         "slug": "portfolio-health-agent",
         "name": "Portfolio Health Agent",
         "title": "Portfolio Health Analyst",
-        "reportsTo": null,
+        "reportsTo": "orchestrator",
         "model": "claude-sonnet-4-6",
         "schedule": "*/4 * * *",
         "gate": "auto",

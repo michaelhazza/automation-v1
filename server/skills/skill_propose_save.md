@@ -2,7 +2,7 @@
 name: Propose and Save Skill Version
 description: Write new skill_versions row and atomically update the skill definition.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

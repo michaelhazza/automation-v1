@@ -184,9 +184,6 @@ export async function listAgentCapabilityMaps(
   const conditions = [
     eq(subaccountAgents.organisationId, organisationId),
     eq(subaccountAgents.isActive, true),
-    // Exclude soft-deleted agents — a soft-deleted agent can still have an
-    // active subaccount_agents row, and we must not route tasks to it.
-    isNull(agents.deletedAt),
   ];
   if (subaccountId !== null) {
     conditions.push(eq(subaccountAgents.subaccountId, subaccountId));
@@ -200,7 +197,9 @@ export async function listAgentCapabilityMaps(
       capabilityMap: subaccountAgents.capabilityMap,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+    // Exclude soft-deleted agents — a soft-deleted agent can still have an
+    // active subaccount_agents row, and we must not route tasks to it.
+    .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isNull(agents.deletedAt)))
     .where(and(...conditions));
 
   return rows.map((r) => ({

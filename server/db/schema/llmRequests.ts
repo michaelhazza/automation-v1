@@ -108,8 +108,12 @@ export const llmRequests = pgTable(
     // initiated a mid-body network RST).
     abortReason:   text('abort_reason'),
 
-    // Caching
+    // Caching — tokens read from Anthropic's ephemeral cache
     cachedPromptTokens: integer('cached_prompt_tokens').notNull().default(0),
+    // Tokens written to Anthropic's ephemeral cache on this call (migration 0210 §5.9)
+    cacheCreationTokens: integer('cache_creation_tokens').notNull().default(0),
+    // Call-level assembled prefix hash from cachedContextOrchestrator (migration 0210 §5.9)
+    prefixHash: text('prefix_hash'),
 
     // Routing metadata — now nullable (rev §6). Required for agent_run /
     // process_execution / iee rows; NULL for system / analyzer rows.
@@ -159,6 +163,10 @@ export const llmRequests = pgTable(
     statusIdx:            index('llm_requests_status_idx')
       .on(table.status)
       .where(sql`${table.status} <> 'success'`),
+    // Cached context infrastructure — §5.9
+    prefixHashIdx:        index('llm_requests_prefix_hash_idx')
+      .on(table.prefixHash)
+      .where(sql`${table.prefixHash} IS NOT NULL`),
   }),
 );
 
@@ -184,6 +192,8 @@ export const TASK_TYPES = [
   'context_enrichment',
   // Agent beliefs extraction — LLM call to extract/merge discrete facts after a run.
   'belief_extraction',
+  // CRM Query Planner Stage 3 LLM calls (spec §10.1)
+  'crm_query_planner',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];
@@ -200,10 +210,19 @@ export type SourceType = typeof SOURCE_TYPES[number];
 export const CALL_SITES = ['app', 'worker'] as const;
 export type CallSite = typeof CALL_SITES[number];
 
-// Valid LLM request statuses — rev §6 adds three new values:
+// Valid LLM request statuses — rev §6 adds three values:
 //   'client_disconnected' — mid-body network RST, initiator unknown
 //   'parse_failure'       — schema-validation failure after all retries
 //   'aborted_by_caller'   — AbortController.abort() fired from caller code
+//
+// Deferred-items brief §1 adds one provisional value:
+//   'started'             — provisional row written BEFORE providerAdapter.call()
+//                           so a retry after a successful provider call + failed
+//                           DB insert sees the row and throws
+//                           ReconciliationRequiredError instead of re-dispatching.
+//                           Rows in this state are reaped by the
+//                           maintenance:llm-started-row-sweep job after
+//                           (providerTimeoutMs + 60s).
 export const LLM_REQUEST_STATUSES = [
   'success',
   'partial',
@@ -216,8 +235,30 @@ export const LLM_REQUEST_STATUSES = [
   'client_disconnected',
   'parse_failure',
   'aborted_by_caller',
+  'started',
 ] as const;
 export type LlmRequestStatus = typeof LLM_REQUEST_STATUSES[number];
+
+/**
+ * Statuses that represent a terminal, committed ledger row. A row with one
+ * of these statuses is the authoritative record of a completed LLM call.
+ * Used by the idempotency-check path to distinguish "work already done —
+ * return cached" from "work in flight — reconciliation needed".
+ */
+export const LLM_REQUEST_TERMINAL_STATUSES = [
+  'success',
+  'partial',
+  'error',
+  'timeout',
+  'budget_blocked',
+  'rate_limited',
+  'provider_unavailable',
+  'provider_not_configured',
+  'client_disconnected',
+  'parse_failure',
+  'aborted_by_caller',
+] as const;
+export type LlmRequestTerminalStatus = typeof LLM_REQUEST_TERMINAL_STATUSES[number];
 
 // Abort reasons — only meaningful when status='aborted_by_caller'.
 export const ABORT_REASONS = ['caller_timeout', 'caller_cancel'] as const;

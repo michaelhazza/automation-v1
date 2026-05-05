@@ -2,7 +2,7 @@
 name: Config Get Link Detail
 description: Get full configuration detail for a specific subaccount agent link.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -1,11 +1,11 @@
-export * from './organisations';
+﻿export * from './organisations';
 export * from './users';
-export * from './workflowEngines';
-export * from './processCategories';
+export * from './automationEngines';
+export * from './automationCategories';
 export * from './subaccounts';
 export * from './subaccountCategories';
-export * from './processes';
-export * from './subaccountProcessLinks';
+export * from './automations';
+export * from './subaccountAutomationLinks';
 export * from './executions';
 export * from './executionPayloads';
 export * from './executionFiles';
@@ -25,6 +25,9 @@ export * from './agentConversations';
 export * from './agentMessages';
 export * from './agentRuns';
 export * from './agentRunSnapshots';
+export * from './agentExecutionEvents';
+export * from './agentRunPrompts';
+export * from './agentRunLlmPayloads';
 export * from './skills';
 export * from './boardTemplates';
 export * from './boardConfigs';
@@ -49,20 +52,21 @@ export * from './actionResumeEvents';
 export * from './organisationSecrets';
 export * from './reviewAuditRecords';
 export * from './workspaceLimits';
-export * from './processConnectionMappings';
+export * from './automationConnectionMappings';
 export * from './projects';
 export * from './llmPricing';
 export * from './orgMarginConfigs';
-export * from './orgBudgets';
+export * from './orgComputeBudgets';
 export * from './llmRequests';
 export * from './llmRequestsArchive';
+export * from './llmInflightHistory';
 export * from './costAggregates';
-export * from './budgetReservations';
+export * from './computeReservations';
 export * from './hierarchyTemplates';
 export * from './hierarchyTemplateSlots';
 export * from './systemHierarchyTemplates';
 export * from './systemHierarchyTemplateSlots';
-export * from './workflowRuns';
+export * from './flowRuns';
 export * from './auditEvents';
 export * from './pageProjects';
 export * from './pages';
@@ -101,9 +105,9 @@ export * from './ieeRuns';
 export * from './ieeSteps';
 export * from './ieeArtifacts';
 
-// Playbooks — multi-step automation engine (migration 0076)
-export * from './playbookTemplates';
-export * from './playbookRuns';
+// Workflows — multi-step automation engine (migration 0076)
+export * from './workflowTemplates';
+export * from './workflowRuns';
 
 // Sprint 2 — P1.1 Layer 3 (migration 0082)
 export * from './toolCallSecurityEvents';
@@ -154,7 +158,7 @@ export * from './configHistory.js';
 // Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
 export * from './configBackups.js';
 
-// Portal Briefs — published playbook output for the portal card (migration 0123)
+// Portal Briefs — published workflow output for the portal card (migration 0123)
 export * from './portalBriefs.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)
@@ -199,3 +203,66 @@ export * from './teams.js';
 export * from './teamMembers.js';
 export * from './delegationGrants.js';
 export * from './canonicalRowSubaccountScopes.js';
+
+// Universal Brief — polymorphic conversation tables (migration 0194)
+export * from './conversations.js';
+
+// Universal Brief — classifier shadow-eval logging (migration 0195)
+export * from './fastPathDecisions.js';
+
+// Universal Brief Phase 7 — per-user approval-gate suggestion settings (migration 0198)
+export * from './userSettings.js';
+
+// Cached Context Infrastructure Phase 1 — reference documents + bundles + snapshots + budget policies
+// (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
+export * from './referenceDocuments.js';
+export * from './referenceDocumentVersions.js';
+export * from './documentBundles.js';
+export * from './documentBundleMembers.js';
+export * from './documentBundleAttachments.js';
+export * from './bundleResolutionSnapshots.js';
+export * from './modelTierBudgetPolicies.js';
+
+// Cached Context Infrastructure Phase 2 — bundle suggestion dismissals (migration 0212)
+export * from './bundleSuggestionDismissals.js';
+
+// Paperclip Hierarchy — delegation outcomes telemetry table (migration 0217, renumbered from 0205 post-merge)
+export * from './delegationOutcomes.js';
+
+// System Monitoring Foundation — incident sink + audit log + suppressions (migration 0224)
+// BYPASSES RLS — all readers must be sysadmin-gated; see rlsProtectedTables.ts commentary.
+export * from './systemIncidents.js';
+export * from './systemIncidentEvents.js';
+export * from './systemIncidentSuppressions.js';
+export * from './systemMonitorHeuristicFires.js';
+export * from './systemMonitorBaselines.js';
+
+// Rate Limit Buckets — sliding-window rate-limit infrastructure (migration 0253)
+export * from './rateLimitBuckets';
+
+// Live External Document References — document cache + fetch audit log (migration 0262)
+export * from './documentCache';
+export * from './documentFetchEvents';
+
+// Conversation Thread Context — per-conversation living doc for agent tasks/approach/decisions (migration 0264)
+export * from './conversationThreadContext';
+
+// Sub-Account Optimiser — generic agent-output primitive (migration 0267)
+export * from './agentRecommendations';
+
+// Sub-Account Optimiser — cross-tenant peer-median view (migration 0277)
+// BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
+export * from './optimiserSkillPeerMedians';
+
+// GHL Agency OAuth — location token cache (migration 0269)
+export * from './connectorLocationTokens.js';
+
+// Workflows V1 — step gates + drafts (migration 0276)
+export * from './workflowStepGates.js';
+export * from './workflowDrafts.js';
+
+// Pre-Launch Hardening Phase 1 — Postgres-backed OAuth state nonces (migration 0277)
+export * from './oauthStateNonces.js';
+
+// Pre-Launch Hardening Phase 1 — Durable task event log (migration 0279)
+export * from './taskEvents.js';

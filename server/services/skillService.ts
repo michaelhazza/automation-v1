@@ -1,6 +1,7 @@
 import { eq, and, or, isNull, sql, inArray } from 'drizzle-orm';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { configHistoryService } from './configHistoryService.js';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
 import type { AnthropicTool } from './llmService.js';
@@ -19,6 +20,8 @@ import {
   MAX_TOTAL_SKILL_INSTRUCTIONS,
   MAX_SKILLS_PER_SUBACCOUNT,
 } from '../config/limits.js';
+import type { HierarchyContext } from '../../shared/types/delegation.js';
+import { computeDerivedSkills, shouldWarnMissingHierarchy } from './skillServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -112,15 +115,24 @@ export const skillService = {
     skillSlugs: string[],
     organisationId: string,
     subaccountId?: string,
+    hierarchy?: Readonly<HierarchyContext>,
   ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
-    if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
+    const derivedSlugs = computeDerivedSkills({ hierarchy });
+    if (shouldWarnMissingHierarchy({ hierarchy, subaccountId })) {
+      logger.warn('hierarchy_missing_at_resolver_time', {
+        organisationId,
+        subaccountId,
+      });
+    }
+    const effectiveSlugs = Array.from(new Set([...skillSlugs, ...derivedSlugs]));
+    if (effectiveSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
 
     // Batch-fetch all matching skills across tiers in one query
     const candidates = await db
       .select()
       .from(skills)
       .where(and(
-        inArray(skills.slug, skillSlugs),
+        inArray(skills.slug, effectiveSlugs),
         isNull(skills.deletedAt),
         eq(skills.isActive, true),
         or(
@@ -146,7 +158,7 @@ export const skillService = {
     }
 
     // Any slugs not found in skills table → fall back to systemSkillService (batch)
-    const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
+    const missingSlugs = effectiveSlugs.filter(s => !bySlug.has(s));
     const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
     if (missingSlugs.length > 0) {
       try {
@@ -174,7 +186,7 @@ export const skillService = {
     const tools: AnthropicTool[] = [];
     const allInstructions: string[] = [];
 
-    for (const slug of skillSlugs) {
+    for (const slug of effectiveSlugs) {
       const skill = bySlug.get(slug);
       if (skill) {
         const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
@@ -660,43 +672,63 @@ export const skillService = {
   },
 
   /**
-   * Seed built-in skills (idempotent — skips if slug already exists)
+   * Seed built-in skills (idempotent — skips if slug already exists).
+   *
+   * Built-in skills carry `organisation_id = NULL` (platform-global rows visible
+   * to every tenant for READ). Migration 0245 tightens the `skills` RLS WITH
+   * CHECK clause to reject NULL writes from tenant code paths, so this seed
+   * MUST run via `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS).
    */
   async seedBuiltInSkills() {
     const builtInSkills = getBuiltInSkillDefinitions();
 
-    for (const def of builtInSkills) {
-      const existing = await db
-        .select()
-        .from(skills)
-        .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)));
+    await withAdminConnection(
+      {
+        source: 'skill-seed',
+        reason: 'boot-time built-in skills seed (organisation_id = NULL platform-global rows)',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      if (existing.length > 0) {
-        // Update existing built-in skill with latest instructions (if changed)
-        const current = existing[0];
-        if (current.instructions !== (def.instructions ?? null)) {
-          await db.update(skills).set({
-            instructions: def.instructions ?? null,
+        for (const def of builtInSkills) {
+          const existing = (await tx
+            .select()
+            .from(skills)
+            .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)))) as Array<{
+            id: string;
+            instructions: string | null;
+          }>;
+
+          if (existing.length > 0) {
+            const current = existing[0];
+            if (current.instructions !== (def.instructions ?? null)) {
+              await tx
+                .update(skills)
+                .set({
+                  instructions: def.instructions ?? null,
+                  updatedAt: new Date(),
+                })
+                // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug; runs under admin_role bypass"
+                .where(eq(skills.id, current.id));
+            }
+            continue;
+          }
+
+          await tx.insert(skills).values({
+            organisationId: null,
+            name: def.name,
+            slug: def.slug,
+            description: def.description,
+            skillType: 'built_in',
+            definition: def.definition,
+            instructions: def.instructions,
+            isActive: true,
+            createdAt: new Date(),
             updatedAt: new Date(),
-          // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug"
-          }).where(eq(skills.id, current.id));
+          });
         }
-        continue;
-      }
-
-      await db.insert(skills).values({
-        organisationId: null,
-        name: def.name,
-        slug: def.slug,
-        description: def.description,
-        skillType: 'built_in',
-        definition: def.definition,
-        instructions: def.instructions,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    }
+      },
+    );
   },
 };
 

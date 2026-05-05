@@ -22,6 +22,28 @@ export function isOverheadRow(row: { revenueCents: number | null }): boolean {
 }
 
 /**
+ * Statuses whose rows contribute cost to the P&L page. Spec + deferred-items
+ * brief §1: `'started'` rows are provisional — they're written before the
+ * provider call so retries can detect in-flight state, but they carry
+ * `costWithMarginCents = 0` and must NEVER count toward revenue/cost
+ * aggregates. Terminal-error and rate-limit rows also carry cost=0 but
+ * count toward the error-rate aggregates separately; this list is
+ * specifically about "rows that contribute real provider cost".
+ *
+ * The SQL queries in `systemPnlService.ts` carry the predicate inline
+ * (`status IN ('success', 'partial')`). This constant exists so that a
+ * test can PIN the contract — if a future status value is added and
+ * accidentally lands inside the countable set, the test trips. See
+ * pr-review finding #2 (2026-04-21) + brief §1 tripwire.
+ */
+export const COUNTABLE_COST_STATUSES = ['success', 'partial'] as const;
+export type CountableCostStatus = typeof COUNTABLE_COST_STATUSES[number];
+
+export function contributesToCostAggregate(status: string): boolean {
+  return (COUNTABLE_COST_STATUSES as readonly string[]).includes(status);
+}
+
+/**
  * Margin percentage with a null-safe denominator. Returns null for overhead
  * rows so the client can render an "overhead" badge instead of a percentage.
  */

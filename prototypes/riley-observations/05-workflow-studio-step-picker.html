@@ -1,0 +1,97 @@
+<!doctype html>
+<!--
+  Mock 5 / 10 — Workflow Studio · "Call Automation" step picker
+  ===============================================================
+  Primary user task: add a new step to the Workflow; one of the options
+  should be "call an external tool".
+  Simplified per docs/frontend-design-principles.md:
+    - dropped the right inspector (composition preview tiles, safety-mode segment,
+      workflow-settings metadata — all dashboard noise)
+    - dropped the "New" badge animations and decoration
+    - canvas shows the DAG as a simple vertical list
+    - picker is a plain menu with one highlighted option (Call Automation)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 5 — Workflow Studio step picker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="mx-auto max-w-[820px] p-6">
+  <div class="flex justify-between items-baseline mb-4 text-[13px]">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 5 · Add a step</h1>
+    <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <!-- Studio -->
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <!-- Title bar -->
+    <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+      <div>
+        <div class="text-[14px] font-semibold text-slate-900">Weekly Lead Re-engagement</div>
+        <div class="text-[11.5px] text-slate-500">Draft · saved 2m ago</div>
+      </div>
+      <button class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-md">Publish</button>
+    </div>
+
+    <!-- Canvas -->
+    <div class="p-8 bg-slate-50 flex flex-col items-center gap-2">
+      <!-- Step 1 -->
+      <div class="w-[380px] bg-white border border-slate-200 rounded-lg p-3 flex items-center gap-3">
+        <div class="w-8 h-8 rounded-md bg-slate-100 text-slate-500 text-[12px] flex items-center justify-center font-semibold">1</div>
+        <div class="flex-1 text-[13.5px] font-medium text-slate-900">Find stale leads</div>
+      </div>
+      <div class="w-px h-5 bg-slate-300"></div>
+      <!-- Step 2 -->
+      <div class="w-[380px] bg-white border border-slate-200 rounded-lg p-3 flex items-center gap-3">
+        <div class="w-8 h-8 rounded-md bg-slate-100 text-slate-500 text-[12px] flex items-center justify-center font-semibold">2</div>
+        <div class="flex-1 text-[13.5px] font-medium text-slate-900">Classify by fit</div>
+      </div>
+      <div class="w-px h-5 bg-slate-300"></div>
+
+      <!-- Picker (open) -->
+      <div class="w-[380px] bg-white rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.1)] border border-slate-200 overflow-hidden">
+        <div class="px-3.5 pt-3 pb-1.5 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Add step</div>
+
+        <button class="w-full flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 text-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-600"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51"/></svg>
+          <span class="text-[13px] text-slate-800">Run a skill</span>
+        </button>
+
+        <button class="w-full flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 text-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-600"><circle cx="12" cy="12" r="10"/><path d="M9 12h6M12 9v6"/></svg>
+          <span class="text-[13px] text-slate-800">Ask the agent to decide</span>
+        </button>
+
+        <!-- The new one -->
+        <button class="w-full flex items-center gap-3 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-left border-y border-indigo-200">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-700"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <span class="text-[13px] text-indigo-900 font-semibold">Call an Automation</span>
+        </button>
+
+        <button class="w-full flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 text-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-600"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span class="text-[13px] text-slate-800">Wait</span>
+        </button>
+
+        <button class="w-full flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 text-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-600"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="text-[13px] text-slate-800">Ask a person to review</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
+    Call an Automation sits in the same menu as every other step type. One click opens the picker in mock 6.
+  </p>
+</div>
+
+</body>
+</html>

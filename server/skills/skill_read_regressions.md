@@ -2,7 +2,7 @@
 name: Read Skill Regressions
 description: Query regression_cases filtered by agent and optionally by rejected call name.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

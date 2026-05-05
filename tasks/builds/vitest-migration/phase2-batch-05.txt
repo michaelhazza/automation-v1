@@ -1,0 +1,2 @@
+server/tools/capabilities/__tests__/askClarifyingQuestionsHandlerPure.test.ts
+server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts

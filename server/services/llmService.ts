@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { processes, executions, executionPayloads } from '../db/schema/index.js';
+import { automations, executions, executionPayloads } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -123,13 +123,13 @@ export async function getOrgProcessesForTools(
 ): Promise<Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>> {
   const rows = await db
     .select({
-      id: processes.id,
-      name: processes.name,
-      description: processes.description,
-      inputSchema: processes.inputSchema,
+      id: automations.id,
+      name: automations.name,
+      description: automations.description,
+      inputSchema: automations.inputSchema,
     })
-    .from(processes)
-    .where(and(eq(processes.organisationId, organisationId), eq(processes.status, 'active'), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.organisationId, organisationId), eq(automations.status, 'active'), isNull(automations.deletedAt)));
 
   return rows;
 }
@@ -153,8 +153,8 @@ export async function executeTriggerredProcess(
   // Support system processes (no orgId) and org processes
   const [process] = await db
     .select()
-    .from(processes)
-    .where(and(eq(processes.id, processId), isNull(processes.deletedAt)));
+    .from(automations)
+    .where(and(eq(automations.id, processId), isNull(automations.deletedAt)));
 
   if (!process) throw new Error(`Process ${processId} not found`);
   if (process.organisationId && process.organisationId !== organisationId) {
@@ -261,11 +261,12 @@ export function buildSystemPrompt(
   masterPrompt: string,
   dataSourceContents: Array<{ name: string; description: string | null; content: string; contentType: string }>,
   orgTasks: Array<{ id: string; name: string; description: string | null }>,
-  maxDataTokens = 60000
+  maxDataTokens = 60000,
+  externalDocBlocks: string[] = [],
 ): string {
   const parts: string[] = [masterPrompt.trim()];
 
-  if (dataSourceContents.length > 0) {
+  if (dataSourceContents.length > 0 || externalDocBlocks.length > 0) {
     parts.push('\n\n---\n## Your Knowledge Base\n');
     parts.push('The following data has been provided for your context. Use it to answer questions accurately.\n');
 
@@ -281,6 +282,10 @@ export function buildSystemPrompt(
       const truncated = truncateToTokenBudget(ds.content, available - approxTokens(header + footer));
       parts.push(header + truncated + footer);
       usedTokens += approxTokens(header + truncated + footer);
+    }
+
+    if (externalDocBlocks.length > 0) {
+      parts.push('\n' + externalDocBlocks.join('\n\n'));
     }
   }
 

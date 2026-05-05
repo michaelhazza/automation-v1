@@ -121,7 +121,7 @@ while IFS= read -r line; do
     "Direct \`db\` import outside services. RLS fail-closes on queries issued without the ALS tx." \
     "Move the query into a server/services/** function or, for admin-bypass paths, wrap it in withAdminConnection()."
   VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE "from ['\"]([^'\"]*\/)?db(\/index(\.js)?)?['\"]" "$ROOT_DIR/server/" --include='*.ts' 2>/dev/null | grep -E "\\bdb\\b" || true)
+done < <(grep -rnE "from ['\"]([^'\"]*\/)?db(\/index(\.js)?)?['\"]" "$ROOT_DIR/server/" --include='*.ts' 2>/dev/null | grep -E "\\bdb\\b" | grep -vE ":[0-9]+:[[:space:]]*import[[:space:]]+type[[:space:]]" || true)
 
 # ── Rule 2: no .transaction() calls in routes or middleware ─────────────────
 # Routes and middleware must not open transactions directly. The

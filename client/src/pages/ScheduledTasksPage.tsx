@@ -133,7 +133,7 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
             <h1 className="text-[24px] font-bold text-slate-900 m-0">Scheduled Tasks</h1>
             <p className="text-[14px] text-slate-500 mt-1 m-0">Recurring tasks that fire on a schedule and wake agents automatically.</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={() => setShowForm(true)} className="btn btn-primary">
             + New Schedule
           </button>
         </div>
@@ -241,7 +241,7 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
               )}
             </div>
             <div className="flex justify-end gap-2 mt-2">
-              <button onClick={() => setShowForm(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium transition-colors cursor-pointer">Cancel</button>
+              <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
               <button
                 onClick={handleCreate}
                 disabled={
@@ -249,7 +249,7 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
                   !form.assignedAgentId ||
                   (useSchedulePicker && !scheduleValid)
                 }
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold transition-colors cursor-pointer"
+                className="btn btn-primary"
               >
                 Create
               </button>
@@ -297,9 +297,9 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-1.5">
-                      <button onClick={() => handleToggle(item.id, !item.isActive)} className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors">{item.isActive ? 'Pause' : 'Resume'}</button>
-                      <button onClick={() => handleRunNow(item.id)} className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors">Run Now</button>
-                      <button onClick={() => setDeleteId(item.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 rounded text-[12px] text-red-600 cursor-pointer transition-colors">Delete</button>
+                      <button onClick={() => handleToggle(item.id, !item.isActive)} className="btn btn-xs btn-secondary">{item.isActive ? 'Pause' : 'Resume'}</button>
+                      <button onClick={() => handleRunNow(item.id)} className="btn btn-xs btn-secondary">Run Now</button>
+                      <button onClick={() => setDeleteId(item.id)} className="btn btn-xs btn-danger">Delete</button>
                     </div>
                   </td>
                 </tr>

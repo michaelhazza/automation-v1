@@ -9,11 +9,10 @@ import { agentExecutionService } from '../services/agentExecutionService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
-import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
+import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
-import { db } from '../db/index.js';
-import { agents, subaccounts, systemAgents } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
 
 const router = Router();
 
@@ -44,15 +43,10 @@ router.post(
     }
 
     // Configuration Assistant org subaccount restriction guard
-    const [targetAgent] = await db
-      .select({ systemAgentSlug: systemAgents.slug })
-      .from(agents)
-      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, req.orgId!)));
-    if (targetAgent?.systemAgentSlug === 'configuration-assistant') {
-      const [sa] = await db.select({ isOrgSubaccount: subaccounts.isOrgSubaccount }).from(subaccounts)
-        .where(and(eq(subaccounts.id, req.params.subaccountId), eq(subaccounts.organisationId, req.orgId!)));
-      if (!sa?.isOrgSubaccount) {
+    const systemSlug = await subaccountAgentService.getAgentSystemSlug(agentId, req.orgId!);
+    if (systemSlug === 'configuration-assistant') {
+      const isOrg = await subaccountAgentService.isOrgSubaccount(req.params.subaccountId, req.orgId!);
+      if (!isOrg) {
         throw { statusCode: 400, message: 'Configuration Assistant can only be linked to the org subaccount' };
       }
     }
@@ -153,7 +147,12 @@ router.patch(
 
     const updated = await subaccountAgentService.updateLink(req.orgId!, req.params.linkId, {
       isActive,
-      parentSubaccountAgentId,
+      // parentSubaccountAgentId must use conditional spread — updateLink uses
+      // an `'in data'` check (rather than `!== undefined`) so it can
+      // distinguish "not provided" from "explicitly null". Always passing the
+      // key would mean every PATCH re-parents the agent to null, violating
+      // the one-root-per-subaccount unique index for any non-root link.
+      ...('parentSubaccountAgentId' in req.body ? { parentSubaccountAgentId } : {}),
       agentRole,
       agentTitle,
       heartbeatEnabled,
@@ -286,7 +285,12 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId, linkId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    checkTestRunRateLimit(req.user!.id);
+    const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+      res.status(429).json({ error: `Too many test runs (max ${TEST_RUN_RATE_LIMIT_PER_HOUR} per hour). Please try again later.` });
+      return;
+    }
     const link = await subaccountAgentService.getLinkById(req.orgId!, subaccountId, linkId);
     const { prompt, inputJson, idempotencyKey } = req.body as {
       prompt?: string;

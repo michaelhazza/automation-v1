@@ -31,7 +31,7 @@ interface PortalPresentation {
 }
 interface PortalRun {
   id: string;
-  playbookSlug: string | null;
+  workflowSlug: string | null;
   status: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -69,8 +69,8 @@ export default function PortalPage({ user: _user }: { user: User }) {
   useEffect(() => {
     if (!subaccountId) return;
     Promise.all([
-      api.get(`/api/portal/${subaccountId}/processes`),
-      api.get(`/api/portal/${subaccountId}/playbook-runs`).catch(() => ({ data: { runs: [] } })),
+      api.get(`/api/portal/${subaccountId}/automations`),
+      api.get(`/api/portal/${subaccountId}/workflow-runs`).catch(() => ({ data: { runs: [] } })),
       // §G10.4 — gated on completed-run + active-schedule server-side, so
       // the client just reads `active` without running its own joins.
       api
@@ -82,7 +82,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
     ])
       .then(([processRes, runsRes, briefRes, permsRes]) => {
         setSubaccount(processRes.data.subaccount);
-        setProcesses(processRes.data.processes ?? []);
+        setProcesses(processRes.data.automations ?? []);
         setCategories(processRes.data.categories ?? []);
         setPortalRuns(runsRes.data.runs ?? []);
         setDailyBriefCard(briefRes.data ?? null);
@@ -104,7 +104,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
     setRunningNow((prev) => new Set([...prev, run.id]));
     try {
       const { data } = await api.post<{ runId: string }>(
-        `/api/portal/${subaccountId}/playbook-runs/${run.id}/run-now`,
+        `/api/portal/${subaccountId}/workflow-runs/${run.id}/run-now`,
       );
       toast.success('Run started');
       // Navigate to the new run
@@ -183,19 +183,19 @@ export default function PortalPage({ user: _user }: { user: User }) {
           this list to avoid showing it twice. */}
       {(() => {
         const otherRuns = dailyBriefCard?.active
-          ? portalRuns.filter((r) => r.playbookSlug !== 'intelligence-briefing')
+          ? portalRuns.filter((r) => r.workflowSlug !== 'intelligence-briefing')
           : portalRuns;
         if (otherRuns.length === 0) return null;
         return (
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-[16px] font-semibold text-slate-800 m-0">Playbooks</h2>
-            <HelpHint text="These playbooks were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
+            <h2 className="text-[16px] font-semibold text-slate-800 m-0">Workflows</h2>
+            <HelpHint text="These workflows were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
           </div>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             {otherRuns.map((run) => {
               const pp = run.portalPresentation;
-              const title = pp?.cardTitle ?? run.playbookSlug ?? 'Playbook run';
+              const title = pp?.cardTitle ?? run.workflowSlug ?? 'Workflow run';
               const isActive = ACTIVE_STATUSES.has(run.status);
               const isRunningNow = runningNow.has(run.id);
               const lastRunDate = run.completedAt ?? run.startedAt ?? run.createdAt;
@@ -299,7 +299,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
           ) : (
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
               {filtered.map((process) => (
-                <Link key={process.id} to={`/portal/${subaccountId}/processes/${process.id}`} className="no-underline">
+                <Link key={process.id} to={`/portal/${subaccountId}/automations/${process.id}`} className="no-underline">
                   <div className="bg-white rounded-xl px-6 py-5 shadow-sm border border-slate-200 h-full hover:border-indigo-300 hover:shadow-md transition-all">
                     {process.category && (
                       <div className="flex items-center gap-1.5 mb-2">

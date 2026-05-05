@@ -2,7 +2,7 @@
 name: Config List System Skills
 description: List available system skills with name, description, and category.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

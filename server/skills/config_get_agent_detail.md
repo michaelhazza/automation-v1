@@ -2,7 +2,7 @@
 name: Config Get Agent Detail
 description: Get full configuration detail for a specific agent.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

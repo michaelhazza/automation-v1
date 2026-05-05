@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Upload documents (mockup)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .annot-banner strong { color: #5a2a02; }
+
+  /* Dimmed / blurred background context */
+  .bg-context {
+    position: fixed; inset: 34px 0 0 0; overflow: hidden;
+    background: #f5f6f8; opacity: 0.45; pointer-events: none; z-index: 1;
+  }
+  .bg-mock {
+    max-width: 780px; margin: 0 auto; padding: 24px 32px;
+    filter: blur(0.5px);
+  }
+  .bg-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 22px 24px; margin-bottom: 14px;
+  }
+  .bg-line { height: 10px; background: #e5e7eb; border-radius: 3px; margin-bottom: 10px; }
+  .bg-line.w70 { width: 70%; }
+  .bg-line.w40 { width: 40%; }
+  .bg-line.w90 { width: 90%; }
+
+  /* Modal overlay */
+  .overlay {
+    position: fixed; inset: 34px 0 0 0; background: rgba(15,23,42,0.45);
+    backdrop-filter: blur(2px); z-index: 10;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 40px 20px 120px; overflow-y: auto;
+  }
+  .modal {
+    background: #fff; border-radius: 12px; width: 100%; max-width: 620px;
+    box-shadow: 0 24px 48px rgba(15,23,42,0.2);
+    overflow: hidden;
+  }
+  .m-head {
+    padding: 18px 24px; display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 1px solid #f0f1f3;
+  }
+  .m-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+  .m-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; max-width: 450px; }
+  .m-head .close {
+    background: none; border: none; font-size: 20px; color: #9ca3af;
+    cursor: pointer; padding: 2px 8px; border-radius: 5px; font-family: inherit;
+  }
+  .m-head .close:hover { color: #1a1d23; background: #f3f4f6; }
+
+  .m-body { padding: 20px 24px; }
+
+  /* File list */
+  .files {
+    display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;
+  }
+  .file-row {
+    background: #fafbff; border: 1px solid #e0e7ff; border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .file-row .row-top {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+  }
+  .file-row .f-icon {
+    width: 36px; height: 36px; background: #eef2ff; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    color: #4338ca; flex-shrink: 0;
+  }
+  .file-row .f-filename {
+    font-size: 13px; color: #4b5563; flex: 1; font-family: 'Menlo', 'Consolas', monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .file-row .f-meta {
+    font-size: 11px; color: #6b7280; white-space: nowrap; flex-shrink: 0;
+  }
+  .file-row .f-meta .est {
+    color: #4338ca; font-weight: 600; margin-left: 4px;
+  }
+  .file-row .f-remove {
+    background: none; border: none; color: #9ca3af; font-size: 15px;
+    cursor: pointer; padding: 4px 7px; border-radius: 5px; font-family: inherit;
+    flex-shrink: 0;
+  }
+  .file-row .f-remove:hover { color: #b91c1c; background: #fef2f2; }
+
+  .file-row .row-bottom {
+    display: flex; align-items: center; gap: 10px;
+    padding-left: 48px;
+  }
+  .file-row .name-label {
+    font-size: 11px; font-weight: 600; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .file-row .name-input {
+    flex: 1; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 5px;
+    font-size: 13px; font-family: inherit; background: #fff; color: #1a1d23;
+  }
+  .file-row .name-input:focus { outline: none; border-color: #6366f1; }
+
+  /* Add more / dropzone hint */
+  .add-more {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 14px; background: #fff;
+    border: 1.5px dashed #a5b4fc; border-radius: 8px;
+    color: #4338ca; font-size: 13px; font-weight: 500; cursor: pointer;
+    font-family: inherit; width: 100%; margin-bottom: 18px;
+  }
+  .add-more:hover { background: #eef2ff; }
+  .add-more .hint { color: #6b7280; font-weight: 400; font-size: 11.5px; }
+
+  /* Bundle grouping section */
+  .bundle-section {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 14px;
+  }
+  .bundle-check {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    user-select: none;
+  }
+  .bundle-check input {
+    width: 16px; height: 16px; accent-color: #4338ca; flex-shrink: 0;
+    cursor: pointer;
+  }
+  .bundle-check .label {
+    font-size: 13px; font-weight: 500; color: #1a1d23; flex: 1;
+  }
+  .bundle-check .why {
+    display: block; font-size: 11.5px; color: #6b7280; font-weight: 400;
+    margin-top: 2px;
+  }
+
+  .bundle-name-field {
+    margin-top: 12px; padding-left: 26px;
+  }
+  .bundle-name-field label {
+    display: block; font-size: 11px; font-weight: 600; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+  }
+  .bundle-name-field input {
+    width: 100%; padding: 8px 11px; border: 1px solid #c7d2fe; border-radius: 5px;
+    font-size: 13.5px; font-family: inherit; background: #fff; color: #1a1d23;
+  }
+  .bundle-name-field input:focus { outline: none; border-color: #6366f1; }
+
+  /* Auto-attach confirmation */
+  .auto-attach {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 14px; background: #f0fdf4; border: 1px solid #bbf7d0;
+    border-radius: 6px; font-size: 12.5px; color: #166534;
+  }
+  .auto-attach .icon {
+    color: #16a34a; font-size: 15px; flex-shrink: 0; line-height: 1.2;
+  }
+  .auto-attach strong { color: #15803d; }
+
+  /* Footer */
+  .m-foot {
+    padding: 14px 24px; background: #fafbfc; border-top: 1px solid #f0f1f3;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  }
+  .m-foot .help {
+    font-size: 11.5px; color: #9ca3af;
+  }
+  .m-foot .actions {
+    display: flex; gap: 8px;
+  }
+  .btn {
+    padding: 9px 18px; border-radius: 5px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 1px solid; font-family: inherit;
+  }
+  .btn-primary {
+    background: #4338ca; color: #fff; border-color: #4338ca;
+  }
+  .btn-primary:hover { background: #3730a3; }
+  .btn-secondary {
+    background: #fff; color: #374151; border-color: #d1d5db;
+  }
+  .btn-secondary:hover { background: #f3f4f6; }
+
+  /* Explainer pinned at bottom */
+  .explainer-floating {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    max-width: 760px; width: calc(100% - 40px);
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 14px 18px; font-size: 12px; color: #4b5563; line-height: 1.55;
+    z-index: 20;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+  }
+  .explainer-floating h3 {
+    font-size: 11px; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 6px;
+  }
+  .explainer-floating strong { color: #1a1d23; }
+  .explainer-floating p { margin-bottom: 6px; }
+  .explainer-floating p:last-child { margin-bottom: 0; }
+  .explainer-floating code {
+    background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">📐 MOCKUP · Upload documents modal · <strong>reusable across the site</strong> · multi-file drag-drop · per-file name edit · opt-in "group as bundle" · <strong>shown with checkbox ticked</strong> — default is unticked.</div>
+
+<!-- Dimmed / blurred background context -->
+<div class="bg-context">
+  <div class="bg-mock">
+    <div class="bg-card" style="height: 60px;">
+      <div class="bg-line w40"></div>
+    </div>
+    <div class="bg-card">
+      <div class="bg-line w70"></div>
+      <div class="bg-line w90"></div>
+      <div class="bg-line w40"></div>
+    </div>
+    <div class="bg-card" style="height: 260px;">
+      <div class="bg-line w70"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal overlay -->
+<div class="overlay">
+  <div class="modal">
+
+    <div class="m-head">
+      <div>
+        <h2>Upload documents</h2>
+        <div class="sub">Adds documents to your library, and attaches them to this task if you opened the dialog from a task or agent.</div>
+      </div>
+      <button class="close">✕</button>
+    </div>
+
+    <div class="m-body">
+
+      <!-- Staged files — 3 files shown -->
+      <div class="files">
+
+        <div class="file-row">
+          <div class="row-top">
+            <div class="f-icon">📄</div>
+            <div class="f-filename">2026-Q2-macro-outlook.md</div>
+            <div class="f-meta">184 KB<span class="est">≈ 58k tokens</span></div>
+            <button class="f-remove" title="Remove">✕</button>
+          </div>
+          <div class="row-bottom">
+            <span class="name-label">Name</span>
+            <input class="name-input" type="text" value="2026 Q2 macro outlook">
+          </div>
+        </div>
+
+        <div class="file-row">
+          <div class="row-top">
+            <div class="f-icon">📄</div>
+            <div class="f-filename">central-bank-update.md</div>
+            <div class="f-meta">92 KB<span class="est">≈ 31k tokens</span></div>
+            <button class="f-remove" title="Remove">✕</button>
+          </div>
+          <div class="row-bottom">
+            <span class="name-label">Name</span>
+            <input class="name-input" type="text" value="Central bank update">
+          </div>
+        </div>
+
+        <div class="file-row">
+          <div class="row-top">
+            <div class="f-icon">📄</div>
+            <div class="f-filename">commodity-notes-q2.md</div>
+            <div class="f-meta">55 KB<span class="est">≈ 18k tokens</span></div>
+            <button class="f-remove" title="Remove">✕</button>
+          </div>
+          <div class="row-bottom">
+            <span class="name-label">Name</span>
+            <input class="name-input" type="text" value="Commodity notes Q2">
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Add more files -->
+      <button class="add-more">
+        <span>+</span>
+        <span>Add more files</span>
+        <span class="hint">· or drop them anywhere on this dialog</span>
+      </button>
+
+      <!-- Bundle grouping — opt-in -->
+      <div class="bundle-section">
+        <label class="bundle-check">
+          <input type="checkbox" checked>
+          <span class="label">
+            Group these documents as a bundle
+            <span class="why">Save the set as a bundle so you can attach it to other tasks with one click.</span>
+          </span>
+        </label>
+
+        <div class="bundle-name-field">
+          <label>Bundle name</label>
+          <input type="text" value="2026 Q2 macro set">
+        </div>
+      </div>
+
+      <!-- Auto-attach confirmation — context-aware -->
+      <div class="auto-attach">
+        <span class="icon">✓</span>
+        <span>These 3 documents will be saved as the <strong>"2026 Q2 macro set"</strong> bundle and attached to <strong>Daily macro report</strong>.</span>
+      </div>
+
+    </div>
+
+    <div class="m-foot">
+      <div class="help">.md · .pdf · .txt · .docx · 10 MB per file</div>
+      <div class="actions">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Upload &amp; attach</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Explainer pinned at bottom — mockup-only context -->
+<div class="explainer-floating">
+  <h3>How this works</h3>
+  <p>
+    <strong>Empty state (before any file is picked):</strong> the file list is replaced by a dashed drop zone with a cloud icon and "Drop files here, or click to browse · Accepts .md, .pdf, .txt, .docx". Dragging files onto the modal anywhere triggers upload — the list is a drop target too.
+  </p>
+  <p>
+    <strong>Bundle checkbox:</strong> off by default. Visible whenever 2+ files are staged (grayed out on single-file uploads — no bundle for one document). When ticked, the bundle name input appears and the confirmation line changes to name the bundle.
+  </p>
+  <p>
+    <strong>Reusable across the site:</strong> same dialog opens from the attach picker (auto-attaches to the current task/agent/scheduled-task after upload) and from the standalone <code>Knowledge › Documents</code> page (no auto-attach, just adds to the library). The auto-attach line only appears in the task-scoped context.
+  </p>
+</div>
+
+</body>
+</html>

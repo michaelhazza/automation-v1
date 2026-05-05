@@ -207,7 +207,7 @@ export default function McpCatalogue({ onAdded, subaccountId }: { onAdded: () =>
                 ) : (
                   <button
                     onClick={() => handleAdd(preset)}
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12px] font-semibold border-0 cursor-pointer transition-colors"
+                    className="btn btn-sm btn-primary"
                   >
                     {subaccountId ? '+ Add to Company' : '+ Add to Org'}
                   </button>
@@ -241,7 +241,7 @@ export default function McpCatalogue({ onAdded, subaccountId }: { onAdded: () =>
                   <button
                     onClick={handleStartOAuth}
                     disabled={connectingOAuth}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12px] font-semibold border-0 cursor-pointer transition-colors disabled:opacity-50 ml-3"
+                    className="btn btn-sm btn-primary ml-3"
                   >
                     {connectingOAuth ? 'Connecting...' : `Connect ${addPreset.credentialProvider}`}
                   </button>
@@ -301,11 +301,11 @@ export default function McpCatalogue({ onAdded, subaccountId }: { onAdded: () =>
           )}
 
           <div className="flex gap-2.5 justify-end">
-            <button onClick={() => setAddPreset(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-semibold border-0 cursor-pointer transition-colors">Cancel</button>
+            <button onClick={() => setAddPreset(null)} className="btn btn-sm btn-ghost">Cancel</button>
             <button
               onClick={handleAddSubmit}
               disabled={adding}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[13px] font-semibold border-0 cursor-pointer transition-colors disabled:opacity-50"
+              className="btn btn-sm btn-primary"
             >
               {adding ? 'Adding...' : 'Add Integration'}
             </button>

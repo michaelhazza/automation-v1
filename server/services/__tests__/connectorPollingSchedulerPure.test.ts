@@ -7,32 +7,8 @@
  *   npx tsx server/services/__tests__/connectorPollingSchedulerPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { selectConnectionsDue, type PollingConnection } from '../connectorPollingSchedulerPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  const aJson = JSON.stringify(a);
-  const bJson = JSON.stringify(b);
-  if (aJson !== bJson) throw new Error(`${label} — expected ${bJson}, got ${aJson}`);
-}
-
-function assertTrue(value: boolean, label: string) {
-  if (!value) throw new Error(`${label} — expected truthy`);
-}
 
 const FIXED_NOW = new Date('2026-04-17T12:00:00.000Z');
 
@@ -53,31 +29,31 @@ console.log('');
 // ── selectConnectionsDue ─────────────────────────────────────────────────
 
 test('returns empty for no connections', () => {
-  assertEqual(selectConnectionsDue([], FIXED_NOW), [], 'empty array');
+  expect(selectConnectionsDue([], FIXED_NOW), 'empty array').toEqual([]);
 });
 
 test('returns connection with null lastSuccessfulSyncAt', () => {
   const connections = [makeConnection({ id: 'c-1', lastSuccessfulSyncAt: null })];
-  assertEqual(selectConnectionsDue(connections, FIXED_NOW), ['c-1'], 'null sync returns id');
+  expect(selectConnectionsDue(connections, FIXED_NOW), 'null sync returns id').toEqual(['c-1']);
 });
 
 test('filters out connections with wrong syncPhase', () => {
   const connections = [
     makeConnection({ id: 'c-wrong', syncPhase: 'idle' as any, lastSuccessfulSyncAt: null }),
   ];
-  assertEqual(selectConnectionsDue(connections, FIXED_NOW), [], 'wrong syncPhase filtered out');
+  expect(selectConnectionsDue(connections, FIXED_NOW), 'wrong syncPhase filtered out').toEqual([]);
 });
 
 test('returns connection when elapsed > pollIntervalMinutes', () => {
   const lastSync = new Date(FIXED_NOW.getTime() - 20 * 60 * 1000); // 20 min ago
   const connections = [makeConnection({ id: 'c-due', pollIntervalMinutes: 15, lastSuccessfulSyncAt: lastSync })];
-  assertEqual(selectConnectionsDue(connections, FIXED_NOW), ['c-due'], 'overdue connection returned');
+  expect(selectConnectionsDue(connections, FIXED_NOW), 'overdue connection returned').toEqual(['c-due']);
 });
 
 test('does not return connection when elapsed < pollIntervalMinutes', () => {
   const lastSync = new Date(FIXED_NOW.getTime() - 5 * 60 * 1000); // 5 min ago
   const connections = [makeConnection({ id: 'c-not-due', pollIntervalMinutes: 15, lastSuccessfulSyncAt: lastSync })];
-  assertEqual(selectConnectionsDue(connections, FIXED_NOW), [], 'not-due connection excluded');
+  expect(selectConnectionsDue(connections, FIXED_NOW), 'not-due connection excluded').toEqual([]);
 });
 
 test('returns multiple due connections', () => {
@@ -87,16 +63,12 @@ test('returns multiple due connections', () => {
     makeConnection({ id: 'c-c', lastSuccessfulSyncAt: new Date(FIXED_NOW.getTime() - 1 * 60 * 1000) }), // 1 min ago, not due
   ];
   const result = selectConnectionsDue(connections, FIXED_NOW);
-  assertTrue(result.includes('c-a'), 'c-a due (never synced)');
-  assertTrue(result.includes('c-b'), 'c-b due (1h ago)');
-  assertTrue(!result.includes('c-c'), 'c-c not due (1 min ago)');
-  assertEqual(result.length, 2, 'exactly 2 due');
+  expect(result.includes('c-a'), 'c-a due (never synced)').toBe(true);
+  expect(result.includes('c-b'), 'c-b due (1h ago)').toBe(true);
+  expect(!result.includes('c-c'), 'c-c not due (1 min ago)').toBe(true);
+  expect(result.length, 'exactly 2 due').toBe(2);
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

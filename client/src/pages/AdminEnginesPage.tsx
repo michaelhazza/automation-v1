@@ -82,7 +82,7 @@ export default function AdminEnginesPage({ user: _user, embedded }: { user: User
         ) : <div />}
         <button
           onClick={() => { setShowForm(true); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           + Add engine
         </button>
@@ -112,8 +112,8 @@ export default function AdminEnginesPage({ user: _user, embedded }: { user: User
             </div>
           </div>
           <div className="flex gap-3">
-            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Create</button>
-            <button onClick={() => setShowForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+            <button onClick={handleCreate} className="btn btn-primary">Create</button>
+            <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
           </div>
         </Modal>
       )}
@@ -151,13 +151,13 @@ export default function AdminEnginesPage({ user: _user, embedded }: { user: User
               <span className={`text-xs font-medium ${engine.status === 'active' ? 'text-green-600' : 'text-slate-500'}`}>
                 {engine.status}
               </span>
-              <button onClick={() => handleTest(engine.id)} className="px-3.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-[13px] font-medium transition-colors">
+              <button onClick={() => handleTest(engine.id)} className="btn btn-sm btn-secondary">
                 Test
               </button>
-              <button onClick={() => handleToggle(engine)} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors">
+              <button onClick={() => handleToggle(engine)} className="btn btn-sm btn-ghost">
                 {engine.status === 'active' ? 'Deactivate' : 'Activate'}
               </button>
-              <button onClick={() => setDeleteId(engine.id)} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[13px] font-medium transition-colors">
+              <button onClick={() => setDeleteId(engine.id)} className="btn btn-sm btn-ghost text-red-600 hover:bg-red-50">
                 Delete
               </button>
             </div>
