@@ -3,7 +3,7 @@ import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { auditService } from '../services/auditService.js';
-import { recordSecurityEvent } from '../services/securityAuditService.js';
+import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from '../services/securityAuditService.js';
 import { validateBody } from '../middleware/validate.js';
 import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, signupBody } from '../schemas/auth.js';
 import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
@@ -89,7 +89,7 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     // auth.login.failure — org is unknown at this point (login rejected before session established).
     // Emit to the system sentinel org so the event is recorded; meta carries the redacted email.
     void recordSecurityEvent({
-      organisationId: '00000000-0000-0000-0000-000000000000',
+      organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
       eventType:      'auth.login.failure',
       ip:             req.ip ?? null,
       userAgent:      req.get('user-agent') ?? null,

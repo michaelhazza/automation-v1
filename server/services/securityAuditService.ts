@@ -6,6 +6,15 @@ import { normaliseSecurityEvent, type SecurityEventInput } from './securityAudit
 
 export type { SecurityEventInput };
 
+/**
+ * Sentinel organisation UUID used for security events that occur before a
+ * tenant context can be established (e.g. `auth.login.failure` — login was
+ * rejected, so we never resolved an organisation). Admin queries scoped to
+ * a real org UUID will not see these rows; queries against the sentinel UUID
+ * surface pre-auth events. Tracked as AR-1.1 in tasks/todo.md.
+ */
+export const SECURITY_AUDIT_SENTINEL_ORG_ID = '00000000-0000-0000-0000-000000000000';
+
 export async function recordSecurityEvent(input: SecurityEventInput): Promise<void> {
   try {
     const norm = normaliseSecurityEvent(input);

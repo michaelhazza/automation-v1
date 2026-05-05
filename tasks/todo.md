@@ -3049,4 +3049,29 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 
 - [ ] AR-6.1 — `connectionTokenService.refreshIfExpired` relies on caller discipline for org scoping
   - `server/services/connectionTokenService.ts:147-174`
-  - The `guard-ignore-next-line` exemption requires every caller to fetch the connection via an org-scoped query. Audit all call sites of `getAccessToken` to confirm each path obtains the connection through an org-scoped lookup before passing it here. If any admin-path caller exists, add an assertion: `if (connection.organisationId !== principalOrgId) throw new Error(...)`.  
+  - The `guard-ignore-next-line` exemption requires every caller to fetch the connection via an org-scoped query. Audit all call sites of `getAccessToken` to confirm each path obtains the connection through an org-scoped lookup before passing it here. If any admin-path caller exists, add an assertion: `if (connection.organisationId !== principalOrgId) throw new Error(...)`.
+
+---
+
+## Deferred from chatgpt-pr-review Round 1 — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md`
+**Branch:** `claude/pre-launch-phase-2`
+**PR:** #264
+
+- [ ] CHATGPT-R1-4 — Tighten audit-stream split enforcement
+  - Current `scripts/verify-audit-stream-split.sh` is a grep gate. Replace with either a centralised audit API that mechanically enforces routing (operational vs. security streams) or a TypeScript ESLint rule that flags writes to the wrong stream at lint time. Grep gates drift; an API or lint rule is structurally enforced.
+  - Out of scope for this PR — design decision required on which approach (API vs. lint rule), and a non-trivial refactor of every audit call site.
+
+- [ ] CHATGPT-R1-6 — Tighten `isActive` helper generic constraint
+  - `server/lib/softDelete.ts` (or wherever the helper lives) — the generic constraint accepts any object with a `deletedAt` field, which is broader than the intended Drizzle-table use. Either narrow the generic to Drizzle table types (`PgTable` with a `deletedAt` column), or add overloads for the known soft-deletable tables (users, organisations, agents, …).
+  - Mechanical-feeling but the constraint design is a small architecture call (do we want a single generic helper or per-table overloads?). Defer until we have time to decide.
+
+- [ ] CHATGPT-R1-7 — Instrument OAuth state TTL before deciding on revert
+  - `server/services/ghlAgencyOauthService.ts` (and similar OAuth state stores) — the state TTL was tightened from 10min → 5min in this branch. Before committing to the new value (or reverting), instrument the state-store with a metric for `expired-on-callback` vs `not-found-on-callback` rate and observe it for a week in staging. If `expired-on-callback` is non-trivial, revert to 10min.
+  - Pre-launch we don't have telemetry yet, so this is correctly a follow-up after we have a baseline.
+
+- [ ] CHATGPT-R1-8 — GHL auto-enrol pagination / partial-onboarding UX
+  - `server/services/ghlAgencyOauthService.ts` `autoEnrolLocations` (or similar) — the auto-enrol loop iterates GHL locations to create/link subaccounts; for agencies with hundreds of locations, the request can time out or partially succeed without surfacing state to the operator. Either add a cursor/pagination strategy with a background-job continuation, or surface partial-onboarding status to the UI so the operator can resume.
+  - Design call required (background job vs. UI surface). Defer until we have a concrete agency hitting the limit or post-launch telemetry suggesting risk.

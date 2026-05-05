@@ -275,6 +275,13 @@ app.use(teamworkWebhookRouter);
 app.use(slackWebhookRouter);
 app.use(workspaceInboundWebhookRouter);
 
+// Path-scoped tight JSON parser for /api/client-errors — applied BEFORE the
+// global 10MB parser so oversized payloads return 413 here instead of being
+// accepted. express.json() checks req._body and skips re-parsing once a body
+// has already been populated, so the global parser below is a no-op for this
+// path. ChatGPT-Round-1 Finding 3.
+app.use('/api/client-errors', express.json({ limit: '16kb' }));
+
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));

@@ -190,13 +190,17 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(newPassword, 12);
 
     const now = new Date();
+    // Floor to second-precision so passwordChangedAt aligns with JWT iat (whole seconds).
+    // Without this, a token reissued in the same wall-clock second as the reset would be
+    // mistakenly revoked by the strict-greater comparison in middleware/auth.ts.
+    const passwordChangedAt = new Date(Math.floor(now.getTime() / 1000) * 1000);
     await db
       .update(users)
       .set({
         passwordHash,
         passwordResetToken: null,
         passwordResetExpiresAt: null,
-        passwordChangedAt: now,
+        passwordChangedAt,
         updatedAt: now,
       })
       .where(eq(users.id, user.id));

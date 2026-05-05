@@ -82,12 +82,18 @@ export const authenticate = async (
   // JWT forced-logout: reject tokens issued before the user last changed their password.
   // This check runs outside the org-scoped tx (uses db directly) because it must
   // execute before the org context is established and is not tenant-data access.
-  const issuedAtMs = (payload.iat ?? 0) * 1000;
+  // Both sides compared at second-precision (JWT iat is whole seconds; passwordChangedAt
+  // is floored to seconds at write-time in authService). Use strict `>` so a token
+  // reissued in the same wall-clock second as the password change is not revoked.
   const [userRow] = await db
     .select({ passwordChangedAt: users.passwordChangedAt })
     .from(users)
     .where(and(eq(users.id, payload.id), isNull(users.deletedAt)));
-  if (userRow && userRow.passwordChangedAt && userRow.passwordChangedAt.getTime() > issuedAtMs) {
+  const issuedSec = payload.iat ?? 0;
+  const pwdChangedSec = userRow?.passwordChangedAt
+    ? Math.floor(userRow.passwordChangedAt.getTime() / 1000)
+    : 0;
+  if (userRow && userRow.passwordChangedAt && pwdChangedSec > issuedSec) {
     void recordSecurityEvent({
       organisationId: payload.organisationId,
       actorUserId:    payload.id,

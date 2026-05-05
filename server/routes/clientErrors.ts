@@ -15,6 +15,10 @@ const ClientErrorBody = z.object({
   userAgent: z.string().max(500).optional(),
 });
 
+// NOTE: Body size cap of 16KB is enforced by a path-scoped express.json parser
+// in server/index.ts (mounted BEFORE the global 10MB parser), so oversized payloads
+// return 413 before reaching this handler. ChatGPT-Round-1 Finding 3.
+
 router.post(
   '/api/client-errors',
   authenticate,
