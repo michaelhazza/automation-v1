@@ -103,7 +103,89 @@ Highest filename: `0279_task_events.sql`. Notable post-0189 work: 0190–0232 (L
 
 ## workflows-v1 deep dive
 
-*(section appended below)*
+### What it is
+
+DAG-based, tick-driven automation engine built on the existing `workflow_runs` / `workflow_step_runs` tables (renamed from "playbooks" in migration 0221). It executes per-subaccount or per-org runs of versioned workflow templates, advancing step by step via pg-boss jobs on the `workflow-run-tick` queue. Steps can be one of four V1 user-facing types (`agent`, `action`, `approval`, `ask`) or a set of legacy engine types. Action steps route through `actionService.proposeAction → skillExecutor.execute` (same pipeline as standalone agents). Agent steps dispatch `agentExecutionService.executeRun` via a separate pg-boss queue (`workflow-agent-step`); the result returns via `workflowAgentRunHook`. Has HITL (step gates, approver pools, quorum, confidence scoring, stall notifications) and a Studio authoring surface backed by GitHub PRs.
+
+**Workflows-v1 IS the renamed playbook system. There is no separate playbook system anymore.**
+
+### Trigger surface
+
+| Trigger | File:line | Notes |
+|---|---|---|
+| HTTP API (manual / programmatic) | `server/routes/workflowRuns.ts:74` — `POST /api/workflow-runs` → `WorkflowRunService.startRun()` | Any authenticated user/service with org context |
+| Portal "Run Now" button | `server/routes/portal.ts:659,679` | Subaccount-portal-authed user re-runs a template |
+| Scheduled task | `server/services/scheduledTaskService.ts:602-605` | RRULE-fired; can pin a specific template version (`pinnedTemplateVersionId` added in 0276) |
+| Onboarding service | `server/services/subaccountOnboardingService.ts:235-272` | When platform detects an "owed" onboarding slug for a subaccount |
+| Agent skill `workflow.run.start` | `server/services/skillExecutor.ts:621-624` → `workflowRunStartSkillService.ts:70` | Agent inside a running workflow can start a child workflow (depth-guarded at 3) |
+| Orchestrator from task | `server/jobs/orchestratorFromTaskJob.ts:148-160` | Detects "workflow draft request" intent in tasks; creates a draft (not a run) |
+
+**Critically absent:**
+- No webhook receiver that starts a workflow.
+- No inbound email handler.
+- No CRM stage-change listener.
+- `agentTriggers` (`server/db/schema/agentTriggers.ts`) fires *agent runs* on `task_created` / `task_moved` / `agent_completed` — does not start workflow runs.
+- `conversionEvents` (`server/db/schema/conversionEvents.ts`) is written but never consumed to trigger a workflow.
+
+### Action types it can dispatch
+
+| Action | Supported | Mechanism |
+|---|---|---|
+| Start a (nested) playbook/workflow run | Yes (identity — workflows-v1 IS playbooks) | `workflow.run.start` skill; depth-3 cap |
+| Create a subaccount | Yes | `action_call` with `actionSlug: 'config_create_subaccount'` → `workflowActionCallExecutor.ts:287` → `executeConfigCreateSubaccount`. HITL-resumable |
+| Send a notification | Yes | `action_call` with `notify_operator` (registry `:2829`) or `send_email` (registry `:334`) |
+| Update a record | Yes | `action_call` with `update_record` (registry `:604`) or CRM primitives (`crm.send_email`, `crm.send_sms`, `crm.create_task`, `crm.fire_automation`) |
+| Start an agent run | Yes | `agent_call` / `agent` step type → `agentExecutionService.executeRun()` (`workflowEngineService.ts:3972`) |
+| Execute CRM primitives | Yes | All registered (`skillExecutor.ts:1414-1488`); accessible via `action_call` |
+
+The `RAW_CONFIG_HANDLERS` map (`workflowActionCallExecutor.ts:267-300`) directly wires all `config_*` actions (create_agent, update_agent, link_agent, set_link_skills, create_subaccount, create_scheduled_task) as HITL-resumable `action_call` targets.
+
+### Per-org rules surface
+
+**There is no per-org rules table that maps event → workflow.** Closest existing pieces:
+- `agentTriggers` — maps eventType + eventFilter → *agent run* (not workflow run).
+- `workflowTemplates` (`server/db/schema/workflowTemplates.ts:75`) — org-owned template definitions, not routing rules.
+- `scheduledTasks.pinnedTemplateVersionId` — schedule → specific template version. Time-driven, not event-driven.
+
+### User-facing concept
+
+- **Drafts** (`workflow_drafts`, `server/db/schema/workflowDrafts.ts`) — orchestrator-authored or Studio-in-progress definitions. `consumedAt: null` until promoted.
+- **Templates** — two levels: `system_workflow_templates` (platform-shipped, read-only) and `workflow_templates` (org-owned, may fork from system). Each template has immutable **versions** (`workflow_template_versions`). Studio (`workflowStudioService.ts`) opens a GitHub PR to merge a new `.workflow.ts` file.
+- **Runs** (`workflow_runs`) — instantiation of a locked template version against a subaccount or org. One active run per task enforced by partial unique index (`workflow_runs_one_active_per_task_idx`, migration 0276).
+
+### HITL and gating
+
+Workflows-v1 has its **own** HITL surface, separate from the standalone `actionService` review queue:
+
+- **`workflow_step_gates`** table — one row per open approval or "ask" gate, keyed by `(workflow_run_id, step_id)`. Carries `gateKind` (`approval | ask`), `seenPayload`, `seenConfidence`, `approverPoolSnapshot`.
+- Lifecycle in `WorkflowStepGateService`. Decisions captured in `workflow_step_reviews` (one row per `(gateId, decidedByUserId)`, unique).
+- Approve / reject / edit-and-approve via `WorkflowRunService.decideApproval()` (`workflowRunService.ts:722-946`).
+- For `action_call` steps that go pending in `actionService`, `reviewItems.ts:163-169` calls `resumeActionCallAfterApproval()` to complete the workflow step. Bridge from old action review queue to workflow gate resumption exists but the primary gate surface is the new table.
+- `isCriticalSynthesised` gates: rejection stalls instead of failing; stall-notification cadence escalates.
+
+### Confidence + approver pools + stall notify
+
+- **Confidence model** (`workflowConfidenceService.ts`, `Pure.ts`): `computeForGate()` queries past review counts for `(templateVersionId, stepId)`. Maps approved/rejected counts plus `isCritical`/`sideEffectClass`/upstream confidence into a `SeenConfidence` struct (value + UI copy). **Decorative — never auto-approves or auto-rejects.** Falls back to `few_past_runs_mixed_history` on error.
+- **Approver pools** (`workflowApproverPoolService.ts`): each `approval` step declares an `approverGroup` of `kind`: `specific_users | task_requester | team | org_admin`. `resolvePool()` evaluates at gate-open time, snapshots into `approverPoolSnapshot`. `assertCallerInApproverPool()` 403s if caller not in snapshot. Admin `/refresh-pool` endpoint for membership changes.
+- **Stall notifications** (`workflowGateStallNotifyService.ts`): three pg-boss jobs scheduled at 24h, 72h, 7d after gate creation. Each job sends plain-text email via `emailService.sendGenericEmail` if gate still unresolved. Stale-fire guard checks before send. `cancelStallNotifications()` cancels pending jobs by querying `pgboss.job` directly on resolution.
+
+### `workflowAgentRunHook`
+
+`server/services/workflowAgentRunHook.ts:31-55` — callback bridge from `agentExecutionService` back to the workflow engine. After any agent run, dynamic-imported `notifyWorkflowEngineOnAgentRunComplete(agentRunId, result)` checks `agentRuns.workflowStepRunId`. If set, calls `WorkflowEngineService.onAgentRunCompleted(stepRunId, result, agentRunId)` → step transitions complete/fail and engine re-ticks. Functionally identical to what `playbookAgentRunHook.ts` did — **it is the replacement.**
+
+### Mapping previous recommendations against workflows-v1
+
+| Recommendation | Satisfied? | How / Gap |
+|---|---|---|
+| Generic `event_rules` table | **No** | No table exists. `agentTriggers` fires agent runs on a narrow event set; no declarative mapping to workflow starts. |
+| Single eventBus.publish surface | **No** | Workflows started only via direct `WorkflowRunService.startRun()` calls. No publish/subscribe layer. |
+| Dispatch `start_playbook` | **Yes (identity)** | Workflows-v1 IS the renamed playbook system. `workflow.run.start` skill enables nested invocation up to depth 3. |
+| Dispatch `create_subaccount` | **Yes** | `action_call` with `config_create_subaccount` → `executeConfigCreateSubaccount`. HITL-resumable. |
+| Dispatch `send_notification` | **Yes** | `action_call` with `notify_operator` or `send_email`. |
+| Dispatch `update_record` | **Yes** | `action_call` with `update_record` or CRM primitives. |
+| Dispatch `start_agent_run` | **Yes** | `agent_call` step type → `agentExecutionService.executeRun()`. |
+| Conversion-event-to-action wiring | **No** | `conversionEvents` written but never consumed to trigger anything. |
+| Service-user / system-principal plumbing | **Partial** | `startedByUserId` nullable; onboarding service passes `null` for system-initiated runs. No formal system principal. `service_principals` table exists but unused for this. |
 
 ---
 
