@@ -142,4 +142,4 @@ No new findings beyond what Codex caught. Spec is structurally clean — frontma
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0 (no items routed to tasks/todo.md)
-- Spec commit after iteration:   pending (will be set after auto-commit step)
+- Spec commit after iteration:   dd08e9a9

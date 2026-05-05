@@ -95,13 +95,15 @@ Every file the spec touches. New files are marked `[NEW]`; everything else is an
 
 | File | Change |
 |---|---|
-| `server/lib/env.ts` | Add a new exported validator function `validateWebhookSecretOrThrow()` that throws when `NODE_ENV === 'production'` and `WEBHOOK_SECRET` is missing or its length < 32. Call it from the existing prod boot validation chain (alongside `validateEncryptionKeyOrThrow`). The validator function is a pure boundary-check on `process.env`; mirrors the shape of `validateEncryptionKeyOrThrow` so the test pattern at `server/lib/__tests__/encryptionKeyValidator.test.ts` can be applied directly. |
+| `server/lib/env.ts` | Add a new exported validator function `validateWebhookSecretOrThrow()` that throws when `NODE_ENV === 'production'` and `WEBHOOK_SECRET` is missing or its length < 32. Pure boundary-check on `process.env`; mirrors the shape of `validateEncryptionKeyOrThrow` so the test pattern at `server/lib/__tests__/encryptionKeyValidator.test.ts` can be applied directly. |
+| `server/index.ts` | At the boot validation site (the existing block around line 535 that imports and calls `validateEncryptionKeyOrThrow()`), add a parallel `validateWebhookSecretOrThrow()` call so a missing/short secret fails fast at boot before any request is accepted. Order: encryption-key check first, webhook secret check second; both must run before the server binds to the port. |
 | `server/services/webhookService.ts` | Remove the `if (!secret) return true` branch and the `webhookOpenModeWarned` flag. In dev, an unset secret throws so it cannot land in prod silently. |
 | `server/middleware/auth.ts` | `requireSubaccountPermission` 403-branch now calls `recordSecurityEvent({ eventType: 'auth.permission_denied', ... })` with `subaccountId` populated, mirroring `requireOrgPermission`. Resolves `organisationId` via `req.orgId ?? req.user.organisationId` and asserts the result is non-null before emitting (see §4.L2). |
 | `server/lib/rateLimitKeys.ts` | Add two email-only builders: `authLoginEmailOnly` (sustained / hourly) and `authLoginEmailOnlyBurst` (micro-burst / 5-min window). Both keyed on lowercased email; namespace and shape inherit the existing convention. |
 | `server/routes/auth.ts` | `/login` handler runs the two new email-only buckets after the existing `ip:email` short and long buckets. On deny, returns 429 with the same headers as the existing buckets. |
-| `server/services/optimiser/__tests__/verificationMatrix.test.ts` | Remove `.skip` on the cost-gate test. Add CI guard: skip locally if `LIVE_LLM_COST_GATE !== '1'`. |
-| `.github/workflows/optimiser-cost-gate.yml` `[NEW]` | New workflow runs the unblocked test against a seeded fixture with `LIVE_LLM_COST_GATE=1`. Fails the workflow if measured `>= $0.02/sa/day`. Fixture is seeded for determinism — variance is a fixture bug, not a gate-tuning problem. |
+| `server/services/optimiser/__tests__/verificationMatrix.test.ts` | Remove the `describe.skip(...)` placeholder block at lines 836-840 (it cannot host the cost-gate test — the file globally mocks `env`, `db`, `renderRecommendation`, and the optimiser query modules at module load time). Replace with a one-line comment pointing at the new dedicated cost-gate test file. |
+| `server/services/optimiser/__tests__/costGate.integration.test.ts` `[NEW]` | New dedicated integration test file for the live cost gate. Imports `runOptimiserScan` and `renderRecommendation` against the real modules (no `vi.mock` blocks), seeds a 5-subaccount × 7-day fixture inline, captures `optimiser.render.tokens_used` log events via a logger spy, computes `dollarsPerSubaccountPerDay`, asserts `< 0.02`. Body is wrapped in `if (process.env.LIVE_LLM_COST_GATE !== '1') { return; }` so local `npx tsx` invocations exit cleanly without LLM credentials. |
+| `.github/workflows/optimiser-cost-gate.yml` `[NEW]` | New workflow runs `npx tsx server/services/optimiser/__tests__/costGate.integration.test.ts` against the seeded fixture with `LIVE_LLM_COST_GATE=1`. Fails the workflow if measured `>= $0.02/sa/day`. Fixture is seeded for determinism — variance is a fixture bug, not a gate-tuning problem. |
 
 ### Tests
 
@@ -110,7 +112,8 @@ Every file the spec touches. New files are marked `[NEW]`; everything else is an
 | `server/jobs/__tests__/measureInterventionOutcomeJob.idempotency.test.ts` | Extend the existing dotted file (already wired to `npx tsx`) with new pure-function assertions against `decideOutcomeMeasurement` covering the read-before-decide contract — see §4.L4. The existing file's docstring already documents that the race-safe single-outcome property needs a real Postgres harness; that property moves to §13 deferred. |
 | `server/services/__tests__/rateLimitKeysPure.test.ts` | Extend the existing pure-test file (vitest `expect`/`test` shape, runnable via `npx tsx`) with cases for both new builders: `authLoginEmailOnly` and `authLoginEmailOnlyBurst` — same email different case → same key per builder; different emails → different keys; burst and sustained keys are distinct from each other and from the existing `authLogin` / `authLoginLong`. |
 | `server/lib/__tests__/webhookSecretValidatorPure.test.ts` `[NEW]` | Pure-function test of `validateWebhookSecretOrThrow()` mirroring the existing `encryptionKeyValidator.test.ts` shape (vitest `describe`/`it`/`expect`, runnable via `npx tsx`). Covers: prod + missing → throws; prod + length < 32 → throws; prod + length ≥ 32 → does not throw; non-prod (`NODE_ENV !== 'production'`) → does not throw regardless of secret value. Restores `process.env.NODE_ENV` and `process.env.WEBHOOK_SECRET` after each case. |
-| `server/lib/__tests__/requireSubaccountPermissionPure.test.ts` `[NEW]` | Pure-function test of a new `decidePermissionDenialEvent({ user, orgId, subaccountId, permissionKey, reqPath, reqMethod, ip, userAgent })` helper extracted from the middleware (see §4.L2 below). The helper builds the `recordSecurityEvent` payload deterministically; the test asserts that (a) it returns the expected payload shape, (b) it throws when `orgId` and `user.organisationId` are both null/undefined (the codified invariant). Uses vitest `expect`/`test`, runnable via `npx tsx`. The middleware itself wires the helper via a single function call and emits `recordSecurityEvent(decidePermissionDenialEvent(...))` — keeps the impure I/O at the boundary and the decision logic in pure code, consistent with the codebase's `*Pure.ts` + `*.test.ts` convention. |
+| `server/middleware/authPure.ts` `[NEW]` | Sibling pure module exporting `decidePermissionDenialEvent({ user, orgId, subaccountId, permissionKey, path, method, ip, userAgent })`. Pure decision logic only — no `req`, no `res`, no I/O. The helper builds a `SecurityEventInput` payload deterministically and throws when both `orgId` and `user.organisationId` are absent (codified invariant). Consistent with the codebase's `*Pure.ts` + `*.test.ts` convention. |
+| `server/middleware/__tests__/authPure.test.ts` `[NEW]` | Pure-function test of `decidePermissionDenialEvent`. Uses vitest `expect`/`test`, runnable via `npx tsx`. Asserts: (a) returns expected payload shape with all fields populated; (b) throws when `orgId` and `user.organisationId` are both null/undefined. The directory `server/middleware/__tests__/` does not currently exist — this PR introduces it. |
 
 ### Docs
 
@@ -121,7 +124,7 @@ Every file the spec touches. New files are marked `[NEW]`; everything else is an
 | `DEVELOPMENT_GUIDELINES.md` | New §8.30 — `WEBHOOK_SECRET` is a required prod env var (length ≥ 32); do not introduce new fail-open code paths in security primitives. |
 | `KNOWLEDGE.md` | Append three patterns: (1) "no fail-open on missing security secrets — fail boot fast"; (2) "credential-stuffing defence needs identity-only buckets at two windows (burst + sustained), independent of network identity"; (3) "`[OPEN]` audit-summary markers must be re-verified against code before being trusted — stale markers caused false-positive scope items in this phase". |
 | `tasks/builds/pre-launch-phase-3/operator-runbook.md` `[NEW]` | Capture conditional re-evaluation triggers for items correctly deferred today: AC-CGPT-R3-3, AR-CGPT-R3-1, CHATGPT-R1-7, F3, DG-4, CHATGPT-R1-4. Each entry names the precondition and the action when it fires. |
-| `tasks/current-focus.md` | After merge, update the sprint-pointer to reflect that `pre-launch-phase-3` shipped and development is locked down for test pass. |
+| `tasks/current-focus.md` | Updated **as part of this PR** to flip the sprint pointer to `pre-launch-phase-3`'s in-flight state (status changes from REVIEWING → BUILDING → SHIPPED across the build's lifecycle). The "shipped" state lands in the merge commit itself, so the file *is* part of the PR's diff, not a post-merge action. |
 
 ---
 
@@ -135,8 +138,9 @@ Every file the spec touches. New files are marked `[NEW]`; everything else is an
 
 **Fix.**
 
-1. `server/lib/env.ts` — extend the prod env validator to require `WEBHOOK_SECRET` length ≥ 32. Boot fails fast on missing/short secret in `NODE_ENV === 'production'`. Mirror the pattern at `validateEncryptionKeyOrThrow`.
-2. `server/services/webhookService.ts` — remove the `if (!secret) return true` branch and the `webhookOpenModeWarned` flag. In `NODE_ENV !== 'production'`, an unset secret throws a clear error from `verifyCallbackToken` so dev does not silently accept any token either.
+1. `server/lib/env.ts` — add `validateWebhookSecretOrThrow()` that throws when `NODE_ENV === 'production'` and `WEBHOOK_SECRET` is missing or its length < 32. Mirror the pattern at `validateEncryptionKeyOrThrow`.
+2. `server/index.ts` — at the boot validation site (around line 535, where `validateEncryptionKeyOrThrow()` is already called), add a parallel `validateWebhookSecretOrThrow()` invocation. Both must run before the server binds to the port. Boot fails fast on missing/short secret in production.
+3. `server/services/webhookService.ts` — remove the `if (!secret) return true` branch and the `webhookOpenModeWarned` flag. In `NODE_ENV !== 'production'`, an unset secret throws a clear error from `verifyCallbackToken` so dev does not silently accept any token either.
 
 **Idempotency posture.** N/A — env validation runs at boot.
 
@@ -152,7 +156,7 @@ Every file the spec touches. New files are marked `[NEW]`; everything else is an
 
 **Fix.** Two-part change so the decision logic stays in pure code (testable without a request mock) and the impure boundary stays as small as possible:
 
-1. **New pure helper** `decidePermissionDenialEvent` exported from `server/middleware/auth.ts` (or a sibling `*Pure.ts` module if the maintainer prefers — implementation choice, the spec only requires the helper exists). Inputs: `{ user, orgId, subaccountId, permissionKey, path, method, ip, userAgent }`. Behaviour:
+1. **New pure helper** `decidePermissionDenialEvent` exported from a new sibling module `server/middleware/authPure.ts` `[NEW]` (see §3). Inputs: `{ user, orgId, subaccountId, permissionKey, path, method, ip, userAgent }`. Behaviour:
    - Compute `organisationId = orgId ?? user.organisationId`.
    - If `organisationId == null`, throw `Error('requireSubaccountPermission: organisationId unresolved post-auth')` — the invariant is that authenticated subaccount paths always carry an org context, and a null here means an upstream invariant has broken (not a denial worth auditing). Failing loud beats emitting a partially-orphaned audit event.
    - Otherwise return a `SecurityEventInput` object with `eventType: 'auth.permission_denied'`, the resolved `organisationId`, the `subaccountId`, `actorUserId: user.id`, `actorRole: user.role`, `ip`, `userAgent`, and `meta: { route: path, method, requiredPermission: permissionKey }`.
@@ -166,7 +170,7 @@ The `subaccountId` field is already on `recordSecurityEvent`'s input shape (see 
 
 **Concurrency guard.** N/A — append-only log.
 
-**Test.** Pure-function test against `decidePermissionDenialEvent` (see §3 — `server/lib/__tests__/requireSubaccountPermissionPure.test.ts` `[NEW]`). Asserts the returned payload has the expected shape, and the helper throws when both `orgId` and `user.organisationId` are absent. Middleware wiring itself is verified by manual smoke test (the spec follows the codebase's `*Pure.ts` + `*.test.ts` convention; introducing a middleware-level vitest harness is out of scope per `runtime_tests: pure_function_only`).
+**Test.** Pure-function test against `decidePermissionDenialEvent` (see §3 — `server/middleware/__tests__/authPure.test.ts` `[NEW]`). Asserts the returned payload has the expected shape, and the helper throws when both `orgId` and `user.organisationId` are absent. Middleware wiring itself is verified by manual smoke test (the spec follows the codebase's `*Pure.ts` + `*.test.ts` convention; introducing a middleware-level vitest harness is out of scope per `runtime_tests: pure_function_only`).
 
 ### L3 — AR-5.1: per-email-only login rate-limit bucket
 
@@ -231,15 +235,17 @@ This locks the contract that `recordOutcome` cannot be reached on partial input 
 
 **Fix.**
 
-The current `describe.skip(...)` block at `verificationMatrix.test.ts:836-840` is a placeholder — only an `it` title with no body. L5 *implements* the test, not just unskips it. The work breakdown:
+The current `describe.skip(...)` block at `verificationMatrix.test.ts:836-840` is a placeholder — only an `it` title with no body. The file itself globally mocks `env`, `db`, `renderRecommendation`, and the optimiser query modules at load time, so a live LLM call cannot be hosted there. L5 *implements* the test in a new dedicated integration file. The work breakdown:
 
-1. **Replace** the `describe.skip` block with a `describe(...)` block (no `.skip`) containing one `it(...)` with a real body. Wrap the body in `if (process.env.LIVE_LLM_COST_GATE !== '1') { return; }` so local `npx tsx` invocations exit cleanly.
-2. **Test body — fixture seeding.** Use the same in-test seeding helper that the existing optimiser pure-tests use to construct the 5-subaccount × 7-day telemetry input. The fixture lives inline in the test file (single source of seeded shape; no separate fixture asset). Determinism: the fixture is hand-tuned so the LLM is exercised on a representative recommendation surface, not data variance. Variance in cost across runs > ±10% is a fixture bug, not a tuning problem.
-3. **Test body — cost measurement.** Run `runOptimiserScan` against the seeded fixture with live LLM credentials. The optimiser already emits `optimiser.render.tokens_used` log events on each `renderRecommendation` call; capture them in-test via a logger spy and aggregate to a per-run total. Convert to dollars using the model's published per-token rate (a constant in the test, not a config — the gate is calibrated to one specific model and re-tuning means re-tuning the gate explicitly).
-4. **Test body — assertion.** Compute `dollarsPerSubaccountPerDay = totalCost / (5 subaccounts × 7 days)`. Assert `dollarsPerSubaccountPerDay < 0.02`. On fail, the test logs the measured value and fails the workflow.
-5. **CI workflow `.github/workflows/optimiser-cost-gate.yml` `[NEW]`.** Triggers: `pull_request` paths matching `server/services/optimiser/**`, plus `workflow_dispatch`. Job sets `LIVE_LLM_COST_GATE=1`, provides DB + LLM credentials via repo secrets, runs `npx tsx server/services/optimiser/__tests__/verificationMatrix.test.ts`. Job fails the run on assertion failure.
-6. **Workflow annotation.** The test prints the measured value to stdout in `::notice::` GitHub annotation form (`echo "::notice title=Optimiser cost::$X /sa/day"`). The annotation surfaces on the PR check page so reviewers see the measured number, not just PASS/FAIL.
-7. **Secret-absence behaviour.** If LLM/DB secrets are unavailable on the PR event (e.g. PR from a fork), the workflow exits early with `::warning::Cost gate skipped — secrets unavailable on this event`. The exit-early path does NOT mark the workflow successful in a way that satisfies a required-status-check; it explicitly fails with an exit code that the branch-protection rule treats as "not satisfied" if branch protection is configured to require this gate. Branch-protection configuration is operator action — see §13.
+1. **Remove** the `describe.skip(...)` placeholder from `verificationMatrix.test.ts:836-840` and leave a one-line comment pointing at the new file.
+2. **New file `server/services/optimiser/__tests__/costGate.integration.test.ts` `[NEW]`.** Real imports (no `vi.mock` blocks) of `runOptimiserScan` and `renderRecommendation`. Body wrapped in `if (process.env.LIVE_LLM_COST_GATE !== '1') { return; }` so local `npx tsx` invocations exit cleanly without LLM credentials.
+3. **Test body — fixture seeding.** Inline seeding of a 5-subaccount × 7-day telemetry fixture. The fixture lives inline in the test file (single source of seeded shape; no separate fixture asset). Determinism: the fixture is hand-tuned so the LLM is exercised on a representative recommendation surface, not data variance. Variance in cost across runs > ±10% is a fixture bug, not a tuning problem.
+4. **Test body — cost measurement.** Run `runOptimiserScan` against the seeded fixture with live LLM credentials. The optimiser already emits `optimiser.render.tokens_used` log events on each `renderRecommendation` call; capture them in-test via a logger spy and aggregate input + output tokens per call. Convert to dollars using the per-token rates pinned in step 5.
+5. **Pinned model and rates.** The cost gate is calibrated against the optimiser's currently-configured render model (read from `getOptimiserRenderModel()` or the equivalent constant exported by the optimiser module — name the function in the test for traceability). Per-token rates are inlined as named constants at the top of the test file (`COST_GATE_INPUT_USD_PER_TOKEN`, `COST_GATE_OUTPUT_USD_PER_TOKEN`) with a comment naming the model, the rate source URL, and the date the rates were captured. **Update path:** when the optimiser model changes, update both the model resolver call site AND the rate constants in the same PR; the cost-gate workflow will rerun with the new rates and re-establish the budget.
+6. **Test body — assertion.** Compute `dollarsPerSubaccountPerDay = totalCost / (5 subaccounts × 7 days)`. Assert `dollarsPerSubaccountPerDay < 0.02`. On fail, the test logs the measured value and fails the workflow.
+7. **CI workflow `.github/workflows/optimiser-cost-gate.yml` `[NEW]`.** Triggers: `pull_request` paths matching `server/services/optimiser/**` AND any path in the LLM/cost surface that can change `renderRecommendation` cost without touching `optimiser/**` — currently just `server/lib/llm/**` if it exists, else only `optimiser/**`. Plus `workflow_dispatch` for manual runs (e.g. a model-pricing change captured outside the optimiser tree). Job sets `LIVE_LLM_COST_GATE=1`, provides DB + LLM credentials via repo secrets, runs `npx tsx server/services/optimiser/__tests__/costGate.integration.test.ts`. Job fails the run on assertion failure.
+8. **Workflow annotation.** The test prints the measured value to stdout in `::notice::` GitHub annotation form (`echo "::notice title=Optimiser cost::$X /sa/day"`). The annotation surfaces on the PR check page so reviewers see the measured number, not just PASS/FAIL.
+9. **Secret-absence behaviour.** If LLM/DB secrets are unavailable on the PR event (e.g. PR from an external fork), the workflow exits with `::error::Cost gate cannot run — secrets unavailable. Trusted maintainer must rerun with `workflow_dispatch` after pulling the fork branch into a trusted ref.` and a non-zero exit code. The "no measurement = block" stance is the correct one — secret-absent runs are not a clean PASS, they are a "did not run, do not merge yet" condition that the maintainer resolves by rerunning the gate from a trusted context. Branch-protection configuration that elevates this into a hard merge block is operator action — see §13.
 
 **Branch protection.** The workflow itself fails the run on cost overrun, which surfaces as a failed PR check. *Whether* the failed check blocks merge is a branch-protection setting in the GitHub repo admin, not a file in this PR. Capturing the protection rule for `optimiser-cost-gate` is operator action, deferred to §13.
 
@@ -400,7 +406,7 @@ No state machines introduced or modified.
 Per `docs/spec-context.md`:
 
 - **L1:** boot-time check, plus a pure-function test of the new `validateWebhookSecretOrThrow()` helper at `server/lib/__tests__/webhookSecretValidatorPure.test.ts` `[NEW]`, mirroring `encryptionKeyValidator.test.ts`. Required, not optional — L1 is launch-boundary security and the validator is a static-gate-friendly pure boundary check on `process.env`.
-- **L2:** pure-function test (`server/lib/__tests__/requireSubaccountPermissionPure.test.ts` `[NEW]`) of `decidePermissionDenialEvent` — asserts the returned payload shape and the throw-on-null-organisationId invariant.
+- **L2:** pure-function test (`server/middleware/__tests__/authPure.test.ts` `[NEW]`) of `decidePermissionDenialEvent` — asserts the returned payload shape and the throw-on-null-organisationId invariant.
 - **L3:** pure-function test cases added to the existing `server/services/__tests__/rateLimitKeysPure.test.ts` covering both new builders.
 - **L4:** pure-function test cases added to the existing `server/jobs/__tests__/measureInterventionOutcomeJob.idempotency.test.ts` covering `decideOutcomeMeasurement`'s read-before-decide ordering.
 - **L5:** CI gate (workflow), not local test.
@@ -418,7 +424,7 @@ Per `docs/doc-sync.md`:
 - `DEVELOPMENT_GUIDELINES.md` — new §8.30: `WEBHOOK_SECRET` required in prod (length ≥ 32); no fail-open paths in security primitives.
 - `KNOWLEDGE.md` — append three patterns: (1) no fail-open on missing secrets; (2) identity-only rate buckets defend credential stuffing across IP rotation, paired burst + sustained windows defend the spike inside the sustained window; (3) `[OPEN]` audit-summary markers must be re-verified against code before being trusted — stale markers caused false-positive scope items in this phase.
 - `tasks/todo.md` — H1 / H2 / H3 marker updates plus item 22 closure when L1 ships.
-- `tasks/current-focus.md` — update at end of build.
+- `tasks/current-focus.md` — updated in this PR (sprint pointer flip is part of the diff, not a post-merge action).
 
 No `docs/capabilities.md` change (no customer-visible capability shifts).
 
@@ -432,13 +438,13 @@ This spec ships when:
 - L2: subaccount permission denials emit `auth.permission_denied` to `security_audit_events`, with the non-null `organisationId` invariant codified by an explicit assertion.
 - L3: a botnet rotating IPs against a single email is capped at 10 attempts/5 minutes (burst) AND 100 attempts/hour (sustained).
 - L4: the read-before-decide ordering invariant on `decideOutcomeMeasurement` is asserted by a pure-function test in the existing dotted file. Race-safe single-outcome property tracked as deferred (§13).
-- L5: every optimiser-touching PR runs the cost-gate workflow against a seeded fixture; the workflow fails the run when the measured cost is ≥ $0.02/sa/day. Branch-protection configuration that elevates this failed run into a merge block is operator action — see §13.
+- L5: every optimiser-touching PR runs the cost-gate workflow against the seeded fixture in `costGate.integration.test.ts`; the workflow fails the run when (a) measured cost ≥ $0.02/sa/day, or (b) LLM/DB secrets are unavailable on the event (no measurement = block, not silent pass). Branch-protection configuration that elevates these failed runs into hard merge blocks is operator action — see §13.
 - L6: no code change. H3 marker flipped to closed with present-state evidence.
 - H1 / H2 / H3: stale `[OPEN]` and unresolved markers in `tasks/todo.md` are corrected.
 - H4: `operator-runbook.md` captures conditional re-evaluation triggers.
 - All doc-sync items in §11 are landed in the same PR.
 
-After merge, `tasks/current-focus.md` is updated and development is locked down for test pass.
+`tasks/current-focus.md` is updated as part of this PR (final commit flips the pointer to "shipped"); development is locked down for test pass on merge.
 
 ---
 
@@ -470,7 +476,7 @@ Items considered for inclusion in this spec and explicitly left out, with their 
 Per the spec-authoring checklist Appendix:
 
 - [x] §0 Verification log — every cited item verified open or closed; closed items dropped to hygiene only
-- [x] No new application primitives — every code change extends an existing one. Net-new artifacts are limited to: one CI workflow (L5), one new pure-function test file (L2), and extensions to two existing test files (L3, L4).
+- [x] No new application primitives — every code change extends an existing one. Net-new artifacts are limited to: one CI workflow (L5), one new pure module (`server/middleware/authPure.ts` for L2), three new pure-function test files (`webhookSecretValidatorPure.test.ts` for L1, `authPure.test.ts` for L2, `costGate.integration.test.ts` for L5), and extensions to two existing test files (L3, L4).
 - [x] File inventory — all new and changed files listed in §3
 - [x] Contracts — two data shapes introduced (§8: sustained + burst email-only rate-limit keys); existing primitives produce/consume them
 - [x] No new tenant-scoped tables — RLS checklist trivially satisfied (§5)
