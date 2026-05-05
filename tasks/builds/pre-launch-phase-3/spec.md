@@ -127,9 +127,11 @@ No invent-new primitives except `AppError` (R3-2), which is justified inline bec
 Phase 3 is hardening — no new tenant entities. Deltas:
 
 - **`AppError` class** (R3-2) — new TypeScript class in `server/lib/errors.ts` (or co-located with `asyncHandler.ts`). Single shape `{ code: string, statusCode: number, message: string, context?: Record<string, unknown> }`. Has a discriminated `code` enum sourced from a new `shared/errorCodes.ts` registry.
-- **Audit-event-name enum** (R3-6) — new TypeScript union in `shared/types/securityAuditEvents.ts` with the four namespaces (`auth.*`, `oauth.*`, `security.*`, `audit.*`). `securityAuditService.recordEvent` is re-typed to accept this union, not `string`.
+- **Audit-event factory** (R3-6) — new TypeScript const-object factory in `shared/types/securityAuditEvents.ts` exporting nested namespaces (`auditEvent.auth.loginFailed`, `auditEvent.oauth.stateExpired`, etc.) backed by a closed `SecurityAuditEventName` union derived from the factory via `typeof`. The factory is the ONLY exported way to obtain an event name — raw string literals are forbidden by the B.4 grep gate and structurally impossible to reach without an explicit `as SecurityAuditEventName` cast (also caught by B.4). `securityAuditService.recordEvent` is re-typed to accept the union, not `string`.
 - **`MAX_GHL_LOCATIONS_TO_ENROL`** — new constant in `server/config/systemLimits.ts`. Default value pinned in §11.
+- **`MAX_GHL_PAGES_PER_RUN`** — new constant in `server/config/systemLimits.ts`. Caps the total number of pages a single auto-enrol job chain processes (defense-in-depth against an upstream API bug that returns a non-terminating cursor). Default value pinned in §11.
 - **Sentinel-org constant exposure** — `SENTINEL_ORG_ID` (already exists in Phase 2) made an exported constant from `server/services/securityAuditService.ts` so admin-query helpers can OR-filter against it. No new constant — promotion from local to exported.
+- **New error codes added to `shared/errorCodes.ts`** (in addition to the seed-set per A.1): `CROSS_TENANT_TOKEN_REFRESH` (D.3), `MISSING_PRINCIPAL_CONTEXT` (D.3), `GHL_ENROL_PAGE_CAP_EXCEEDED` (D.5).
 
 Schema change scope is intentionally minimal:
 
@@ -160,35 +162,37 @@ Each contract that changes is named here. Producer/consumer pairs explicit per c
   });
   ```
 - **Nullability:** `context` may be undefined. `code` and `statusCode` are required. `message` is required and human-readable.
-- **Source-of-truth precedence:** `AppError.statusCode` > prior `errorCode` mapping > `statusCode` fallback in `asyncHandler`. Existing throw-sites that surface `{statusCode, message, errorCode}` shapes continue to work — `asyncHandler` checks `instanceof AppError` first, falls through to the duck-typed shape second.
+- **Source-of-truth precedence:** `AppError.statusCode` > prior `errorCode` mapping > `statusCode` fallback in `asyncHandler`. Existing throw-sites that surface `{statusCode, message, errorCode}` shapes continue to work — `asyncHandler` checks `instanceof AppError` first, then for any non-`AppError` error that exposes a numeric `statusCode` property, normalises it on-the-fly into a synthetic `AppError` instance with `code: error.errorCode ?? 'LEGACY_ERROR'`, the original `statusCode` and `message`, and `context: { legacy: true }`. The normalised error is what the response writer + structured logger see — downstream observers always operate on a single shape regardless of whether the throw site was migrated. The normalisation layer is purely additive: existing duck-typed throws produce identical wire output and the same status-code mapping; the only change is a uniform internal error envelope. Backfilling existing throw sites to construct `AppError` directly is still a Phase 4 sweep (see §13).
 
-### 7.2 Audit event name (re-typed)
+### 7.2 Audit event name (factory + closed union)
 
-- **Type:** Discriminated union — `'auth.login_succeeded' | 'auth.login_failed' | 'auth.signup' | ... | 'oauth.state_issued' | 'oauth.state_expired' | ... | 'security.rate_limit_trip' | ... | 'audit.permission_granted' | ...`. The full list is enumerated in `shared/types/securityAuditEvents.ts` and is closed (any addition requires a spec amendment).
-- **Producer:** every call site of `securityAuditService.recordEvent` or `recordSecurityEvent`. Phase 3 migrates ALL existing call sites — this is the rename pass.
+- **Type:** `SecurityAuditEventName` discriminated union derived from a const-object factory `auditEvent` exported from `shared/types/securityAuditEvents.ts`. Producers obtain event names via member access (`auditEvent.auth.loginFailed`, `auditEvent.oauth.stateExpired`, `auditEvent.security.rateLimitTrip`, `auditEvent.audit.permissionGranted`, etc.). The factory is `as const`-typed so `SecurityAuditEventName = typeof auditEvent[Namespace][EventKey]` resolves to a literal-string union. The list is closed — additions require a spec amendment + re-export from the factory.
+- **Producer:** every call site of `securityAuditService.recordEvent` or `recordSecurityEvent`. Phase 3 migrates ALL existing call sites — this is the rename pass. Producers MUST use `auditEvent.<namespace>.<eventKey>` and never raw string literals. The B.4 grep gate enforces this and additionally fails on any `as SecurityAuditEventName` cast (the factory eliminates the legitimate need for that cast — its presence indicates a bypass).
 - **Consumer:** `securityAuditService` writer + admin query surfaces.
-- **Example instance:** `'oauth.state_expired'` (new event added by R1-7).
+- **Example instance:** `auditEvent.oauth.stateExpired` (new event added by R1-7).
 - **Nullability:** required, non-empty.
-- **Source-of-truth precedence:** the union type. The DB stores the string verbatim; type-narrowing happens at write time.
+- **Source-of-truth precedence:** the factory const-object. The DB stores the string value verbatim; type-narrowing happens at write time.
+- **Ordering guarantee:** audit events are append-only with a `created_at` timestamp populated by the DB at insert time. Read-side ordering is `ORDER BY created_at DESC, id DESC` (the surrogate `id` provides a deterministic tiebreaker for events written within the same millisecond on the same writer; cross-writer same-millisecond ordering is undefined and admin-query consumers MUST NOT rely on it for causality reconstruction). The DESC-DESC ordering rule is enumerated as a §8 invariant in DEVELOPMENT_GUIDELINES — Phase 3 documents the convention without rewriting existing read paths.
 
 ### 7.3 Login rate-limit key (extended)
 
 - **Type:** Two parallel keys. Existing: `rl:v1:auth:login:ip-email:<ip>:<normalised-email>`. New: `rl:v1:auth:login:email:<normalised-email>`.
-- **Producer:** `rateLimitKeys.ts` exports two helper functions — existing `loginIpEmailKey(ip, email)` + new `loginEmailOnlyKey(email)`.
+- **Producer:** `rateLimitKeys.ts` exports two helper functions — existing `loginIpEmailKey(ip, email: NormalisedEmail)` + new `loginEmailOnlyKey(email: NormalisedEmail)`. Both helpers take a branded `NormalisedEmail` parameter (not a raw `string`). The branded type is constructed only by `normaliseEmail(input: string): NormalisedEmail` — there is no other constructor and no synonymous helper. Callers that have a raw string MUST route through `normaliseEmail` to obtain a `NormalisedEmail`; the type system rejects raw strings at the helper signature, and there is no fallback path.
 - **Consumer:** `routes/auth.ts` login handler — checks both buckets; failure is the union (either bucket trips → reject).
 - **Limits:** existing `ip:email` keeps `10/60s` and `50/3600s`. New `email`-only bucket is `100/3600s`. Rationale below.
 - **Rationale on the email-only limit:** the email-only bucket targets a single victim email under IP-rotation. 100/hour is generous for a real human user retrying their password (any real user hitting 100 attempts in an hour is themselves the abuser) but tight enough to defeat a 50-node botnet at 1k+ attempts/hr against the same email. Shared-IP organisations (offices, universities) are unaffected because the bucket is keyed on email, not IP — different users have different emails.
+- **Type-system enforcement vs grep:** the canonical and only enforcement of normalised-email-at-keying is the branded `NormalisedEmail` type. The B.3 grep gate (§11) is retained as a redundant compile-time-pre-check for files that bypass the type checker (e.g. `.js` or untyped scripts in `scripts/**`); within typed `server/**`, the type signature alone prevents the bug. The grep gate's data-flow tracing approach was rejected as fragile — see §11 B.3 for the resolved gate spec.
 
 ### 7.4 OAuth state lifecycle audit (new events)
 
 - **Producer:** `consumeGhlOAuthState` (and any analogous OAuth state consumer) emits one of:
-  - `oauth.state_issued` — on `setGhlOAuthState` write (already implicit; now logged)
-  - `oauth.state_consumed` — on successful single-use consumption
-  - `oauth.state_expired` — when consume finds row but `expires_at < now()`
-  - `oauth.state_not_found` — when consume finds no row (could be expired-and-cleaned, never-set, or replay)
+  - `auditEvent.oauth.stateIssued` — on `setGhlOAuthState` write (already implicit; now logged)
+  - `auditEvent.oauth.stateConsumed` — on successful single-use consumption
+  - `auditEvent.oauth.stateExpired` — when consume finds row but `expires_at < now()`
+  - `auditEvent.oauth.stateNotFound` — when consume finds no row (could be expired-and-cleaned, never-set, or replay)
 - **Consumer:** post-launch dashboard / admin query — Phase 3 only emits; no UI surface ships.
 - **Cardinality budget:** all four events are bounded by OAuth callback rate; expected volume is single-digit per hour pre-launch. No sampling required.
-- **Context payload:** each event includes `{ provider: 'ghl' | ..., userAgent, ipHash, callerSegment? }` so the post-launch revert decision (R1-7) can be made on segmented data, not aggregate.
+- **Context payload:** each event includes `{ provider: 'ghl' | ..., userAgent, ipHash, callerSegment? }` so the post-launch revert decision (R1-7) can be made on segmented data, not aggregate. The `stateConsumed` event additionally includes `{ issuedAt: ISO-8601, consumedAt: ISO-8601, latencyMs: number }` — `latencyMs = consumedAt - issuedAt` — so the post-launch dataset captures success-side latency distribution (P50 / P95 / margin to TTL), not just the failure modes. This is the primary input for the deferred TTL-revert decision in §13: keep 5min if P95 latency stays well under TTL, revert to 10min if margin is tight or there is a long tail. The `stateExpired` event includes the same `issuedAt`-derived field so expired flows also carry their full lifecycle latency.
 
 ### 7.5 `logAndSwallow` (extended observability)
 
@@ -206,15 +210,18 @@ Each contract that changes is named here. Producer/consumer pairs explicit per c
 ### 7.7 `connectionTokenService.refreshIfExpired` cross-tenant assertion (extended)
 
 - **Producer:** unchanged caller contract — connection object passed in by caller via org-scoped fetch.
-- **Consumer:** `connectionTokenService.refreshIfExpired` adds an org-id assertion before the existing UPDATE. Reads `principalOrgId` from the in-scope `PrincipalContext` ALS.
-- **New assertion:** `if (principalOrgId !== null && principalOrgId !== connection.organisationId) throw new AppError({code: 'CROSS_TENANT_TOKEN_REFRESH', statusCode: 403, message: '...', context: { connectionOrgId: connection.organisationId, principalOrgId }})`. The `principalOrgId !== null` guard preserves the existing system-admin override path (no PrincipalContext set during boot-time refresh sweeps).
-- **Idempotency posture:** unchanged — assertion fires before the existing optimistic predicate.
+- **Consumer:** `connectionTokenService.refreshIfExpired` adds two org-id assertions before the existing UPDATE. Reads `principalOrgId` from the in-scope `PrincipalContext` ALS.
+- **New assertions** (in order — `MISSING_PRINCIPAL_CONTEXT` fires before `CROSS_TENANT_TOKEN_REFRESH` so the operator can distinguish "context lost" from "wrong tenant" in audit logs):
+  1. `if (principalOrgId === undefined) throw new AppError({code: 'MISSING_PRINCIPAL_CONTEXT', statusCode: 500, message: 'Principal context not set in ALS — refusing token refresh', context: { connectionId: connection.id, connectionOrgId: connection.organisationId }})` — protects against silent bypass when the ALS context was never populated (e.g. a future caller that forgot to enter `withPrincipalContext`). The strict `=== undefined` check is intentional: `null` is the explicit system-flow sentinel and MUST be passed deliberately, never inferred from a missing ALS entry.
+  2. `if (principalOrgId !== null && principalOrgId !== connection.organisationId) throw new AppError({code: 'CROSS_TENANT_TOKEN_REFRESH', statusCode: 403, message: 'Cross-tenant token refresh blocked', context: { connectionOrgId: connection.organisationId, principalOrgId }})` — the explicit `null` allowance preserves the system-admin override path (boot-time refresh sweeps that operate outside any organisation's principal scope explicitly set `principalOrgId: null` via the established system-call wrapper).
+- **PrincipalContext API contract:** `principalOrgId` is typed as `string | null | undefined` at the read site so the difference between "not set" and "explicit system flow" is visible to the type checker. The two-assertion pattern is canonical for any future service that needs the same distinction.
+- **Idempotency posture:** unchanged — assertions fire before the existing optimistic predicate.
 
 ## 8. Permissions / RLS checklist (per checklist §4)
 
 No new tenant-scoped tables. Phase 3 touches existing tables `security_audit_events`, `oauth_state_nonces`, `integration_connections` — all already in `RLS_PROTECTED_TABLES` per Phase 1/2 manifest entries.
 
-The two new audit-event types (`oauth.state_expired`, `oauth.state_not_found`) write under the sentinel-org UUID — same posture as existing pre-auth events. RLS `WITH CHECK` clause already permits sentinel-org writes per Phase 2 migration `0281`.
+The two new audit-event types (`auditEvent.oauth.stateExpired`, `auditEvent.oauth.stateNotFound`) write under the sentinel-org UUID — same posture as existing pre-auth events. RLS `WITH CHECK` clause already permits sentinel-org writes per Phase 2 migration `0281`.
 
 The login email-only RL bucket (§7.3) writes to the existing rate-limit storage (DB table or in-process — confirm at build time per existing pattern). No new table; no RLS implication.
 
@@ -260,29 +267,29 @@ The build chunks below are presented in dependency order. Each is sized to fit a
 ### Chunk A — Canonical types (foundation)
 - **A.1** New `shared/errorCodes.ts` registry — discriminated union of error codes seeded with codes already used in the codebase (e.g. `ARTEFACT_ALREADY_COMPLETED`, `OPTIMISTIC_LOCK_FAILED`). Initial enum is closed; additions require spec amendment.
 - **A.2** New `server/lib/errors.ts` — `AppError` class. `asyncHandler` updated to handle `AppError` first.
-- **A.3** New `shared/types/securityAuditEvents.ts` — closed union of audit event names across `auth.* | oauth.* | security.* | audit.*` namespaces. `securityAuditService` re-typed.
-- **A.4** Rename pass — every existing `recordSecurityEvent` / `recordEvent` call site updated to use the typed constant. Mechanical fix; CI grep gate from Chunk B will catch regressions.
+- **A.3** New `shared/types/securityAuditEvents.ts` — exports a const-object factory `auditEvent` with four nested namespaces (`auth`, `oauth`, `security`, `audit`); each namespace is an `as const` object whose property values are the canonical event-name strings. The `SecurityAuditEventName` union type is derived as `typeof auditEvent[keyof typeof auditEvent][keyof typeof auditEvent[keyof typeof auditEvent]]` (a small generic helper expressed once at file top). `securityAuditService.recordEvent` re-typed to accept `SecurityAuditEventName`. The factory IS the union — there is no separate raw-string source. Producers MUST use `auditEvent.<namespace>.<eventKey>`; raw-string and `as`-cast callers fail B.4.
+- **A.4** Rename pass — every existing `recordSecurityEvent` / `recordEvent` call site updated to use `auditEvent.<namespace>.<eventKey>` member access (not raw strings, not type assertions). Mechanical fix; CI grep gate from Chunk B.4 catches regressions.
 - **A.5** Convention doc — new `docs/security-audit-namespace.md` describing the four namespaces. Update `architecture.md` § Layer 4 to reference it.
 
 ### Chunk B — CI grep invariants (depends on A)
 - **B.1** `scripts/verify-assert-active.sh` — grep guard that flags any service-layer fetch on a soft-deletable table that doesn't pass through `assertActive` / `isActive`. Allowlist file co-located.
 - **B.2** `scripts/verify-no-raw-console.sh` — grep guard that forbids raw `console.*` calls outside an explicit allowlist (`server/index.ts` boot, `server/lib/logger.ts` internals, `scripts/**`, `server/__tests__/**`).
-- **B.3** `scripts/verify-rate-limit-key-normalisation.sh` — grep guard that ensures every call to `loginIpEmailKey` / `loginEmailOnlyKey` (and any future `*Key` helper) receives a normalised email. The gate enforces the value-flow contract by tracing the email argument back to its assignment site and confirming the assignment matches one of: (a) inline `email.trim().toLowerCase()` / `normaliseEmail(email)`, or (b) a function parameter typed as `NormalisedEmail` (a new branded string type from `server/lib/rateLimitKeys.ts` returned only by `normaliseEmail()`). The branded-type approach is the canonical fix — it lets the grep gate compile to a simple "argument must be of type `NormalisedEmail`" check via TypeScript, with the grep-only fallback used only for files outside the type-checked scope. Centralised normalisation into a helper that returns `NormalisedEmail` is the intended pattern, not duplicated inline normalisation.
+- **B.3** `scripts/verify-rate-limit-key-normalisation.sh` — grep guard with a narrow scope: forbids any literal that looks like a raw email argument (e.g. `loginIpEmailKey(req.body.email`, `loginEmailOnlyKey(input)`) outside files whose imports include `normaliseEmail`. The canonical enforcement is the branded `NormalisedEmail` type — `loginIpEmailKey` / `loginEmailOnlyKey` (and any future `*Key` helper that consumes an email) take `NormalisedEmail` not `string`, and the only constructor of `NormalisedEmail` is `normaliseEmail(input: string): NormalisedEmail` exported from `server/lib/rateLimitKeys.ts`. The TypeScript checker rejects raw-string callers at the helper signature; B.3 exists only to catch `.js`-typed scripts and any caller that silenced the type via `as NormalisedEmail` (the gate fails on that cast as a bypass). Data-flow tracing was rejected as fragile and is NOT how this gate operates — it's a single-pass check for the cast-bypass pattern, not a static analyser.
 - **B.4** `scripts/verify-audit-event-namespace.sh` — grep guard that every call to `recordSecurityEvent` / `securityAuditService.recordEvent` uses a value from the `SecurityAuditEventName` union. Bypass-string detection: if `as SecurityAuditEventName` cast appears, fail with reviewer note.
 - **B.5** Each gate gets a known-bad fixture file (gitignored, reproduced via shell snippet in the gate script's docstring) that's run in dev to prove the gate trips. Gates wired into the CI workflow alongside existing `verify-*.sh`.
 
 ### Chunk C — Observability and audit additions (depends on A)
-- **C.1** OAuth state lifecycle telemetry — `consumeGhlOAuthState` emits `oauth.state_consumed` / `oauth.state_expired` / `oauth.state_not_found` per §7.4. `setGhlOAuthState` emits `oauth.state_issued`.
-- **C.2** AR-2.2 — `requireSubaccountPermission` emits `auth.permission_denied` event in 403 branch, mirroring `requireOrgPermission`.
+- **C.1** OAuth state lifecycle telemetry — `consumeGhlOAuthState` emits `auditEvent.oauth.stateConsumed` / `auditEvent.oauth.stateExpired` / `auditEvent.oauth.stateNotFound` per §7.4 (the `stateConsumed` and `stateExpired` events both carry `issuedAt` / `consumedAt` / `latencyMs` for the post-launch TTL-revert decision). `setGhlOAuthState` emits `auditEvent.oauth.stateIssued`.
+- **C.2** AR-2.2 — `requireSubaccountPermission` emits `auditEvent.auth.permissionDenied` event in 403 branch, mirroring `requireOrgPermission`.
 - **C.3** AR-1.1 — admin-query helper for `security_audit_events` exposes `includeSentinelOrg: boolean` parameter; doc note added to `architecture.md` Layer 4 section. No data migration.
 - **C.4** Documentation: `docs/oauth-state-telemetry.md` describes the four event types and the post-launch revert decision criteria (segment breakdown, mobile vs desktop, IdP type — captured as `context` fields on the audit event so the admin can filter).
 
 ### Chunk D — Independent hardening
 - **D.1** AR-5.1 — new `loginEmailOnlyKey` helper in `rateLimitKeys.ts`; `routes/auth.ts` login path checks both buckets. Limit: 100/3600s (rationale §7.3). Both buckets fail-open if storage backend errors (existing posture, unchanged).
 - **D.2** AR-4.1 — `securityAuditServicePure.ts` extended with `PII_SUBSTRINGS = ['password','token','secret','authorization','credential']`. Substring match runs in addition to exact-key match. Pure-function test added.
-- **D.3** AR-6.1 — `connectionTokenService.refreshIfExpired` adds an org-id assertion: `if (principalOrgId !== null && principalOrgId !== connection.organisationId) throw new AppError({code:'CROSS_TENANT_TOKEN_REFRESH', statusCode:403, ...})`. Sourced from the `PrincipalContext` ALS already in scope. Existing `guard-ignore-next-line` retained but augmented with the new assertion.
-- **D.4** GHL enrol cap (Phase-1 residue) — `MAX_GHL_LOCATIONS_TO_ENROL = 250` in `server/config/systemLimits.ts`. `oauthIntegrations.ts:424` aborts and emits `oauth.enrol_capped` audit event when the agency exceeds the cap; the response redirects with a "partial-enrol" status flag, and the remaining locations are picked up by the D.5 background job. Cap value rationale: a 250-location agency at ~50ms/location auto-enrol completes in ~12.5s, comfortably under the existing 15s timeout; agencies beyond 250 locations always require the pagination job from R1-8.
-- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
+- **D.3** AR-6.1 — `connectionTokenService.refreshIfExpired` adds two ordered org-id assertions per §7.7: (1) `principalOrgId === undefined` → throw `MISSING_PRINCIPAL_CONTEXT` (statusCode 500), then (2) `principalOrgId !== null && principalOrgId !== connection.organisationId` → throw `CROSS_TENANT_TOKEN_REFRESH` (statusCode 403). Sourced from the `PrincipalContext` ALS already in scope. Existing `guard-ignore-next-line` retained but augmented with the new assertions. Both new error codes added to `shared/errorCodes.ts` registry (A.1 sourcing).
+- **D.4** GHL enrol cap (Phase-1 residue) — `MAX_GHL_LOCATIONS_TO_ENROL = 250` in `server/config/systemLimits.ts`. `oauthIntegrations.ts:424` aborts and emits `auditEvent.oauth.enrolCapped` when the agency exceeds the cap; the response redirects with a "partial-enrol" status flag, and the remaining locations are picked up by the D.5 background job. Cap value rationale: a 250-location agency at ~50ms/location auto-enrol completes in ~12.5s, comfortably under the existing 15s timeout; agencies beyond 250 locations always require the pagination job from R1-8.
+- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `auditEvent.oauth.enrolProgress` / `auditEvent.oauth.enrolCompleted` / `auditEvent.oauth.enrolFailed` / `auditEvent.oauth.enrolPartial` events. Triggered when the inline path hits the §D.4 cap. **Concurrency model: single-writer per connection.** The pg-boss `singletonKey` is `ghl-enrol:${connectionId}` (NOT cursor-suffixed) — only one auto-enrol job per connection runs at any moment, regardless of which page it is on. The current page cursor is stored in the job payload (`{ connectionId, runId, pageCursor, pageIndex }`) and the re-enqueue carries the next cursor forward. This eliminates the duplicate-progress-event class where two cursor-different jobs racing on the same connection both report "enrolled X locations" for an overlapping subset. **Idempotency posture:** `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Page-count cap:** `MAX_GHL_PAGES_PER_RUN` (default `200`, allowing 10,000 locations across pages — comfortably above any realistic agency size) bounds the chain. When `pageIndex >= MAX_GHL_PAGES_PER_RUN` the job emits `auditEvent.oauth.enrolFailed` with `context.reason = 'GHL_ENROL_PAGE_CAP_EXCEEDED'` and stops without re-enqueuing — defense-in-depth against an upstream GHL API bug returning a non-terminating cursor. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
 - **D.6** AR-3.1 advisory-lock scope verification — read `workflowEngineService.ts:840-1924` and confirm whether `pgboss.send()` runs inside the same transaction as `pg_try_advisory_xact_lock`. If yes (xact lock holds across send): document via inline code comment + `architecture.md` note, no code change. If no (lock released before send): wrap the send in the same transaction, document in same comment + KNOWLEDGE.md entry. Decision routed to build-time after `feature-coordinator`'s `architect` invocation.
 
 ### Chunk E — Cleanup and convenience
@@ -320,10 +327,10 @@ Phase 3 introduces a small number of new write paths and one new state machine. 
 
 | Path | Idempotency | Retry | Concurrency guard | Terminal event |
 |------|-------------|-------|-------------------|----------------|
-| `recordSecurityEvent` for new `oauth.*` events (C.1) | non-idempotent (intentional — append-only audit log) | safe (write retries are duplicate audit rows; admin queries deduplicate at read time if needed) | none required (append-only) | n/a (no chain) |
-| `auth.permission_denied` from `requireSubaccountPermission` (C.2) | non-idempotent (intentional) | safe | none required | n/a |
+| `recordSecurityEvent` for new `auditEvent.oauth.*` events (C.1) | non-idempotent (intentional — append-only audit log) | safe (write retries are duplicate audit rows; admin queries deduplicate at read time if needed) | none required (append-only) | n/a (no chain) |
+| `auditEvent.auth.permissionDenied` from `requireSubaccountPermission` (C.2) | non-idempotent (intentional) | safe | none required | n/a |
 | Login email-only RL bucket increment (D.1) | non-idempotent — race-tolerant counter | safe | atomic INCR / DB-row UPDATE per existing pattern | n/a |
-| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations of the same page; per-location partial uniqueness handles cross-page retries | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
+| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry; the connection-scoped singleton means retries are serialised, not parallelised | **Single-writer per connection** — pg-boss `singletonKey: ghl-enrol:${connectionId}` (cursor lives in job payload, NOT in the singleton key) ensures at most one job per connection runs at any moment regardless of page progression. Per-location partial uniqueness handles the same-location-across-pages case introduced by upstream API inconsistency. Page-count is bounded by `MAX_GHL_PAGES_PER_RUN` (default 200) — exceeding the cap emits `auditEvent.oauth.enrolFailed` with `GHL_ENROL_PAGE_CAP_EXCEEDED` and terminates without re-enqueue. | `auditEvent.oauth.enrolCompleted` (success) `auditEvent.oauth.enrolFailed` (failure) `auditEvent.oauth.enrolPartial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
 | `connectionTokenService.refreshIfExpired` cross-tenant assertion (D.3) | n/a — read assertion before existing write | safe — assertion failure throws before the UPDATE | existing optimistic predicate retained | n/a |
 
 ### 12.2 State machine — GHL enrolment (D.5)
@@ -333,9 +340,9 @@ States: `pending → in_progress → completed | failed | partial`.
 - Valid transitions: `pending → in_progress`, `in_progress → completed`, `in_progress → failed`, `in_progress → partial`.
 - Forbidden: any backward transition (no `completed → in_progress`); no transition from terminal (`completed | failed | partial`) except via a fresh `(connectionId, newRunId)` chain — i.e. a re-trigger creates a new run, not a re-open of the old terminal.
 - Status set is **closed** — adding a new status (e.g. `cancelled`) requires spec amendment.
-- Pre-terminal state: an `in_progress` execution record (`oauth.enrol_progress` events) MUST exist before any terminal event is emitted.
+- Pre-terminal state: an `in_progress` execution record (`auditEvent.oauth.enrolProgress` events) MUST exist before any terminal event is emitted.
 - `partial`: emitted when the job hits `MAX_GHL_LOCATIONS_TO_ENROL` cap AND the operator-facing message includes a "resume" hint pointing at the manual re-trigger path.
-- `failed`: emitted on unrecoverable error (auth-token revoked mid-page, GHL API 5xx beyond `withBackoff` retry budget).
+- `failed`: emitted on unrecoverable error (auth-token revoked mid-page, GHL API 5xx beyond `withBackoff` retry budget, or `MAX_GHL_PAGES_PER_RUN` page cap exceeded — the latter carries `context.reason = 'GHL_ENROL_PAGE_CAP_EXCEEDED'` so the post-mortem can distinguish it from token-revoked or 5xx-saturated failures).
 - `completed`: emitted only after the last page returns 0 unprocessed locations.
 
 ### 12.3 DB unique constraints
@@ -346,20 +353,21 @@ Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are un
 
 ## 13. Deferred items
 
-- **OAuth state TTL revert decision (R1-7).** Phase 3 emits the four `oauth.state_*` events. The decision to keep 5min or revert to 10min waits on post-launch telemetry — minimum two weeks of staging traffic with mobile/desktop and IdP-type segment breakdown.
+- **OAuth state TTL revert decision (R1-7).** Phase 3 emits the four `auditEvent.oauth.state*` events (`stateIssued`, `stateConsumed`, `stateExpired`, `stateNotFound`) with success-side latency captured on `stateConsumed`. The decision to keep 5min or revert to 10min waits on post-launch telemetry — minimum two weeks of staging traffic with mobile/desktop and IdP-type segment breakdown plus the `latencyMs` distribution from §7.4.
 - **Invalidation-guards double-read profiling (R2-6).** Phase 3 ships no work. Re-evaluate after first production traffic spike OR after pre-launch load-testing run, whichever comes first.
 - **Agent-triggered GHL OAuth resume wiring** (Phase-1 residue). The `pendingRunId` column + `enqueueResumeAfterOAuth` are infrastructure for a future feature where an agent run triggers an OAuth connection. No such consumer exists today; wiring is one line at the future call site. Not Phase 4 either — wired when the consumer is built.
 - **Canonical error taxonomy backfill (R3-2 Phase 4).** Phase 3 ships the `AppError` class and `shared/errorCodes.ts` registry. Existing throw sites are NOT retrofitted — that's a Phase 4 sweep. New throws in Phase 3 use `AppError`; old throws continue to use `{statusCode, message, errorCode}` duck shape.
 - **Audit namespace rename Phase 4 sweep.** Phase 3 renames every existing call site (Chunk A.4) — there is no Phase 4 sweep needed for this. Recorded here for completeness so the absence is intentional, not forgotten.
 - **REQ #4 integration tests.** Permanently DEFER — pure-function tests are canonical per `feedback_unit-tests-mid-build`. The mini-spec text is amended in Chunk E (one-line edit to `docs/pre-launch-hardening-mini-spec.md`) to reflect this.
 - **AR-3.1 advisory-lock scope** — if Chunk D.6 confirms the dispatch is outside the lock's transaction, the fix lands in Phase 3. If the lock + send are correctly co-located, no code change ships and the verification is documented inline. The decision is an artefact of the build, not a deferral.
+- **CI gate: "no raw DB writes outside transaction helpers" (Phase 4 candidate).** Source: chatgpt-spec-review round 1 (technical, defer). The proposed gate would forbid `db.insert/update/delete` calls outside `withOrgTx` / explicit `db.transaction(...)` blocks, with an allowlist for system bootstrap, migrations, RLS policy enforcement queries, and admin tooling. Aligns with the spec's org-scoping posture but is NOT in the Phases 1+2 deferred backlog this spec is chartered to close. Tracked as a Phase 4 candidate alongside the `AppError` taxonomy backfill (R3-2 Phase 4) — both items "tighten the write surface" and naturally co-locate.
 
 ## 14. Self-consistency pass
 
 | Question | Verdict |
 |----------|---------|
 | Goals (close 24 deferred items with explicit verdicts) match Implementation (chunks A-E + verdicts table)? | yes |
-| Every "single source of truth" claim survives? `AppError` is the canonical typed error (asyncHandler reads it first); `SecurityAuditEventName` union is the canonical event-name source; `MAX_GHL_LOCATIONS_TO_ENROL` is the canonical cap | yes |
+| Every "single source of truth" claim survives? `AppError` is the canonical typed error (asyncHandler reads it first; legacy errors normalise into `AppError`); the `auditEvent` factory in `shared/types/securityAuditEvents.ts` is the canonical event-name source (the `SecurityAuditEventName` union is derived from it); `MAX_GHL_LOCATIONS_TO_ENROL` and `MAX_GHL_PAGES_PER_RUN` are the canonical caps; `NormalisedEmail` branded type is the canonical RL key constructor | yes |
 | Non-functional claims match execution model? No latency/throughput claims made; cardinality budget for OAuth events explicitly bounded; GHL pagination explicitly async | yes |
 | Every "must" / "guarantees" backed by mechanism? Audit-namespace rename gated by B.4 grep; `assertActive` adoption gated by B.1; raw-console regression gated by B.2; rate-limit normalisation gated by B.3 | yes |
 | File inventory? Every file mentioned in §5–§11 is enumerated below | see §15 |
@@ -367,8 +375,8 @@ Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are un
 ## 15. File inventory lock
 
 ### Files to create
-- `shared/errorCodes.ts` — error-code registry (A.1)
-- `shared/types/securityAuditEvents.ts` — audit event-name union (A.3)
+- `shared/errorCodes.ts` — error-code registry (A.1); seed-set + new codes `CROSS_TENANT_TOKEN_REFRESH`, `MISSING_PRINCIPAL_CONTEXT` (D.3), `GHL_ENROL_PAGE_CAP_EXCEEDED` (D.5)
+- `shared/types/securityAuditEvents.ts` — `auditEvent` factory + derived `SecurityAuditEventName` union (A.3)
 - `server/lib/errors.ts` — `AppError` class (A.2)
 - `docs/security-audit-namespace.md` — convention doc (A.5)
 - `docs/oauth-state-telemetry.md` — telemetry doc (C.4)
@@ -396,13 +404,13 @@ Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are un
 - `server/middleware/orgScoping.ts` — `setOrgGUC(tx, orgId)` helper (E.5)
 - `server/routes/oauthIntegrations.ts` — replace `withOrgTx({tx:db})` pattern (E.5); enrol cap (D.4)
 - `server/services/ghlAgencyOauthService.ts` — emit OAuth state lifecycle events (C.1); enrol-page job dispatch (D.5)
-- `server/services/ghlOAuthStateStore.ts` — emit `oauth.state_consumed` / `oauth.state_expired` / `oauth.state_not_found` (C.1)
-- `server/middleware/auth.ts` — `requireSubaccountPermission` emits `auth.permission_denied` (C.2)
+- `server/services/ghlOAuthStateStore.ts` — emit `auditEvent.oauth.stateConsumed` / `auditEvent.oauth.stateExpired` / `auditEvent.oauth.stateNotFound` with `issuedAt`/`consumedAt`/`latencyMs` context (C.1)
+- `server/middleware/auth.ts` — `requireSubaccountPermission` emits `auditEvent.auth.permissionDenied` (C.2)
 - `server/lib/rateLimitKeys.ts` — `loginEmailOnlyKey` helper (D.1)
 - `server/routes/auth.ts` — login checks both RL buckets (D.1)
 - `server/services/securityAuditServicePure.ts` — `PII_SUBSTRINGS` extension (D.2)
 - `server/services/connectionTokenService.ts` — cross-tenant assertion (D.3)
-- `server/config/systemLimits.ts` — `MAX_GHL_LOCATIONS_TO_ENROL = 250` (D.4)
+- `server/config/systemLimits.ts` — `MAX_GHL_LOCATIONS_TO_ENROL = 250` (D.4); `MAX_GHL_PAGES_PER_RUN = 200` (D.5)
 - `server/services/workflowEngineService.ts` — advisory-lock scope verification (D.6, may or may not change code)
 - `server/db/schema/subaccounts.ts` — add `externalIdNamespace: text('external_id_namespace')` column + register the partial-unique index in the table builder (D.5)
 - `KNOWLEDGE.md` — refresh `withOrgTx({tx:db})` gotcha entry (E.5)
