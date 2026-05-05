@@ -3,6 +3,7 @@
 //
 // No DB, no I/O. All functions are deterministic and side-effect-free.
 // Spec: tasks/builds/agentic-commerce/spec.md §7.3, plan §Chunk 10.
+// C4b-INVAL-RACE: shouldDiscardWriteForInvalidation (pre-launch-phase-2 chunk 6).
 // ---------------------------------------------------------------------------
 
 import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
@@ -79,4 +80,16 @@ export function validateResumeKind(
     };
   }
   return { valid: true };
+}
+
+/**
+ * Returns true if a step-run write should be discarded due to invalidation or
+ * cancellation. Used by pre-call and post-call guards in workflowEngineService
+ * to prevent late writes to steps that have been superseded.
+ *
+ * C4b-INVAL-RACE: both 'invalidated' and 'cancelled' are terminal-override
+ * statuses that must block further writes from in-flight I/O.
+ */
+export function shouldDiscardWriteForInvalidation(currentStatus: string): boolean {
+  return currentStatus === 'invalidated' || currentStatus === 'cancelled';
 }

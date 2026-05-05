@@ -1316,32 +1316,23 @@ export function computeRunResultStatus(
 
 Callers that need to surface "summary missing" do so via a separate field on the response/extraction shape.
 
-#### 4.3 C4a-6-RETSHAPE — Phase 5 owns this decision (recommendation: Branch A grandfather)
+#### 4.3 C4a-6-RETSHAPE — Phase 5 owns this decision (LOCKED: Branch A grandfather)
 
 **Ownership resolution.** The cross-spec consistency sweep (Task 6.6) surfaced unowned-decision drift between Phases 2 / 5 / 6: each chunk pointed at another for the C4a-6-RETSHAPE decision. The Phase 2 architect output covered schema decisions and renames; C4a-6-RETSHAPE is an execution-path concern and lives in Phase 5. This spec now owns it.
 
-**Recommendation: Branch A — grandfather the flat-string pattern.** Rationale:
+**Phase 2 decision — grandfathered (operator-locked):** The flat-string `error: <code-string>` pattern across all skill handlers is preserved as-is. Migration to a `{code, message, context}` envelope is deferred to Phase 3, conditional on a UI consumer requiring the structured shape (per operator-locked decision § 12.4 in the Phase 2 plan).
+
+Rationale for Branch A:
 
 - Pre-launch posture (`docs/spec-context.md § Architecture defaults`): rapid_evolution, prefer existing primitives, no introduce-then-defer.
 - Migrating ~40 skill handlers from `error: '<code-string>'` to `error: { code, message, context }` is high-effort low-value pre-launch — every handler ships pre-launch with a minor refactor for no direct testing-round benefit.
 - The 3 delegation skills (`spawn_sub_agents`, `reassign_task`, third per `tasks/todo.md:337`) bring their return shapes back to align with the legacy flat-string pattern. The amendment to `docs/hierarchical-delegation-dev-spec.md` §4.3 documents the legacy pattern as canonical for v1.
-- Branch B (migrate) becomes a Phase-2 spec when explicit operator value emerges (e.g., LLM-facing serialisation needs richer error context). Trigger documented in § 10 Deferred Items.
+- Branch B (migrate) becomes a Phase-3 spec when explicit operator value emerges (e.g., LLM-facing serialisation needs richer error context).
 
-User can override at PR review (§ Review Residuals captures this as a HITL question — recommendation flagged but not enforced).
-
-Branches documented for completeness:
-
-**Branch A — grandfather the flat-string pattern (RECOMMENDED):**
+**Branch A — grandfather the flat-string pattern (LOCKED):**
 - No code change to ~40 existing skill handlers.
 - Spec § 4.3 of `docs/hierarchical-delegation-dev-spec.md` is amended to acknowledge the legacy pattern.
 - Three delegation skills (`spawn_sub_agents`, `reassign_task`, third per spec) bring their return shape into alignment with the legacy flat-string pattern.
-
-**Branch B — migrate all skills to nested envelope (alternative):**
-- All ~40 skill handlers refactor `error: '<code-string>'` to `error: { code: '<code-string>', message: '...', context: {...} }`.
-- LLM-facing serialisation, agent prompt parsing, `executeWithActionAudit` audit log all updated.
-- Bigger code change; bigger payoff (consistent error envelope across the platform).
-
-Implementation PR ships against Branch A by default; if user picks Branch B at review, implementation PR scope expands.
 
 #### 4.4 W1-43 rule 4 implementation (resolved inline)
 
