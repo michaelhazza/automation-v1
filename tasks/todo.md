@@ -3129,3 +3129,18 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
     - `audit.*` — business events (resource created/updated/deleted, ownership changed, permission granted).
   - Write a short convention doc (likely under `docs/` alongside the security runbook) and run a one-shot rename pass across existing audit call sites. Update `securityAuditService` typing if it currently accepts free-form strings.
   - **ChatGPT framing:** "Optional. Define a simple convention."
+
+---
+
+## Deferred from spec-reviewer — pre-launch-phase-3 iteration 3 (2026-05-05)
+
+**Captured:** 2026-05-05T10-50-00Z
+**Source log:** `tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md` (Iteration 3 entry)
+**Branch:** `claude/pre-launch-phase-3`
+**Spec:** `tasks/builds/pre-launch-phase-3/spec.md`
+
+- [ ] PARALLEL-BUILD-DASHBOARD-VISIBILITY — Mission Control parser does not understand parallel build pointers
+  - `tasks/current-focus.md` carries a `<!-- mission-control-parallel ... -->` block alongside the canonical `<!-- mission-control ... -->` to track the Phase 3 build alongside `baseline-capture` (REVIEWING). The dashboard parser at `tools/mission-control/` reads only the canonical regex (`<!-- mission-control ... -->`), so the parallel block is invisible.
+  - Two routes to close: (a) extend `parseCurrentFocusBlock` + `readActiveBuildSlug` to read the canonical block PLUS any `mission-control-parallel` blocks, returning a list rather than a single active build; (b) drop the parallel-block convention and use `tasks/builds/<slug>/progress.md` files alone for tracking concurrent builds (status pointer becomes informational only).
+  - Out of scope for Phase 3 — this is dashboard tooling drift, not a spec or code-correctness issue. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3/progress.md` and the handoff file regardless of dashboard visibility. Operator authorised the parallel-build pattern explicitly in the Phase 3 invocation instructions.
+  - **Codex framing:** "Either teach the parser about parallel blocks or use an existing supported mechanism for in-flight builds."

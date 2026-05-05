@@ -79,3 +79,42 @@ Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.m
 - Continue: yes — one more round to confirm convergence.
 
 ---
+
+## Iteration 3
+
+**Codex command 1:** `codex review --commit 039e3e8a --title "iter 3"` — scoped to the iter-2 commit.
+**Verdict:** CLEAN. "I did not find any introduced correctness issue in the changed lines."
+
+**Codex command 2:** `codex review --base main --title "iter 3 full branch"` — scoped to the full branch diff vs main, to catch findings outside the latest commit.
+**Verdict:** 1 P2 finding (outside spec — on `tasks/current-focus.md`).
+
+### Finding 4 — Mission Control parser ignores parallel block
+
+- **Source:** Codex
+- **Section:** `tasks/current-focus.md` line 15 (`mission-control-parallel` block) — outside spec scope
+- **Description:** Mission Control dashboard's `parseCurrentFocusBlock` only matches the canonical `<!-- mission-control ... -->` regex; the new parallel block is ignored.
+- **Codex's suggested fix:** teach the parser about parallel blocks OR use an existing mechanism for in-flight builds.
+- **Classification:** ambiguous (operational tooling drift, not a spec finding; outside the spec under review)
+- **Disposition:** auto-decide → log to `tasks/todo.md` as a deferred operational item; do not block Phase 3 spec on dashboard tooling.
+- **Reasoning:** The operator explicitly authorised parallel operation per the Phase 3 invocation instructions ("a parallel `baseline-capture` build is currently in REVIEWING ... Don't disturb its active-build pointer — add the Phase 3 entry alongside it"). The dashboard limitation is a known consequence of running two coordinator sessions in parallel; the spec is not the venue for fixing the dashboard parser. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3/progress.md` and the handoff file regardless of dashboard visibility.
+
+## Iteration 3 — stopping heuristic
+
+- Findings: 0 mechanical, 0 directional, 1 ambiguous (auto-decided + routed to todo.md), 0 rejected.
+- The mechanical-only signal is now achieved (commit-scoped iter 3 = CLEAN). Full-branch iter 3 raised one operational finding outside spec scope.
+- **STOP** — two consecutive rounds with no spec-scope mechanical findings (iter 2 was the last one). Spec is mechanically tight.
+- Iterations used: 3 of 5.
+
+---
+
+## Final verdict
+
+**spec-reviewer:** READY_FOR_BUILD with one operational note routed to `tasks/todo.md`.
+
+**Iteration count used:** 3 of 5. Two remain available if a major edit triggers a re-review.
+
+**Mechanical findings applied:** 3 across iterations 1-2 — gate brittleness, GHL idempotency, ON CONFLICT predicate.
+
+**Directional findings:** 0. The spec stayed inside framing assumptions throughout.
+
+**Ambiguous findings:** 1 (Mission Control dashboard parallel-block parsing) — auto-decided to defer; outside spec scope.
