@@ -187,3 +187,82 @@ None required — round 2 was 100% technical / auto-execute.
 
 Top theme: terminal/checkpoint clarification + observability filling — pagination event taxonomy fixed (partial is now non-terminal), security-boundary failures gain audit-stream visibility, dedupe hash strengthened to full SHA-256, brand-pattern syntax pinned, runId chain identity made explicit. ChatGPT verdict: **APPROVED (build-ready)** with all suggested tweaks applied.
 
+---
+
+## Round 3 — 2026-05-05T13-00-00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> This is tight. The Round 2 changes closed every meaningful gap: terminal semantics are now correct, audit causality is explicitly bounded, pagination is safe, and security assertions are observable. At this point, this is clean, internally consistent, and production-safe to build.
+>
+> What follows is a final micro-pass. No structural issues. Only edge-case clarifications and future-proofing.
+>
+> **Final review — only what still matters**
+> 1. Terminal invariant — add explicit mutual exclusivity + "no further events of any type after terminal" closure rule.
+> 2. enrolPartial chain closure — add explicit prohibition on resume/append; any continuation MUST start a new chain.
+> 3. Pagination singletonKey lock-loss behaviour — make crash-recovery semantics intentional (worker crash → next job resumes via runId + cursor in payload; idempotency guarantees correctness).
+> 4. Empty-page early exit — make completeness assumption explicit (no reconciliation against previously observed totals).
+> 5. Audit causality — add positive directive ("consumers requiring causal ordering MUST use chain identifiers, not infer from timestamps").
+> 6. NormalisedEmail — explicit single-constructor lock-in ("MUST only be constructed via `normaliseEmail()`").
+> 7. Security audit events — add severity classification hint (`missingPrincipalContext → system integrity`; `crossTenantAttempt → security boundary`).
+>
+> 8-10. (No changes needed.) LRU dedupe correct (full SHA-256). Page-cap classification correct. Overall spec integrity: everything aligns cleanly — no contradictions found.
+>
+> **Final verdict: ✅ APPROVED — READY TO BUILD (no blockers)**
+>
+> This is now mechanically enforceable, operationally safe, observable in failure modes, resistant to race conditions, future-proofed against common regressions.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F1 | Terminal-event mutual exclusivity + post-terminal silence (no further events of any type after terminal) | technical | apply | auto (apply) | low | Closes future-reader ambiguity; turns implied invariant into directive |
+| F2 | Explicit prohibition on resuming/appending an `enrolPartial` chain | technical | apply | auto (apply) | low | Currently implied; making directive prevents accidental cursor/runId reuse |
+| F3 | Pagination lock-loss behaviour — worker-crash recovery semantics made explicit | technical | apply | auto (apply) | low | Recovery currently incidental; making intentional matters for post-mortem |
+| F4 | Empty-page early-exit completeness assumption (no reconciliation against prior totals) | technical | apply | auto (apply) | low | Pre-empts future "why didn't we double-check" debates |
+| F5 | Audit causality positive directive ("MUST use chain identifiers, not timestamps") | technical | apply | auto (apply) | low | Spec currently only forbids misuse; pairing with positive directive is symmetrical |
+| F6 | NormalisedEmail single-constructor lock-in ("MUST only via `normaliseEmail()`") | technical | apply | auto (apply) | low | Implied; making directive enforceable in future reviews |
+| F7 | Security audit events severity classifier (closed enum: `system_integrity` | `security_boundary` | `rate_limit` | `configuration`) | technical | apply | auto (apply) | low | Useful downstream metadata for alerting/dashboards/triage; small Phase 3-appropriate factory extension |
+
+### Auto-execution summary (technical findings)
+
+- **Auto-applied (7):** F1, F2, F3, F4, F5, F6, F7.
+- **Auto-rejected (0):** none.
+- **Escalated to operator (0):** none.
+
+### User-facing approvals
+
+None. All findings classified `technical` with apply recommendation. No carveouts triggered.
+
+### Operator decisions (round 3)
+
+None required — round 3 was 100% technical / auto-execute.
+
+### Applied (auto-applied technical)
+
+- [auto F1] §11 D.5, §12.1, §12.2 — post-terminal silence invariant: once a terminal (`enrolCompleted` | `enrolFailed`) fires for `(connectionId, runId)`, NO further events of any type may be emitted. Late retries dropped at handler. The §12.1 row updated to "mutually exclusive AND chain-closing"; §12.2 adds explicit "Chain-closure invariant (post-terminal silence)" bullet.
+- [auto F2] §11 D.5, §12.2 — `enrolPartial` chain closure directive: chain MUST NOT be resumed or appended to; continuation MUST start fresh chain with new `runId`. Job handler refuses re-enqueue against a payload whose `runId` matches a known-partial chain (runtime check, not just doc rule).
+- [auto F3] §11 D.5 — lock-loss / crash recovery section made explicit: pg-boss releases singleton on worker crash; subsequent worker resumes via `runId` + cursor from payload + per-location idempotency. Recovery uses SAME `runId` — fresh `runId` reserved for operator-driven re-trigger after partial/failed.
+- [auto F4] §11 D.5 — empty-page completeness assumption: early exit assumes upstream API completeness; no reconciliation against documented agency location counts. Reconciliation logic is a future spec amendment, not implicit.
+- [auto F5] §7.2 — added "Causality posture (positive directive)" paragraph: consumers requiring causal ordering MUST use chain identifiers (`runId`, `connectionId`, transactional locks, FK relationships) carried in event `context`, not timestamps. Phase 3 events all carry chain identifiers; dashboards/alerting/post-mortems query by identifier first.
+- [auto F6] §7.3 — added "Single-constructor invariant (directive)": `NormalisedEmail` MUST only be constructed via `normaliseEmail()`; no other constructor/factory/wrapper permitted. PR adding a second exporter is a blocking finding, not a nit.
+- [auto F7] §6, §7.7 — added `SecurityEventSeverity = 'system_integrity' | 'security_boundary' | 'rate_limit' | 'configuration'` closed enum, exported from `shared/types/securityAuditEvents.ts` alongside the factory. Each `auditEvent.security.*` event has a single canonical severity declared at factory site (NOT call site): `crossTenantAttempt → 'security_boundary'`, `missingPrincipalContext → 'system_integrity'`, `rateLimitTrip → 'rate_limit'`. recordEvent type signature requires a severity. §15 file inventory updated.
+
+### Integrity check (post-edit pass)
+
+- Forward references: severity classifier now consistent across §6 (declaration) and §7.7 (per-event tags). Lock-loss / chain-closure / empty-page-assumption clauses in §11 D.5 align with §12.1 / §12.2 state machine.
+- Contradictions: zero. The "exactly one terminal" invariant is now explicitly chain-closing AND mutually exclusive — no remaining wiggle room for interpretation.
+- Missing inputs/outputs: §15 file inventory updated for the `SecurityEventSeverity` export from `shared/types/securityAuditEvents.ts`. No other new files / contracts.
+- Integrity-check found one self-introduced inconsistency: an optional `auditEvent.oauth.enrolStaleRetry` event mentioned in F1's edit was a new event name not in the factory + conflated namespaces — removed. Late-retry observability is now "the absence of any further `enrol*` event after terminal IS the observable signal."
+- Issues found this round: 1 mechanical (self-introduced enrolStaleRetry) — auto-fixed inline. 0 directional.
+- Integrity-check findings this round: auto: 1, escalated: 0.
+
+### Round 3 summary
+
+- **Auto-accepted (technical):** 7 applied, 0 rejected, 0 deferred.
+- **User-decided (user-facing + technical-escalated):** 0 applied, 0 rejected, 0 deferred.
+
+Top theme: directive-strengthening of implied invariants — turning "this is true because we wrote it correctly" into "this is enforced by signature / handler check / closed enum / runtime drop." Plus one observability metadata addition (severity classifier) for downstream alerting routing. ChatGPT verdict: **APPROVED — READY TO BUILD (no blockers)**.
+
