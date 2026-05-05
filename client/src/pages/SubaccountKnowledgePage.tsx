@@ -6,6 +6,10 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { HelpHint } from '../components/ui/HelpHint';
 import RichTextEditor from '../components/RichTextEditor';
+import EditArtefactDrawer from '../components/baseline/EditArtefactDrawer';
+import BaselineArtefactsStatusBadge from '../components/baseline/BaselineArtefactsStatusBadge';
+import { BASELINE_SLUGS, TIER_BY_SLUG } from '../../../shared/constants/baselineArtefacts';
+import type { ArtefactStatus } from '../../../shared/constants/baselineArtefacts';
 
 /**
  * Extract a plain-text title from Tiptap HTML / plain text. Used for table
@@ -145,10 +149,15 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
   const [renameRef, setRenameRef] = useState<Reference | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
 
+  // Baseline artefacts section state
+  const [artefactStatuses, setArtefactStatuses] = useState<Record<string, ArtefactStatus>>({});
+  const [drawerSlug, setDrawerSlug] = useState<string | null>(null);
+
   useEffect(() => {
     if (!subaccountId) return;
     load();
-    // reason: `load` is an inline async function that closes over state setters; only subaccountId is the intended trigger.
+    loadArtefactStatus();
+    // reason: `load` and `loadArtefactStatus` are inline async functions that close over state setters; only subaccountId is the intended trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 
@@ -169,6 +178,27 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
       setError('Failed to load knowledge');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadArtefactStatus() {
+    try {
+      const res = await api.get(`/api/subaccounts/${subaccountId}/baseline-artefacts-status`);
+      const raw = res.data.status;
+      if (!raw) return;
+      const statuses: Record<string, ArtefactStatus> = {};
+      for (const slug of BASELINE_SLUGS) {
+        const shortKey = slug.split('.')[1];
+        const tier = TIER_BY_SLUG[slug];
+        const tierKey = `tier${tier}` as 'tier1' | 'tier2' | 'tier3';
+        const entry = (raw[tierKey] as Record<string, { status: string }> | undefined)?.[shortKey];
+        if (entry?.status) {
+          statuses[slug] = entry.status as ArtefactStatus;
+        }
+      }
+      setArtefactStatuses(statuses);
+    } catch {
+      // Non-critical — silently ignore if status cannot be loaded
     }
   }
 
@@ -439,6 +469,42 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           </button>
         </div>
       )}
+
+      {/* Baseline artefacts section */}
+      <div className="mb-6 bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+          <h2 className="text-[13px] font-semibold text-slate-700 m-0">Baseline artefacts</h2>
+        </div>
+        <ul className="divide-y divide-slate-50">
+          {BASELINE_SLUGS.map((slug) => {
+            const shortKey = slug.split('.')[1];
+            const name = shortKey
+              .replace(/_/g, ' ')
+              .replace(/^./, (c) => c.toUpperCase());
+            const tier = TIER_BY_SLUG[slug];
+            const status = artefactStatuses[slug] ?? 'not_started';
+            return (
+              <li key={slug} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="text-[13px] text-slate-800 font-medium">{name}</span>
+                  <span className="text-[11px] text-slate-400">Tier {tier}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <BaselineArtefactsStatusBadge status={status} slug={slug} />
+                  {status === 'completed' && (
+                    <button
+                      onClick={() => setDrawerSlug(slug)}
+                      className="btn btn-xs btn-secondary"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 mb-4">
@@ -763,6 +829,16 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           confirmLabel="Demote"
           onConfirm={handleDemote}
           onCancel={() => setDemoteBlockId(null)}
+        />
+      )}
+
+      {drawerSlug && subaccountId && (
+        <EditArtefactDrawer
+          artefactSlug={drawerSlug}
+          subaccountId={subaccountId}
+          open={drawerSlug !== null}
+          onClose={() => setDrawerSlug(null)}
+          onSaved={() => loadArtefactStatus()}
         />
       )}
     </div>

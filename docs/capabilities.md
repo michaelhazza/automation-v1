@@ -45,7 +45,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Configuration Assistant](#configuration-assistant)
   - [Skill System](#skill-system)
   - [CRM Query Planner](#crm-query-planner)
-  - [Playbook Engine](#playbook-engine)
+  - [Workflow Engine](#workflow-engine)
   - [Human-in-the-Loop](#human-in-the-loop)
   - [Task Board & Workspace](#task-board--workspace)
   - [Pulse — Supervision Home](#pulse--supervision-home)
@@ -85,7 +85,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
 Automation OS enables organisations to:
 
 - **Deploy AI agents as a structured workforce** — not chat toys, but role-based agents with defined skills, budgets, and accountability
-- **Automate multi-step operations with human oversight** — playbooks, approval gates, and review queues keep humans in control of every sensitive action
+- **Automate multi-step operations with human oversight** — workflows, approval gates, and review queues keep humans in control of every sensitive action
 - **Operate across multiple clients with strict isolation** — multi-tenant from the ground up, so agencies can scale without cross-contamination
 - **Build institutional knowledge that compounds** — every agent run feeds memory, briefings, and cross-agent learning back into the system
 
@@ -105,7 +105,7 @@ LLM providers sell **primitives**: a model, an SDK, scheduled runs, hosted agent
 
 ### The one-sentence answer
 
-> LLM providers give you a model. Shared team chat products give you group conversations. Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms give you a single agent at a time. **Synthetos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, playbooks, margin tracking, and vertical skills.
+> LLM providers give you a model. Shared team chat products give you group conversations. Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms give you a single agent at a time. **Synthetos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, margin tracking, and vertical skills.
 
 ### Messaging north star
 
@@ -121,25 +121,25 @@ These are the moats LLM providers and horizontal agent platforms structurally ca
 |---|---|
 | **Multi-tenant three-tier isolation** (System → Org → Subaccount) | LLM provider platforms assume a single buyer. Synthetos is built for agencies managing many clients with strict data, memory, skill, and billing isolation enforced at every layer. |
 | **Human-in-the-loop as a system** | 42+ review-gated actions, approve-with-edits, side-effect classification (irreversible steps never auto-retry), rejection as training signal, per-action gate overrides. Agencies cannot deploy unsupervised agents on client accounts. The review system **is** the product. |
-| **Playbook engine with multi-step approval gates** | Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms are single-agent. Synthetos runs multi-step workflows with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
+| **Workflow engine with multi-step approval gates** | Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms are single-agent. Synthetos runs multi-step workflows with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
 | **Client portal and white-label surface** | LLM providers will not build this — their buyer is the producer, not the consumer of the producer's work. A permanent wedge for agencies serving end-clients. |
 | **Agency economics** | LLM usage ledger with full org → subaccount → run → skill cost attribution, org-level margin configuration, pre-reserved budgets, and cost circuit breakers. Agency P&L (revenue, per-client pricing, per-client margin reporting) is on the roadmap as a first-class surface. LLM providers sell tokens; they do not care what agencies bill. |
 | **Integration framework with managed connectors** | Generic integration protocols are just protocols. Synthetos is a managed integration product with pre-built OAuth flows for the tools agencies already use (CRM, ads, accounting, communication, support desks) — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
 | **Execution infrastructure maturity** | Every agent action is guaranteed to run exactly once — even on retries, network hiccups, or rapid clicks. Real-time execution streaming delivers instant feedback as agents work, not delayed polling. Pre-reserved budgets with hard cost ceilings, automatic failure recovery, crash-resume, and proactive configuration health monitoring. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
 | **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, financial transcript analysis. LLM providers ship primitives; Synthetos ships solutions. Verticals compound into pricing power. |
 | **Model-agnostic routing** | Per-skill routing across every frontier and open-source LLM. Building on any one provider's managed stack locks agencies to that provider's pricing and roadmap. Synthetos routes to the best model per task and insulates agencies from provider shifts. |
-| **Portfolio-wide scheduled-work visibility** | A single calendar surface shows every scheduled agent run, recurring playbook, and scheduled task across every client for the next 7–30 days — roll up org-wide, drill down per client, and expose a "here's what we're doing for you next week" card inside the client portal. Hosted-routine and scheduled-prompt products show a calendar for *one user's* automations; Synthetos shows an agency's entire book of client work on one screen. Agencies pitch it on discovery calls; clients see it in their portal. |
-| **Supervised migration from no-code workflow tools** | One-shot converter that ingests a no-code workflow export (node graph JSON) and produces a draft supervised playbook with approval gates, side-effect classification, cost simulation, and retry policies mapped from the source nodes. Not a transliteration — an *upgrade* from stateless trigger/action chains to a supervised, multi-client operations layer. Agencies migrate their existing workflow library in hours, not weeks, and inherit approval gates for free. |
+| **Portfolio-wide scheduled-work visibility** | A single calendar surface shows every scheduled agent run, recurring workflow, and scheduled task across every client for the next 7–30 days — roll up org-wide, drill down per client, and expose a "here's what we're doing for you next week" card inside the client portal. Hosted-routine and scheduled-prompt products show a calendar for *one user's* automations; Synthetos shows an agency's entire book of client work on one screen. Agencies pitch it on discovery calls; clients see it in their portal. |
+| **Supervised migration from no-code workflow tools** | One-shot converter that ingests a no-code workflow export (node graph JSON) and produces a draft supervised workflow with approval gates, side-effect classification, cost simulation, and retry policies mapped from the source nodes. Not a transliteration — an *upgrade* from stateless trigger/action chains to a supervised, multi-client operations layer. Agencies migrate their existing workflow library in hours, not weeks, and inherit approval gates for free. |
 
 ### Objection handling — "Why Synthetos when I can just use the tools from my LLM provider?"
 
 | Objection | Response |
 |---|---|
 | *"I'll manage my clients in a shared team chat product."* | Shared team chat is built for internal teams sharing context — your clients would see each other's data. Synthetos enforces strict isolation at every layer so per-client data, memory, and configuration never cross. |
-| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Synthetos runs multi-step playbooks with human approvals, cost ceilings, retry policies, exactly-once execution guarantees, parallel step execution, **and a portfolio-wide calendar that shows an agency's entire book of client work on one screen**. Different product category — and one of them is demoable inside a client portal. |
+| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Synthetos runs multi-step workflows with human approvals, cost ceilings, retry policies, exactly-once execution guarantees, parallel step execution, **and a portfolio-wide calendar that shows an agency's entire book of client work on one screen**. Different product category — and one of them is demoable inside a client portal. |
 | *"I'll use a hosted routines product from an LLM provider."* | Hosted routines are a prompt on a schedule, with connectors, for *one user*. The moment you're running them across many clients, you need multi-tenant isolation, approval gates on CRM/ads/accounting writes, per-client billing and margin tracking, and a white-label surface where your client can see what's being done for them. Those are structural agency requirements a provider's hosted product doesn't build — their buyer is the producer, not the consumer. Synthetos uses provider primitives as supply and adds the operations layer on top, model-agnostic across every provider. |
 | *"Hosted agents are autonomous — perfect."* | Which is exactly why agencies can't put them on a client's CRM, ad account, or accounting system. 42+ review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
-| *"I'll build on an agent SDK directly."* | Great — Synthetos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a supervision home. That is 18+ months of engineering not spent on client work. |
+| *"I'll build on an agent SDK directly."* | Great — Synthetos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, workflows, managed integrations, margin tracking, health monitoring, and a supervision home. That is 18+ months of engineering not spent on client work. |
 | *"What if an LLM provider ships multi-tenant?"* | They won't — their buyer is not agencies. Even if one did, vertical skills, managed integrations, the client portal, and model-agnostic routing remain. The moat isn't any one feature; it's the operations system. |
 | *"What if a better model ships?"* | Synthetos routes to it per skill. No migration. Build on a single provider's managed stack and that question becomes a year-long project. |
 | *"We already use a commodity workflow automation tool."* | Those are stateless trigger-action chains. Synthetos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
@@ -171,7 +171,7 @@ These are **explicit non-goals**. Competing on them is a losing fight against ve
 
 Three-tier hierarchy that isolates data and configuration at every level — so agencies never mix client data, and clients never see each other.
 
-- **System tier** — Platform-wide defaults, system-managed agents, global skill library, playbook templates
+- **System tier** — Platform-wide defaults, system-managed agents, global skill library, workflow templates
 - **Organisation tier** — Agency-level workspace with its own users, agents, skills, memory, branding, and billing
 - **Subaccount tier** — Per-client workspace with its own agent links, task board, review queue, data sources, and memory
 - Strict data isolation enforced at every layer with full audit history preserved
@@ -206,7 +206,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - **Per-run cost transparency:** Every run-detail surface (history card, trace viewer, agent admin page) shows the exact LLM spend for that run — total cost, call count, input/output token totals, and an app-vs-worker call-site breakdown. Operators see the bill, not just the ceiling
 - **Knowledge sources:** Per-agent data files from cloud storage, HTTP, Google Docs, Dropbox, or direct uploads — with token budgets and caching
 - Agent templates for rapid team deployment; full run history with execution traces; exactly-once deduplication on all run paths
-- **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring playbook, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
+- **Portfolio-wide scheduled-work calendar** — A single surface showing every scheduled agent run, recurring workflow, and scheduled task across the org or a single client for the next 7–30 days, with roll-ups by subaccount, source, and estimated cost. Exposed in the client portal as an "Upcoming work" card so clients see what the agency is doing for them next week.
 - **Inline Run Now testing on the authoring page** — Agent and skill edits are tested in a collapsible side panel with real-time streamed run output, tool-call timeline, and token/cost metering — no page switch, no save-and-navigate. Test runs are flagged and excluded from agency P&L and LLM usage aggregates by default. Re-usable test-input fixture library per agent and skill. Rapid clicks and retries are automatically deduplicated; per-user rate limits prevent runaway test costs.
 - **Per-conversation cost meter** — A live token and cost pill in the chat thread shows cumulative spend for the current conversation as it builds up — giving operators a running total without leaving the conversation or opening a separate analytics view.
 - **Suggested next actions** — After each agent response, contextually relevant follow-up actions appear as one-tap chips below the message. Chips are generated by the agent based on its active skills and the current task state — selecting one dispatches the action immediately.
@@ -221,7 +221,7 @@ Each agent gets a real workplace seat — not an alias or a borrowed login. Agen
 - **Onboard in four clicks** — Existing agents onboard to the workplace from the Agents tab: select the agent → set email and send-mail toggle → confirm. The agent's email, photo, and lifecycle state are visible immediately
 - **Org chart with humans and agents** — A single org-chart canvas shows every team member — human and agent — with reporting lines and hierarchy. An agency operator can see the full team structure at a glance, including which agents report to which humans
 - **Per-agent mailbox and calendar** — Each onboarded agent has a read-only mailbox and calendar view inside the platform, with compose and new-event actions always routed through Automation OS so policy, signing, and audit run regardless of backend
-- **Activity feed with workplace events** — The subaccount Activity page includes email, calendar, and identity lifecycle events (sent, received, accepted, suspended, migrated) alongside task and playbook runs — a single audit-ready view of everything an agent did
+- **Activity feed with workplace events** — The subaccount Activity page includes email, calendar, and identity lifecycle events (sent, received, accepted, suspended, migrated) alongside task and workflow runs — a single audit-ready view of everything an agent did
 - **Lifecycle management** — Operators can activate, suspend, revoke, and migrate agent identities from the Identity tab. Suspension is instant and reversible; revocation removes the identity from the backend. Migration moves the agent's identity from one backend to another in a tracked, failure-tolerant background job
 - **Seat tracking** — Consumed seats are derived from active agent identities and displayed inline on the subaccount header; no separate billing dashboard
 - **Email governance built in** — A send-mail toggle per agent, three-window rate limiting, and a central email pipeline (audit → rate-limit → signing → dispatch) apply to every outbound message regardless of which backend delivers it
@@ -315,7 +315,7 @@ Natural-language CRM reads that stay cheap and deterministic by default. Agents 
 - **Dual surface** — Exposed as an HTTP endpoint for users/Briefs and as an agent skill (`crm.query`) governed by the normal capability-gate and review system
 - **Observability built in** — Dashboard surfaces stage-hit rate, escalation rate, live-call rate, and cost-per-resolved-query so agencies can tune the deterministic library against real usage
 
-### Playbook Engine
+### Workflow Engine
 
 Multi-step workflow automation with dependency graphs, parallel execution, branching logic, and human review gates.
 
@@ -331,13 +331,13 @@ Multi-step workflow automation with dependency graphs, parallel execution, branc
 - **Five run modes:** hands-off, supervised (pauses at every approval gate), background (silent batch), bulk (one run per item in a list), and replay (re-execute a prior run with the same inputs)
 - **Parallel execution** — Independent branches run simultaneously; results flow between steps automatically
 - **Safety controls** — Irreversible steps cannot be auto-retried; per-step retry policy; every step declares its risk level; concurrent execution guards prevent double actions
-- **Run-now + schedule** — Any recurring playbook can be launched immediately on setup; the normal schedule continues afterward
-- **Portal publishing** — Playbooks can publish their output directly to the client portal as a summary card; the portal always displays the most recent published brief per client
-- **Email digest delivery** — Playbooks can send markdown email digests to configured recipients with deduplication (no double-sends on retry)
+- **Run-now + schedule** — Any recurring workflow can be launched immediately on setup; the normal schedule continues afterward
+- **Portal publishing** — Workflows can publish their output directly to the client portal as a summary card; the portal always displays the most recent published brief per client
+- **Email digest delivery** — Workflows can send markdown email digests to configured recipients with deduplication (no double-sends on retry)
 - **Knowledge bindings** — Steps can write their output back to shared memory on completion; optional "first run only" mode captures baseline facts once without overwriting on subsequent runs
-- **Onboarding auto-start** — Designated playbooks launch automatically in supervised mode when a new client workspace is created — the Onboarding tab tracks progress so nothing falls through the cracks
+- **Onboarding auto-start** — Designated workflows launch automatically in supervised mode when a new client workspace is created — the Onboarding tab tracks progress so nothing falls through the cracks
 - **Workflow Studio** — Chat-based authoring with validation, simulation, and cost estimation; platform and agency templates with versioning; fork and customise per agency; automatic recovery sweeps for stuck runs
-- **No-code workflow migration wedge** — One-shot converter that ingests a no-code workflow JSON export and produces a draft supervised playbook, mapping each source node to a step with appropriate side-effect classification, approval gates, and a mapping report flagging anything the admin needs to review or rewrite. Credentials are never migrated; the admin re-authenticates via managed OAuth flows. Net effect: an agency's existing workflow library becomes multi-tenant, supervised, and cost-attributed in hours rather than a re-platforming project.
+- **No-code workflow migration wedge** — One-shot converter that ingests a no-code workflow JSON export and produces a draft supervised workflow, mapping each source node to a step with appropriate side-effect classification, approval gates, and a mapping report flagging anything the admin needs to review or rewrite. Credentials are never migrated; the admin re-authenticates via managed OAuth flows. Net effect: an agency's existing workflow library becomes multi-tenant, supervised, and cost-attributed in hours rather than a re-platforming project.
 - **Visual Workflow Studio** — Org admins can author multi-step automated workflows in a visual canvas. Steps can involve agents, actions, human approvals, and user input forms. Workflows support branching, parallel execution, and loops.
 - **Workflow runs** — Workflows execute against a subaccount context, with built-in cost and time ceilings, approval gates, and a real-time status feed for operators.
 - **Scheduled workflows** — Workflows can be triggered on a schedule or by agent actions, with a maximum nesting depth of 3 to prevent runaway automated fan-out.
@@ -408,6 +408,7 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 
 - **Workspace memory** — Per-client fact store with intelligent retrieval that combines meaning, keywords, and recency for accurate recall
 - **Memory blocks** — Named shared context with per-agent read/write permissions and governance controls
+- **Baseline artefacts** — Sub-accounts capture six baseline artefacts at onboarding: brand identity, voice and tone, offer positioning, audience profile, operating constraints, and proof library. The first two are included in every client-touching agent run; the next two are included when the agent role matches the artefact domain; the last two are retrieved on demand via workspace memory search.
 - **Cross-agent search** — Agents query what other agents have learned across the org
 - **Agent briefings** — Rolling summaries generated post-run, injected into next run's context
 - **Agent beliefs** — Confidence-scored facts per agent per client, automatically extracted from run outcomes. Each belief can be individually added, updated, reinforced, or removed — and corrected by users when agents get something wrong. Built-in guards prevent belief flip-flopping.
@@ -417,7 +418,7 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 - **References** — Manually-authored or promoted insights surfaced as durable, citable knowledge separate from auto-captured run output
 - **Weekly digest** — Automated rollup that surfaces what the workspace learned in the last seven days
 - **Citation tracking** — Each memory entry tracks how often it was injected into a run and how often it was actually cited in the agent's output, creating a feedback loop that improves retrieval relevance over time
-- **Full provenance** — Every memory entry records its source (agent run, manual entry, playbook, upload, or synthesis) and a confidence score; high-trust paths automatically filter out unverified entries
+- **Full provenance** — Every memory entry records its source (agent run, manual entry, workflow, upload, or synthesis) and a confidence score; high-trust paths automatically filter out unverified entries
 - **Automatic accuracy maintenance** — When content changes, the system detects stale data and refreshes it in the background — search always returns matches against current information, not outdated text
 - **Quality safeguards** — Memory quality scores are managed by the platform, not individual agents — preventing any single run from corrupting the knowledge base
 - Automated memory decay (90 days), nightly deduplication, and multi-scope context cascading so agents always have the right context at the right level
@@ -434,7 +435,7 @@ Automated configuration auditing that detects drift, misconfigurations, and oper
 
 Unified operational view across all activity types with advanced filtering and real-time updates.
 
-- **Unified activity stream** — Agent runs, reviews, health findings, playbook runs, task events, and executions in one view
+- **Unified activity stream** — Agent runs, reviews, health findings, workflow runs, task events, and executions in one view
 - **Multi-scope:** system-wide, org-level, and per-subaccount with filtering by type, status, date, agent, severity
 - **LLM usage tracking** — Every call logged with tokens, cost, model; usage explorer with cost trends and margin calculations
 - **Dashboard metrics** — Active agents, success rate, total runs, token usage with daily trend indicators
@@ -446,7 +447,7 @@ White-label client-facing interface scoped per subaccount, enabling agencies to 
 
 - Subaccount selector, workflow browser with category filtering, self-service execution, and run history
 - Client users see only their own portal; agency brand colours carry through to the portal styling
-- **Playbook brief cards** — Published playbook outputs appear on the portal as rich summary cards (headline bullets, full brief in modal); each card shows status and last-run timestamp; "Run now" triggers a fresh run and navigates to results
+- **Workflow brief cards** — Published workflow outputs appear on the portal as rich summary cards (headline bullets, full brief in modal); each card shows status and last-run timestamp; "Run now" triggers a fresh run and navigates to results
 - Portal briefs are isolated per client; retracted briefs disappear automatically; clients always see the most recent published version
 
 ### Pages & Content Builder
@@ -459,7 +460,7 @@ CMS-style page creation and publishing with analytics tracking and form submissi
 
 ### Integration Framework
 
-Pre-built connectors for the tools agencies already use — connect once, use across every agent and playbook.
+Pre-built connectors for the tools agencies already use — connect once, use across every agent and workflow.
 
 - **OAuth providers:** Gmail, Slack, HubSpot, Go High Level (GHL), Teamwork Desk, GitHub App
 - **Connection ownership** — Connections can be user-owned (personal Gmail, Calendar), per-client (isolated), or agency-wide (shared). Personal connections default to private visibility with explicit sharing controls
@@ -518,7 +519,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 | Replaced | With | Why it's better |
 |----------|------|-----------------|
-| Commodity workflow automation tools | Playbook Engine | Stateful, agent-driven, with structured human review gates — not brittle trigger/action chains |
+| Commodity workflow automation tools | Workflow Engine | Stateful, agent-driven, with structured human review gates — not brittle trigger/action chains |
 | Standalone LLM chat products | Deployed agents | Defined skills, budgets, memory, and accountability — not ephemeral conversations |
 | Manual monthly reporting | Scheduled reporting agents | Drafted, reviewed, and delivered automatically on cadence — not assembled by hand each month |
 | Ad-hoc CRM hygiene sprints | Continuous enrichment pipeline | Always-on enrichment and pipeline analysis — not a quarterly cleanup |
@@ -526,10 +527,10 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 | Fragmented client management across orgs | Multi-tenant subaccount hierarchy | Strict per-client data isolation built in — not enforced by process |
 | Manual churn reviews | Always-on health scoring | Anomaly detection and intervention triggers fire automatically — not discovered on a renewal call |
 | Shared team chat products used for agent work | Multi-tenant org + subaccount hierarchy with Client Portal | Strict per-client isolation and white-label portals — shared chat products are built for internal teams sharing context, not agencies serving many isolated clients |
-| Scheduled-prompt and hosted-routine tools | Playbook Engine + portfolio-wide scheduled-work calendar | Multi-step workflows with approval gates, cost ceilings, templating, retry policies, and idempotent execution — plus a single calendar that shows every scheduled agent run, playbook, and scheduled task across every client, rolled up org-wide and exposed inside the client portal. Scheduled-prompt and hosted-routine tools run one prompt on a cadence for one user; Synthetos runs an agency's entire book of client work on one supervised surface. |
+| Scheduled-prompt and hosted-routine tools | Workflow Engine + portfolio-wide scheduled-work calendar | Multi-step workflows with approval gates, cost ceilings, templating, retry policies, and idempotent execution — plus a single calendar that shows every scheduled agent run, workflow, and scheduled task across every client, rolled up org-wide and exposed inside the client portal. Scheduled-prompt and hosted-routine tools run one prompt on a cadence for one user; Synthetos runs an agency's entire book of client work on one supervised surface. |
 | Hosted single-agent platforms and hosted-agent products | Three-tier agent hierarchy with role-based handoffs | Fleet management with role hierarchy, handoffs up to 5 levels, workspace health monitoring, and per-client skill cascades — hosted single-agent and hosted-agent products have no multi-client operations layer because their buyer is an individual or an internal team, not an agency |
-| Hand-maintained no-code workflow libraries | Supervised-migration converter + Playbook Engine | One-shot import of no-code workflow JSON into a draft supervised playbook with approval gates and cost simulation mapped from the source nodes — not a transliteration, an upgrade from stateless trigger/action chains to a multi-client operations system |
-| Self-build on an agent SDK | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, playbooks, managed integrations, margin tracking, supervision home |
+| Hand-maintained no-code workflow libraries | Supervised-migration converter + Workflow Engine | One-shot import of no-code workflow JSON into a draft supervised workflow with approval gates and cost simulation mapped from the source nodes — not a transliteration, an upgrade from stateless trigger/action chains to a multi-client operations system |
+| Self-build on an agent SDK | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, workflows, managed integrations, margin tracking, supervision home |
 | Single-provider LLM lock-in | Model-agnostic per-skill routing | Route across every frontier and open-source LLM per skill; insulated from any one provider's pricing or roadmap shifts |
 
 ---
@@ -1041,6 +1042,7 @@ Skills that complete transactions autonomously on behalf of agents. All payment 
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-04 | F1 Sub-Account Baseline Artefacts (migration 0277): sub-accounts now capture six baseline artefacts at onboarding via the baseline-artefacts-capture workflow. Brand identity and voice/tone (tier 1) are prepended to every client-touching agent run system prompt in hash-stable order for prefix caching. Offer positioning and audience profile (tier 2) are injected when the agent role matches the artefact domain. Operating constraints and proof library (tier 3) are stored in workspace memory and retrieved on demand. Artefact capture status is tracked per sub-account in a versioned JSONB field. The onboarding wizard includes a dedicated capture step; captured artefacts are editable from the sub-account Knowledge page. | — |
 | 2026-05-04 | Agent Spending: ship the agent spending primitive — operator-defined Spending Budgets per sub-account with hard ceiling, daily and monthly caps, and a kill switch that pauses all charges immediately and is re-checked at execute time. Each budget carries a Spending Policy with per-transaction limits, merchant allowlists, approval thresholds, and category rules; policies start in shadow mode (full decision logic, no money moved) and require an explicit approval to promote to live. Per-charge approval gates pause high-risk charges before execution; expired approvals re-queue rather than executing late. Multi-channel approval routing supports per-sub-account and shared agency-level channels. Five payment skills (`pay_invoice`, `purchase_resource`, `subscribe_to_service`, `top_up_balance`, `issue_refund`) all route through one charge router for uniform policy decisions, idempotency, and ledger writes. Immutable spend ledger as append-only audit trail with database-level lifecycle guards; settled-vs-in-flight visibility distinguishes money moved from money committed. Refunds preserve the original charge record by writing a new inbound-refund ledger entry. Tenant-isolated at the database level for budgets, policies, channels, and ledger rows. Compute Budget rename (formerly "Budget") clears the namespace for the new spending primitive — vocabulary lock: no bare "Budget" in the product. | — |
 | 2026-05-03 | GHL agency-level OAuth: agency token stored per org + GHL company (`connector_configs.token_scope='agency'`), location tokens minted on demand per sub-account and cached in `connector_location_tokens`. Nine adapter methods use location-scoped tokens; two (list-locations, get-location) use the agency token. Pending Stage 6b sign-off. | — |
 | 2026-05-01 | Skills Reference: add invoke_automation as the eighth Workflow step type (PR #186); add 14 new system-agent v7.1 skills across Admin Operations & Finance, CRM & Contact Management, and Analytics & Reporting categories; remove retired update_financial_record skill (PR #212/#216). | — |

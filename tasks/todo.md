@@ -2927,3 +2927,14 @@ Source: `tasks/review-logs/adversarial-review-log-pre-launch-phase-1-2026-05-05T
 Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branch. One worth-confirming deferred below.
 
 - [ ] **Wire agent-triggered GHL OAuth resume path.** `server/routes/ghl.ts:36` — `setGhlOAuthState(nonce, orgId)` never passes `pendingRunId`. The `oauth_state_nonces.pending_run_id` column and `enqueueResumeAfterOAuth` function are pre-built infrastructure for a future path where an agent run triggers a GHL agency OAuth connect (as opposed to the current user-initiated settings/onboarding flow). When that path is built: (1) the initiation site (`routes/ghl.ts`) must pass `pendingRunId` to `setGhlOAuthState`, (2) the callback (`routes/oauthIntegrations.ts`) must call `enqueueResumeAfterOAuth({ runId: stateData.pendingRunId, organisationId: ghlOrgId })` when `stateData.pendingRunId` is non-null. The JWT-based OAuth flow already handles resume via `resumeFromIntegrationConnect`.
+
+## Deferred from spec-conformance review — subaccount-artefacts (2026-05-04)
+
+**Captured:** 2026-05-04T23:24:55Z
+**Source log:** `tasks/review-logs/spec-conformance-log-subaccount-artefacts-2026-05-04T23-24-55Z.md`
+**Spec:** `tasks/builds/subaccount-artefacts/plan.md`
+
+- [ ] REQ #43-extension — `markArtefactSkipped` precondition is broader than spec §4B idempotency posture
+  - Spec section: plan chunk 4B step 6 "Idempotency posture per route" — *"Skip: state-based; precondition `tier3.{slug}.status IN ('not_started')` — UPDATE WHERE that predicate. 0 rows affected = race; return 409 with the current state."*
+  - Gap: implementation at `server/services/subaccountOnboardingService.ts:586-590` only blocks `status === 'completed'` (errorCode `ARTEFACT_ALREADY_COMPLETED`); skipping from `in_progress` or re-skipping a `skipped` artefact is allowed. Plan §4B literal precondition is `IN ('not_started')` only.
+  - Suggested approach: decide whether to tighten the precondition to `not_started`-only (matches §4B; introduce errorCode `BASELINE_SKIP_PRECONDITION_FAILED` and wire 409 mapping in `server/routes/subaccounts.ts:867-879`), OR relax §4B in the spec to match the current operationally-permissive implementation. Not a regression — same behaviour the prior 2026-05-04T13-04-44Z conformance run marked PASS without flagging — so this is a follow-up cleanup, not a PR blocker.

@@ -66,7 +66,7 @@ Branch claude/stream-1-onboarding-scope
 
 ## Sub-stream B — F3 baseline capture
 
-**Goal:** When a new sub-account becomes ready (≥2 stable polls + ≥2 of the 4 core metrics non-null), capture an immutable T0 snapshot for month-over-month delta narration.
+**Goal:** When a new sub-account becomes ready (≥2 polls elapsed AND ≥1h since first poll, with ≥2 of the 4 core metrics non-null), capture an immutable T0 snapshot for month-over-month delta narration.
 
 **Phases (full detail in spec §8):**
 
@@ -74,7 +74,7 @@ Branch claude/stream-1-onboarding-scope
 |---|---|---|
 | 1 — Schema | ~3h | Migrations 0278/0279/0280: `subaccount_baselines` + `subaccount_baseline_metrics` + RLS + canonicalDictionary. |
 | 2 — Readiness + sync-complete event | ~5h | `baselineReadinessService.evaluate`, `connector.sync.complete` emit, subscriber, daily fallback job. |
-| 3 — Capture service + retry | ~5h | `captureBaselineService.run`, per-metric readers, 3-attempt retry, telemetry events, integration test. |
+| 3 — Capture service + retry | ~5h | `captureBaselineService.run`, per-metric readers, classified retry with 3-attempt exponential backoff, telemetry events, integration test. |
 | 4 — Manual entry UI + admin reset | ~4h | `<ManualBaselineForm>`, validation, manual + admin-reset endpoints, status badge. |
 | 5 — Reporting Agent delta | ~3h | `getBaselineForSubaccount` helper, extend `generate_portfolio_report` skill, honest-gap narration. |
 | 6 — Verification | ~2h | Lint + typecheck + tests + manual E2E (now possible end-to-end via Module C) + doc updates. |
@@ -93,10 +93,25 @@ Branch claude/stream-1-onboarding-scope
 | `agentExecutionService.ts` | Lines ~834-870 | Doesn't touch | Safe |
 | Migration order | 0277 | 0278-0280 | Strict numeric order |
 
+## Pre-flight migration check (mandatory at every schema phase)
+
+Migration drift on main is a real risk during a multi-day stream. At the start of any phase that adds a migration, run:
+
+```bash
+# Confirm branch is rebased on latest main before checking migration numbers
+git fetch origin main && git diff --quiet origin/main...HEAD -- migrations/
+
+# Print the highest existing migration number on main (excluding _down + meta)
+ls migrations/ | grep -v _down | grep -v meta | grep -E '^[0-9]{4}_' | sort | tail -1
+```
+
+If the next-free number is higher than this plan's reservation, **bump the reservation** and update both the spec and the per-build progress file before authoring the migration. Do NOT skip: a colliding migration number is a merge nightmare on main.
+
 ## Risks
 
 - Spec drift if F1 review reshapes `subaccountOnboardingService`. Mitigate: same operator reviews both PRs; F3 rebases on main after F1 merges.
-- Migration number drift on main during the build. Mitigate: `ls migrations/` at the start of any phase that adds one.
+- Migration number drift on main during the build. Mitigate: pre-flight check above at every schema phase.
+- Race conditions in F3's four-trigger surface (subscriber, cron, retry, manual). Mitigate: spec §5.2 single-writer rule + §3 partial UNIQUE index — both invariants asserted by tests in `baselineInvariants.test.ts`. Note on index intent: the UNIQUE is partial (`WHERE status <> 'reset'`) to allow historical reset rows while enforcing exactly one active baseline per version; do not simplify it to a full UNIQUE or the history model breaks.
 
 ## Done definition (Stream 1)
 
@@ -105,6 +120,19 @@ Branch claude/stream-1-onboarding-scope
 - Both build progress files closed out
 - `KNOWLEDGE.md` appended for patterns learned
 - `tasks/current-focus.md` returned to NONE after final merge
+
+Hard invariants (asserted before either PR ships, not just at end-of-stream):
+- **Baseline created exactly once per sub-account** — F3 §10 invariant; UNIQUE index test in `baselineInvariants.test.ts` is green.
+- **Pending row insert is idempotent** — initial insert uses `INSERT ... ON CONFLICT DO NOTHING`; if 0 rows returned, caller treats it as "baseline already in progress" and exits. Prevents subscriber + cron collision from producing duplicate pending rows. Test green.
+- **Capture/retry scoped to current version** — all `captureBaselineService.run` and retry paths scope by `(subaccount_id, baseline_version)` and no-op if the row is no longer the current version. Prevents stale retry jobs from writing into old or new versions after an admin reset. Test green.
+- **Ownership assertion at runtime** — `captureBaselineService.run` asserts row status is `pending` or `ready` on entry (matching the §5.3 lock acquisition `WHERE status IN ('pending','ready')`) and fails fast otherwise; enforces single-writer rule at runtime, not just in spec. The schema status enum has no `retrying` state — retryable failures revert to `ready` per §5.4.
+- **Idempotent retry** — F3 §10 invariant; running `captureBaselineService.run` twice on the same `ready` baseline produces no new metric rows. Test green.
+- **Manual override never conflicts with auto capture** — F3 §10 invariant; concurrent-simulation test green.
+- **Admin reset never destroys history** — F3 §10 invariant; `baseline_version` increment test green.
+- **Fallback job exits early when a baseline is already terminal** — daily cron checks for an existing baseline in a TERMINAL state (`captured`, `manual`, or `failed`) before attempting capture; emits a `baseline.fallback.noop` telemetry event and returns. `pending` and `ready` rows are exactly the recovery targets the fallback is meant to handle, so they MUST NOT trigger early exit. Prevents unnecessary reads and log noise on already-captured sub-accounts without skipping the rows the fallback exists to capture.
+- **All baseline timestamps use Postgres `now()`** — static check (grep for `Date.now()` in `server/services/captureBaselineService.ts` + `baselineMetricReaders/` + `baselineReadinessService.ts`) returns zero hits.
+- **F1 artefact status enum locked** — F1 §8 invariant; wizard cannot exit with Tier 1+2 in `not_started` / `in_progress`. Test green.
+- **F1→F2 interface contract honoured** — F1 §6b; `getBaselineVoiceTone` returns `null` for any non-`completed` voice_tone artefact. Test green.
 
 ## Kickoff prompt
 
