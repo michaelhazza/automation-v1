@@ -1,5 +1,4 @@
-import { describe, it } from 'vitest';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
 import { computeDelta } from '../baselineHelper.js';
 import type { BaselineSnapshot } from '../baselineHelper.js';
 
@@ -37,21 +36,21 @@ describe('computeDelta', () => {
       { slug: 'revenue_last_30d'        as const, numeric: 55000 },
     ];
     const deltas = computeDelta(snapshot, current);
-    assert.equal(deltas.length, 5);
+    expect(deltas.length).toBe(5);
     for (const d of deltas) {
-      assert.equal(d.unavailableAtBaseline, false);
+      expect(d.unavailableAtBaseline).toBe(false);
     }
     const pv = deltas.find(d => d.slug === 'pipeline_value')!;
-    assert.equal(pv.delta, 20000);
-    assert.ok(Math.abs(pv.pct! - 20) < 0.001, `pct should be ~20, got ${pv.pct}`);
+    expect(pv.delta).toBe(20000);
+    expect(Math.abs(pv.pct! - 20) < 0.001).toBeTruthy();
 
     const lc = deltas.find(d => d.slug === 'lead_count')!;
-    assert.equal(lc.delta, 10);
-    assert.ok(Math.abs(lc.pct! - 20) < 0.001);
+    expect(lc.delta).toBe(10);
+    expect(Math.abs(lc.pct! - 20) < 0.001).toBeTruthy();
 
     const ce = deltas.find(d => d.slug === 'conversation_engagement')!;
-    assert.equal(ce.delta, -20);
-    assert.ok(Math.abs(ce.pct! - (-10)) < 0.001);
+    expect(ce.delta).toBe(-20);
+    expect(Math.abs(ce.pct! - (-10)) < 0.001).toBeTruthy();
   });
 
   it('2 unavailable metrics in baseline → unavailableAtBaseline=true, delta/pct null', () => {
@@ -71,17 +70,17 @@ describe('computeDelta', () => {
     ];
     const deltas = computeDelta(snapshot, current);
     const lc = deltas.find(d => d.slug === 'lead_count')!;
-    assert.equal(lc.unavailableAtBaseline, true);
-    assert.equal(lc.delta, null);
-    assert.equal(lc.pct, null);
+    expect(lc.unavailableAtBaseline).toBe(true);
+    expect(lc.delta).toBe(null);
+    expect(lc.pct).toBe(null);
     const oo = deltas.find(d => d.slug === 'open_opportunity_count')!;
-    assert.equal(oo.unavailableAtBaseline, true);
-    assert.equal(oo.delta, null);
-    assert.equal(oo.pct, null);
+    expect(oo.unavailableAtBaseline).toBe(true);
+    expect(oo.delta).toBe(null);
+    expect(oo.pct).toBe(null);
     // non-unavailable ones are still computed
     const pv = deltas.find(d => d.slug === 'pipeline_value')!;
-    assert.equal(pv.unavailableAtBaseline, false);
-    assert.equal(pv.delta, 0);
+    expect(pv.unavailableAtBaseline).toBe(false);
+    expect(pv.delta).toBe(0);
   });
 
   it('baseline is null → all unavailableAtBaseline=true', () => {
@@ -90,11 +89,11 @@ describe('computeDelta', () => {
       { slug: 'lead_count'     as const, numeric: 25 },
     ];
     const deltas = computeDelta(null, current);
-    assert.equal(deltas.length, 2);
+    expect(deltas.length).toBe(2);
     for (const d of deltas) {
-      assert.equal(d.unavailableAtBaseline, true);
-      assert.equal(d.delta, null);
-      assert.equal(d.pct, null);
+      expect(d.unavailableAtBaseline).toBe(true);
+      expect(d.delta).toBe(null);
+      expect(d.pct).toBe(null);
     }
   });
 
@@ -105,10 +104,10 @@ describe('computeDelta', () => {
     const current = [{ slug: 'pipeline_value' as const, numeric: 10000 }];
     const deltas = computeDelta(snapshot, current);
     const pv = deltas.find(d => d.slug === 'pipeline_value')!;
-    assert.equal(pv.unavailableAtBaseline, false);
-    assert.equal(pv.baselineValue, 0);
-    assert.equal(pv.delta, 10000);
-    assert.equal(pv.pct, null);
+    expect(pv.unavailableAtBaseline).toBe(false);
+    expect(pv.baselineValue).toBe(0);
+    expect(pv.delta).toBe(10000);
+    expect(pv.pct).toBe(null);
   });
 
   it('current < baseline → negative delta and negative pct', () => {
@@ -116,9 +115,9 @@ describe('computeDelta', () => {
     const current = [{ slug: 'lead_count' as const, numeric: 40 }];
     const deltas = computeDelta(snapshot, current);
     const lc = deltas.find(d => d.slug === 'lead_count')!;
-    assert.equal(lc.delta, -10);
-    assert.ok(lc.pct! < 0, `pct should be negative, got ${lc.pct}`);
-    assert.ok(Math.abs(lc.pct! - (-20)) < 0.001);
+    expect(lc.delta).toBe(-10);
+    expect(lc.pct! < 0).toBeTruthy();
+    expect(Math.abs(lc.pct! - (-20)) < 0.001).toBeTruthy();
   });
 });
 

@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Placeholder integration scaffold — DB-backed tests deferred until createTestDb helper exists; no parent-sibling pure helper to import. See tasks/builds/baseline-capture/progress.md § Deferred Items."
 /**
  * captureBaselineIntegration.test.ts
  *
