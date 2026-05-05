@@ -21,7 +21,8 @@ You are running a **throwaway pilot** to validate whether a video-analysis featu
 **One standalone TypeScript script** at `scripts/pilots/video-analysis-pilot.ts`, runnable via `npx tsx scripts/pilots/video-analysis-pilot.ts`. It must NOT touch the existing Synthetos platform code. No changes to `ProviderContentBlock`, no new skill, no DB schema, no MCP wrapper, no LLM router extension. Direct `fetch()` calls to vendor APIs only.
 
 ### Inputs
-- `tasks/pilots/video-analysis/inputs.json` — array of `{ url, platform, expected_to_perform_well }` objects. Read it; do not generate URLs. If the file is missing, abort with a clear error message and instructions for the operator to create it.
+- `tasks/pilots/video-analysis/inputs.json` — array of `{ url, platform, expected_to_perform_well, note? }` objects. Read it; do not generate URLs. If the file is missing, abort with a clear error message and instructions for the operator to create it.
+- **Skip any entry whose `url` starts with `TODO_`** (case-sensitive prefix). These are unfilled placeholders. Log how many were skipped, grouped by platform, in the results report. Do not treat them as failures.
 - `.env` — `SUPADATA_API_KEY` and `GEMINI_API_KEY`. If either is missing, abort with a clear error message.
 
 ### Per-video flow
