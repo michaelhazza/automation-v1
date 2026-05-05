@@ -477,7 +477,7 @@ Items considered for inclusion in this spec and explicitly left out, with their 
 Per the spec-authoring checklist Appendix:
 
 - [x] §0 Verification log — every cited item verified open or closed; closed items dropped to hygiene only
-- [x] No new application primitives — every code change extends an existing one. Net-new artifacts are limited to: one CI workflow (L5), one new pure-function test file (L2), and extensions to two existing test files (L3, L4).
+- [x] No new application primitives — every code change extends an existing one. Net-new artifacts are: one CI workflow (`.github/workflows/optimiser-cost-gate.yml`, L5); three new pure-function test files (`webhookSecretValidatorPure.test.ts` for L1; `requireSubaccountPermissionPure.test.ts` for L2; `securityAuditServiceWriteFailureLogPure.test.ts` for the L2 audit-write-failure observability sub-fix); extensions to two existing test files (`measureInterventionOutcomeJob.idempotency.test.ts` for L4; `rateLimitKeysPure.test.ts` for L3); and one new docs file (`operator-runbook.md` for H4). All other changes extend existing files in place.
 - [x] File inventory — all new and changed files listed in §3
 - [x] Contracts — two data shapes introduced (§8: sustained + burst email-only rate-limit keys); existing primitives produce/consume them
 - [x] No new tenant-scoped tables — RLS checklist trivially satisfied (§5)
