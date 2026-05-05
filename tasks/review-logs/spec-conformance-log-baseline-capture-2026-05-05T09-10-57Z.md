@@ -7,6 +7,7 @@
 **Scope:** all-of-spec (caller confirmed re-verification of full requirements list; all 12 implementation chunks complete and committed)
 **Changed-code set:** 58 files (committed across `5e6616b4` + `0f66f252`)
 **Run at:** 2026-05-05T09:10:57Z
+**Commit at finish:** `a0faccf3`
 **Prior run:** `tasks/review-logs/spec-conformance-log-baseline-capture-2026-05-05T05-36-34Z.md` (NON_CONFORMANT, 2 directional gaps)
 
 ---
