@@ -42,7 +42,27 @@ This report maps each previously-discussed item to its current status: **BUILT**
 
 ## Schema items
 
-*(section appended below)*
+| Proposed item | Status | Evidence (file:line) | Notes |
+|---|---|---|---|
+| `canonical_prospect_profiles` | **NOT BUILT** | Zero hits across `server/db/schema/` and `migrations/` for `prospect`, `canonical_prospect` | Closest landed tables are `canonical_contacts` and `canonical_opportunities` (`server/db/schema/canonicalEntities.ts:12-89`) — sync-sourced from external CRMs, not operator-built prospect lifecycle |
+| `crm_type` on `subaccounts` | **NOT BUILT** | `server/db/schema/subaccounts.ts:1-105` — no `crm_type` / `crmType` column | Migration `0268_connector_configs_agency_columns.sql` added `connector_config_id` + `external_id` to `subaccounts` for GHL agency installs — closest adjacent work, but not a `crm_type` discriminator |
+| `outreach_sends` | **NOT BUILT** | Zero hits for `outreach_send`, `provider_message_id`, `email_send` | `workspace_identities.email_sending_enabled` toggle exists (`server/db/schema/workspaceIdentities.ts:20`) but no send-tracking table |
+| `org_sending_domains` | **NOT BUILT** | Zero hits for `sending_domain`, `warmup`, `warm_up` | Per-subaccount email identity provisioning landed (`migrations/0254_workspace_canonical_layer.sql`) but no per-org domain warmup config |
+| `bd_conversion_events` | **NOT BUILT** | Only `conversion_events` is page-funnel only (`server/db/schema/conversionEvents.ts:5-26`, keyed on `page_id`) | No BD-specific conversion log under any name |
+| `event_rules` | **NOT BUILT** | Zero hits for `event_rule`, `eventRule` anywhere | Closest is `policy_rules` (gate-decision table, scope: tool-call approval) — not a generic event-to-action dispatch system |
+
+### Adjacent schema work that landed (informational)
+
+- **GHL agency OAuth linkage** — `migrations/0268_connector_configs_agency_columns.sql` extended `connector_configs` with `token_scope`, `company_id`, `access_token`, `refresh_token`, `expires_at`, `scope`. Multi-location GHL agency installs are now first-class, but there is no `crm_type` discriminator yet.
+- **Workspace canonical layer** — `migrations/0254_workspace_canonical_layer.sql` added `workspace_identities` + `workspace_actors` for per-subaccount email identity provisioning.
+- **Agentic commerce** — `migrations/0271_agentic_commerce_schema.sql` added 7 tables (`spending_budgets`, `spending_policies`, `agent_charges`, etc.) for Stripe-backed agent spending. Unrelated to operator-as-agency BD.
+- **Workflows-v1 schema** — `migrations/0276_workflows_v1_additive_schema.sql` added `workflow_step_gates`, `workflow_drafts`, plus columns on existing `workflow_runs`, `tasks`, `agent_execution_events`. See workflows-v1 section below.
+- **`task_events`** — `migrations/0279_task_events.sql` added an append-only sequential event log per task. General-purpose lifecycle events, not BD or outreach.
+- **`service_principals` table** — `server/db/schema/servicePrincipals.ts:9` exists for non-human identities. Partial groundwork for the system-principal plumbing we flagged.
+
+### Migration range
+
+Highest filename: `0279_task_events.sql`. Notable post-0189 work: 0190–0232 (LLM inflight, orchestrator gates, memory, delegation), 0245 (universal tenant RLS hardening), 0254–0255 (workspace canonical layer), 0268 (GHL agency OAuth), 0271 (agentic commerce), 0276 (workflows-v1), 0279 (task_events). **Next free number is `0280`.**
 
 ---
 
