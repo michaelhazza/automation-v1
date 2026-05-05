@@ -221,4 +221,58 @@ Concretely, the revised recommendation:
 
 ## What's left to build
 
-*(section appended below)*
+Grouped by effort tier so the planner can sequence.
+
+### Quick wins (each ≤ half-day, mostly plumbing)
+
+- **Wire `discover_prospects` skill** — register in `actionRegistry.ts`, add handler dispatch in `skillExecutor.ts`. Provider already exists.
+- **Wire `score_lead` skill** — same as above (note the divergence — see recommendation #9).
+- **Connect `hunterProvider` to `enrich_contact`** — currently `enrich_contact` has a stub note; `hunterProvider.ts` is the intended backend.
+- **Declare `GOOGLE_PLACES_API_KEY` and `HUNTER_API_KEY`** in `server/lib/env.ts` Zod schema and `.env.example`. Today they're read via raw `process.env`.
+- **Capture Resend message ID in `emailService.ts:236`** — change `send()` return type from `Promise<void>` to return `{ providerMessageId }`. Required before any Resend webhook correlation can work.
+
+### Skills + agent (1-2 days)
+
+- **`classify_prospect_reply` skill** — new SKILL.md + handler. BD intent taxonomy (positive/negative/OOO/not-ready/referral) wrapped as a workflow `agent_decision` step (per the second exploration's recommendation on structured LLM output). Distinct from existing `classify_email.md`.
+- **Decide on `score_lead`** — keep the criteria-scorer as is, OR fold Hunter enrichment into it (recommendation #9). HITL decision.
+
+### Schema additions (each is a single migration, mostly independent)
+
+- **`canonical_prospect_profiles`** — Q1 of operator-as-agency report. Lifecycle overlay on canonical contacts. Independent of everything else.
+- **`crm_type` column on `subaccounts`** — Q3. Single-column ALTER. Required before native-CRM code path is meaningful.
+- **`outreach_sends`** — Q6. `provider_message_id` correlation table. Required before Resend webhook works end-to-end.
+- **`org_sending_domains`** — Q6. Per-org warmed sending domain config. Required for non-shared sender domains.
+- **`workflow_triggers` (new) OR generalised event-rules table** — the routing layer. See revised recommendation. Single most architecturally consequential addition.
+- **`bd_conversion_events` (or generic `event_log`)** — durable trail of events that fired triggers. Optional but recommended for audit + replay.
+
+### Routing & event ingestion (1-2 weeks)
+
+- **`server/lib/ruleMatcher.ts`** — extract the duplicated `matchesFilter` (`triggerService.ts:44`) and `matchesRule` (`policyEngineServicePure.ts:106`) into one shared utility.
+- **`eventBus.publish(event)`** — single normalised entry point. Looks up matching `workflow_triggers` rows, dispatches to `WorkflowRunService.startRun()`.
+- **Wire existing event sources to publish:**
+  - `ghlWebhook.ts:112-157` — call `eventBus.publish(...)` after the existing `OpportunityStageUpdate` upsert.
+  - `conversionEvents` writer in `pageIntegrationWorker.ts` — publish after insert.
+  - Subaccount creation in `routes/subaccounts.ts:121-155` — publish `subaccount_created` event.
+- **`POST /api/webhooks/resend`** — new route mirroring the GHL webhook pattern. Verify svix signature. Look up `outreach_sends` by `provider_message_id`. Update `outreach_sends.status`. Publish `email.delivered` / `email.opened` / `email.bounced` events to the bus.
+
+### Cross-cutting
+
+- **System-principal plumbing.** Two options: (a) seed a per-org system user; (b) wire `service_principals` to `workflow_runs.startedByUserId` polymorphically. Required for clean audit attribution on system-initiated runs.
+- **`lead-discover` nightly pg-boss job** — per-subaccount fan-out with `singletonKey: lead-discover:${subaccountId}:${YYYY-MM-DD}`. Per the original Q2 spec.
+- **`client-onboarding` workflow template** — `server/workflows/client-onboarding.workflow.ts`. Triggered post-conversion via the `workflow_triggers` table.
+
+### Out of scope for the operator-as-agency cut, but worth flagging
+
+- **`email-inbound-poll` job + `imapflow` dependency** — original Q6 recommendation. Resend still has no inbound parsing as of April 2026. If reply detection is a launch requirement, this becomes critical-path. If launch can survive without auto-reply detection (e.g. operator manually routes inbound), defer.
+- **Formal `CrmAdapter` interface** — Q3. Only worth doing if a second CRM (`synthetos_native` per `crm_type` proposal) is genuinely on the near roadmap. Otherwise the existing `IntegrationAdapter` + `apiAdapter` GHL path is sufficient.
+
+### Suggested build order
+
+1. **Plumbing layer** — env vars, message-ID capture, register `discover_prospects` + `score_lead` skills, connect Hunter to `enrich_contact`. (~1 day)
+2. **Schema layer** — `canonical_prospect_profiles`, `crm_type`, `outreach_sends`, `org_sending_domains` migrations + Drizzle types. (~2-3 days incl. RLS)
+3. **Routing layer** — `ruleMatcher` extract → `workflow_triggers` table → `eventBus.publish` → wire 2-3 event sources → `POST /api/webhooks/resend`. (~1-2 weeks)
+4. **System-principal** — seed or polymorphic FK. (~1-2 days, but mostly design-decision time)
+5. **Onboarding template + lead-discover job** — once routing is in place. (~3-5 days)
+6. **`classify_prospect_reply` + IMAP polling (optional)** — if auto-reply detection is in scope.
+
+The biggest schedule risk is the routing layer (step 3) — everything else is mechanical once it's in place.
