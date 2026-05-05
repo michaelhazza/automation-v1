@@ -36,6 +36,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Pass 1: literal eventType string in recordSecurityEvent / recordEvent ─────
+# Note: [^}]* does not cross newlines — multi-line object literals with eventType:
+# on a separate line are not caught. The TypeScript type system (SecurityEventInputV2)
+# is the primary defence; this pass catches single-line literal bypasses only.
 
 while IFS= read -r match; do
   file=$(echo "$match" | cut -d: -f1)

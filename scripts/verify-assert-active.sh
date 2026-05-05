@@ -8,8 +8,9 @@
 # the same file, OR carry the escape-hatch comment:
 #   // active-check-not-required: <reason>
 #
-# Soft-deletable tables checked (derived from schema files that contain
-# `deletedAt: timestamp`):
+# Soft-deletable tables checked (derived by running
+# `git grep "deletedAt" server/db/schema/` at plan time 2026-05-06;
+# update this list when adding new soft-deletable schema tables):
 #   subaccounts, agents, skills, workflowTemplates, agentTriggers,
 #   organisations, tasks, memoryBlocks, documentBundles, goals, projects,
 #   permissionSets, subscriptions, users, teams, automations, reports,
