@@ -191,7 +191,31 @@ Workflows-v1 has its **own** HITL surface, separate from the standalone `actionS
 
 ## Revised recommendation
 
-*(section appended below)*
+**Extended, not dropped.** The earlier recommendation was framed as a single new "event_rules + dispatcher" subsystem. The right framing now is to recognise that workflows-v1 is the **execution layer** ("what to run, how, with which HITL/cost/confidence guardrails"), and the gap that remains is the **routing layer** ("when to start, for whom, with which initial input"). These are orthogonal.
+
+Concretely, the revised recommendation:
+
+1. **Drop the proposal to build the execution primitives.** Workflows-v1 already dispatches `start_playbook` (it IS playbook), `create_subaccount`, `send_notification`, `update_record`, `start_agent_run`, and CRM primitives as `action_call` / `agent_call` step types with HITL gating. Don't reinvent.
+
+2. **Keep the `event_rules` table concept** (or call it `workflow_triggers`) — `{event_type, org_id, filter_json}` → `{workflow_template_id, initial_input_template}`. **The table's only dispatch target is `WorkflowRunService.startRun()`.** No new execution primitives required.
+
+3. **Choose between two implementation paths for routing:**
+   - **(a) Extend `agent_triggers`** with a `target_type` column (`agent_run | workflow_run`) and a nullable `workflow_template_id`. Cheaper (3 files change, no callers of `checkAndFire` break per the earlier exploration). Risk: semantic drift — `agent_triggers` was named when only agent dispatch existed.
+   - **(b) Build a parallel `workflow_triggers` table.** Cleaner naming; same shape; share the `matchesFilter` evaluator with `agent_triggers` via the still-unbuilt `server/lib/ruleMatcher.ts`. Higher up-front cost.
+
+   Recommendation: **(b)** — the naming clarity is worth the small extra cost, and the ruleMatcher extraction was already on the books anyway.
+
+4. **Build the event ingestion surface alongside `workflow_triggers`.** Single normalised entry point that webhook routes (`ghlWebhook.ts`, new `resendWebhook.ts`, `stripeAgentWebhook.ts`), pg-boss jobs, and internal services call. `EventBusInput` is `NormalisedEvent` + `{ orgId, subaccountId?, source }` (per the earlier exploration). Routes to `workflow_triggers` lookup, then `WorkflowRunService.startRun()`.
+
+5. **Wire `conversionEvents` consumers.** The page-funnel `conversion_events` writer currently inserts and stops. After the event bus exists, the same insert site should call `eventBus.publish(...)`. Same for `crm_stage_changed` events from `ghlWebhook.ts:112-157` (already received and upserted to canonical opportunities; just needs a publish call).
+
+6. **Resolve the system-principal gap.** `service_principals` table exists but unused. Either seed a per-org system user, or wire `service_principals` to `workflow_runs.startedByUserId` via a polymorphic actor reference. Required for clean audit attribution on system-initiated workflow runs.
+
+7. **The prospect / outreach data layers are independent of the routing/execution decisions above.** `canonical_prospect_profiles`, `outreach_sends`, `org_sending_domains`, `bd_conversion_events` (or generalised `event_log`), Resend webhook + IMAP polling — all still need to be built. None block on workflows-v1 or the routing layer.
+
+8. **The SDR skills are 80% built and unwired** — registering `discover_prospects` and `score_lead` in `actionRegistry.ts` + `skillExecutor.ts`, declaring `GOOGLE_PLACES_API_KEY` / `HUNTER_API_KEY` in `env.ts` + `.env.example`, and connecting `hunterProvider` to `enrich_contact` is a half-day of plumbing rather than a green-field skill build.
+
+9. **Clarify the `score_lead` divergence with the user.** The shipped `score_lead.md` is a criteria-based LLM scorer with no Hunter call. The original proposal was a Hunter-enrichment-driven score. Decide whether to keep both as separate skills or fold Hunter into `score_lead` (in which case it must move out of `enrich_contact`).
 
 ---
 
