@@ -136,7 +136,7 @@ router.post(
     // Fire-and-forget: schedule the optimiser for the new subaccount.
     // Failure logs but does not block the response (§5.8 pattern).
     if (sa.optimiserEnabled !== false) {
-      agentScheduleService.registerOptimiserSchedule(sa.id)
+      agentScheduleService.registerOptimiserSchedule(sa.id, organisationId)
         .catch((err) => {
           logger.warn('optimiser_schedule_register_failed', {
             event: 'optimiser.schedule.register_failed',

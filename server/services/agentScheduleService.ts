@@ -324,7 +324,7 @@ export const agentScheduleService = {
     }
 
     const rows = await db
-      .select({ subaccountId: subaccountAgents.subaccountId })
+      .select({ subaccountId: subaccountAgents.subaccountId, organisationId: subaccountAgents.organisationId })
       .from(subaccountAgents)
       .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
       .where(
@@ -341,7 +341,7 @@ export const agentScheduleService = {
     let failedCount = 0;
     for (const row of rows) {
       try {
-        const result = await this.registerOptimiserSchedule(row.subaccountId);
+        const result = await this.registerOptimiserSchedule(row.subaccountId, row.organisationId);
         if (result.wasNew) newCount++;
         else existingCount++;
       } catch (err) {
@@ -438,7 +438,7 @@ export const agentScheduleService = {
    * Cron: stagger offset [0,359] maps to a (minute, hour) pair in the 06:00–11:59
    * UTC window: minute = offset % 60, hour = 6 + floor(offset / 60).
    */
-  async registerOptimiserSchedule(subaccountId: string): Promise<{
+  async registerOptimiserSchedule(subaccountId: string, organisationId: string): Promise<{
     subaccountAgentId: string;
     cron: string;
     scheduleName: string;
@@ -455,11 +455,11 @@ export const agentScheduleService = {
       throw { statusCode: 500, message: 'Optimiser system agent not found', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
     }
 
-    // 2. Resolve the subaccount to get organisationId and timezone
+    // 2. Resolve the subaccount to confirm it belongs to this org
     const [subaccount] = await db
       .select({ id: subaccounts.id, organisationId: subaccounts.organisationId })
       .from(subaccounts)
-      .where(eq(subaccounts.id, subaccountId))
+      .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
       .limit(1);
 
     if (!subaccount) {

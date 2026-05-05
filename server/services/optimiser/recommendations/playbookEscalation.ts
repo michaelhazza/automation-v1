@@ -66,7 +66,7 @@ export const evaluate: Evaluator<EscalationRateEvidence> = (
         median_version: ev.median_version,
       },
       priorityTuple: [severityRank(severity), CATEGORY, dedupeKey],
-      actionHint: escalationActionHint(ev.workflowId, null),
+      actionHint: escalationActionHint(ev.workflowId),
     });
   }
 

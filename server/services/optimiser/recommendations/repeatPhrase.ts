@@ -55,7 +55,7 @@ export const evaluate: Evaluator<EscalationPhraseEvidence> = (
         median_version: ev.median_version,
       },
       priorityTuple: [severityRank(severity), CATEGORY, dedupeKey],
-      actionHint: phraseActionHint(ctx.subaccountId, ev.phrase),
+      actionHint: phraseActionHint(ctx.subaccountId),
     });
   }
 

@@ -9,6 +9,7 @@
 
 import { expect, test, describe, vi } from 'vitest';
 import { createHash } from 'crypto';
+import { computeStaggerMinutes } from '../agentScheduleService.js';
 
 // ---------------------------------------------------------------------------
 // Mock all modules that have side-effects at import time so that importing
@@ -74,9 +75,6 @@ vi.mock('../../lib/logger.js', () => ({
     error: vi.fn(),
   },
 }));
-
-// Now import the named export under test — mocks above ensure no side effects
-const { computeStaggerMinutes } = await import('../agentScheduleService.js');
 
 // ---------------------------------------------------------------------------
 // Reference implementation of the formula (for cross-checking)

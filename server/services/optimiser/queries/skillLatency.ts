@@ -17,6 +17,7 @@
 
 import { sql } from 'drizzle-orm';
 import type { OrgScopedTx } from '../../../db/index.js';
+import { withAdminConnectionGuarded } from '../../../lib/rlsBoundaryGuard.js';
 import type { QueryRow } from './types.js';
 
 export interface SkillSlowEvidence {
@@ -38,22 +39,27 @@ export interface SkillSlowEvidence {
  * Returns true if the optimiser_skill_peer_medians materialised view contains
  * at least one row.
  *
- * The orchestrator (Chunk 5) calls this BEFORE running runSkillLatencyQuery.
+ * The orchestrator calls this BEFORE running runSkillLatencyQuery.
  * When the view is empty, the orchestrator emits `optimiser.scan.partial` and
  * skips this category entirely — no error is raised.
  *
- * @param tx Must be an admin-role connection. The view is REVOKED from the
- *   default role (migration 0277). Callers must use withAdminConnectionGuarded.
+ * The view is REVOKED from the default role (migration 0277); this function
+ * uses withAdminConnectionGuarded internally to access it.
  */
-export async function peerMediansViewIsPopulated(tx: OrgScopedTx): Promise<boolean> {
-  const rows = await tx.execute<{ populated: boolean }>(sql`
-    SELECT EXISTS(
-      SELECT 1 FROM optimiser_skill_peer_medians LIMIT 1
-    ) AS populated
-  `);
-
-  const row = rows[0];
-  return row?.populated === true;
+export async function peerMediansViewIsPopulated(): Promise<boolean> {
+  // allowRlsBypass: read-only existence check on optimiser_skill_peer_medians (cross-tenant aggregate, excluded from RLS)
+  return withAdminConnectionGuarded(
+    { source: 'optimiser.peer_medians.populated_check', allowRlsBypass: false },
+    async (adminTx) => {
+      const rows = await adminTx.execute<{ populated: boolean }>(sql`
+        SELECT EXISTS(
+          SELECT 1 FROM optimiser_skill_peer_medians LIMIT 1
+        ) AS populated
+      `);
+      const row = rows[0];
+      return row?.populated === true;
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------

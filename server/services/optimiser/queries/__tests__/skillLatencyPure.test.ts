@@ -11,6 +11,12 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../../../../lib/rlsBoundaryGuard.js', () => ({
+  withAdminConnectionGuarded: vi.fn(),
+}));
+
+import { withAdminConnectionGuarded } from '../../../../lib/rlsBoundaryGuard.js';
 import {
   peerMediansViewIsPopulated,
   runSkillLatencyQuery,
@@ -22,22 +28,24 @@ import {
 // ---------------------------------------------------------------------------
 
 describe('peerMediansViewIsPopulated', () => {
-  it('returns false when the mock tx returns { populated: false }', async () => {
+  it('returns false when the admin tx returns { populated: false }', async () => {
     const fakeTx = {
       execute: vi.fn().mockResolvedValue([{ populated: false }]),
     };
+    vi.mocked(withAdminConnectionGuarded).mockImplementation(async (_opts, cb) => cb(fakeTx as any));
 
-    const result = await peerMediansViewIsPopulated(fakeTx as any);
+    const result = await peerMediansViewIsPopulated();
     expect(result).toBe(false);
     expect(fakeTx.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('returns true when the mock tx returns { populated: true }', async () => {
+  it('returns true when the admin tx returns { populated: true }', async () => {
     const fakeTx = {
       execute: vi.fn().mockResolvedValue([{ populated: true }]),
     };
+    vi.mocked(withAdminConnectionGuarded).mockImplementation(async (_opts, cb) => cb(fakeTx as any));
 
-    const result = await peerMediansViewIsPopulated(fakeTx as any);
+    const result = await peerMediansViewIsPopulated();
     expect(result).toBe(true);
   });
 
@@ -45,8 +53,9 @@ describe('peerMediansViewIsPopulated', () => {
     const fakeTx = {
       execute: vi.fn().mockResolvedValue([]),
     };
+    vi.mocked(withAdminConnectionGuarded).mockImplementation(async (_opts, cb) => cb(fakeTx as any));
 
-    const result = await peerMediansViewIsPopulated(fakeTx as any);
+    const result = await peerMediansViewIsPopulated();
     expect(result).toBe(false);
   });
 });

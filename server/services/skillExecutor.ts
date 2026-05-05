@@ -2046,17 +2046,18 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     try {
       const { skillLatencyModule, peerMediansViewIsPopulated, runSkillLatencyQuery } = await import('./optimiser/queries/skillLatency.js');
       const { evaluateSkillSlow } = await import('./optimiser/recommendations/skillSlow.js');
+      // peerMediansViewIsPopulated manages its own admin connection internally
+      const populated = await peerMediansViewIsPopulated();
+      if (!populated) {
+        logger.info('optimiser.scan.partial', { scanCategory: skillLatencyModule.category, medianVersion: 0, subaccountId });
+        return { success: true, outputs: [] };
+      }
       // allowRlsBypass: reading cross-tenant peer medians view (optimiser_skill_peer_medians) — read-only aggregate, no tenant data written
       const { withAdminConnectionGuarded: adminGuarded } = await import('../lib/rlsBoundaryGuard.js');
       let outputs: import('./optimiser/recommendations/types.js').EvaluatorOutput[] = [];
       await adminGuarded(
         { source: 'optimiser.scan_skill_latency', allowRlsBypass: false },
         async (adminTx) => {
-          const populated = await peerMediansViewIsPopulated(adminTx);
-          if (!populated) {
-            logger.info('optimiser.scan.partial', { scanCategory: skillLatencyModule.category, medianVersion: 0, subaccountId });
-            return;
-          }
           const versionRows = await adminTx.execute<{ max_version: number }>(
             (await import('drizzle-orm')).sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
           );

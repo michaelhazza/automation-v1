@@ -146,31 +146,18 @@ export async function runOptimiserScan(
   // ── Step 2: load prior recs for dedup ───────────────────────────────────
   const priorRecs = await loadPriorRecs(tx, subaccountId);
 
-  // ── Step 3: peer-medians view check + version read ──────────────────────
-  // optimiser_skill_peer_medians is REVOKED from the default role; SELECT
-  // requires admin_role (migration 0277). Both the EXISTS check and
-  // MAX(median_version) read must run inside withAdminConnectionGuarded.
-  await withAdminConnectionGuarded(
-    { source: 'optimiser.scan.peerMediansCheck', allowRlsBypass: false },
-    async (adminTx) => {
-      const viewPopulated = await peerMediansViewIsPopulated(adminTx);
-
-      if (!viewPopulated) {
-        partialMode = true;
-        logger.info('optimiser.scan.partial', {
-          subaccountId,
-          organisationId,
-          medianVersion: 0,
-        });
-      } else {
-        // Invariant 32: use MAX not LIMIT 1 for version read
-        const versionRows = await adminTx.execute<{ max_version: number }>(
-          sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
-        );
-        medianVersion = versionRows[0]?.max_version ?? 0;
-      }
-    },
-  );
+  // ── Step 3: peer-medians view check ─────────────────────────────────────
+  // peerMediansViewIsPopulated manages its own admin connection internally.
+  // When the view is empty we enter partial mode and skip skillLatency entirely.
+  const viewPopulated = await peerMediansViewIsPopulated();
+  if (!viewPopulated) {
+    partialMode = true;
+    logger.info('optimiser.scan.partial', {
+      subaccountId,
+      organisationId,
+      medianVersion: 0,
+    });
+  }
 
   // ── Step 4: build evaluator context (shared across all categories) ───────
   const evalCtx: EvaluatorContext = {
@@ -210,7 +197,7 @@ export async function runOptimiserScan(
     logger.error('optimiser.scan.failed', { scanCategory: escalationRateModule.category, error: err instanceof Error ? err.message : String(err), subaccountId });
   }
 
-  // skillLatency — special: uses withAdminConnectionGuarded + version param
+  // skillLatency — special: uses withAdminConnectionGuarded for version read + query
   if (partialMode) {
     logger.info('optimiser.scan.noop', { scanCategory: skillLatencyModule.category, subaccountId, reason: 'partial_mode' });
   } else {
@@ -220,6 +207,12 @@ export async function runOptimiserScan(
       await withAdminConnectionGuarded(
         { source: 'optimiser.scan.skillLatency', allowRlsBypass: false },
         async (adminTx: OrgScopedTx) => {
+          // Invariant 32: use MAX not LIMIT 1 for version read; done inside admin connection for atomic consistency
+          const versionRows = await adminTx.execute<{ max_version: number }>(
+            sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
+          );
+          medianVersion = versionRows[0]?.max_version ?? 0;
+          evalCtx.medianVersion = medianVersion;
           skillLatencyRows = await runSkillLatencyQuery(adminTx, subaccountId, medianVersion);
         },
       );

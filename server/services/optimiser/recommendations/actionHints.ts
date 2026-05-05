@@ -10,25 +10,24 @@ export function budgetActionHint(agentId: string): string {
   return `configuration-assistant://agent/${agentId}?focus=budget`;
 }
 
-export function escalationActionHint(workflowId: string, stepId?: string | null): string {
-  const step = stepId ? `&step=${encodeURIComponent(stepId)}` : '';
-  return `configuration-assistant://workflow/${workflowId}?focus=escalation-step${step}`;
+export function escalationActionHint(workflowId: string): string {
+  return `configuration-assistant://workflow/${workflowId}?focus=escalation`;
 }
 
 export function skillSlowActionHint(skillSlug: string, subaccountId: string): string {
   return `configuration-assistant://skill/${encodeURIComponent(skillSlug)}?focus=latency&subaccountId=${subaccountId}`;
 }
 
-export function inactiveWorkflowActionHint(subaccountAgentId: string): string {
-  return `configuration-assistant://subaccount-agent/${subaccountAgentId}?focus=schedule`;
+export function inactiveWorkflowActionHint(workflowId: string): string {
+  return `configuration-assistant://workflow/${workflowId}?focus=schedule`;
 }
 
-export function phraseActionHint(subaccountId: string, phrase: string): string {
-  return `configuration-assistant://brand-voice/${subaccountId}?phrase=${encodeURIComponent(phrase)}`;
+export function phraseActionHint(subaccountId: string): string {
+  return `configuration-assistant://subaccount/${subaccountId}?focus=escalation_phrases`;
 }
 
 export function memoryCitationActionHint(agentId: string): string {
-  return `configuration-assistant://agent/${agentId}?focus=memory-cleanup`;
+  return `configuration-assistant://agent/${agentId}?focus=memory`;
 }
 
 export function routingActionHint(agentId: string): string {
@@ -36,5 +35,5 @@ export function routingActionHint(agentId: string): string {
 }
 
 export function cacheActionHint(agentId: string): string {
-  return `configuration-assistant://agent/${agentId}?focus=cache-prefix`;
+  return `configuration-assistant://agent/${agentId}?focus=llm_cache`;
 }

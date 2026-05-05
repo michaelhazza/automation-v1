@@ -23,6 +23,7 @@ export async function runPeerMediansRefresh(): Promise<void> {
     await withAdminConnectionGuarded(
       {
         source: 'optimiser_peer_medians_refresh',
+        // allowRlsBypass: cross-tenant aggregate refresh for peer-medians materialised view
         allowRlsBypass: true,
         reason: 'cross-tenant aggregate refresh for peer-medians materialised view',
       },

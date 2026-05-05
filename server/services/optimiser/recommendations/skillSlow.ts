@@ -7,7 +7,6 @@
 
 import type { EvaluatorOutput, EvaluatorContext } from './types.js';
 import type { QueryRow } from '../queries/types.js';
-import { skillSlowActionHint } from './actionHints.js';
 
 export interface SkillSlowEvidence {
   skillSlug: string;
@@ -52,7 +51,7 @@ export function evaluateSkillSlow(
       latency_p95_ms: e.thisP95Ms,
       peer_p95_ms: e.peerP95Ms,
       ratio: e.ratioVsPeerP95,
-      median_version: e.medianVersion,
+      medianVersion: e.medianVersion,
     };
 
     results.push({
@@ -61,7 +60,7 @@ export function evaluateSkillSlow(
       dedupeKey,
       evidence,
       priorityTuple: [2, CATEGORY, dedupeKey],
-      actionHint: skillSlowActionHint(e.skillSlug ?? dedupeKey, ctx.subaccountId),
+      actionHint: null,
     });
   }
 
