@@ -714,7 +714,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
           onClose={() => setOnboardLink(null)}
           onSuccess={(_identityId) => {
             setOnboardLink(null);
-            navigate(`/admin/subaccounts/${subaccountId}/agents/${onboardLink.id}/manage?tab=identity`);
+            navigate(`/admin/subaccounts/${subaccountId}/agents/${onboardLink.id}/manage?tab=identity&newlyOnboarded=1`);
           }}
         />
       )}
