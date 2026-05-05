@@ -106,3 +106,51 @@ Hand ChatGPT the actual code-only diff bundle so they can run their offered "tru
 
 ---
 
+## Round 2 — 2026-05-05T11:00:00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> You're basically there. There are no obvious merge blockers, but there are two real risks still hiding in this PR that are easy to miss because everything "looks correct":
+> - State leakage / hidden side effects
+> - Observability drift that won't fail fast
+>
+> The one actual bug-class I see (not theoretical):
+> 🔴 Session-level state leakage — concrete example pattern: `SET statement_timeout = '200ms'` on a pooled connection without guaranteed reset. Connection reused → timeout persists → unrelated queries fail randomly. Rule: always `SET LOCAL` inside transaction OR try/finally reset.
+>
+> The subtle risk most people miss:
+> 🟠 Async context + tracing integrity — async boundaries drop context silently; Promise.all, job queues, event emitters all break lineage. Verify any new async fan-out, queue/job boundaries, or callbacks have explicit context propagation.
+>
+> Observability drift — no new ad-hoc span names, no dynamic span naming, no raw payloads in metadata, no "temporary" debug logs.
+>
+> Determinism check — explicit ORDER BY, tie-breaker (id DESC), no implicit ordering assumptions.
+>
+> Idempotency / replay safety — verify every new write path has a dedupe story, no "assume upstream is safe" logic.
+>
+> Verdict: Approve and merge — but this is one of those PRs where nothing is obviously wrong; the risk is entirely in system integrity over time. You're protecting determinism, observability, replay safety.
+
+### Adjudication note
+
+Round 2 sharpened the previous meta-review into 5 specific concerns. Two are **substantive duplicates** of Round 1 (auto-apply prior decision per playbook step 1a) and three are **new** and required fresh verification against the actual code.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R2.F1 — Session-level state leakage (statement_timeout pattern) | technical | reject | auto (reject) | low | Verified: PR diff contains zero `statement_timeout` and zero non-LOCAL `SET` statements. Pre-existing instance in `workspaceMemoryService.ts:289` is documented in `architecture.md:1288` with guaranteed try/finally reset; all optimiser queries use `SET LOCAL` (e.g. `optimiser/queries/skillLatency.ts:98`). No regression introduced. |
+| R2.F2 — Async context + tracing integrity in new async fan-out / job boundaries | technical | reject | auto (reject) | low | Verified: `withOrgTx` uses `AsyncLocalStorage` (`server/instrumentation.ts:165`). Both new pg-boss handlers (`captureBaselineJob.ts`, `evaluateAllPendingBaselines.ts`) wrap execution in `db.transaction` + `set_config('app.organisation_id')` + `withOrgTx`. Metric readers run sequentially (no `Promise.all` fan-out) so AsyncLocalStorage context is preserved across awaits. `getOrgScopedDb()` reads from the same store and resolves correctly inside metric readers. No new context-loss surface introduced. Note: `createEvent('baseline.capture.*')` calls no-op silently in pg-boss context (no Langfuse trace), but this matches the established codebase pattern — `connectorPollingService.ts` does the same. Not a regression. |
+| R2.F3 — Observability drift (event names not in registry, dynamic naming, raw payloads, temp debug logs) | technical | reject | auto (reject) — duplicate of Round 1 F3+F4 | low | Substantive duplicate of Round 1 F3 (event-name registry) and F4 (raw payload logging) — same finding_type, same code area, no new evidence. Carries Round 1's verified-clean decision. |
+| R2.F4 — Determinism (ORDER BY, tie-breaker, no implicit ordering) | technical | reject | auto (reject) — duplicate of Round 1 F2 | low | Substantive duplicate of Round 1 F2 (latest/current selection determinism) — same finding_type, same code area, no new evidence. Carries Round 1's verified-clean decision (partial UNIQUE index `subaccount_baselines_active_uniq` enforces uniqueness at the DB level). |
+| R2.F5 — Idempotency / replay safety on new write paths | technical | reject | auto (reject) | low | Verified: every new write path has explicit deduplication. (a) `subaccountOnboardingService.markBaselinePending` catches 23505 unique-violation as no-op (`subaccountOnboardingService.ts:766`); (b) `subaccount_baseline_metrics` upserts use `ON CONFLICT (baseline_id, metric_slug) DO UPDATE` (`captureBaselineService.ts:152-161`); (c) capture-lock acquisition uses optimistic predicate `WHERE status IN ('pending','ready')` so a second worker no-ops; (d) `runManual` atomic claim uses `WHERE status NOT IN ('capturing','reset')` returning 409 on race; (e) pg-boss enqueue uses `singletonKey: baseline:${baselineId}` + `singletonHours: 1` for queue-level dedup; (f) `adminReset` runs in a single `withAdminConnection` transaction. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None — all 5 findings rejected after verification. R2.F1 and R2.F5 were genuinely new and required code-level verification; R2.F2 confirmed the existing AsyncLocalStorage pattern is correctly used; R2.F3 and R2.F4 were duplicates of Round 1 findings.
+
+### Round 2 verdict from ChatGPT
+
+> Approve and merge — but this is one of those PRs where nothing is obviously wrong; the risk is entirely in system integrity over time.
+
+---
+
