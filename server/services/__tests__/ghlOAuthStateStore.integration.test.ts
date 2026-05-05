@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="dynamic import conditioned on NODE_ENV=integration to avoid loading the DB module in unit test runs"
 /**
  * ghlOAuthStateStore — DB integration tests (S-P0-1, S-P0-2).
  *

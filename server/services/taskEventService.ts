@@ -110,8 +110,8 @@ export async function appendAndEmitTaskEvent(
     // The uniq_approval_resolved_per_step constraint enforces exactly-one semantics.
     // On concurrent double-approve the second writer hits 23505 — the first write
     // won the race, so silently discard this duplicate and skip the socket emit.
-    const pgErr = err as { code?: string; constraint_name?: string };
-    if (pgErr.code === '23505' && pgErr.constraint_name === 'uniq_approval_resolved_per_step') {
+    const cause = (err as { cause?: { code?: string; constraint_name?: string } }).cause;
+    if (cause?.code === '23505' && cause?.constraint_name === 'uniq_approval_resolved_per_step') {
       logger.debug('task_event_duplicate_approval_resolved', {
         taskId: ctx.taskId,
         eventKind: event.kind,
