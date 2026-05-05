@@ -2236,3 +2236,87 @@ Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `
 F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
 
 JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.
+
+### 2026-05-05 Pattern — Sentinel-row dependencies are validated at boot, not caught at write time
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 2 Finding 1.
+
+When code depends on a known DB row existing (e.g. the `SECURITY_AUDIT_SENTINEL_ORG_ID` org row that anchors `auth.login.failure` events when no real org is known), validate at boot — don't catch the silent FK failure at write time. The precedent is `validateEncryptionKeyOrThrow()`; the new instance is `validateSecurityAuditSentinelOrgOrThrow()`. Both run inside `server/index.ts::start()`, both throw in production, both downgrade to `console.warn` in development.
+
+The failure mode without boot validation: the audit-write path catches the FK violation, logs it, returns. The write silently drops. The on-call engineer doesn't see the missing event until they go looking for it during an incident — by which point the original audit context (request, headers, IP) is gone. Boot validation makes the dependency visible at deploy time, when fixing it is a `psql` paste-in away.
+
+Detection heuristic: any service that imports a DB row by hard-coded UUID — sentinel orgs, system agents, well-known principal IDs — needs a boot-time validator. Grep for `'00000000-` literals; each hit either has a validator already or needs one.
+
+### 2026-05-05 Pattern — JWT `iat` invalidation comparisons must align both sides to whole seconds
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 1 Finding 2.
+
+JWTs encode `iat` (issued-at) as whole seconds. The natural way to invalidate a token after a state change (password changed, session revoked) is "if `passwordChangedAt > token.iat * 1000`, reject". This is wrong by ~1s on average: `passwordChangedAt` is millisecond-precision, `token.iat * 1000` is whole-second × 1000, so a token issued in the same wall-clock second as the state change is mistakenly revoked on first use.
+
+Fix is two-sided: floor the state field at write time (`new Date(Math.floor(now.getTime() / 1000) * 1000)`) AND compare in seconds at read time (`Math.floor(passwordChangedAt.getTime() / 1000) > token.iat` — strict greater, not `>=`). Either side alone leaves the off-by-one. Apply to: password change, signup (welcome email links), invite acceptance, any future session-revocation path.
+
+The read-side fix (`server/middleware/auth.ts`) and the write-side fix (`server/services/authService.ts::resetPassword`) ride together — neither is sufficient alone.
+
+### 2026-05-05 Pattern — Per-route body-size caps install BEFORE the global JSON parser, not after
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 1 Finding 3.
+
+Express middleware ordering matters here. The standard setup is `app.use(express.json({ limit: '10mb' }))` early in the chain. To enforce a tighter cap on a specific route (`/api/client-errors`, audit endpoints, anything where authenticated abuse can inflate downstream layers), the path-scoped tight parser must register BEFORE the global parser:
+
+```ts
+app.use('/api/client-errors', express.json({ limit: '16kb' }));  // tight, first
+app.use(express.json({ limit: '10mb' }));                          // global, second
+```
+
+Mechanism: once the tight parser populates `req._body`, the global parser short-circuits (Express `req._body` semantics — `bodyParser` skips when already set). Reverse order means the global parser fires first and accepts up to 10mb regardless of the tight registration. The tight cap returns 413 only when it runs first.
+
+Detection heuristic: grep `app.use('/api/.*express\.json` — every hit must register BEFORE the global `app.use(express.json` call. Order is enforced by source position in `server/index.ts`, not by mount path specificity.
+
+### 2026-05-05 Pattern — `logAndSwallow` is "don't propagate", not "don't observe"
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 1 Finding 5.
+
+The `logAndSwallow` helper in `client/src/lib/silentCatchHelper.ts` exists to keep best-effort client calls from breaking the page when they fail. The contract is "don't propagate the error to the render path", NOT "don't observe the error". Always emit `console.debug` (not gated on `NODE_ENV`) so support engineers can surface swallowed errors with devtools open. Never gate logging on environment for swallow helpers — production users won't see `console.debug` unless they explicitly enable it, but a support engineer investigating an issue can.
+
+Wider rule: any "swallow" helper (server or client) that gates its observability on environment is a regression magnet. `console.debug` is the right level — present, but quiet by default — and the gate, if any, lives at the caller, not in the helper.
+
+### 2026-05-05 Pattern — `leftJoin` + `isActive(table)` predicate must live in the JOIN ON clause, not the WHERE clause
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 2 Finding 5 (verify-clean confirmation).
+
+Drizzle's `leftJoin(table, condition)` preserves left-side rows even when the right side has no match. Adding a predicate on the right-side table to the `WHERE` clause silently converts LEFT semantics to INNER: rows where the right side is `NULL` (no match) are filtered out by the WHERE.
+
+For soft-deletable tables (`agents`, `systemAgents`, `subaccounts`, etc.), the soft-delete filter (`isActive(table)` from `server/lib/queryHelpers`, or raw `isNull(table.deletedAt)`) MUST live in the join's ON clause:
+
+```ts
+// CORRECT — preserves LEFT semantics
+.leftJoin(systemAgents, and(
+  eq(systemAgents.id, agents.sourceTemplateId),
+  isActive(systemAgents)  // here, not WHERE
+))
+
+// WRONG — silently converts to INNER
+.leftJoin(systemAgents, eq(systemAgents.id, agents.sourceTemplateId))
+.where(isActive(systemAgents))
+```
+
+This is now §8.27 in `DEVELOPMENT_GUIDELINES.md`. The verify-clean grep pattern: search server/ for `leftJoin` + `isActive` co-located in a `.where(...)` clause. Round 2 Finding 5 verified the only co-located instance (`subaccountAgentService.ts:522`) sits in the JOIN ON clause and is correct — but the grep is the recommended detection going forward.
+
+### 2026-05-05 Pattern — Two-layer rate-limit key normalisation is intentional defence-in-depth, not redundant
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 2 Finding 7 (verify-clean confirmation).
+
+The rate-limit key construction has two normalisation layers:
+
+1. **Call site** — `server/routes/auth.ts` lines 26 (signup), 60 (login), 131 (forgot) call `email.trim().toLowerCase()` before building the key.
+2. **Key builder** — `server/lib/rateLimitKeys.ts:rateLimitKeys.authSignup` lowercases the email internally.
+
+ChatGPT initially flagged this as redundancy. It's not — it's defence-in-depth. If a future caller forgets the call-site normalisation, the key builder still produces a normalised key. If the key-builder implementation is refactored (e.g. switched to a hash that doesn't normalise), call-site normalisation still produces case-equivalent keys. Either layer alone is one regression away from a case-sensitivity bypass (`Foo@example.com` vs `foo@example.com` getting separate buckets, doubling the abuse budget).
+
+The pattern generalises: any "construct a key from user input" path that depends on canonical form should normalise at both the call site AND the builder, with a pure test pinning the case-equivalence invariant (`server/services/__tests__/rateLimitKeysPure.test.ts:19`). Single-layer normalisation works today but rots silently the first time someone touches either layer.

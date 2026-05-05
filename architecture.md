@@ -1620,6 +1620,15 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 
 `server/jobs/securityEventsCleanupJob.ts` prunes events beyond retention. `scripts/prune-security-events.ts` is the manual equivalent.
 
+### Layer 4 — Security audit stream (auth / oauth / abuse)
+
+The platform writes **two distinct audit streams**, never one merged stream:
+
+- **`audit_events`** — operational / business events: resource created/updated/deleted, ownership changes, permission grants, cross-org access, admin connection invocations. Written via `server/services/auditService.ts`. Tenant-scoped via RLS.
+- **`security_audit_events`** (migration 0281) — auth and abuse events: `auth.login.failure`, `auth.login.success`, `auth.password.reset`, oauth state events, rate-limit trips, sentinel violations. Written via `server/services/securityAuditService.ts`. Includes a sentinel organisation row (`SECURITY_AUDIT_SENTINEL_ORG_ID`) so failed-login events without a known org can still be persisted (FK-safe). Boot-time invariant: `server/services/securityAuditSentinelValidation.ts::validateSecurityAuditSentinelOrgOrThrow()` is wired into `server/index.ts::start()` immediately after `validateEncryptionKeyOrThrow()`. In production: throws on missing sentinel; in development: downgrades to `console.warn`.
+
+The split exists because the streams have different write volumes, retention requirements, and exposure rules — and because muddling them was a pre-launch finding. Detection gate: `scripts/verify-audit-stream-split.sh` (grep guard at `scripts/__fixtures__/audit-stream-split/`).
+
 ### Canonical RLS session variables (hard rule)
 
 The only session variables that RLS policies may reference are:

@@ -49,19 +49,19 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 | 24 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 1]** Multer memory storage accepts 500MB — OOM DoS risk | `server/middleware/validate.ts:17-20` | MEDIUM |
 | 25 | **Security** | **[CLOSED 2026-04-29 — route wiring; primitive swap remaining in pre-prod-boundary-and-brief-api Phase 2]** Forgot/reset-password rate-limited via `express-rate-limit` 5/15min at `server/routes/auth.ts:11-12,108,120`. Swap to DB-backed primitive folded into Phase 2. | `server/routes/auth.ts:11-12,108,120` | MEDIUM |
 | 26 | **Security** | **[CLOSED 2026-04-29]** Production error envelope `{ error: { code, message }, correlationId }` strips internals; 5xx `message` replaced with "Internal server error" in prod | `server/index.ts:436-443` | MEDIUM |
-| 27 | **Security** | **[OPEN — out of scope for pre-prod-boundary-and-brief-api per brief; broader follow-up]** Missing security audit trail — no logging of auth/permission events | No centralized audit | MEDIUM |
+| 27 | **Security** | **[CLOSED 2026-05-05 — pre-launch-phase-2]** Security audit trail now lives in the dedicated `security_audit_events` table (migration 0281) with `securityAuditService` writing `auth.login.failure`, `auth.login.success`, oauth state events, abuse events. Sentinel-org row anchors orgless events; boot-time invariant in `securityAuditSentinelValidation.ts`. Stream split documented in `architecture.md` §Layer 4. | `server/services/securityAuditService.ts` + migration `0281_security_audit_events.sql` | MEDIUM |
 
 ### Noted (Lower Priority / Post-Testing)
 
 - Route files exceeding 200-line limit: `subaccounts.ts` (758L), `permissionSets.ts` (587L), `llmUsage.ts` (524L), `portal.ts` (502L)
 - Auth tokens stored in localStorage (XSS risk — migrate to httpOnly cookies later)
-- No React ErrorBoundary component
+- ~~No React ErrorBoundary component~~ **[CLOSED 2026-05-05 — pre-launch-phase-2]** `client/src/components/ErrorBoundary.tsx` now ingests client errors via `/api/client-errors` endpoint (16kb tight body cap; rate-limited).
 - Silent promise rejections in `workspaceMemoryService.ts`
 - Missing cascade delete rules on parent-child task/agent relationships
 - Deprecated columns in agents schema (`sourceTemplateId`, `sourceTemplateVersion`)
-- OAuth state JWT window too long (10 min, recommend 5 min)
+- ~~OAuth state JWT window too long (10 min, recommend 5 min)~~ **[CLOSED 2026-05-05 — pre-launch-phase-2]** Tightened to 5min. Revert decision pending telemetry — see deferred CHATGPT-R1-7.
 - No refresh token rotation on OAuth integrations
-- JWT session expiry at 24h with no forced logout on password change
+- ~~JWT session expiry at 24h with no forced logout on password change~~ **[CLOSED 2026-05-05 — pre-launch-phase-2]** `passwordChangedAt` JWT iat invalidation wired with second-precision alignment (write-side `authService.resetPassword` floors to whole seconds; read-side `middleware/auth.ts` compares whole seconds with strict `>`). See KNOWLEDGE.md [2026-05-05] JWT iat invalidation.
 
 ---
 

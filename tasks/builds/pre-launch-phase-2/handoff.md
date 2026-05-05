@@ -37,3 +37,37 @@ Mini-spec Chunks 1, 2, 3 are OUT_OF_SCOPE for this branch — owned by separate 
 **spec_deviations:** None locked. Three directional gaps deferred to `tasks/todo.md` — non-blocking for merge, all three represent scope decisions (operator-locked pure-test divergence, envelope gate scope TBD, CI baseline placeholder).
 
 Final HEAD before finalisation: `b1a7d89d` — pushed to remote.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #264
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md`
+**spec_deviations reviewed:** yes — three directional gaps (REQ #4 pure-vs-integration, REQ #15 envelope-gate scope, REQ #29 CI-baseline placeholder) carried into Round 1 framing context. ChatGPT did not flag any of them; they remain deferred in `tasks/todo.md` as scope decisions, not findings.
+
+**ChatGPT rounds:** 3 (Round 1: 4 ACCEPT / 4 DEFER / 1 NO-ACTION; Round 2: 1 ACCEPT / 3 DEFER / 2 VERIFY-clean / 1 NO-ACTION; Round 3: 0 ACCEPT / 3 DEFER / 3 NO-ACTION). Round 3 verdict: "You are genuinely done."
+
+**Doc-sync sweep verdicts:**
+
+| Doc | Verdict |
+|---|---|
+| `architecture.md` | yes — added §Layer 4 "Security audit stream (auth / oauth / abuse)" describing `audit_events` vs `security_audit_events` split, sentinel-org row, boot-time invariant. |
+| `docs/capabilities.md` | no — no customer-visible capabilities added; this branch is hardening, observability, and pre-launch invariants. Grep terms checked: `securityAuditService`, `client-errors`, `silentCatchHelper`, `actionCallAllowlist`, `inboundRateLimiter`, `connectionTokenValidation`, `errorEnvelope` — zero hits. |
+| `docs/integration-reference.md` | no — no integration behaviour shipped (GHL pagination is deferred CHATGPT-R1-8; OAuth TTL telemetry is deferred CHATGPT-R1-7). Grep terms checked: `securityAuditService`, `oauth.*state.*ttl`, `GHL.*auto.*enrol` — zero hits. |
+| `CLAUDE.md` | no — no fleet, gate, or convention changes in this branch. Grep terms checked: `securityAuditService`, `client-errors`, `silentCatchHelper`, `actionCallAllowlist` — zero hits. |
+| `DEVELOPMENT_GUIDELINES.md` | yes — appended §8.28 "JWT `iat` invalidation comparisons align both sides to whole seconds" and §8.29 "Per-route body-size caps install BEFORE the global JSON parser"; updated last-updated header. §8.27 (leftJoin / `isActive` ON-vs-WHERE) was added in Phase 2 already. |
+| `CONTRIBUTING.md` | no — no lint-suppression policy change. Grep terms checked: `securityAuditService`, `isActive`, `assertActive`, `errorEnvelope` — zero hits. |
+| `docs/frontend-design-principles.md` | no — no UI pattern, hard rule, or worked example introduced. Only client change is `silentCatchHelper.ts` always-emit (helper internals, not a UI pattern). |
+| `KNOWLEDGE.md` | yes — six new entries appended (sentinel-row boot validation; JWT iat second-precision; per-route body-size cap ordering; `logAndSwallow` visibility-in-prod; leftJoin + `isActive` ON-clause placement; two-layer rate-limit key normalisation defence-in-depth). All marked with finalisation-coordinator provenance. |
+| `references/test-gate-policy.md` | n/a — testing-gate posture unchanged. Grep terms checked: `verify-audit-stream-split`, `securityAuditService`, `client-errors` — zero hits. |
+| `references/spec-review-directional-signals.md` | n/a — spec-reviewer signal-list unchanged this build. |
+| `docs/decisions/` | n/a — no durable architectural choice locked this round; Round 3 closed out as "you are genuinely done." Sentinel-row pattern, JWT iat alignment, and body-size ordering are operational rules, not architectural choices. |
+| `docs/context-packs/` | n/a — no anchor changes in `architecture.md` that affect existing pack slices. The new §Layer 4 sits inside the existing `## Row-Level Security` section already loaded by the `review` and `debug` packs. |
+| `.claude/FRAMEWORK_VERSION` | n/a — repo-specific changes; framework-level files untouched in this branch. |
+| `docs/spec-context.md` | n/a — Phase 3 finalisation, not a spec-review session. |
+
+**KNOWLEDGE.md entries added:** 6
+**tasks/todo.md items removed/closed:** 4 closed-out annotations on existing audit / pre-testing items (#27 security audit trail, ErrorBoundary noted item, OAuth state TTL noted item, JWT password-change-invalidation noted item) + 3 new defer entries (CHATGPT-R3-1, R3-2, R3-6).
+
+**ready-to-merge label applied at:** 2026-05-05T09:56:17Z
