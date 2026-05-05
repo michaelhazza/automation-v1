@@ -7,6 +7,7 @@ import { env } from '../lib/env.js';
 import { auditService } from '../services/auditService.js';
 import { withOrgTx } from '../instrumentation.js';
 import { recordSecurityEvent } from '../services/securityAuditService.js';
+import { auditEvent } from '../../shared/types/securityAuditEvents.js';
 
 export interface JwtPayload {
   id: string;
@@ -95,9 +96,9 @@ export const authenticate = async (
     : 0;
   if (userRow && userRow.passwordChangedAt && pwdChangedSec > issuedSec) {
     void recordSecurityEvent({
+      event:          auditEvent.auth.tokenRevoked,
       organisationId: payload.organisationId,
       actorUserId:    payload.id,
-      eventType:      'auth.token_revoked',
       ip:             req.ip ?? null,
       userAgent:      req.get('user-agent') ?? null,
       meta:           { reason: 'password_changed_after_token_issued' },
@@ -126,10 +127,10 @@ export const authenticate = async (
         ipAddress: req.ip,
       });
       void recordSecurityEvent({
+        event:          auditEvent.auth.crossOrgAccess,
         organisationId: payload.organisationId,
         actorUserId:    payload.id,
         actorRole:      payload.role,
-        eventType:      'auth.cross_org_access',
         targetType:     'organisation',
         targetId:       headerOrgId,
         ip:             req.ip ?? null,
@@ -322,10 +323,10 @@ export const requireOrgPermission = (permissionKey: string) => {
 
       if (!req._orgPermissionCache.has(permissionKey)) {
         void recordSecurityEvent({
+          event:          auditEvent.auth.permissionDenied,
           organisationId: organisationId,
           actorUserId:    req.user.id,
           actorRole:      req.user.role,
-          eventType:      'auth.permission_denied',
           ip:             req.ip ?? null,
           userAgent:      req.get('user-agent') ?? null,
           meta:           { route: req.path, method: req.method, requiredPermission: permissionKey },

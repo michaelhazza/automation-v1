@@ -9,6 +9,7 @@ import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, sig
 import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
 import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
 import { rateLimitKeys } from '../lib/rateLimitKeys.js';
+import { auditEvent } from '../../shared/types/securityAuditEvents.js';
 
 const router = Router();
 
@@ -46,9 +47,9 @@ router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (re
     ipAddress: req.ip,
   });
   void recordSecurityEvent({
+    event:          auditEvent.auth.signup,
     organisationId: result.user.organisationId,
     actorUserId:    result.user.id,
-    eventType:      'auth.signup',
     ip:             req.ip ?? null,
     userAgent:      req.get('user-agent') ?? null,
   });
@@ -89,8 +90,8 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     // auth.login.failure — org is unknown at this point (login rejected before session established).
     // Emit to the system sentinel org so the event is recorded; meta carries the redacted email.
     void recordSecurityEvent({
+      event:          auditEvent.auth.loginFailed,
       organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
-      eventType:      'auth.login.failure',
       ip:             req.ip ?? null,
       userAgent:      req.get('user-agent') ?? null,
       meta:           { emailDomain: email.split('@')[1] ?? 'unknown' },
@@ -107,9 +108,9 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     ipAddress: req.ip,
   });
   void recordSecurityEvent({
+    event:          auditEvent.auth.loginSucceeded,
     organisationId: result.user.organisationId,
     actorUserId:    result.user.id,
-    eventType:      'auth.login.success',
     ip:             req.ip ?? null,
     userAgent:      req.get('user-agent') ?? null,
   });
@@ -176,10 +177,10 @@ router.get('/api/auth/me', authenticate, asyncHandler(async (req, res) => {
 router.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
   const result = await authService.logout();
   void recordSecurityEvent({
+    event:          auditEvent.auth.logout,
     organisationId: req.user!.organisationId,
     actorUserId:    req.user!.id,
     actorRole:      req.user!.role,
-    eventType:      'auth.logout',
     ip:             req.ip ?? null,
     userAgent:      req.get('user-agent') ?? null,
   });

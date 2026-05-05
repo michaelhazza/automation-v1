@@ -64,13 +64,46 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 | 0. Context load + Phase 2 entry | DONE 2026-05-05 | feature-coordinator resumed after S1 collision detected on prior session — slug `pre-launch-phase-3` collided with origin/main `dd08e9a9` parallel spec |
 | 1. Slug rename to resolve S1 collision | DONE 2026-05-05 | Operator approved Recommendation 1: build slug renamed `pre-launch-phase-3` → `pre-launch-phase-3-deferred-backlog`. Branch name `claude/pre-launch-phase-3` unchanged. `git mv` for build dir + 6 review-log files; internal slug references updated in spec.md / handoff.md / progress.md / 2 review log .md files / KNOWLEDGE.md (6 entries) / tasks/todo.md (3 sites) / tasks/current-focus.md (parallel block + prose body) / _index.jsonl (36 file: refs). Codex raw txt captures left as-is (immutable historical terminal output). After rename, main's `tasks/builds/pre-launch-phase-3/` (narrower 7-item spec by `dd08e9a9`) coexists alongside our `tasks/builds/pre-launch-phase-3-deferred-backlog/`. |
 | 2. Branch-sync S1 + freshness check | DONE 2026-05-05 | Merged `dd08e9a9` (main's parallel pre-launch-phase-3 spec) into branch as merge commit `661e6009`. No file overlaps post-rename. No migration collisions. Post-merge `npm run typecheck` clean. Pushed. Both `tasks/builds/pre-launch-phase-3/` (main's narrower spec) and `tasks/builds/pre-launch-phase-3-deferred-backlog/` (ours) coexist. |
-| 3. architect invocation | PAUSED | Sub-agent Task/Agent tool unavailable in this Claude Code web session — operator decision required: run architect playbook inline OR defer plan-phase to a session with Task tool. Surface the recommendation; await operator reply. |
-| 4. chatgpt-plan-review (MANUAL) | PENDING | |
-| 5. plan-gate | PENDING | Operator approval required before chunk loop |
-| 6. Per-chunk loop (A → B → C → D → E) | PENDING | |
+| 2b. Branch-sync S1 freshness (resume) | NOTED 2026-05-06 | Re-fetched origin/main. Two new main commits since last S1: `56577989` (spec-reviewer iter 2 — narrow `pre-launch-phase-3` spec) and `a9852133` (spec-reviewer final report). Both touch ONLY `tasks/builds/pre-launch-phase-3/spec.md` and `tasks/review-logs/*pre-launch-phase-3*` — files outside our build's scope (we build from `pre-launch-phase-3-deferred-backlog/`). Merge attempted; surfaced conflict on the narrow spec from divergent edits (our branch did chatgpt-spec-review rounds 1+2 on it; main did spec-reviewer iter 2). Aborted merge — narrow-spec divergence is owned by main's effort, not ours; resolving here would bias their work. Migration collision detection ran clean. Code-file overlap with main: NONE (only `KNOWLEDGE.md` differs, additive entries from our spec review). Proceeding with architect invocation against current branch HEAD `aebf5384`. |
+| 3. architect invocation | DONE 2026-05-06 | Architect playbook executed inline (Task/Agent sub-agent tool unavailable in this session). Plan written to `tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md` — 1021 lines / ~86kB. Sections: architecture notes (1), model-collapse check (2 — rejected, hardening is not an ingest→render pipeline), primitives-reuse confirmation (3), file inventory cross-reference (4 — three corrections recorded vs spec: `limits.ts` vs `systemLimits.ts`, `server/lib/orgScoping.ts` vs `server/middleware/orgScoping.ts`, migration `0285`), contracts (5 — TS-level signatures for `AppError`, `auditEvent` factory, `NormalisedEmail`, GHL job payload, D.3 assertions), chunk decomposition (6 — A→B, A→C, A→D.3+D.5; D and E independent of A elsewhere), per-chunk detail (7 — 4-7 file modifications per chunk + acceptance criteria), risks (8 — 9 named risks with mitigations), system invariants (9 — 20 invariants), self-consistency (10), executor notes (11). |
+| 4. chatgpt-plan-review (MANUAL) | DONE 2026-05-06 | 3 rounds; APPROVED. Round 1: 10 findings (6 high-impact + 4 minor) — all applied (D.5 idempotency, D.5 restart-safe totals, D.3 isSystemContext guard, B.1 gate precision, E.3 time-based LRU eviction, D.5 classifyError, A.2 stack capture, B.4 indirect string pass, D.1 all-buckets-independent, E.5 orgId assert). Round 2: 6 polish notes — all applied (D.5 partial-index hint, D.5 totals scaling note, D.3 sync-by-design comment, B.4 dynamic-string scope, E.3 concurrency note, migration 0285 backfill safety check). Round 3: CLEAN — no findings; final sign-off. Plan LOCKED. See review log `tasks/review-logs/chatgpt-plan-review-pre-launch-phase-3-deferred-backlog-2026-05-05T21-45-44Z.md`. |
+| 5. plan-gate | AWAITING OPERATOR | Plan is LOCKED. Operator reviews `tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md` and approves before chunk loop begins. |
+| 6. Per-chunk loop (A → B → C → D → E) | IN PROGRESS | Chunk A DONE 2026-05-06 — see Chunk A section below |
 | 7. G2 integrated-state static-check gate | PENDING | |
 | 8. Branch-level review pass | PENDING | spec-conformance → adversarial-reviewer → pr-reviewer → fix-loop → dual-reviewer |
 | 9. Doc-sync gate | PENDING | |
 | 10. Handoff (Phase 2 section) | PENDING | |
 | 11. current-focus → REVIEWING | PENDING | |
+
+## Chunk A — Canonical types (foundation) — DONE 2026-05-06
+
+### Files created
+- `shared/errorCodes.ts` — `APP_ERROR_CODES` const array + `AppErrorCode` union (A.1)
+- `server/lib/errors.ts` — `AppError` class + kept `OptimisticLockError` (A.2)
+- `server/lib/asyncHandlerNormalisationPure.ts` — extracted pure normalisation helper (`normaliseRouteError`) for testability
+- `shared/types/securityAuditEvents.ts` — `auditEvent` factory (all namespaces), `SecurityAuditEventName` union, `SecurityEventSeverity` enum (A.3)
+- `docs/security-audit-namespace.md` — convention doc (A.5)
+- `server/lib/__tests__/errorsPure.test.ts` — AppError constructor pure tests (5 assertions, all pass)
+- `server/lib/__tests__/asyncHandlerNormalisationPure.test.ts` — normaliseRouteError pure tests (6 assertions, all pass)
+
+### Files modified
+- `server/lib/asyncHandler.ts` — imports `normaliseRouteError`; full normalisation logic (AppError → legacy AppError → unknown 500)
+- `server/services/securityAuditServicePure.ts` — added `SecurityEventInputV2`, `NormalisedSecurityEvent`, `normaliseSecurityEventV2`; legacy `normaliseSecurityEvent` retained for existing vitest
+- `server/services/securityAuditService.ts` — `recordSecurityEvent` re-typed to accept `SecurityEventInputV2`; removed legacy V1 overload at write path
+- `server/routes/auth.ts` — all 4 `recordSecurityEvent` calls migrated to factory member access (A.4)
+- `server/middleware/auth.ts` — all 3 `recordSecurityEvent` calls migrated (A.4)
+- `architecture.md` § Layer 4 — one-line pointer to `docs/security-audit-namespace.md` (A.5)
+
+### Verification results
+- `npm run lint` — 0 errors (869 warnings, pre-existing)
+- `npm run typecheck` — clean exit
+- `npx tsx server/lib/__tests__/errorsPure.test.ts` — 5/5 PASS
+- `npx tsx server/lib/__tests__/asyncHandlerNormalisationPure.test.ts` — 6/6 PASS
+- No raw-string `eventType:` literals remain at call sites: `git grep "'auth\.\|'oauth\.\|'security\." server/services/securityAuditService.ts server/middleware/auth.ts server/routes/auth.ts` — exit 1 (no matches)
+- 7 `auditEvent.` member-access usages confirmed in `server/`
+
+### Decisions / notes
+- `SecurityAuditEventName` type derivation: used explicit per-namespace union (`EventNamesInNamespace<AuditEventFactory['auth']> | ...`) instead of the spec's generic form — the generic form returned `unknown` for TypeScript's infer handling with the empty `audit` namespace. The `audit` namespace comment is preserved in the docs.
+- `asyncHandlerNormalisationPure.ts` introduced as a pure extraction so the test can import it without pulling in `env.ts` (via logger/incidentIngestor). `asyncHandler.ts` delegates to it.
+- Legacy `SecurityEventType` and `SecurityEventInput` retained in `securityAuditServicePure.ts` for backward compat with existing vitest (`securityAuditServicePure.test.ts`).
 
