@@ -131,7 +131,14 @@ Phase 3 is hardening — no new tenant entities. Deltas:
 - **`MAX_GHL_LOCATIONS_TO_ENROL`** — new constant in `server/config/systemLimits.ts`. Default value pinned in §11.
 - **Sentinel-org constant exposure** — `SENTINEL_ORG_ID` (already exists in Phase 2) made an exported constant from `server/services/securityAuditService.ts` so admin-query helpers can OR-filter against it. No new constant — promotion from local to exported.
 
-No schema changes. No new tables, no new columns, no new migrations except the migration-header comment fix on `0277_oauth_state_nonces.sql` (in-file comment edit only — does not bump migration version).
+Schema change scope is intentionally minimal:
+
+- **One new column** on `subaccounts`: `external_id_namespace text` (nullable; default null) — required by D.5 to support the partial-unique index for cross-page idempotent insertion of GHL locations.
+- **One new partial-unique index**: `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`.
+- **One inline backfill UPDATE** in the same migration sets `external_id_namespace = 'ghl_location'` on existing rows whose `external_id` was set by the inline GHL path (identifiable via `connector_config_id` join to a GHL connector). No data risk pre-launch — no live agencies.
+- **One migration-header comment fix** on `0277_oauth_state_nonces.sql` (in-file comment edit only — does not bump migration version).
+
+Migration number for the schema change: next sequential number after current head (build-time decision). No other tables modified. No new tables. No RLS policy changes — `subaccounts` already has its policy and is in the manifest.
 
 ## 7. Service-contract deltas
 
@@ -260,7 +267,7 @@ The build chunks below are presented in dependency order. Each is sized to fit a
 ### Chunk B — CI grep invariants (depends on A)
 - **B.1** `scripts/verify-assert-active.sh` — grep guard that flags any service-layer fetch on a soft-deletable table that doesn't pass through `assertActive` / `isActive`. Allowlist file co-located.
 - **B.2** `scripts/verify-no-raw-console.sh` — grep guard that forbids raw `console.*` calls outside an explicit allowlist (`server/index.ts` boot, `server/lib/logger.ts` internals, `scripts/**`, `server/__tests__/**`).
-- **B.3** `scripts/verify-rate-limit-key-normalisation.sh` — grep guard that ensures every call to `loginIpEmailKey` / `loginEmailOnlyKey` (and any future `*Key` helper) receives normalised email (lowercased, trimmed). Pattern-match for `.toLowerCase().trim()` or `normaliseEmail(` in the same expression.
+- **B.3** `scripts/verify-rate-limit-key-normalisation.sh` — grep guard that ensures every call to `loginIpEmailKey` / `loginEmailOnlyKey` (and any future `*Key` helper) receives a normalised email. The gate enforces the value-flow contract by tracing the email argument back to its assignment site and confirming the assignment matches one of: (a) inline `email.trim().toLowerCase()` / `normaliseEmail(email)`, or (b) a function parameter typed as `NormalisedEmail` (a new branded string type from `server/lib/rateLimitKeys.ts` returned only by `normaliseEmail()`). The branded-type approach is the canonical fix — it lets the grep gate compile to a simple "argument must be of type `NormalisedEmail`" check via TypeScript, with the grep-only fallback used only for files outside the type-checked scope. Centralised normalisation into a helper that returns `NormalisedEmail` is the intended pattern, not duplicated inline normalisation.
 - **B.4** `scripts/verify-audit-event-namespace.sh` — grep guard that every call to `recordSecurityEvent` / `securityAuditService.recordEvent` uses a value from the `SecurityAuditEventName` union. Bypass-string detection: if `as SecurityAuditEventName` cast appears, fail with reviewer note.
 - **B.5** Each gate gets a known-bad fixture file (gitignored, reproduced via shell snippet in the gate script's docstring) that's run in dev to prove the gate trips. Gates wired into the CI workflow alongside existing `verify-*.sh`.
 
@@ -275,7 +282,7 @@ The build chunks below are presented in dependency order. Each is sized to fit a
 - **D.2** AR-4.1 — `securityAuditServicePure.ts` extended with `PII_SUBSTRINGS = ['password','token','secret','authorization','credential']`. Substring match runs in addition to exact-key match. Pure-function test added.
 - **D.3** AR-6.1 — `connectionTokenService.refreshIfExpired` adds an org-id assertion: `if (principalOrgId !== null && principalOrgId !== connection.organisationId) throw new AppError({code:'CROSS_TENANT_TOKEN_REFRESH', statusCode:403, ...})`. Sourced from the `PrincipalContext` ALS already in scope. Existing `guard-ignore-next-line` retained but augmented with the new assertion.
 - **D.4** GHL enrol cap (Phase-1 residue) — `MAX_GHL_LOCATIONS_TO_ENROL = 250` in `server/config/systemLimits.ts`. `oauthIntegrations.ts:424` aborts and emits `oauth.enrol_capped` audit event when the agency exceeds the cap; the response redirects with a "partial-enrol" status flag, and the remaining locations are picked up by the D.5 background job. Cap value rationale: a 250-location agency at ~50ms/location auto-enrol completes in ~12.5s, comfortably under the existing 15s timeout; agencies beyond 250 locations always require the pagination job from R1-8.
-- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `state-based` — re-runs on the same `(connectionId, pageCursor)` skip already-enrolled locations via `WHERE NOT EXISTS` predicate. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
+- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
 - **D.6** AR-3.1 advisory-lock scope verification — read `workflowEngineService.ts:840-1924` and confirm whether `pgboss.send()` runs inside the same transaction as `pg_try_advisory_xact_lock`. If yes (xact lock holds across send): document via inline code comment + `architecture.md` note, no code change. If no (lock released before send): wrap the send in the same transaction, document in same comment + KNOWLEDGE.md entry. Decision routed to build-time after `feature-coordinator`'s `architect` invocation.
 
 ### Chunk E — Cleanup and convenience
@@ -316,7 +323,7 @@ Phase 3 introduces a small number of new write paths and one new state machine. 
 | `recordSecurityEvent` for new `oauth.*` events (C.1) | non-idempotent (intentional — append-only audit log) | safe (write retries are duplicate audit rows; admin queries deduplicate at read time if needed) | none required (append-only) | n/a (no chain) |
 | `auth.permission_denied` from `requireSubaccountPermission` (C.2) | non-idempotent (intentional) | safe | none required | n/a |
 | Login email-only RL bucket increment (D.1) | non-idempotent — race-tolerant counter | safe | atomic INCR / DB-row UPDATE per existing pattern | n/a |
-| GHL enrol-locations-page job (D.5) | state-based — `WHERE NOT EXISTS subaccount.ghl_location_id = page_cursor` skip | guarded — the predicate makes re-runs no-op for already-enrolled rows | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations to one | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
+| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations of the same page; per-location partial uniqueness handles cross-page retries | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
 | `connectionTokenService.refreshIfExpired` cross-tenant assertion (D.3) | n/a — read assertion before existing write | safe — assertion failure throws before the UPDATE | existing optimistic predicate retained | n/a |
 
 ### 12.2 State machine — GHL enrolment (D.5)
@@ -333,7 +340,9 @@ States: `pending → in_progress → completed | failed | partial`.
 
 ### 12.3 DB unique constraints
 
-No new unique constraints in Phase 3. Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are unchanged. The `AppError` class supports a `code: 'UNIQUE_VIOLATION_*'` prefix for catch-and-rethrow at the route layer — but no new constraint is introduced, so no new HTTP-mapping decisions are required in this phase.
+One new partial-unique index in Phase 3 (D.5): `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. HTTP-mapping for `23505 unique_violation` raised through this index: catch in the D.5 job handler and short-circuit to "already enrolled" (this is the intended ON CONFLICT path). The route layer never surfaces this error — it's job-internal. No HTTP status-code mapping needed. The `AppError` class supports a `code: 'UNIQUE_VIOLATION_*'` prefix for the route-layer catch-and-rethrow pattern in general; the D.5 job uses ON CONFLICT directly to suppress the violation in the SQL layer.
+
+Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are unchanged.
 
 ## 13. Deferred items
 
@@ -369,6 +378,7 @@ No new unique constraints in Phase 3. Existing constraints (e.g. `agent_run_prom
 - `scripts/verify-audit-event-namespace.sh` (B.4)
 - `scripts/verify-skill-error-envelope.sh` (E.6)
 - `server/jobs/ghlAutoEnrolLocationsPageJob.ts` — pagination job (D.5)
+- `migrations/<next-sequential>_subaccounts_external_id_namespace.sql` — adds `external_id_namespace` column + partial-unique index + backfill UPDATE (D.5)
 
 ### Files to modify
 - `server/lib/asyncHandler.ts` — handle `AppError` first (A.2)
@@ -394,6 +404,7 @@ No new unique constraints in Phase 3. Existing constraints (e.g. `agent_run_prom
 - `server/services/connectionTokenService.ts` — cross-tenant assertion (D.3)
 - `server/config/systemLimits.ts` — `MAX_GHL_LOCATIONS_TO_ENROL = 250` (D.4)
 - `server/services/workflowEngineService.ts` — advisory-lock scope verification (D.6, may or may not change code)
+- `server/db/schema/subaccounts.ts` — add `externalIdNamespace: text('external_id_namespace')` column + register the partial-unique index in the table builder (D.5)
 - `KNOWLEDGE.md` — refresh `withOrgTx({tx:db})` gotcha entry (E.5)
 - `docs/pre-launch-hardening-mini-spec.md` — amend REQ #4 done-criteria text (E.6 verdict)
 - `tasks/builds/pre-launch-phase-3/progress.md` — capture SC-COVERAGE-BASELINE numbers (E.7)
