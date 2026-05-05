@@ -103,4 +103,4 @@ No new findings beyond Codex. The iteration 1 fixes opened up some second-order 
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0 (no items routed to tasks/todo.md)
-- Spec commit after iteration:   pending (will be set after auto-commit step)
+- Spec commit after iteration:   56577989
