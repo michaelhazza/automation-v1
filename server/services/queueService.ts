@@ -1314,6 +1314,35 @@ export const queueService = {
         },
       });
 
+      // Pre-launch hardening D-P0-1 — GHL auto-start onboarding (event-driven).
+      // Dequeued after subaccount creation from webhook/OAuth-callback paths.
+      // The default resolveOrgContext reads `organisationId` from the payload and
+      // opens an org-scoped tx with `app.organisation_id` set, so the FORCE-RLS
+      // tenant-table reads inside subaccountOnboardingService (now using
+      // getOrgScopedDb) pass policy checks.
+      await createWorker<import('../jobs/ghlAutoStartOnboardingJob.js').GhlAutoStartOnboardingPayload>({
+        queue: 'ghl:auto-start-onboarding',
+        boss: boss as any,
+        handler: async (job) => {
+          const { ghlAutoStartOnboardingWorker } = await import('../jobs/ghlAutoStartOnboardingJob.js');
+          await ghlAutoStartOnboardingWorker(job.data);
+        },
+      });
+
+      // Pre-launch hardening C-P0-2 — OAuth resume restart (event-driven).
+      // Dequeued after a successful OAuth token exchange when a pendingRunId was
+      // stored on the state nonce. Default resolveOrgContext reads organisationId
+      // from the payload and opens an org-scoped tx with the GUC set so that
+      // WorkflowRunPauseStopService (now using getOrgScopedDb) can read workflow_runs.
+      await createWorker<import('../jobs/resumeRunAfterOAuthJob.js').ResumeRunAfterOAuthPayload>({
+        queue: 'run:resumeAfterOAuth',
+        boss: boss as any,
+        handler: async (job) => {
+          const { resumeRunAfterOAuthWorker } = await import('../jobs/resumeRunAfterOAuthJob.js');
+          await resumeRunAfterOAuthWorker(job.data);
+        },
+      });
+
       // Agentic Commerce — agent-spend-request handler (worker→main, Chunk 11)
       // Receives WorkerSpendRequest, recomputes idempotency key, calls proposeCharge,
       // emits WorkerSpendResponse on agent-spend-response by correlationId.

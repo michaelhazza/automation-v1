@@ -19,8 +19,7 @@ if [ ! -f "$FIELDS_FILE" ]; then
     "Fields allowlist not found" "Create scripts/derived-data-null-safety-fields.txt"
   VIOLATIONS=$((VIOLATIONS + 1))
   emit_summary "$FILES_SCANNED" "$VIOLATIONS"
-  # Advisory: exit 0 even with violations
-  exit 0
+  exit 1
 fi
 
 # Collect all .ts files under the scan directory.
@@ -71,5 +70,7 @@ while IFS= read -r field; do
 done < "$FIELDS_FILE"
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
-# Advisory: always exit 0 in Phase 1
+if [ "$VIOLATIONS" -gt 0 ]; then
+  exit 1
+fi
 exit 0

@@ -22,6 +22,7 @@ const client = await pool.connect();
 let updated = 0;
 let skipped = 0;
 
+// O-P0-4: verified — full transaction wrap; rollback on error
 try {
   await client.query('BEGIN');
   for (const row of rows) {

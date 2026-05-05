@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { logger } from '../lib/logger.js';
 import type { IntegrationCardContent } from '../../shared/types/integrationCardContent.js';
 import {
+  ACTION_REGISTRY,
   getActionDefinition,
   REQUIRED_INTEGRATION_SLUGS,
   type RequiredIntegrationSlug,
@@ -26,7 +27,8 @@ export type IntegrationBlockDecision =
       tokenHash: string;        // sha256(plaintext) — stored in agent_runs column
       expiresAt: Date;          // now + 24h
       card: Omit<IntegrationCardContent, 'actionUrl' | 'resumeToken' | 'schemaVersion'>;
-    };
+    }
+  | { shouldBlock: false; allowed: false; code: 'TOOL_NOT_RESUMABLE'; toolName: string; reason: string };
 
 /**
  * Checks whether a tool requires an integration that is not yet connected for
@@ -49,9 +51,6 @@ export async function checkRequiredIntegration(
     currentBlockSequence: number;
   },
 ): Promise<IntegrationBlockDecision> {
-  // TODO(E-D4): if the action's strategy is 'unsafe', throw TOOL_NOT_RESUMABLE
-  // before evaluating the integration requirement — allows hard-blocking tools
-  // that must never execute mid-run regardless of connection state.
   const action = getActionDefinition(toolName);
   if (!action?.requiredIntegration) {
     logger.debug('integration_block_check.no_requirement', { toolName, runId: ctx.runId });
@@ -76,6 +75,19 @@ export async function checkRequiredIntegration(
     return { shouldBlock: false };
   }
 
+  // E-D4: tools marked integrationNotResumable cannot pause mid-execution to
+  // wait for OAuth — return a structured result so the caller cancels the run.
+  if (ACTION_REGISTRY[toolName]?.integrationNotResumable === true) {
+    logger.warn('integration_block_check.not_resumable', { toolName, provider, runId: ctx.runId });
+    return {
+      shouldBlock: false,
+      allowed: false,
+      code: 'TOOL_NOT_RESUMABLE' as const,
+      toolName,
+      reason: `Tool "${toolName}" requires an integration that cannot be connected via OAuth pause/resume`,
+    };
+  }
+
   logger.info('integration_block_check.blocking', { toolName, provider, runId: ctx.runId });
   logger.info('metric.integration_blocked', { provider: String(provider) });
 
@@ -85,20 +97,6 @@ export async function checkRequiredIntegration(
     runId: ctx.runId,
     currentBlockSequence: ctx.currentBlockSequence,
   });
-}
-
-/**
- * Thrown (not returned) when a tool cannot be safely paused mid-execution
- * because its idempotencyStrategy is 'unsafe'.
- *
- * Callers catch this error code and cancel the run with cancelReason:
- * 'tool_not_resumable'.
- */
-export interface ToolNotResumableError {
-  statusCode: 409;
-  message: string;
-  errorCode: 'TOOL_NOT_RESUMABLE';
-  toolName: string;
 }
 
 /**

@@ -32,6 +32,7 @@ import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
 import { WorkflowRunService } from './workflowRunService.js';
 import { taskService } from './taskService.js';
 import { upsertSubaccountOnboardingState } from '../lib/workflow/onboardingStateHelpers.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   isBaselineSlug,
   tierFor,
@@ -64,7 +65,8 @@ class SubaccountOnboardingService {
   private async resolveOwedSlugsForOrg(
     organisationId: string,
   ): Promise<Map<string, string[]>> {
-    const [orgSub] = await db
+    const tx = getOrgScopedDb('subaccountOnboardingService.resolveOwedSlugsForOrg');
+    const [orgSub] = await tx
       .select()
       .from(orgSubscriptions)
       .where(
@@ -75,7 +77,7 @@ class SubaccountOnboardingService {
       );
     if (!orgSub) return new Map();
 
-    const [sub] = await db
+    const [sub] = await tx
       .select()
       .from(subscriptions)
       .where(
@@ -83,7 +85,7 @@ class SubaccountOnboardingService {
       );
     if (!sub || !sub.moduleIds || sub.moduleIds.length === 0) return new Map();
 
-    const activeModules = await db
+    const activeModules = await tx
       .select({
         id: modules.id,
         onboardingWorkflowSlugs: modules.onboardingWorkflowSlugs,
@@ -115,8 +117,9 @@ class SubaccountOnboardingService {
     organisationId: string,
     subaccountId: string,
   ): Promise<OwedOnboardingWorkflow[]> {
+    const tx = getOrgScopedDb('subaccountOnboardingService.listOwedOnboardingWorkflows');
     // 1. Verify the subaccount belongs to the org.
-    const [sub] = await db
+    const [sub] = await tx
       .select({
         id: subaccounts.id,
         organisationId: subaccounts.organisationId,
@@ -135,7 +138,7 @@ class SubaccountOnboardingService {
 
     // 3. Load the latest onboarding run per slug for this subaccount.
     //    DISTINCT ON (workflow_slug) ordered by createdAt DESC.
-    const latestRuns = await db
+    const latestRuns = await tx
       .select({
         id: workflowRuns.id,
         workflowSlug: workflowRuns.workflowSlug,
@@ -195,7 +198,8 @@ class SubaccountOnboardingService {
     organisationId: string;
     subaccountId: string;
     slug: string;
-    startedByUserId: string;
+    /** UUID of the user who triggered the start, or null for system-initiated paths. */
+    startedByUserId: string | null;
     runMode?: 'auto' | 'supervised';
     initialInput?: Record<string, unknown>;
   }): Promise<{ runId: string }> {
@@ -209,8 +213,9 @@ class SubaccountOnboardingService {
       };
     }
 
+    const tx = getOrgScopedDb('subaccountOnboardingService.startOwedOnboardingWorkflow');
     // Prefer an org-owned template with this slug, then fall back to system.
-    const [orgTemplate] = await db
+    const [orgTemplate] = await tx
       .select({ id: workflowTemplates.id })
       .from(workflowTemplates)
       .where(
@@ -225,7 +230,7 @@ class SubaccountOnboardingService {
       title: `Workflow run`,
       status: 'inbox',
       brief: JSON.stringify(params.initialInput ?? {}),
-    }, params.startedByUserId);
+    }, params.startedByUserId ?? undefined);
 
     let startInput: Parameters<typeof WorkflowRunService.startRun>[0];
     if (orgTemplate) {
@@ -234,13 +239,13 @@ class SubaccountOnboardingService {
         subaccountId: params.subaccountId,
         templateId: orgTemplate.id,
         initialInput: params.initialInput ?? {},
-        startedByUserId: params.startedByUserId,
+        startedByUserId: params.startedByUserId ?? undefined,
         taskId: onboardingTask.id,
         runMode: params.runMode ?? 'supervised',
         isOnboardingRun: true,
       };
     } else {
-      const [sysTemplate] = await db
+      const [sysTemplate] = await tx
         .select({ id: systemWorkflowTemplates.id })
         .from(systemWorkflowTemplates)
         .where(eq(systemWorkflowTemplates.slug, params.slug));
@@ -256,7 +261,7 @@ class SubaccountOnboardingService {
         subaccountId: params.subaccountId,
         systemTemplateSlug: params.slug,
         initialInput: params.initialInput ?? {},
-        startedByUserId: params.startedByUserId,
+        startedByUserId: params.startedByUserId ?? undefined,
         taskId: onboardingTask.id,
         runMode: params.runMode ?? 'supervised',
         isOnboardingRun: true,
@@ -272,7 +277,7 @@ class SubaccountOnboardingService {
       // (subaccountId, slug). Convert that into an existing-run lookup.
       const pgCode = (err as { code?: string } | null)?.code;
       if (pgCode === '23505') {
-        const [existing] = await db
+        const [existing] = await tx
           .select({ id: workflowRuns.id })
           .from(workflowRuns)
           .where(
@@ -307,7 +312,8 @@ class SubaccountOnboardingService {
   async autoStartOwedOnboardingWorkflows(params: {
     organisationId: string;
     subaccountId: string;
-    startedByUserId: string;
+    /** UUID of the user who triggered the auto-start, or null for system-initiated paths. */
+    startedByUserId: string | null;
   }): Promise<{ startedRunIds: string[]; skippedSlugs: string[]; errors: Array<{ slug: string; error: string }> }> {
     const owed = await this.listOwedOnboardingWorkflows(
       params.organisationId,
@@ -363,8 +369,9 @@ class SubaccountOnboardingService {
     organisationId: string,
     slug: string,
   ): Promise<boolean> {
+    const tx = getOrgScopedDb('subaccountOnboardingService.templateAutoStartsOnOnboarding');
     // Org-owned template.
-    const orgRows = (await db.execute(sql`
+    const orgRows = (await tx.execute(sql`
       SELECT ptv.definition_json AS definition
       FROM workflow_templates pt
       JOIN workflow_template_versions ptv
@@ -381,7 +388,7 @@ class SubaccountOnboardingService {
     }
 
     // System template fallback.
-    const sysRows = (await db.execute(sql`
+    const sysRows = (await tx.execute(sql`
       SELECT sptv.definition_json AS definition
       FROM system_workflow_templates spt
       JOIN system_workflow_template_versions sptv

@@ -44,6 +44,7 @@ import type { PauseReason } from './workflowRunPauseStopServicePure.js';
 import { TaskAlreadyHasActiveRunError } from './errors/TaskAlreadyHasActiveRunError.js';
 import { insertRunRowWithUniqueGuard } from './workflowRunInsertHelper.js';
 import { appendAndEmitTaskEvent } from './taskEventService.js';
+import { assertRunDepth } from '../lib/runDepthGuard.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -156,6 +157,10 @@ export const WorkflowRunService = {
     pinnedTemplateVersionId?: string | null;
     workflowRunDepth?: number;
   }): Promise<{ runId: string; status: WorkflowRunStatus }> {
+    // Fail-fast before any DB writes if the caller is already at or beyond the
+    // maximum nesting depth. Top-level runs pass undefined (treated as 0).
+    assertRunDepth(input.workflowRunDepth ?? 0, { taskId: input.taskId });
+
     // Verify the subaccount belongs to the org.
     const [sub] = await db
       .select({ id: subaccounts.id, name: subaccounts.name, organisationId: subaccounts.organisationId })

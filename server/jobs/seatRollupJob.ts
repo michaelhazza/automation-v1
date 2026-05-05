@@ -12,7 +12,7 @@
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { orgSubscriptions } from '../db/schema/orgSubscriptions.js';
 import { subaccounts } from '../db/schema/subaccounts.js';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { countActiveIdentities } from '../../shared/billing/seatDerivation.js';
 import { logger } from '../lib/logger.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
@@ -34,7 +34,7 @@ export async function runSeatRollup(): Promise<void> {
           status: workspaceIdentities.status,
         })
         .from(workspaceIdentities)
-        .innerJoin(subaccounts, eq(subaccounts.id, workspaceIdentities.subaccountId));
+        .innerJoin(subaccounts, and(eq(subaccounts.id, workspaceIdentities.subaccountId), isNull(subaccounts.deletedAt)));
 
       // Aggregate per org in memory
       const perOrg = new Map<string, { status: WorkspaceIdentityStatus }[]>();
