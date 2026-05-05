@@ -135,7 +135,7 @@ None. ChatGPT verdict closed the loop; all findings are defers (3) or no-action 
 
 - No code changes in Round 3, so no fresh lint/typecheck pass required. Round 2 left the tree green (`npm run lint` 0 errors, `npm run typecheck` exit 0).
 
-**Close-out commit:** `__CLOSEOUT_SHA__` — `chore(pre-launch-phase-2): chatgpt-pr-review Round 3 — close-out, route 3 defers to todo.md`.
+**Close-out commit:** `49ba5b29` — `chore(pre-launch-phase-2): chatgpt-pr-review Round 3 — close-out, route 3 defers to todo.md`.
 
 ---
 
@@ -147,7 +147,7 @@ None. ChatGPT verdict closed the loop; all findings are defers (3) or no-action 
 - Round 1 commit `7499f870` — Sentinel constant; JWT iat-precision fix; client-errors 16kb body cap; logAndSwallow always-emit.
 - Round 1 commit `23503234` — (Round 1 follow-up; squashed/included pre-Round-2 diff capture.)
 - Round 2 commit `2bd17f65` — Security audit sentinel-org boot assert with prod throw / dev warn.
-- Round 3 commit `__CLOSEOUT_SHA__` — close-out only (no code change); Round 3 defers routed to `tasks/todo.md`.
+- Round 3 commit `49ba5b29` — close-out only (no code change); Round 3 defers routed to `tasks/todo.md`.
 
 **ChatGPT verdict on close:** "You are genuinely done."
 
