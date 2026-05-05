@@ -54,4 +54,8 @@ export const rateLimitKeys = {
     `rl:${KEY_VERSION}:workspace:email:identity:${identityId}`,
   workspaceEmailOrg: (organisationId: string): string =>
     `rl:${KEY_VERSION}:workspace:email:org:${organisationId}`,
+
+  // ---------------- client errors (Phase 2) ----------------
+  clientError: (userId: string): string =>
+    `rl:${KEY_VERSION}:client:error:user:${userId}`,
 };

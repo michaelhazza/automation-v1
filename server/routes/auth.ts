@@ -22,7 +22,8 @@ function validatePasswordStrength(password: string): string | null {
 }
 
 router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (req, res) => {
-  const { agencyName, email, password } = req.body as SignupInput;
+  const { agencyName, password } = req.body as SignupInput;
+  const email = (req.body as SignupInput).email.trim().toLowerCase();
   const limitResult = await rateLimitCheck(rateLimitKeys.authSignup(req.ip ?? 'unknown', email), 10, 900);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
@@ -63,7 +64,7 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
   const rlShort = await rateLimitCheck(rateLimitKeys.authLogin(ip, email), 10, 60);
   if (!rlShort.allowed) {
     setRateLimitDeniedHeaders(res, rlShort.resetAt, rlShort.nowEpochMs);
-    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.', reason: 'short_window' });
     return;
   }
 
@@ -71,7 +72,7 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
   const rlLong = await rateLimitCheck(rateLimitKeys.authLoginLong(ip, email), 50, 3600);
   if (!rlLong.allowed) {
     setRateLimitDeniedHeaders(res, rlLong.resetAt, rlLong.nowEpochMs);
-    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.', reason: 'long_window' });
     return;
   }
 
@@ -84,6 +85,15 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
       action: 'login_failed',
       metadata: { email, reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
       ipAddress: req.ip,
+    });
+    // auth.login.failure — org is unknown at this point (login rejected before session established).
+    // Emit to the system sentinel org so the event is recorded; meta carries the redacted email.
+    void recordSecurityEvent({
+      organisationId: '00000000-0000-0000-0000-000000000000',
+      eventType:      'auth.login.failure',
+      ip:             req.ip ?? null,
+      userAgent:      req.get('user-agent') ?? null,
+      meta:           { emailDomain: email.split('@')[1] ?? 'unknown' },
     });
     throw err;
   }
@@ -118,8 +128,8 @@ router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHand
 }));
 
 router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
-  const { email } = req.body as ForgotPasswordInput;
-  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown', String(email)), 5, 300);
+  const email = String((req.body as ForgotPasswordInput).email).trim().toLowerCase();
+  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown', email), 5, 300);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many password reset requests. Please try again later.' });

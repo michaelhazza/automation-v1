@@ -8,4 +8,9 @@ CREATE INDEX IF NOT EXISTS idx_review_items_org        ON review_items (organisa
 CREATE INDEX IF NOT EXISTS idx_review_items_org_status ON review_items (organisation_id, review_status, created_at DESC);
 
 -- password_changed_at on users (for JWT forced-logout — Task 4.4)
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at timestamptz NOT NULL DEFAULT now();
+-- Backfill existing rows to epoch sentinel so active JWTs are not revoked on deploy.
+-- The column only advances to now() when the user actually changes their password.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at timestamptz;
+UPDATE users SET password_changed_at = '1970-01-01'::timestamptz WHERE password_changed_at IS NULL;
+ALTER TABLE users ALTER COLUMN password_changed_at SET NOT NULL;
+ALTER TABLE users ALTER COLUMN password_changed_at SET DEFAULT now();

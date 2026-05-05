@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { check as rateLimitCheck } from '../lib/inboundRateLimiter.js';
+import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -18,7 +19,7 @@ router.post(
   '/api/client-errors',
   authenticate,
   asyncHandler(async (req, res) => {
-    const rl = await rateLimitCheck(`client-error:${req.user!.id}`, 30, 300);
+    const rl = await rateLimitCheck(rateLimitKeys.clientError(req.user!.id), 30, 300);
     if (!rl.allowed) {
       res.status(429).json({ error: 'rate_limited' });
       return;

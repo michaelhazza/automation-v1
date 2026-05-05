@@ -22,5 +22,13 @@ ALTER TABLE security_audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE security_audit_events FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY security_audit_events_org_isolation ON security_audit_events
-  USING (organisation_id::text = current_setting('app.organisation_id', true))
-  WITH CHECK (organisation_id::text = current_setting('app.organisation_id', true));
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
