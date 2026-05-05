@@ -3097,3 +3097,35 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 - [ ] CHATGPT-R2-6 — Pre+post invalidation guards double DB reads under heavy workflow load
   - The new validation/invalidation guards added in this branch read state both before and after the protected operation. Under heavy workflow load this doubles the read cost for the guarded paths. Options: (a) cache the pre-read for the duration of the call where consistency permits, (b) collapse to post-read only where the pre-read was defensive rather than load-bearing, or (c) accept the cost if profiling shows it's negligible. ChatGPT framing: "not a problem now, just something to track."
   - Defer — we don't have load profiling against the new guards yet. Re-evaluate after pre-launch load testing or first production traffic spike.
+
+---
+
+## Deferred from chatgpt-pr-review Round 3 — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md` (Round 3 entry)
+**Branch:** `claude/pre-launch-phase-2`
+**PR:** #264
+**ChatGPT verdict:** "You are genuinely done." Round 3 closed all open findings; the items below are scoped follow-ups, not blockers.
+
+- [ ] CHATGPT-R3-1 — Extend CI grep invariants pattern to additional safety guards
+  - The audit-stream split grep guard added in Round 1 (`scripts/verify-audit-stream-split.sh`) is a useful pattern: a CI-grep that triggers on a known-bad usage. Extend the pattern to other invariants ChatGPT flagged in Round 3:
+    - **`assertActive` on entity fetch paths** — every service-layer fetch that returns a soft-deletable entity should pass through `assertActive`/`isActive` before the row is consumed. Grep guard would fail-fast on any new fetch path that bypasses the helper.
+    - **Forbid raw `console.*` outside allowed zones** — bootstrap, logger internals, build scripts, test fixtures. Production runtime paths must use the structured logger. Grep guard would catch new `console.*` regressions.
+    - **Normalized email at rate-limit-key construction sites** — every call site that builds a rate-limit key from an email must use the normalised form (lowercased, trimmed). Grep guard would catch raw email-as-key regressions.
+  - Wants its own scoped session: define the invariant set, write each guard, prove each one triggers on a known-bad fixture, then wire into CI.
+  - **ChatGPT framing:** "Optional. The pattern is sound; extending it is leverage."
+
+- [ ] CHATGPT-R3-2 — Canonical error taxonomy `{ code, statusCode, message, context? }`
+  - Define a single error class shape across the server: `{ code: string, statusCode: number, message: string, context?: Record<string, unknown> }`. Every thrown error in `server/services/**`, `server/routes/**`, and `server/middleware/**` constructs through this shape. The error envelope at `server/index.ts` reads `code` and `statusCode` mechanically rather than mapping ad-hoc by `message` or `instanceof`.
+  - Belongs in its own spec — touches every module that throws and every route that surfaces an error. Coordinate with the error-envelope and correlation-ID work already in place; this is the type-system follow-up that lets the envelope be authoritative.
+  - **ChatGPT framing:** "Not urgent, but high leverage later."
+
+- [ ] CHATGPT-R3-6 — Audit event namespace consistency
+  - Audit event names currently mix conventions across the security-audit and operational-audit streams. Define the namespace convention and align existing call sites:
+    - `auth.*` — user authentication events (login, logout, password change, MFA enrol/verify).
+    - `oauth.*` — provider OAuth flows (state issued, callback success/expired, token refresh).
+    - `security.*` — threat / abuse events (rate-limit trip, suspicious-activity, sentinel-row violation).
+    - `audit.*` — business events (resource created/updated/deleted, ownership changed, permission granted).
+  - Write a short convention doc (likely under `docs/` alongside the security runbook) and run a one-shot rename pass across existing audit call sites. Update `securityAuditService` typing if it currently accepts free-form strings.
+  - **ChatGPT framing:** "Optional. Define a simple convention."
