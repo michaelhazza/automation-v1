@@ -53,3 +53,29 @@ Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.m
 - Continue: yes — at least one round of mechanical-only is required to verify no follow-on findings.
 
 ---
+
+## Iteration 2
+
+**Codex command:** `codex review --commit 5729d580 --title "pre-launch-phase-3 spec review iteration 2"`
+**Codex verdict:** "directs implementers to use an ON CONFLICT target that will not match the partial unique index it also defines"
+**Findings:** 1 (P2 / important)
+
+### Finding 3 — D.5 ON CONFLICT predicate mismatch
+
+- **Source:** Codex
+- **Section:** §11 D.5 + §12.1
+- **Description:** ON CONFLICT clause `WHERE external_id_namespace = 'ghl_location'` is a subset of the partial-unique-index predicate `external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Postgres requires the conflict target's WHERE clause to match the index predicate exactly to infer the index — otherwise: `there is no unique or exclusion constraint matching the ON CONFLICT specification`.
+- **Codex's suggested fix:** include `AND deleted_at IS NULL` in the ON CONFLICT predicate.
+- **Classification:** mechanical (broken SQL — exact replication of a known-bad pattern)
+- **Disposition:** auto-apply
+
+## Iteration 2 — fixes applied
+
+`INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` — applied via Edit `replace_all` to both §11 D.5 and §12.1 GHL job row.
+
+## Iteration 2 — stopping heuristic
+
+- Findings: 1 mechanical, 0 directional, 0 ambiguous, 0 rejected.
+- Continue: yes — one more round to confirm convergence.
+
+---
