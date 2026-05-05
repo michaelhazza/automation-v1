@@ -109,8 +109,48 @@ None. All findings classified `technical` (apply) or `mechanical-noop` (reject).
 
 Top theme: tight clarifications that close ambiguity in already-good design. ChatGPT's "ready to build" verdict is preserved — no structural changes; six 1-3-line specifications that lock down operational details (what the dev `curl` loop sees, what a sustained audit-DB outage produces, which bucket's headers go on the 429, how a future reader of the test file knows what's asserted, how a future cost-gate failure is diagnosed, how the operator catches drift before the gate fails).
 
+## Round 2 — 2026-05-06T00-30-00Z
+
+### ChatGPT Feedback (raw)
+
+> Looks clean. Round-1 feedback was applied correctly and the F7 rejection is reasonable.
+>
+> One minor issue in the updated spec: §14 checklist is now stale. It says net-new artifacts are limited to "one CI workflow (L5), one new pure-function test file (L2), and extensions to two existing test files," but §3 now lists multiple new test files and a workflow. Update that checklist line so the pre-review checklist matches the inventory.
+>
+> Other than that: ready for next review/build pass.
+
+### Triage and Decision
+
+| # | Finding | Triage | Decision | Severity | Rationale |
+|---|---------|--------|----------|----------|-----------|
+| F9 | §14 pre-review checklist "net-new artifacts" line stale post round-1 — undercounts new pure test files and omits the new operator-runbook.md docs file | mechanical | auto (apply) | low | Pure documentation-consistency fix; the checklist is the auditable record of "no new application primitives" so it must enumerate the actual net-new artifacts. Updated line names all six artifacts (one CI workflow, three new pure test files, two extensions to existing test files, one new docs file) plus their source-of-finding (L1, L2, L2-sub-fix, L3, L4, L5, H4). |
+
+### Auto-execution summary
+
+- **Auto-applied (1):** F9.
+- **Auto-rejected (0):** none.
+- **Escalated to operator (0):** none.
+
+### Applied (auto-applied technical)
+
+- [auto F9] §14 pre-review checklist — replaced the "net-new artifacts" summary line with an explicit enumeration: one CI workflow (`.github/workflows/optimiser-cost-gate.yml`, L5); three new pure-function test files (`webhookSecretValidatorPure.test.ts` for L1; `requireSubaccountPermissionPure.test.ts` for L2; `securityAuditServiceWriteFailureLogPure.test.ts` for the L2 audit-write-failure observability sub-fix); extensions to two existing test files (`measureInterventionOutcomeJob.idempotency.test.ts` for L4; `rateLimitKeysPure.test.ts` for L3); one new docs file (`operator-runbook.md` for H4). All other changes extend existing files in place.
+
+### Integrity check
+
+- §14 line now matches §3 inventory exactly (cross-checked file by file).
+- No other staleness detected.
+
+### Round 2 summary
+
+- **Auto-accepted (mechanical):** 1 applied.
+- **User-decided:** 0.
+
+ChatGPT verdict: "Ready for next review/build pass."
+
 ## 5. Session close-out
 
-- Round 1 (this round): 6 applied, 1 rejected.
-- ChatGPT verdict: APPROVED. "Ready to build. No blockers."
+- Round 1: 6 applied, 1 rejected.
+- Round 2: 1 applied (mechanical checklist sync).
+- Total: 7 applied, 1 rejected.
+- ChatGPT verdict: APPROVED both rounds. Round 2 explicit "ready for next review/build pass."
 - No further rounds required for this spec on this feedback. Spec status flips to **READY_FOR_BUILD** for the chatgpt-spec-review gate. Next gate: feature-coordinator (Phase 2 build) — note the architect-invocation gap flagged in commit `1d13a97e` (Claude Code web session does not expose the Task/Agent tool needed to invoke the architect sub-agent; operator decision required — run architect playbook inline OR defer plan-phase to a Claude Code CLI session).
