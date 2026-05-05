@@ -4,7 +4,7 @@
 |---|---|
 | Stream | 1 of 2 (concurrent with Stream 2) |
 | Goal | Ship F1 then F3 sequentially in one worktree. Both extend onboarding plumbing; F1 must land first. |
-| Status | READY TO START — both specs revised against main 2026-05-04 |
+| Status | F1 MERGED (PR #263, 2026-05-05) — F3 READY TO START |
 | Branch | `claude/stream-1-onboarding-scope` |
 | Worktree | `../automation-v1.stream-1-onboarding-scope` |
 | Specs (canonical) | `docs/sub-account-baseline-artefacts-spec.md` (F1), `docs/baseline-capture-spec.md` (F3) |
@@ -45,7 +45,11 @@ Branch claude/stream-1-onboarding-scope
 
 **Hard constraint:** F3 cannot start until F1 PR is merged. Both modify the same files at the same area; trying to interleave creates merge hell. Pattern: complete F1 end-to-end → merge → rebase Stream 1 branch on main → start F3.
 
-## Sub-stream A — F1 sub-account baseline artefact set
+## Sub-stream A — F1 sub-account baseline artefact set (COMPLETE)
+
+**Status: MERGED — PR #263, 2026-05-05.** Migration 0277 on main. All six phases shipped. Detailed plan: `tasks/builds/subaccount-artefacts/plan.md`.
+
+
 
 **Goal:** Capture six tiered artefacts at sub-account onboarding (brand identity, voice/tone, offer/positioning, audience/ICP, operating constraints, proof library).
 
@@ -64,7 +68,12 @@ Branch claude/stream-1-onboarding-scope
 
 **Done definition (F1):** see spec §8.
 
-## Sub-stream B — F3 baseline capture
+## Sub-stream B — F3 baseline capture (READY TO START)
+
+**Detailed plan:** `tasks/builds/baseline-capture/plan.md` (authored 2026-05-05, 12 chunks).
+**Progress:** `tasks/builds/baseline-capture/progress.md`.
+
+
 
 **Goal:** When a new sub-account becomes ready (≥2 polls elapsed AND ≥1h since first poll, with ≥2 of the 4 core metrics non-null), capture an immutable T0 snapshot for month-over-month delta narration.
 
