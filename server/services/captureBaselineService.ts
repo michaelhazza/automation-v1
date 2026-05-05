@@ -248,6 +248,34 @@ export const captureBaselineService = {
       throw { statusCode: 409, errorCode: 'BASELINE_CAPTURING', message: 'Auto capture in flight; retry shortly' };
     }
 
+    // F3 §6 — lead_count must not exceed the all-time-high observed in
+    // canonical_metric_history for this subaccount. Sanity check against
+    // order-of-magnitude data-entry mistakes; no-op if no history exists yet.
+    const leadCountInput = params.metricInputs.find((m) => m.slug === 'lead_count');
+    if (leadCountInput) {
+      const result = await orgDb.execute<{ high: string | null }>(sql`
+        SELECT MAX(cmh.value::numeric)::text AS high
+        FROM canonical_metric_history cmh
+        INNER JOIN canonical_accounts ca ON ca.id = cmh.account_id
+        WHERE ca.organisation_id = ${params.organisationId}
+          AND ca.subaccount_id = ${params.subaccountId}
+          AND cmh.metric_slug = 'lead_count'
+      `);
+      const rows = (result as unknown as { rows?: { high: string | null }[] }).rows
+        ?? (result as unknown as { high: string | null }[]);
+      const highRaw = Array.isArray(rows) && rows.length > 0 ? rows[0]?.high : null;
+      if (highRaw !== null && highRaw !== undefined) {
+        const high = Number(highRaw);
+        if (Number.isFinite(high) && leadCountInput.numeric > high) {
+          throw {
+            statusCode: 400,
+            errorCode: 'LEAD_COUNT_EXCEEDS_HISTORICAL_HIGH',
+            message: `lead_count (${leadCountInput.numeric}) exceeds historical maximum (${high})`,
+          };
+        }
+      }
+    }
+
     const overridden: BaselineMetricSlug[] = [];
     for (const input of params.metricInputs) {
       const meta = metricMeta(input.slug);
