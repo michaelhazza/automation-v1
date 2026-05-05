@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: docs/baseline-capture-spec.md
+active_plan: tasks/builds/baseline-capture/plan.md
+build_slug: baseline-capture
+branch: claude/baseline-capture
+status: REVIEWING
 last_updated: 2026-05-05
 last_merged_pr: #264
 last_merged_slug: pre-launch-phase-2
@@ -21,6 +21,13 @@ The HTML comment block at the top of this file is read by the Mission Control da
 For per-session progress (what was done this session, what's next), write to `tasks/builds/<slug>/progress.md` — not here.
 
 **Migration note (for sessions following historical plans):** Prior plans referencing "Update CLAUDE.md §'Current focus'" should now target this file (`tasks/current-focus.md`). Prior plans referencing "Update CLAUDE.md §'Key files per domain'" should now target `architecture.md § Key files per domain`.
+
+---
+
+**Active spec:** `docs/baseline-capture-spec.md`
+**Active plan:** `tasks/builds/baseline-capture/plan.md`
+**Active build slug:** `baseline-capture`
+**Status:** **REVIEWING** — F3 baseline-capture build implemented + spec-conformance CONFORMANT (re-run) + pr-reviewer APPROVED + adversarial-reviewer ALL_CLOSED. HEAD `b516e26a`. Phase 2 handoff at `tasks/builds/baseline-capture/handoff.md`. Next step: launch finalisation-coordinator. **REVIEW_GAP:** dual-reviewer skipped (Codex CLI unavailable in this Claude Code web session); chatgpt-pr-review will be the second-opinion pass during Phase 3.
 
 ---
 
