@@ -5,6 +5,7 @@
 - PR: #265 — https://github.com/michaelhazza/automation-v1/pull/265
 - Mode: manual
 - Started: 2026-05-05T10:17:27Z
+- **Verdict:** APPROVED (3 rounds, 0 implement / 15 reject / 0 defer)
 - Spec deviations carried in: NONE — spec-conformance re-run verdict was CONFORMANT
 - REVIEW_GAP: dual-reviewer was SKIPPED in Phase 2 (Codex CLI unavailable in this Claude Code web session). chatgpt-pr-review is the primary second-opinion pass for this build.
 - Phase 2 review history (carried into this session as resolved):
@@ -153,4 +154,60 @@ None — all 5 findings rejected after verification. R2.F1 and R2.F5 were genuin
 > Approve and merge — but this is one of those PRs where nothing is obviously wrong; the risk is entirely in system integrity over time.
 
 ---
+
+## Round 3 — 2026-05-05T11:30:00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> You've done a proper verification loop. At this point there are no remaining credible risk signals. What's left falls into paranoia-level checks, not merge blockers. If your Round 2 verification is accurate, this is clean to merge.
+>
+> Final pass — only things not already covered:
+> 1) Silent schema drift — Drizzle schema vs actual migration parity (defaults, nullable vs not null, enum constraints).
+> 2) "Dead path" idempotency gaps — rare branches: retry failure paths, partial rollback paths, admin/reset interrupts mid-flight.
+> 3) Transaction boundary correctness — no external I/O inside transaction; no "read → external call → write" without revalidation.
+> 4) Log / metric cardinality sanity — any new fields that can explode cardinality (user input, IDs embedded in metric labels, free-text error messages).
+>
+> Verdict: **Merge.** You've done 2 clean rounds, explicit verification, dedupe validation, invariant-level thinking. That's exactly the bar where further review stops adding value.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R3.F1 — Silent schema drift (Drizzle ↔ migration parity) | technical | reject | auto (reject) | low | Verified column-by-column. Migration 0280 ↔ `server/db/schema/subaccountBaselines.ts`: all 17 columns match (defaults, nullable, FK references). Migration 0281 ↔ `server/db/schema/subaccountBaselineMetrics.ts`: all 6 columns + composite PK + ON DELETE CASCADE + secondary index match. Status/source/confidence enums: DB has CHECK constraints; Drizzle uses TS union types via `$type<...>()` — standard codebase pattern; CHECK enforces at write time, TS enforces at insertion call site. No drift. |
+| R3.F2 — Dead-path idempotency (rare branches) | technical | reject | auto (reject) | low | Verified every write path: (a) initial-baseline insert catches 23505 and no-ops; (b) lock acquisition is conditional UPDATE on `status IN ('pending','ready')` so a second worker matches zero rows; (c) `runManual` atomic claim flips status='manual' from non-capturing/non-reset states only — race-loser gets 409 BEFORE any metric write commits (closes adversarial-reviewer AR-1); (d) all metric upserts are `ON CONFLICT (baseline_id, metric_slug) DO UPDATE`; (e) final-state UPDATEs key on baseline.id under an already-acquired exclusive predicate; (f) `adminReset` runs in a single `withAdminConnection` tx with admin role, prior UPDATE + new INSERT atomic; (g) pg-boss enqueues use `singletonKey: baseline:${baselineId}` + `singletonHours: 1`. Retry-failure path: `isRetryBudgetExhausted(attempt) → status='failed'` is terminal, no further enqueue. Partial-rollback: per-metric upserts are individually idempotent so partial commit on transaction abort still leaves a recoverable state for the next run. No write path bypasses dedupe. |
+| R3.F3 — Transaction boundary correctness (no external I/O inside tx) | technical | reject | auto (reject) | low | Verified: pg-boss handlers (`captureBaselineJobHandler`, `evaluateAllPendingBaselinesHandler`) wrap execution in `db.transaction`. Inside the transaction, code paths only do DB queries — metric readers use `getOrgScopedDb` against canonical_metrics (no HTTP/external calls). External provider API calls live in `connectorPollingService.syncConnector` which orchestrates per-row `canonicalDataService.upsert*` calls (each opens its own short tx) — fetch-then-upsert pattern, not "read → external → write". No external I/O inside transactions. |
+| R3.F4 — Log / metric cardinality (high-cardinality labels) | technical | reject | auto (reject) | low | Verified the 9 new event types: all metadata fields are bounded enums (`metric_slug` 5 values, `unavailable_reason` 4 values, `error_class` 2 values, `failure_reason` enum, `confidence` 3 values, `source` 3 values, `triggerSource` 4 values) or finite UUIDs (subaccount_id, baseline_id, user_id). The only free-text field is `admin_reset_reason` on `baseline.admin_reset` — captured as event metadata payload, not a metric label, and bounded by sysadmin invocation cardinality. `safeMetadata()` truncates oversized payloads to `MAX_METADATA_SIZE_BYTES`. `logger.error` calls in `evaluateAllPendingBaselines` include `error.message` (potentially unbounded text) — but as log content, not a label/dimension; bounded by occurrence count, no cardinality explosion. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None — all 4 paranoia-level concerns rejected after verification. ChatGPT's verdict is **Merge.**
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 0 implemented | 15 rejected | 0 deferred
+- User-decided: 0 implemented | 0 rejected | 0 deferred
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § PR Review deferred items / PR #265:
+  - (none)
+- Architectural items surfaced to screen (user decisions):
+  - (none)
+- KNOWLEDGE.md updated: yes (1 entry — *2026-05-05 Pattern — chatgpt-pr-review meta-level Round 1 without diff visibility*)
+- architecture.md updated: yes (sections *Sub-account Baseline Capture (PR #265)*, *Key files per domain* row "Modify sub-account baseline capture (F3)")
+- capabilities.md updated: yes (section *Sub-account Baseline*)
+- integration-reference.md updated: n/a — checked baseline, subaccount_baseline grep terms; zero hits. No new connector slug, OAuth provider, scope, or skill introduced by this PR.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked baseline, subaccount_baseline grep terms in CLAUDE.md (zero hits) and DEVELOPMENT_GUIDELINES.md (only pre-existing "gate-baseline" hits at lines 69, 70, 72, 174 — RLS scanner allow-lists / gate suppressions, unrelated to F3 domain). New RLS table additions follow the established pattern in `rlsProtectedTables.ts` + `rls-not-applicable-allowlist.txt`; no new convention introduced.
+- frontend-design-principles.md updated: n/a — checked baseline, subaccount_baseline grep terms; zero hits. The 3 new client components (`BaselineStatusBadge`, `ManualBaselineForm`, `AdminBaselineResetButton`) follow existing form / badge / button patterns; no new UI hard rule, pattern, or worked example introduced.
+- main merged into branch: pending step 10 of finalisation
+- PR: #265 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/265
+
+### Consistency check across rounds
+
+No contradictions: same finding type was never decided differently across rounds. Round 1 (meta-level pass without diff visibility) flagged 6 generic concerns → all rejected after verification. Round 2 (with diff) sharpened to 5 concerns → 3 new (also rejected after verification), 2 substantive duplicates of Round 1 (auto-applied prior decision per playbook §1a). Round 3 (paranoia-level) raised 4 final concerns → all rejected after verification. Decision trajectory is consistent: every concern verified clean, never partially implemented and partially rejected.
+
+**Verdict:** APPROVED (3 rounds, 0 implement / 15 reject / 0 defer)
 

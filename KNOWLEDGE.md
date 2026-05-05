@@ -2236,3 +2236,11 @@ Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `
 F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
 
 JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.
+
+### 2026-05-05 Pattern — chatgpt-pr-review meta-level Round 1 without diff visibility
+
+When ChatGPT is given only the GitHub PR summary (no diff), Round 1 produces a *meta-level pass*: generic recommendations about determinism, observability, idempotency, lifecycle drift — not pinpoint findings against actual code. The reviewer typically signals this themselves ("Right now this is a meta-level review… If you paste the actual code diff, I'll run a true deep pass").
+
+Adjudication shape for these rounds: each "concern" is a verification request, not a defect claim. Treat them as `reject` with a verification-trail rationale, not as `implement` or `defer`. The session log carries the verification (e.g. "verified by partial UNIQUE index `subaccount_baselines_active_uniq` in migration 0280") rather than a code change. Round 2 onwards (with the diff bundle uploaded) sharpens to specific findings; substantive duplicates of Round 1 concerns auto-apply the prior-round decision per the duplicate-detection rule.
+
+Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05T10-17-27Z.md` — 3 rounds, 15 rejections, 0 code changes, APPROVED verdict. Round 1 raised 6 generic concerns; Round 2 sharpened to 5 (3 new, 2 duplicates of R1); Round 3 dropped to 4 paranoia-level concerns. The verification trail in the log is the audit artifact, not the (empty) implementation diff.
