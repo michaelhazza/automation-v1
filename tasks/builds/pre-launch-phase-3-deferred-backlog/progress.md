@@ -107,3 +107,38 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 - `asyncHandlerNormalisationPure.ts` introduced as a pure extraction so the test can import it without pulling in `env.ts` (via logger/incidentIngestor). `asyncHandler.ts` delegates to it.
 - Legacy `SecurityEventType` and `SecurityEventInput` retained in `securityAuditServicePure.ts` for backward compat with existing vitest (`securityAuditServicePure.test.ts`).
 
+## Chunk B — CI grep invariants (B.1-B.5) — DONE 2026-05-06
+
+### Files created
+- `scripts/verify-assert-active.sh` — B.1: hunts db.query on soft-deletable tables with no assertActive/isActive guard
+- `scripts/verify-no-raw-console.sh` — B.2: hunts raw console.* in server/ outside allowlist; grandfathered legacy list built in
+- `scripts/verify-rate-limit-key-normalisation.sh` — B.3: hunts `as NormalisedEmail` cast bypass outside rateLimitKeys.ts
+- `scripts/verify-audit-event-namespace.sh` — B.4: three-pass strategy; hunts raw eventType strings, SecurityAuditEventName casts, and dotted namespace strings
+- `scripts/fixtures/verify-assert-active-bad.txt` — known-bad fixture for B.1
+- `scripts/fixtures/verify-no-raw-console-bad.txt` — known-bad fixture for B.2
+- `scripts/fixtures/verify-rate-limit-key-normalisation-bad.txt` — known-bad fixture for B.3
+- `scripts/fixtures/verify-audit-event-namespace-bad-pass1.txt` — known-bad fixture for B.4 pass 1
+- `scripts/fixtures/verify-audit-event-namespace-bad-pass3.txt` — known-bad fixture for B.4 pass 3
+- `tasks/builds/pre-launch-phase-3-deferred-backlog/audit/assert-active-allowlist.txt` — empty allowlist for B.1
+
+### Files modified
+- `.github/workflows/ci.yml` — added `grep_invariants` job (B.5): 4 steps wiring B.1-B.4, unconditional on every PR
+
+### Bug fixed
+- `verify-audit-event-namespace.sh` pass 3: `grep | head -1` without `|| true` caused SIGPIPE-exit when grep found no matches (grep exits 1, head exits 0, pipefail propagates grep's non-zero). Added `|| true` to the inner command substitution.
+
+### False positives resolved
+- B.1: No false positives — `db.query.<soft-deletable-table>.findFirst/findMany` pattern has 0 occurrences in server/services and server/routes (codebase uses `.select().from()` pattern instead)
+- B.2: 291 existing raw console calls grandfathered into `LEGACY_ALLOWLIST` inside the script — new files will be caught
+- B.3: No false positives — `NormalisedEmail` doesn't exist yet (Chunk D)
+- B.4: No false positives — Chunk A cleaned all call sites
+
+### Verification results
+- `bash scripts/verify-assert-active.sh` — EXIT:0
+- `bash scripts/verify-no-raw-console.sh` — EXIT:0
+- `bash scripts/verify-rate-limit-key-normalisation.sh` — EXIT:0
+- `bash scripts/verify-audit-event-namespace.sh` — EXIT:0
+- `npm run lint` — exit 0
+- `npm run typecheck` — exit 0
+- Commit: `ce537318`
+
