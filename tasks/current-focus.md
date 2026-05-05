@@ -3,16 +3,16 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-05
 last_merge_ready_pr: #262
 last_merge_ready_slug: stream-2-optimiser-finish
 last_merge_ready_branch: stream-2-optimiser-finish
-last_merged_pr: #263
-last_merged_slug: workflows-v1-phase-2
-last_merged_branch: workflows-v1-phase-2
-last_merged_at: 2026-05-04T10:24:40Z
-last_merged_commit: 0b26429c
+last_merged_pr: #262
+last_merged_slug: stream-2-optimiser-finish
+last_merged_branch: stream-2-optimiser-finish
+last_merged_at: 2026-05-05T01:33:57Z
+last_merged_commit: e75f9dbd
 -->
 
 # Current Focus
@@ -30,7 +30,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** none.
 **Active plan:** none.
 **Active build slug:** none.
-**Status:** **MERGE_READY** — PR [#262](https://github.com/michaelhazza/automation-v1/pull/262) `stream-2-optimiser-finish` is ready to merge. `ready-to-merge` label applied 2026-05-05T00:38:53Z; CI is running G5. The operator drives the merge sequence.
+**Status:** **NONE** — no active build. PR [#262](https://github.com/michaelhazza/automation-v1/pull/262) `stream-2-optimiser-finish` merged to main 2026-05-05T01:33:57Z as `e75f9dbd`.
 
 **Just MERGE_READY:** PR #261 — `pre-launch-hardening`. Phase 1 of the pre-launch P0 hardening plan. 24 of 25 P0 items closed across 6 chunks: OAuth state security (S-P0-1, S-P0-2 via durable `oauth_state_nonces` table, migrations 0277/0278; cleanup job `maintenance:oauth-state-cleanup` every 5 min), security primitives (S-P0-3 verify, S-P0-5 DB rate limiter on auth/forgot/reset with login 60s + forgot/reset 300s windows, S-P0-6 webhook HMAC boot assert, S-P0-7 OAuth postMessage origin allowlist, S-P0-8 multer 25MB cap, S-P0-9 forgot/reset DB rate limiter), auto-start onboarding via pg-boss (S-P0-4 GUC propagation, D-P0-1 `ghl:auto-start-onboarding` queue with singletonKey + per-org dedup window), customer-facing P0s (C-P0-1 integrationBlockService E-D4 hard-block via `integrationNotResumable` flag returning structured `TOOL_NOT_RESUMABLE`; C-P0-2 OAuth resume restart job `run:resumeAfterOAuth` + `pendingRunId` column; C-P0-3 Universal Brief routes stub; C-P0-6 soft-delete sweep), data integrity P0s (D-P0-2 step.approval_resolved emission; D-P0-3 23505→409 conversion via `insertRunRowWithUniqueGuard`; D-P0-4 version predicate via `OptimisticLockError`; D-P0-5 durable `task_events` table migration 0279 with FORCE RLS + explicit GUC inside service-opened transaction; D-P0-6 resolver atomicity; D-P0-7 run-depth fail-fast via `assertRunDepth` from `server/lib/runDepthGuard.ts` with `MAX_WORKFLOW_RUN_DEPTH = 10` throwing `RunDepthExceededError statusCode 422`), operational readiness P0s (O-P0-1 CI workspace-actor-coverage gate, O-P0-2 verifier sweep, O-P0-3 reseed env-guard + backup/restore runbook with task_events orphan validation queries, O-P0-4 verify reseed_restore_users transaction wrap, O-P0-5 skill-analyzer pipeline observability). **Pipeline:** `pr-reviewer` (CHANGES_REQUESTED → 6 fixes in `a06efdcf`) → `dual-reviewer` (Codex 1 iter, APPROVED with 2 deferrals) → `adversarial-reviewer` (HOLES_FOUND: 1 confirmed AR-1.1 task_events GUC + 2 likely AR-2.1 trust proxy / AR-3.1 OAuth resume RLS, all 3 fixed in `38d7c495`; 4 worth-confirming routed to `tasks/todo.md` in `ac3c53e8`) → `chatgpt-pr-review` (2 rounds, APPROVED with fixes; Round 1 4 fixes `161b1081`; Round 2 4 fixes `7f5991d6`). Doc-sync sweep complete. Phase 3 handoff: `tasks/builds/pre-launch-hardening/handoff.md`.
 
