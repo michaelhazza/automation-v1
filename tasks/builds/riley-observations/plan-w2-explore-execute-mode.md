@@ -1,5 +1,10 @@
 # Wave 2 — Explore Mode / Execute Mode (Part 3)
 
+> **Schema portion of this plan landed via migration 0230 (out-of-band, in `pre-launch-hardening` build). Service / route / UI work below has not started.**
+>
+> Columns added by migration 0230: `workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, `system_skills.side_effects`.
+> This wave does NOT include skill-execution timing capture.
+
 _Plan slug: `riley-observations` — W2 chunk: `explore-execute-mode`_
 _Source spec: `docs/riley-observations-dev-spec.md` §6 (lines 944–1242), §10.1–§10.5, §11.2, §12.3_
 _Mockups: `prototypes/riley-observations/02-agent-chat-explore-mode.html`, `03-workflow-run-modal-step2.html`, `04-promote-to-execute-prompt.html`, `10-agent-config-page.html`_

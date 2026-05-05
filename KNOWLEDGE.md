@@ -2100,3 +2100,15 @@ Workflows-v1's `appendAndEmitTaskEvent` is the emit path for non-agent-run-shape
 Today: emit is WebSocket-only — the live socket records state, but a client opening the page after an event fired sees stale projection until the next forced refresh. The replay endpoint cannot reconstruct these events.
 
 Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.
+
+### 2026-05-04 Correction — Riley waves ship independently
+
+W1 shipped via PR #186 + migrations 0219-0222. W2 schema landed in migration 0230 out-of-band from `pre-launch-hardening`; W2 services / UI did not. W3 and W4 unstarted in code. Don't conflate the four waves when reading Riley docs — check migrations and `server/lib/tracing.ts` for actual state.
+
+### 2026-05-04 Pattern — F1 Sub-Account Baseline Artefacts (migration 0277)
+
+Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `memory_blocks.applies_to_domains` (TEXT[]), and `subaccounts.baseline_artefacts_status` (versioned JSONB). Six reserved-slug artefacts are captured at onboarding via the `baseline-artefacts-capture` workflow. Tier-1 blocks prepend to the system prompt via `memoryBlockService.getTier1Blocks` (sorted by name ASC for hash-stable prefix caching). Tier-2 blocks load when `applies_to_domains @> ARRAY[agentDomain]` matches. Tier-3 lives in `workspace_memory_entries` under `domain='baseline'`.
+
+F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
+
+JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.

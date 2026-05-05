@@ -16,21 +16,11 @@ import { eq, and, isNull, desc } from 'drizzle-orm';
 import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
 import { subaccountOnboardingService } from '../services/subaccountOnboardingService.js';
+import { isBaselineSlug } from '../../shared/constants/baselineArtefacts.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
-
-// ─── Helper: verify subaccount belongs to the request's org ──────────────────
-
-async function resolveSubaccount(subaccountId: string, organisationId: string) {
-  const [sa] = await db
-    .select()
-    .from(subaccounts)
-    .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)));
-
-  if (!sa) throw { statusCode: 404, message: 'Subaccount not found' };
-  return sa;
-}
 
 // ─── Subaccounts CRUD ─────────────────────────────────────────────────────────
 
@@ -789,6 +779,107 @@ router.delete(
 
     await db.delete(subaccountUserAssignments).where(eq(subaccountUserAssignments.id, assignment.id));
     res.json({ message: 'Member removed from subaccount' });
+  })
+);
+
+// ─── Baseline artefacts (F1 §4A) ─────────────────────────────────────────────
+
+/**
+ * GET /api/subaccounts/:subaccountId/baseline-artefacts-status
+ * Read the current baseline_artefacts_status JSONB blob for a sub-account.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/baseline-artefacts-status',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    res.json({ status: sa.baselineArtefactsStatus });
+  })
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/baseline-artefacts/started
+ * Emit a telemetry event when the user opens a capture step.
+ * Body: { slug: string }
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/baseline-artefacts/started',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const { slug } = req.body as { slug?: string };
+    if (!slug || !isBaselineSlug(slug)) {
+      res.status(400).json({
+        error: 'Invalid baseline slug',
+        errorCode: 'INVALID_BASELINE_SLUG',
+      });
+      return;
+    }
+    subaccountOnboardingService.recordArtefactStarted({
+      subaccountId: sa.id,
+      organisationId: req.orgId!,
+      slug,
+      userId: req.user!.id,
+    });
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/baseline-artefacts/:slug/skip
+ * Skip a Tier-3 baseline artefact. Tier-1 and Tier-2 slugs return 400.
+ * Body: { reason: 'defer_for_later' | 'not_applicable' }
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/baseline-artefacts/:slug/skip',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const { slug } = req.params;
+    const { reason } = req.body as { reason?: string };
+    if (!reason || (reason !== 'defer_for_later' && reason !== 'not_applicable')) {
+      res.status(400).json({ error: 'Validation failed', details: 'reason must be defer_for_later or not_applicable' });
+      return;
+    }
+    await subaccountOnboardingService.markArtefactSkipped({
+      organisationId: req.orgId!,
+      subaccountId: sa.id,
+      slug,
+      userId: req.user!.id,
+      reason,
+    });
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * PATCH /api/subaccounts/:subaccountId/baseline-artefacts/:slug
+ * Edit the content of a completed baseline artefact.
+ * Body: { payload: Record<string, unknown> }
+ */
+router.patch(
+  '/api/subaccounts/:subaccountId/baseline-artefacts/:slug',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const { slug } = req.params;
+    const { payload } = req.body as { payload?: Record<string, unknown> };
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      res.status(400).json({ error: 'Validation failed', details: 'payload must be an object' });
+      return;
+    }
+    await subaccountOnboardingService.markArtefactEdited({
+      organisationId: req.orgId!,
+      subaccountId: sa.id,
+      slug,
+      userId: req.user!.id,
+      payload,
+    });
+    res.json({ ok: true });
   })
 );
 
