@@ -3,7 +3,6 @@ import { db } from '../db/index.js';
 import { securityAuditEvents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import {
-  normaliseSecurityEvent,
   normaliseSecurityEventV2,
   type SecurityEventInput,
   type SecurityEventInputV2,
