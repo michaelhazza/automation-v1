@@ -22,6 +22,11 @@ export async function evaluateAllPendingBaselinesHandler(_job: PgBoss.Job<unknow
       // is intentionally excluded — by that point captureBaselineService.run has
       // already transitioned the row to status='failed' (isRetryBudgetExhausted),
       // so it is no longer 'ready' and never matched here.
+      //
+      // Bounded LIMIT prevents DoS on a large instance: if thousands of pending
+      // rows accumulated (e.g., during an outage), the daily run processes the
+      // oldest 1000 first and the next run picks up the remainder. ORDER BY
+      // created_at ASC ensures FIFO fairness so no baseline is starved.
       const result = await adminDb.execute(sql`
         SELECT id, organisation_id, subaccount_id, status, capture_attempt_count
         FROM subaccount_baselines
@@ -33,6 +38,8 @@ export async function evaluateAllPendingBaselinesHandler(_job: PgBoss.Job<unknow
                OR (capture_attempt_count = 2 AND last_attempt_at <= now() - interval '4 hours')
              )
            )
+        ORDER BY created_at ASC
+        LIMIT 1000
       `);
       return (result as unknown as { rows: Array<{ id: string; organisation_id: string; subaccount_id: string; status: string; capture_attempt_count: number }> }).rows;
     },

@@ -236,8 +236,9 @@ export const captureBaselineService = {
   }): Promise<void> {
     const orgDb = getOrgScopedDb('captureBaselineService.runManual');
 
+    // Step 1 — locate the active baseline.
     const [baseline] = await orgDb
-      .select({ id: subaccountBaselines.id, source: subaccountBaselines.source, status: subaccountBaselines.status })
+      .select({ id: subaccountBaselines.id })
       .from(subaccountBaselines)
       .where(and(
         eq(subaccountBaselines.subaccountId, params.subaccountId),
@@ -248,13 +249,9 @@ export const captureBaselineService = {
       throw { statusCode: 404, errorCode: 'BASELINE_NOT_FOUND', message: 'No active baseline for this subaccount' };
     }
 
-    if (baseline.status === 'capturing') {
-      throw { statusCode: 409, errorCode: 'BASELINE_CAPTURING', message: 'Auto capture in flight; retry shortly' };
-    }
-
-    // F3 §6 — lead_count must not exceed the all-time-high observed in
-    // canonical_metric_history for this subaccount. Sanity check against
-    // order-of-magnitude data-entry mistakes; no-op if no history exists yet.
+    // Step 2 — read-only validation: lead_count cap. Spec §6 sanity check
+    // against order-of-magnitude data-entry mistakes; no-op when no history
+    // exists. Run before the atomic claim so a 400 here doesn't flip status.
     const leadCountInput = params.metricInputs.find((m) => m.slug === 'lead_count');
     if (leadCountInput) {
       const result = await orgDb.execute<{ high: string | null }>(sql`
@@ -280,6 +277,34 @@ export const captureBaselineService = {
       }
     }
 
+    // Step 3 — ATOMIC CLAIM. Flip status to 'manual' from any non-terminal,
+    // non-capturing state. Once this UPDATE returns >=1 row we own the
+    // baseline: auto-capture's lock-acquisition predicate (§5.10
+    // `WHERE status IN ('pending','ready')`) cannot match it, so subsequent
+    // metric upserts cannot be raced. Zero rows returned means the auto-capture
+    // worker beat us to it (status flipped to 'capturing' between Step 1 and
+    // here) — throw 409 BEFORE any metric writes commit. This closes the
+    // adversarial-reviewer AR-1 race where the HTTP transaction would commit
+    // partial metric writes after a late 409.
+    const claim = await orgDb
+      .update(subaccountBaselines)
+      .set({ status: 'manual' })
+      .where(and(
+        eq(subaccountBaselines.id, baseline.id),
+        sql`status NOT IN ('capturing', 'reset')`,
+      ))
+      .returning({ id: subaccountBaselines.id });
+    if (claim.length === 0) {
+      throw {
+        statusCode: 409,
+        errorCode: 'BASELINE_CAPTURING',
+        message: 'Auto capture in flight; retry shortly',
+      };
+    }
+
+    // Step 4 — metric upserts. Now safe: status='manual' is outside the
+    // auto-capture lock predicate, so concurrent capture jobs cannot acquire
+    // this baseline.
     const overridden: BaselineMetricSlug[] = [];
     for (const input of params.metricInputs) {
       const meta = metricMeta(input.slug);
@@ -301,6 +326,7 @@ export const captureBaselineService = {
       overridden.push(input.slug);
     }
 
+    // Step 5 — recompute source + confidence from the post-upsert metric set.
     const allRows = await orgDb
       .select({ source: subaccountBaselineMetrics.source })
       .from(subaccountBaselineMetrics)
@@ -323,23 +349,19 @@ export const captureBaselineService = {
     const newConfidence: 'confirmed' | 'partial' =
       optedIn.length > 0 && captured >= optedIn.length ? 'confirmed' : 'partial';
 
-    const result = await orgDb
+    // Step 6 — final state update. No race guard needed: status is already
+    // 'manual' from the atomic claim, and no other writer can flip it under us
+    // (auto-capture is locked out, admin reset would target a fresh
+    // baseline_version row, not this one).
+    await orgDb
       .update(subaccountBaselines)
       .set({
-        status: 'manual',
         source: newSource,
         confidence: newConfidence,
         capturedAt: sql`COALESCE(captured_at, now())`,
         nextAttemptAt: null,
       })
-      .where(and(
-        eq(subaccountBaselines.id, baseline.id),
-        sql`status <> 'capturing'`,
-      ))
-      .returning({ id: subaccountBaselines.id });
-    if (result.length === 0) {
-      throw { statusCode: 409, errorCode: 'BASELINE_CAPTURING', message: 'Auto capture in flight; retry shortly' };
-    }
+      .where(eq(subaccountBaselines.id, baseline.id));
 
     createEvent('baseline.manual.applied', {
       subaccount_id: params.subaccountId,

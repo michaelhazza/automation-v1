@@ -14,6 +14,7 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import {
   canTransition,
   isTerminal,
@@ -187,6 +188,55 @@ describe('Invariant 8: Subscriber + helper queries exclude reset rows', () => {
       { encoding: 'utf8', cwd: process.cwd(), shell: SHELL },
     );
     assert.ok(limited.trim().length > 0, 'baselineHelper must limit(1) so the post-reset state returns the new baseline');
+  });
+});
+
+// ── Invariant 9: runManual atomic-claim ordering ─────────────────────────────
+
+describe('Invariant 9: runManual claims status before any metric write', () => {
+  // Adversarial-reviewer AR-1: HTTP transactions commit on 4xx (asyncHandler
+  // sends res.json which fires res.finish, resolving withOrgTx, committing
+  // the wrapping db.transaction). Without an atomic status claim BEFORE
+  // metric upserts, a concurrent auto-capture transitioning the row to
+  // 'capturing' between read and write would commit partial manual metric
+  // rows alongside a 409 response.
+  //
+  // Static check: the atomic UPDATE (status → 'manual' from anything except
+  // 'capturing'/'reset') MUST appear in the source before the INSERT INTO
+  // subaccount_baseline_metrics loop.
+  it("runManual flips status to 'manual' before any metric INSERT", () => {
+    const captureSrc = readFileSync(
+      'server/services/captureBaselineService.ts',
+      'utf8',
+    );
+    const runManualStart = captureSrc.indexOf('async runManual');
+    assert.ok(runManualStart > 0, 'runManual method must exist');
+    const adminResetStart = captureSrc.indexOf('async adminReset', runManualStart);
+    assert.ok(adminResetStart > runManualStart, 'adminReset must appear after runManual');
+    const runManualBody = captureSrc.slice(runManualStart, adminResetStart);
+
+    const claimUpdateIdx = runManualBody.search(
+      /\.update\s*\(\s*subaccountBaselines\s*\)[\s\S]*?\.set\s*\(\s*\{\s*status:\s*'manual'\s*\}/,
+    );
+    assert.ok(
+      claimUpdateIdx > 0,
+      "runManual must contain an atomic UPDATE setting only `status: 'manual'` (the AR-1 claim)",
+    );
+
+    const claimWhereIdx = runManualBody.search(
+      /status NOT IN \('capturing', 'reset'\)/,
+    );
+    assert.ok(
+      claimWhereIdx > 0,
+      "atomic claim WHERE clause must filter `status NOT IN ('capturing', 'reset')`",
+    );
+
+    const firstMetricInsertIdx = runManualBody.indexOf('INSERT INTO subaccount_baseline_metrics');
+    assert.ok(firstMetricInsertIdx > 0, 'runManual must perform the metric upserts');
+    assert.ok(
+      claimUpdateIdx < firstMetricInsertIdx,
+      'AR-1: atomic status claim MUST precede metric upserts to prevent committed partial writes on a 409',
+    );
   });
 });
 
