@@ -1,0 +1,86 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=JGwWNGJdvx8",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Ed Sheeran - Shape of You. 6B+ views."
+  },
+  "slug": "youtube_JGwWNGJdvx8",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 4205,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "[RINGING SOUND] [♪♪♪] ♪ The club isn't the best place\nto find a lover ♪ ♪ So the bar is where I go ♪ ♪ Me and my friends at\nthe table doing shots ♪ ♪ Drinking fast and\nthen we talk slow ♪ ♪ Come over and start up a\nconversation with just me ♪ ♪ And trust me I'll give it\na chance now ♪ ♪ Take my hand, stop, put\nVan the Man on the jukebox ♪ ♪ And then we start to dance,\nand now I'm singing like ♪ ♪ Girl, you know\nI want your love ♪ ♪ Your love was handmade\nfor somebody like me ♪ ♪ Come on now, follow my lead ♪ ♪ I may be crazy,\ndon't mind me ♪ ♪ Say, boy, let's not\ntalk too much ♪ ♪ Grab on my waist and\nput that body on me ♪ ♪ Come on now, follow my lead ♪ ♪ Come, come on now,\nfollow my lead ♪ ♪ I'm in love with\nthe shape of you ♪ ♪ We push and pull\nlike a magnet do ♪ ♪ Although my heart\nis falling too ♪ ♪ I'm in love with your body ♪ ♪ And last night\nyou were in my room ♪ ♪ And now my bedsheets\nsmell like you ♪ ♪ Every day discovering\nsomething brand new ♪ ♪ I'm in love with your body ♪ ♪ (Oh-I-oh-I-oh-I-oh-I) ♪ ♪ I'm in love with your body ♪ ♪ (Oh-I-oh-I-oh-I-oh-I) ♪ ♪ I'm in love with your body ♪ ♪ (Oh-I-oh-I-oh-I-oh-I) ♪ ♪ I'm in love with your body ♪ ♪ Every day discovering\nsomething brand new ♪ ♪ I'm in love with\nthe shape of you ♪ ♪ One week in\nwe let the story begin ♪ ♪ We're going out on\nour first date ♪ ♪ You and me are thrifty,\nso go all you can eat ♪ ♪ Fill up your bag and\nI fill up a plate ♪ ♪ We talk for hours and hours\nabout the sweet and the sour ♪ ♪ And how your family\nis doing OK ♪ ♪ And leave and get in a taxi,\nthen kiss in the backseat ♪ ♪ Tell the driver make the radio\nplay, and I'm singing like ♪ ♪ Girl, you know\nI want your love ♪ ♪ Your love was handmade\nfor somebody like me ♪ ♪ Come on now, follow my lead ♪ ♪ I may be crazy,\ndon't mind me ♪ ♪ Say, boy, let's not\ntalk too much ♪ ♪ Grab on my waist and\nput that body on me ♪ ♪ Come on now, follow my lead ♪ ♪ Come, come on now,\nfollow my lead ♪ ♪ I'm in love with\nthe shape of you ♪ ♪ We push and pull\nlike a magnet do ♪ ♪ Although my heart\nis falling too ♪ ♪ I'm in love with your body ♪ ♪ And last night you\nwere in my room ♪ ♪ And now my bedsheets\nsmell like you ♪ ♪ Every day discovering\nsomething brand new ♪ ♪ I'm in love with your body ♪ ♪ (Oh-I-oh-I-oh-I-oh-I) ♪ ♪ I'm in love with your body ♪ ♪ (Oh-I-oh-I-oh-I-oh-I) ♪ ♪ I'm in love with your body ♪ ♪ (Oh-I-oh-I-oh-I-oh-I) ♪ ♪ I'm in love with your body ♪ ♪ Every day discovering\nsomething brand new ♪ ♪ I'm in love with\nthe shape of you ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby, come on ♪ ♪ I'm in love with\nthe shape of you ♪ ♪ We push and pull\nlike a magnet do ♪ ♪ Although my heart\nis falling too ♪ ♪ I'm in love with your body ♪ ♪ And last night\nyou were in my room ♪ ♪ And now my bedsheets\nsmell like you ♪ ♪ Every day discovering\nsomething brand new ♪ ♪ I'm in love with your body ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby\n- (I'm in love with your body) ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby\n- (I'm in love with your body) ♪ ♪ Come on, be my baby, come on ♪ ♪ Come on, be my baby\n- (I'm in love with your body) ♪ ♪ Every day discovering\nsomething brand new ♪ ♪ I'm in love with\nthe shape of you ♪ [COSTUME RUSTLES] [HE GROANS]"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "JGwWNGJdvx8",
+      "url": "https://www.youtube.com/watch?v=JGwWNGJdvx8",
+      "title": "Ed Sheeran - Shape of You (Official Music Video)",
+      "description": "Brand new album 'Play' out now: https://es.lnk.to/play\n\nThe official music video for Ed Sheeran - Shape Of You\n\nTaken from the studio album ÷ (divide) released in 2017, which featured the hit singles 'Castle on the Hill', 'Shape of You', 'Galway Girl', ‘Perfect’ & 'Happier'. \n \nSubscribe to the Ed Sheeran channel for all the best and latest official music videos, behind the scenes and live performances.  \nhttp://bit.ly/SubscribeToEdSheeran \n \nSee more official videos from Ed Sheeran here: \nhttps://www.youtube.com/watch?v=ryJgDL9jzKk&list=PLjp0AEEJ0-fGKG_3skl0e1FQlJfnx-TJz \n\nListen to more from the album ÷ (divide): https://www.youtube.com/playlist?list=PLjp0AEEJ0-fGi7bkjrGhBLUF9NMraL9cL \n \nFollow Ed Sheeran on:\nInstagram: http://instagram.com/teddysphotos\nTikTok: https://www.tiktok.com/@edsheeran\nFacebook: http://www.facebook.com/EdSheeranMusic\nTwitter: http://twitter.com/edsheeran\nDiscord: http://discord.gg/edsheeran\nOfficial Website: http://edsheeran.com  \n  \nVIDEO CREDITS: \nDirector|DOP: Jason Koenig\nProducer: Honna Kimmerer\nProduction company: Anonymous Content\nExec Producer: Nina Soriano\n\nCinematography: Johnny Valencia, Ryan Haug \nEdited by: Johnny Valencia, Jason Koenig\nCommissioner: Dan Curwin\n\nCo-Starring: \nJennie Pegouskie\nYama\n\n-- | LYRICS |--\n\nThe club isn’t the best place to find a lover\nSo the bar is where I go \nMe and my friends at the table doing shots drinking fast and then we talk slow\nyou come over and start up a conversation with just me and trust me I’ll give it a chance now\nTake my hand stop, put van the man on the jukebox and then we start to dance\nAnd now I’m singing like\n\nGirl you know I want your love\nYour love was handmade for somebody like me\nCome on now follow my lead\nI may be crazy don’t mind me \nSay boy let’s not talk too much \nGrab on my waist and put that body on me\nCome on now follow my lead\nCome come on now follow my lead\n\nI’m in love with the shape of you\nWe push and pull like a magnet do\nAlthough my heart is falling too\nI’m in love with your body\nLast night you were in my room \nAnd now my bed sheets smell like you \nEvery day discovering something brand new\nI’m in love with your body\n\nOh I X 4\nI’m in love with your body\nOh I X 4\nI’m in love with your body\nOh I X 4\nI’m in love with your body\nEvery day discovering something brand new\nI’m in love with the shape of you \n\nOne week in we let the story begin\nWe’re going out on our first date\nYou and me are thrifty\nSo go all you can eat \nFill up your bag and I fill up a plate\nWe talk for hours and hours about the sweet and the sour\nAnd how your family’s doing ok\nleave and get in a taxi, then kiss in the backseat\nTell the driver make the radio play\nand I'm singing like\n\nGirl you know I want your love\nYour love was handmade for somebody like me\nCome on now follow my lead \nI may be crazy, don’t mind me\nSay boy let’s not talk too much \nGrab on my waist and put that body on me\nCome on now follow my lead\nCome come on now follow my lead\n\nI’m in love with the shape of you\nWe push and pull like a magnet do\nAlthough my heart is falling too\nI’m in love with your body\nLast night you were in my room \nAnd now my bed sheets smell like you \nEvery day discovering something brand new\n\nWell I’m in love with your body\nOh I x 4 \nI’m in love with your body\nOh I x 4\nI’m in love with your body\nOh I X 4\nI’m in love with your body\nEvery day discovering something brand new\nI’m in love with the shape of you \n\nCome on be my baby come on X 8\n\nI’m in love with the shape of you\nWe push and pull like a magnet do\nAlthough my heart is falling too\nI’m in love with your body\nLast night you were in my room \nAnd now my bed sheets smell like you \nEvery day discovering something brand new\n\nWell I’m in love with your body\nCome on be my baby come on X 6\nEvery day discovering something brand new\nI’m in love with the shape of you \n \nAbout Ed Sheeran: \nEd Sheeran may be the quintessential pop star of the 2010s: an internationally acclaimed, multi-award winning singer/songwriter who seems to acknowledge no boundaries between styles or eras with elements of folk, hip-hop, pop, dance, soul, and rock woven throughout his music. \n\nHis incredible catalogue includes the studio albums ‘+’ (plus), ‘x’ (multiply) and ‘÷’ (divide) which spawned hit singles such as ‘The A team’ , ’Lego House’, ‘Sing', ‘Thinking Out Loud’, ‘Photograph’, ‘Shape Of You’, ‘Castle on The Hill’ and ‘Perfect’. \n \nIn 2019, Ed Sheeran released the genre-spanning ‘No.6 Collaborations Project’ which featured a wide-range of artists including ‘Justin Bieber’, ‘Camilla’ Cabello’, ‘Travis Scott’, ‘Eminem’, ‘Cardi B, ‘Paulo Londra’, ‘Bruno Mars’ and ‘Stormzy’ amongst many others, producing hits such as ‘I Don’t Care’, ‘Beautiful People’, ‘South of The Border’ and ‘Take Me Back To London’. \n \n#EdSheeran #ShapeOfYou #divide",
+      "author": {
+        "displayName": "Ed Sheeran"
+      },
+      "stats": {
+        "views": 6715223888,
+        "likes": 35511601,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 263,
+        "thumbnailUrl": "https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLDlT6L0sEzlJ81zLRYRh9Ja0fXW3g"
+      },
+      "tags": [
+        "Ed Sheeran",
+        "Shape Of You",
+        "Ed Sheeran Shape Of You",
+        "Shape Of You Song",
+        "Ed Sheeran Official Video",
+        "Shape Of You Official Video",
+        "Ed Sheeran music",
+        "Ed Sheeran Lyrics",
+        "Shape Of You Lyrics",
+        "Ed Sheeran 2017",
+        "divide",
+        "Ed Sheeran divide",
+        "Ed Sheeran third album",
+        "Ed Sheeran 3rd album",
+        "Ed Sheeran songs",
+        "Pop",
+        "Pop Music",
+        "Ed",
+        "Sheeran",
+        "Ed Sheerin",
+        "EdSheeran",
+        "Ed Sheran",
+        "English Songs",
+        "English Song",
+        "i'm in love with the shape of you",
+        "i'm in love with your body",
+        "एड शीरन",
+        "तुम्हारी सूरत"
+      ],
+      "createdAt": "2017-01-30T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UC0C-w0YjGpqDXGB8IHb662A"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 502,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 20.032711907s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 4707,
+  "failure_class": "gemini_quota"
+}

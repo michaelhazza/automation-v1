@@ -1,0 +1,62 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Me at the zoo. First-ever YouTube video."
+  },
+  "slug": "youtube_jNQXAC9IVRw",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 6326,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "de",
+      "availableLangs": [
+        "en",
+        "de"
+      ],
+      "content": "Also hier sind wir vor den Elefanten. Das Coole an den Typen ist dass sie sehr, sehr, sehr, lange Rüssel haben. Und das ist cool. Ansonsten gibt es nicht wirklich viel zu sagen."
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "jNQXAC9IVRw",
+      "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+      "title": "Me at the zoo",
+      "description": "Microplastics are accumulating in human brains at an alarming rate\nhttps://www.youtube.com/watch?v=0PT5c1z3LL8\n\n“Nanoplastics and Human Health” with Matthew J Campen, PhD, MSPH\nhttps://www.youtube.com/watch?v=RRBN_4L09Mg\n\n00:00 Intro\n00:05 The cool thing\n00:17 End",
+      "author": {
+        "displayName": "jawed"
+      },
+      "stats": {
+        "views": 390221798,
+        "likes": 18803730,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 19,
+        "thumbnailUrl": "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=-oaymwE2CNACELwBSFXyq4qpAygIARUAAIhCGAFwAcABBvABAfgBvgKAAvABigIMCAAQARhVIFkoZTAP&rs=AOn4CLB7NY0fx4yZYDj27223V3b7Sowf5w"
+      },
+      "tags": [
+        "me at the zoo",
+        "jawed karim",
+        "first youtube video"
+      ],
+      "createdAt": "2005-04-23T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UC4QobU6STFB0P71PMvOGN5A"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 531,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 57.687753764s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 6857,
+  "failure_class": "gemini_quota"
+}

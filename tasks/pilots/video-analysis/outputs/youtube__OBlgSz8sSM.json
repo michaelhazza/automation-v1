@@ -1,0 +1,102 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=_OBlgSz8sSM",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Charlie Bit My Finger. Classic viral. (May have moved post-NFT-sale)"
+  },
+  "slug": "youtube__OBlgSz8sSM",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 5328,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "Charlie Charlie Bit Me ouch OU ouch Jolie OU Johnny that really hurts bit me and that really hurt Char it's still act hurting"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "_OBlgSz8sSM",
+      "url": "https://www.youtube.com/watch?v=_OBlgSz8sSM",
+      "title": "Charlie bit my finger - again !",
+      "description": "Contact us at harryandcharlie@gmail.com\nI am sorry comments are turned off.  YouTube have set the video to 'made for kids'.  I have appealed many times and every time I get an anonymous rejection from the community.  I have tried to enable your engagements but no one from YouTube will return contact.  This video was made for my friends and family and engagement has always been with adults.  Instead I have moved to engaging with Fans through NFT.  We helped YouTube grow and embraced it early.  We are now moving onto the next exciting thing.\n\nCharlie bit my finger - again ! Subscribe here: http://bit.ly/1oHVuUM\n\nEven had I thought of trying to get my boys to do this I probably couldn't have. Neither were coerced into any of this and neither were hurt (for very long anyway).  This was just one of those moments when I had the video camera out because the boys were being fun and they provided something really very funny.\n\nT-Shirts\niPhone  http://itunes.apple.com/gb/app/charlie-bit-me!!!/id494858348?mt=8\nAndroid  https://play.google.com/store/apps/details?id=com.viralspiral.charlie \n\nFAQ Harry is 8 3/4, Charlie is 6 1/2, Jasper is  4 1/4, Rupert is 1 1/2\n(November 2012)\n\n\n\nTwitter\nhttp://twitter.com/harryandcharlie",
+      "author": {
+        "displayName": "HDCYT"
+      },
+      "stats": {
+        "views": 888675269,
+        "likes": 2376287,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 56,
+        "thumbnailUrl": "https://i.ytimg.com/vi/_OBlgSz8sSM/hqdefault.jpg?sqp=-oaymwE2CNACELwBSFXyq4qpAygIARUAAIhCGAFwAcABBvABAfgB_gSAAuADigIMCAAQARg9IFMoZTAP&rs=AOn4CLCI1G8UZ3OL50D2VmSsB4OpqQT3Pg"
+      },
+      "tags": [
+        "Charlie",
+        "bit",
+        "me",
+        "my",
+        "finger",
+        "baby",
+        "bite",
+        "cute",
+        "babies",
+        "funny",
+        "boys",
+        "Harry",
+        "laughing",
+        "most",
+        "viewed",
+        "ragu",
+        "advert",
+        "charlie bit my finger",
+        "kids games",
+        "games for kids",
+        "fun games",
+        "kids",
+        "kids jokes",
+        "cute babies",
+        "baby games",
+        "playdate",
+        "funny baby",
+        "funny babies",
+        "cute kids",
+        "cute kid",
+        "Charlie Bit Me",
+        "baby crying",
+        "brother",
+        "how to play kids",
+        "how to play babies",
+        "children",
+        "cute brothers",
+        "cute brother",
+        "funny and cute babies",
+        "funny babies video",
+        "hilarious babies",
+        "laughing babies",
+        "cutest kids",
+        "HDCYT"
+      ],
+      "createdAt": "2007-05-22T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCfHZCZHykS3IQDPyFfnqjWg"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 494,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 37.882686775s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 5822,
+  "failure_class": "gemini_quota"
+}

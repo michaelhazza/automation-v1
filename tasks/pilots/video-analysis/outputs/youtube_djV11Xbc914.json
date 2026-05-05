@@ -1,0 +1,88 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=djV11Xbc914",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "a-ha - Take On Me. Iconic 80s, 2B+ views."
+  },
+  "slug": "youtube_djV11Xbc914",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 5395,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "♪♪ ♪ We're talking away ♪ ♪ I don't know what I'm to say ♪ ♪ I'll say it anyway ♪ ♪ Today's another\nday to find you ♪ ♪ Shying away ♪ ♪ I'll be coming for\nyour love, okay? ♪ ♪ Take on me, take on me ♪ ♪ Take me on, take on me ♪ ♪ I'll be gone ♪ ♪ In a day or two ♪ ♪ So needless to say ♪ ♪ I'm odds and ends\nbut I'll be ♪ ♪ Stumbling away ♪ ♪ Slowly learning that\nlife is okay ♪ ♪ Say after me ♪ ♪ It's no better to\nbe safe than sorry ♪ ♪ Take on me, take on me ♪ ♪ Take me on, take on me ♪ ♪ I'll be gone ♪ ♪ In a day or two ♪ ♪ Oh, things that\nyou say, yeah ♪ ♪ Is it life or just to\nplay my worries away? ♪ ♪ You're all the things\nI've got to remember ♪ ♪ You're shying away ♪ ♪ I'll be coming\nfor you anyway ♪ ♪ Take on me, take on me ♪ ♪ Take me on, take on me ♪ ♪ I'll be gone ♪ -♪ In a day ♪\n-♪ Take on me ♪ ♪ Take on me, take me on,\ntake on me ♪ -♪ I'll be gone ♪\n-♪ Take on me ♪ -♪ In a day ♪\n-♪ Take on me, take me on ♪ ♪♪"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "djV11Xbc914",
+      "url": "https://www.youtube.com/watch?v=djV11Xbc914",
+      "title": "a-ha - Take On Me (Official Video) [4K]",
+      "description": "“Take On Me” has been remastered in stunning 4K resolution - watch it now! 📺 Watch all the official a-ha videos here http://bit.ly/ahaOfficialVideos\n\nONE BILLION VIEWS on February 17, 2020 / TWO BILLION VIEWS on September 19, 2024 📅\n\n🎼 Listen to more a-ha here https://lnk.to/ahastrm\n\n🔔 Subscribe to the a-ha channel and “ring the bell” to turn on notifications http://bit.ly/Subscribetoaha\n\nAt the 1986 MTV Video Music Awards, the video for \"Take On Me\" won six awards—Best New Artist in a Video, Best Concept Video, Most Experimental Video, Best Direction, Best Special Effects, and Viewer's Choice—and was nominated for two others, Best Group Video and Video of the Year. \"Take On Me\" was also nominated for Favorite Pop/Rock Video at the 13th American Music Awards in 1986.\n\nTime and Again: The Ultimate a-ha, including the biggest hits + rare and unreleased remixes, is out now! Get your copy here: http://smarturl.it/ahatimeagaincd\n\nStay In Touch with a-ha…\n\n📡 Website https://a-ha.com/\n🌎 Tour Dates https://a-ha.com/tickets\n📣 Facebook https://www.facebook.com/officialaha/\n📸 Instagram https://www.instagram.com/officialaha/\n📱 Twitter https://twitter.com/aha_com\n🔈 Soundcloud https://soundcloud.com/a-ha\n\nStay In Touch with Morten Harket…\n\n📡 Website https://mortenharket.com/\n📣 Facebook https://www.facebook.com/mortenharket.official/\n📸 Instagram https://www.instagram.com/mortenharket/\n📱 Twitter https://twitter.com/mortenharket\n\n*******************\n\nThe a-ha channel is the official YouTube home of the Norwegian Pop trio a-ha, who achieved global stardom in 1985 when their debut single, “Take On Me” from the album ‘Hunting High And Low’ topped the charts in 36 different countries on its way to becoming one of the best-selling singles of all time, and the 5th most streamed song of the 20th century. a-ha struck chart gold again with “The Sun Always Shines On T.V.” and “Cry Wolf,” and recorded the theme to the 1987 James Bond film “The Living Daylights”. The a-ha YouTube channel is proud to host the music videos from these hits alongside live performance videos, lyric videos, and the solo work of band members Morten Harket (lead vocals), Paul Waaktaar-Savoy (Guitar), and Magne Furuholmen (Keyboards).",
+      "author": {
+        "displayName": "a-ha"
+      },
+      "stats": {
+        "views": 2400727215,
+        "likes": 12746526,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 244,
+        "thumbnailUrl": "https://i.ytimg.com/vi_webp/djV11Xbc914/maxresdefault.webp"
+      },
+      "tags": [
+        "A-Ha",
+        "Take On Me",
+        "80's",
+        "a-ha band",
+        "take on me take on me",
+        "take on me lyrics",
+        "take on me a-ha",
+        "take on me deadpool 2 scene",
+        "80s music",
+        "80s hits",
+        "80s music hits",
+        "aha",
+        "best songs 80s",
+        "best songs of 80s",
+        "80s music mix",
+        "80s",
+        "80s music greatest hits",
+        "80s music classics",
+        "best of 80s music",
+        "aha lyrics",
+        "4 non blondes what;s up",
+        "toto",
+        "4 non blondes",
+        "clasicos de los 80",
+        "exitos de los 80",
+        "pop de los 80",
+        "take on me subtitulado",
+        "take on me remastered",
+        "take on me 4k",
+        "take on me 1 billion"
+      ],
+      "createdAt": "2010-01-06T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCeEi1My3KTXHT0SG1JkR9gA"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 479,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 11.551450544s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 5874,
+  "failure_class": "gemini_quota"
+}

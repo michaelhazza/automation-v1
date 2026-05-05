@@ -1,0 +1,72 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=9bZkp7q19f0",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "PSY - Gangnam Style. 5B+ views."
+  },
+  "slug": "youtube_9bZkp7q19f0",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 6644,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "open gam star gam [Music] star [Music] good know hey I don't [Music] know hey sexy lady hey sexy [Music] lady [Music] know know hey [Music] he sexy lady star hey sexy lady [Music] baby [Music] baby baby baby hey [Music] seated [Music] star openam star"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "9bZkp7q19f0",
+      "url": "https://www.youtube.com/watch?v=9bZkp7q19f0",
+      "title": "PSY - GANGNAM STYLE(강남스타일) M/V",
+      "description": "PSY - ‘I LUV IT’ M/V @ https://youtu.be/Xvjnoagk6GU\nPSY - ‘New Face’ M/V @https://youtu.be/OwJPPaEyqhI\n\nPSY - 8TH ALBUM '4X2=8' on iTunes @\nhttps://smarturl.it/PSY_8thAlbum\n\nPSY - GANGNAM STYLE(강남스타일) on iTunes @ http://smarturl.it/PsyGangnam\n\n#PSY #싸이 #GANGNAMSTYLE #강남스타일\n\nMore about PSY@\nhttp://www.youtube.com/officialpsy\nhttp://www.facebook.com/officialpsy\nhttp://twitter.com/psy_oppa\nhttps://www.instagram.com/42psy42\nhttp://iTunes.com/PSY\nhttp://sptfy.com/PSY\nhttp://weibo.com/psyoppa",
+      "author": {
+        "displayName": "officialpsy"
+      },
+      "stats": {
+        "views": 5928875965,
+        "likes": 31759088,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 252,
+        "thumbnailUrl": "https://i.ytimg.com/vi_webp/9bZkp7q19f0/maxresdefault.webp"
+      },
+      "tags": [
+        "PSY",
+        "싸이",
+        "강남스타일",
+        "뮤직비디오",
+        "Music Video",
+        "Gangnam Style",
+        "KOREAN SINGER",
+        "KPOP",
+        "KOERAN WAVE",
+        "PSY 6甲",
+        "6th Studio Album",
+        "싸이6집",
+        "육갑",
+        "Psy Gangnam Style"
+      ],
+      "createdAt": "2012-07-15T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCrDkAvwZum-UTjHmzDI2iIw"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 10888,
+    "status": 503,
+    "error": "HTTP 503: {\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}"
+  },
+  "total_duration_ms": 17532,
+  "failure_class": "gemini_other"
+}

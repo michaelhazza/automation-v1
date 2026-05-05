@@ -1,0 +1,83 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=60ItHLz5WEA",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Alan Walker - Faded. 4B+ views."
+  },
+  "slug": "youtube_60ItHLz5WEA",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 4850,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "[Music] [Applause] you were the shadow to my light did you feel another star you Fade Away afraid our a is out of sight want to see your I li where are you now where are you [Music] now where are you now was it all in my fantasy where are you now were you only imaginary where are you now I'm never see never see where are you now another another the dream the monsters running wide inside of me I'm [Music] F feel so lost I'm fed I'm fading so lost I'm fing the shallow Waters never what I needed I'm Letting Go a deeper dive Eternal Silence of the sea and Brea a li where are you now where are [Music] you under the bright the F night you set the heart on fire where are you now where are now where where are you [Music] now Under the Sea Under the SE where are you now another dream the monsters roing wide inside of me I'm fed I so lost I'm feeling I'm fing so lost I'm [Music] feeling"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "60ItHLz5WEA",
+      "url": "https://www.youtube.com/watch?v=60ItHLz5WEA",
+      "title": "Alan Walker - Faded",
+      "description": "Visit worldofwalker.com for early access to the ultimate Walker experience. #walkersjoin \n\n🎵Alan Walker - Monster (Official Music Video)🎵\nhttps://youtu.be/vv0YJOY5txc\n\nWorld of Walker, Season One: Rise of the Drones Official playlist:\nhttps://youtube.com/playlist?list=PLYT4vq6pQVStwl0HaddGRWQPj7UQmJ-5_&si=ZURkgHnw764397jz\n\nListen to Rise of the Drones here: https://ffm.to/wow_riseofthedrones\n\n👕 Official Merchandise: https://www.alanwalker.com/shop\n\nThanks for all the love Walkers!\n\n- Alan\n\nRemember to subscribe to the channel and turn on 🔔\n\nConnect with Alan Walker: \n👉  @Alanwalkermusic  \n👉Join the community: https://www.worldofwalker.com   \n👉Instagram: https://www.instagram.com/alanwalkermusic/  \n👉TikTok: https://www.tiktok.com/@alanwalkermusic  \n👉Facebook: https://www.facebook.com/alanwalkermusic  \n👉X: https://twitter.com/IAmAlanWalker  \n👉Snapchat: https://www.snapchat.com/add/alanwalkermusic  \n👉Discord: https://discord.gg/alanwalker  \n\n//////////////// \n\nLyrics:\nYou were the shadow of my light\nDid you feel us\nAnother start\nYou fade away\nAfraid our aim is out of sight\nWanna see us\nAlive\nWhere are you now\nWhere are you now\nWhere are you now\nWas it all in my fantasy\nWhere are you now\nWere you only imaginary\nWhere are you now\nAtlantis\nUnder the sea\nUnder the sea\nWhere are you now\nAnother dream\nThe monsters running wild inside of me\nI'm faded\nI'm faded\nSo lost\nI'm faded\nI'm faded\nSo lost\nI'm faded\nThese shallow waters, never met\nWhat I needed\nI'm letting go\nA deeper dive\nEternal silence of the sea\nI'm breathing\nAlive\nWhere are you now\nWhere are you now\nUnder the bright\nBut faded lights\nYou set my heart on fire\nWhere are you now\nWhere are you now\nWhere are you now\nAtlantis\nUnder the sea\nUnder the sea\nWhere are you now\nAnother dream\nThe monsters running wild inside of me\nI'm faded\nI'm faded\nSo lost\nI'm faded\nI'm faded\nSo lost\nI'm faded\n\n//////////////// \n\nCREDITS:\nVocalist: Iselin Solheim\nVideo Location: Tallinn, Estonia\nVideo produced by: Bror Bror\nDirectors: Rikkard & Tobias Häggbom\nD.O.P: Rikkard Häggbom\nEdit and grading: Bror Bror\nActor: Shahab Salehi\n\n🎵Listen & Follow WalkerverseRadio here: https://AlanWalker.lnk.to/WalkerRadio\n\n#Faded #AlanWalker #YouAreNotAlone\n\n© 2015 Alan Walker & MER Musikk\n℗ 2015 Sony Music Entertainment Sweden AB",
+      "author": {
+        "displayName": "Alan Walker"
+      },
+      "stats": {
+        "views": 3964059402,
+        "likes": 30022777,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 213,
+        "thumbnailUrl": "https://i.ytimg.com/vi_webp/60ItHLz5WEA/maxresdefault.webp"
+      },
+      "tags": [
+        "alan walker",
+        "faded",
+        "faded alan walker",
+        "alan walker faded",
+        "faded song",
+        "faded lyrics",
+        "alan walker faded lyrics",
+        "faded 1 hour",
+        "alan walker songs",
+        "world of walker",
+        "alan walker 2020",
+        "alan walker fade",
+        "fade",
+        "alan walker faded meaning",
+        "alan walker faded song",
+        "alan walker faded videos",
+        "alan walker faded remix",
+        "alan walker faded live",
+        "alan walker faded bpm",
+        "walkerverse",
+        "Smurfcat",
+        "heart over mind",
+        "thick of it all",
+        "julia michaels",
+        "joe jonas"
+      ],
+      "createdAt": "2015-12-03T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCJrOtniJ0-NWz37R30urifQ"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 475,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 49.705227132s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 5325,
+  "failure_class": "gemini_quota"
+}

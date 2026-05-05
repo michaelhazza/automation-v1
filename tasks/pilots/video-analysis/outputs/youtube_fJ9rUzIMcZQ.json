@@ -1,0 +1,91 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=fJ9rUzIMcZQ",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Queen - Bohemian Rhapsody. Official upload, 2B+ views."
+  },
+  "slug": "youtube_fJ9rUzIMcZQ",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 6707,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "ar",
+      "availableLangs": [
+        "ar"
+      ],
+      "content": "♪ هل هذه هي الحياة الحقيقية؟ ♪ ♪ أم هذا مجرد خيال؟ ♪ ♪ علقت في الطمى ♪ ♪ لا مجال للهروب من الواقع ♪ ♪ افتح عينيك ♪ ♪ انظر إلى السماوات ورَ ♪ ♪ أنا مجرد صبي مسكين ♪ ♪ لست بحاجة لتعاطفك ♪ ♪ لأنني لا أكترث بأي شيء ♪ ♪ مرتفع قليلاً، منخفض قليلاً ♪ ♪ على أي حال لقد هبت الرياح ♪ ♪ لا يعني لي ذلك شيئًا ♪ ♪ لي ♪ ♪ ماما، لقد قتلت رجلاً ♪ ♪ وضعت مسدسي برأسه ♪ ♪ وسحبت الزناد، فمات ♪ ♪ ماما، حياتي بدأت لتوها ♪ ♪ ولكنني رميت كل شيء أدراج الرياح ♪ ♪ ماما، آآآه ♪ ♪ لم أقصد أن أبكيكِ ♪ ♪ إذا لم أعد مجدداً في مثل هذ الوقت غداً ♪ ♪ واصلي، واصلي ♪ ♪ وكأن شيئاً لم يكن ♪ ♪ لقد فات الأوان، حان وقتي ♪ ♪ بدا يقشعر أسفل عمودي الفقري ♪ ♪ جسدي يؤلمني ♪ ♪ وداعاً جميعاً، علي أن أرحل ♪ ♪ عليّ أن أترككم جميعاً وأواجه الحقيقة ♪ ♪ ماما آآآآه ♪ ♪ لقد هبت الرياح ♪ ♪ لا أريد أن أموت ♪ ♪ يا ليتني لم أولد من الأصل ♪ ♪ أرى بقايا رجل ♪ ♪ سكاراموش سكاراموش ألا\nتؤدي رقصة الفاندانغو ♪ ♪ صواعق وبرق ♪ ♪ تُخيفني جدًا، جدًا ♪ ♪ غاليليو غاليليو ♪ ♪ غاليليو غاليليو ♪ ♪ غاليليو فيغارو ♪ ♪ ياللروعة ♪ ♪ ولكنني مجرد صبي مسكين ولا أحد يحبني ♪ ♪ إنه مجرد صبي مسكين من عائلة مسكينة ♪ ♪ أنقذوا حياته من هذه الفظاعة ♪ ♪ لا أكترث بشيء فألا تطلقون سراحي ♪ ♪ بسم الله ♪ ♪ كلا لن نطلق سراحك، أطلقوا سراحه ♪ ♪ بسم الله! كلا لن نطلق\nسراحك، أطلقوا سراحه ♪ ♪ بسم الله! كلا لن نطلق\nسراحك، أطلقوا سراحي ♪ ♪ لن نطلق سراحك، أطلقوا سراحي ♪ ♪ لن نطلق سراحك مطلقاً\nمطلقًا مطلقًا، أطلقوا سراحي ♪ ♪ أوه أوه أوه أوه ♪ ♪ كلا، كلا، كلا، كلا، كلا، كلا ♪ ♪ آه يا أمي، يا أمي يا أمي أطلقوا سراحي ♪ ♪ بعلزبوب وضع شيطاناً بداخلي ♪ ♪ بداخلي، بداخلي ♪ ♪ أتعتقد أنك تستطيع رجمي والبصاق في وجهي ♪ ♪ أتعتقد أنك تستطيع أن\nتحبني ومن ثم تركي لأموت ♪ ♪ يا حبيبي لا تستطيع فعل هذا بي يا حبيبي ♪ ♪ علي الخروج من هنا، علي\nالخروج من هنا حالاً ♪ ♪ أوه نعم، أوه نعم ♪ ♪ لا شيء يعنيني ♪ ♪ يمكن لأي شخص أن يرى ♪ ♪ لا شيء يعنيني حقًا ♪ ♪ لا شيء يعنيني حقًا ♪ ♪ على أي حال الرياح تهب ♪"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "fJ9rUzIMcZQ",
+      "url": "https://www.youtube.com/watch?v=fJ9rUzIMcZQ",
+      "title": "Queen – Bohemian Rhapsody (Official Video Remastered)",
+      "description": "REMASTERED IN HD TO CELEBRATE ONE BILLION VIEWS!\nTaken from A Night At The Opera, 1975.\n\nClick here to buy the DVD with this video at the Official Queen Store:\nhttp://www.queenonlinestore.com\n\nThe official 'Bohemian Rhapsody' music video. Taken from Queen - 'Greatest Video Hits 1'. Lyrics below:\n\nIs this the real life?\nIs this just fantasy?\nCaught in a landslide\nNo escape from reality\nOpen your eyes\nLook up to the skies and see\nI'm just a poor boy, I need no sympathy\nBecause I'm easy come, easy go\nA little high, little low\nAnyway the wind blows, doesn't really matter to me, to me\n\nMama, just killed a man\nPut a gun against his head\nPulled my trigger, now he's dead\nMama, life had just begun\nBut now I've gone and thrown it all away\nMama, ooo\nDidn't mean to make you cry\nIf I'm not back again this time tomorrow\nCarry on, carry on, as if nothing really matters\n\nToo late, my time has come\nSends shivers down my spine\nBody's aching all the time\nGoodbye everybody - I've got to go\nGotta leave you all behind and face the truth\nMama, ooo - (anyway the wind blows)\nI don't want to die\nI sometimes wish I'd never been born at all\n\nI see a little silhouetto of a man\nScaramouch, scaramouch will you do the fandango\nThunderbolt and lightning - very very frightening me\nGallileo, Gallileo,\nGallileo, Gallileo,\nGallileo Figaro - magnifico\n\nBut I'm just a poor boy and nobody loves me\nHe's just a poor boy from a poor family\nSpare him his life from this monstrosity\nEasy come easy go - will you let me go\nBismillah! No - we will not let you go - let him go\nBismillah! We will not let you go - let him go\nBismillah! We will not let you go - let me go\nWill not let you go - let me go (never)\nNever let you go - let me go\nNever let me go - ooo\nNo, no, no, no, no, no, no -\nOh mama mia, mama mia, mama mia let me go\nBeelzebub has a devil put aside for me\nfor me\nfor me\n\nSo you think you can stone me and spit in my eye\nSo you think you can love me and leave me to die\nOh baby - can't do this to me baby\nJust gotta get out - just gotta get right outta here\n\nOoh yeah, ooh yeah\nNothing really matters\nAnyone can see\nNothing really matters - nothing really matters to me\n\nAnyway the wind blows...\n\n#QueenTheGreatest #BohemianRhapsody #Remastered #Queen\n\nSubscribe to the official Queen channel Here https://Queen.lnk.to/Subscribe\nWatch more: https://Queen.lnk.to/OfficialMusicVideos\n\nAbout Queen:\nWelcome to the official Queen channel. Subscribe today for exclusive Queen videos, including live shows, interviews, music videos & much more.\n\nConnect with Queen Online:\nVisit the official Queen Website: https://Queen.lnk.to/Official\nFollow Queen on Instagram: https://Queen.lnk.to/Instagram\nFollow Queen on TikTok: https://Queen.lnk.to/TikTokOfficial\nFollow Queen on Twitter: https://Queen.lnk.to/Twitter\n\nQueen – Bohemian Rhapsody (Official Video Remastered)\nhttps://www.youtube.com/user/queenofficial",
+      "author": {
+        "displayName": "Queen Official"
+      },
+      "stats": {
+        "views": 2052251564,
+        "likes": 13996100,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 359,
+        "thumbnailUrl": "https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLC7tkjMN8pT-zh4iBw5n9zg11OMFQ"
+      },
+      "tags": [
+        "Queen",
+        "Freddie",
+        "Mercury",
+        "Brian",
+        "May",
+        "Roger",
+        "Taylor",
+        "John",
+        "Deacon",
+        "Bohemian",
+        "Rhapsody",
+        "queen official video",
+        "queen official channel",
+        "freddie",
+        "mercury",
+        "queen",
+        "official",
+        "videos",
+        "live",
+        "freddy",
+        "Queen (Musical Group)",
+        "bo rhap",
+        "Bohemian Rhapsody (Composition)",
+        "Bohemian Rhapsody (Musical Recording)",
+        "Hard Rock (Musical Genre)",
+        "Progressive Rock (Musical Genre)",
+        "Rock Music (Film Genre)",
+        "Music (TV Genre)",
+        "Brian May (Musical Artist)",
+        "A Night At The Opera",
+        "1975",
+        "HD",
+        "Remastered"
+      ],
+      "createdAt": "2008-08-01T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCiMhD4jzUqG-IgPzUmmytRQ"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 513,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 24.734949716s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 7220,
+  "failure_class": "gemini_quota"
+}

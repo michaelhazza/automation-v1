@@ -1,0 +1,81 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=nfWlot6h_JM",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Taylor Swift - Shake It Off. 3B+ views."
+  },
+  "slug": "youtube_nfWlot6h_JM",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 8887,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "I stay out too late Got nothing in my brain That's what people say Mmm-mmm That's what people say Mmm-mmm I go on too many dates But I can't make them stay At least that's what people say Mmm-mmm That's what people say Mmm-mmm But I keep cruising Can't stop, won't stop moving It's like I got this music in my mind Saying it's gonna be alright 'Cause the players gonna play, play, play, play, play And the haters gonna hate, hate, hate, hate, hate Baby, I'm just gonna shake, shake, shake, shake, shake Shake it off, I shake it off Heartbreakers gonna break, break, break, break, break And the fakers gonna fake, fake, fake, fake, fake Baby, I'm just gonna shake, shake, shake, shake, shake Shake it off, I shake it off I never miss a beat I'm lightning on my feet And that's what they don't see Mmm-mmm That's what they don't see Mmm-mmm I'm dancing on my own I'll make the moves up as I go And that's what they don't know Mmm-mmm That's what they don't know Mmm-mmm But I keep cruising Can't stop, won't stop moving It's like I got this music in my mind Saying it's gonna be alright 'Cause the players gonna play, play, play, play, play And the haters gonna hate, hate, hate, hate, hate Baby, I'm just gonna shake, shake, shake, shake, shake Shake it off, I shake it off Heartbreakers gonna break, break, break, break, break And the fakers gonna fake, fake, fake, fake, fake Baby, I'm just gonna shake, shake, shake, shake, shake Shake it off, I shake it off Shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off Hey, hey, hey Just think while you've been getting down and out about the liars and the dirty, dirty cheats of the world You could've been getting down to this sick beat My ex-man brought his new girlfriend She's like \"Oh my God\", but I'm just gonna shake And to the fella over there with the hella good hair Won't you come on over baby, we can shake, shake, shake Yeah, oh-oh 'Cause the players gonna play, play, play, play, play And the haters gonna hate, hate, hate, hate, hate Baby, I'm just gonna shake, shake, shake, shake, shake Shake it off, I shake it off Heartbreakers gonna break, break, break, break, break And the fakers gonna fake, fake, fake, fake, fake Baby, I'm just gonna shake, shake, shake, shake, shake Shake it off, I shake it off Shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off I-I-I shake it off, I shake it off"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "nfWlot6h_JM",
+      "url": "https://www.youtube.com/watch?v=nfWlot6h_JM",
+      "title": "Taylor Swift - Shake It Off",
+      "description": "Music video by Taylor Swift performing Shake It Off. (C) 2014 Taylor Swift.\n\nStream/download ‘The Life of a Showgirl’ - https://taylor.lnk.to/TSTheLifeofaShowgirlYD\n\n►Shop Merch: http://taylor.lnk.to/store\n►Subscribe to Taylor Swift on YouTube: https://ts.lnk.to/subscribe\n\n►Follow Taylor Swift Online:\nTikTok: http://tiktok.com/@taylorswift\nInstagram: http://instagram.com/taylorswift\nTwitter: http://twitter.com/taylorswift13\nSnapchat: http://snapchat.com/add/taylorswift\nFacebook: http://facebook.com/taylorswift\nTumblr: http://taylorswift.tumblr.com\nWebsite: http://www.taylorswift.com\n\n►Follow Taylor Nation Online:\nTikTok: http://tiktok.com/@taylornation\nInstagram: http://instagram.com/taylornation\nYouTube: https://youtube.com/taylornation\nTwitter: http://twitter.com/taylornation13\nTumblr: http://taylornation.tumblr.com\n\n#TaylorSwift #ShakeItOff",
+      "author": {
+        "displayName": "Taylor Swift"
+      },
+      "stats": {
+        "views": 3675053694,
+        "likes": 14213269,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 242,
+        "thumbnailUrl": "https://i.ytimg.com/vi/nfWlot6h_JM/maxresdefault.jpg"
+      },
+      "tags": [
+        "Taylor",
+        "Swift",
+        "Shake",
+        "Off",
+        "Big",
+        "Machine",
+        "Records",
+        "LLC",
+        "Pop",
+        "한글자막",
+        "日本語字幕",
+        "subtítulos en español",
+        "Türkçe Altyazılı",
+        "Phụ đề tiếng Việt",
+        "Subtitles in Tagalog",
+        "Teks dalam Bahasa Indonesia",
+        "उपशीर्षक हिंदी में",
+        "Sarikata Dalam Bahasa Malaysia",
+        "คำบรรยายภาษาไทย",
+        "テイラー・スウィフト",
+        "테일러 스위프트",
+        "泰勒絲",
+        "泰勒斯威夫特"
+      ],
+      "createdAt": "2014-08-18T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 491,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 55.043095364s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 9378,
+  "failure_class": "gemini_quota"
+}

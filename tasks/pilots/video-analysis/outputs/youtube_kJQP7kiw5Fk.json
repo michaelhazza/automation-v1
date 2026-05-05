@@ -1,0 +1,89 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
+    "platform": "youtube",
+    "expected_to_perform_well": true,
+    "note": "Luis Fonsi - Despacito. 8B+ views, top YouTube video globally."
+  },
+  "slug": "youtube_kJQP7kiw5Fk",
+  "fetch": {
+    "ok": true,
+    "duration_ms": 7649,
+    "transcript_status": 200,
+    "metadata_status": 200,
+    "transcript": {
+      "lang": "en",
+      "availableLangs": [
+        "en"
+      ],
+      "content": "♪ ♪ ♪ AAAAY ♪ ♪ FONSI, ♪ ♪ D.Y. ♪ ♪ OHH OH NO OH NOOOO ♪ ♪ EYY EYY EH ♪ ♪ SI... SABES QUE YA LLEVO\nUN RATO MIRÁNDOTE ♪ ♪ TENGO QUE\nBAILAR CONTIGO HOY ♪ ♪ D.Y. ♪ ♪ VI QUE TU MIRADA YA\nESTABA LLAMÁNDOME ♪ ♪ MUESTRAME EL\nCAMINO QUE YO VOY ♪ ♪ OHH ♪ ♪ TU... TÚ ERES EL IMÁN\nY YO SOY EL METAL ♪ ♪ ME VOY ACERCANDO Y\nVOY ARMANDO EL PLAN ♪ ♪ SOLO CON PENSARLO\nSE ACELERA EL PULSO ♪ ♪ OHH YEAH ♪ ♪ YA... ♪ ♪ YA ME ESTÁS GUSTANDO\nMÁS DE LO NORMAL ♪ ♪ TODOS MIS SENTIDOS\nVAN PIDIENDO MÁS ♪ ♪ ESTO HAY QUE TOMARLO\nSIN NINGÚN APURO... ♪ ♪ DESPACITO ♪ ♪ QUIERO RESPIRAR\nTU CUELLO DESPACITO ♪ ♪ DEJA QUE TE DIGA\nCOSAS AL OÍDO ♪ ♪ PARA QUE TE ACUERDES\nSI NO ESTÁS CONMIGO ♪ ♪ DESPACITO ♪ ♪ QUIERO DESNUDARTE\nA BESOS, DESPACITO ♪ ♪ FIRMAR LAS PAREDES\nDE TU LABERINTO ♪ ♪ Y HACER DE TU CUERPO\nTODO UN MANUSCRITO ♪ ♪ (SUBE SUBE SUBE)\n(SUBE SUBE) ♪ ♪ QUIERO VER BAILAR TU\nPELO QUIERO SER TU RITMO ♪ ♪ QUE LE ENSEÑES A MI BOCA ♪ ♪ TUS LUGARES FAVORITOS ♪ ♪ FAVORITO FAVORITO EY EEH ♪ ♪ DÉJAME SOBREPASAR ♪ ♪ TU ZONAS DE PELIGRO ♪ ♪ HASTA PROVOCAR TUS GRITOS ♪ ♪ Y QUE OLVIDES TU APELLIDO ♪ ♪ SI TE PIDO UN\nBESO VEN DAMELO ♪ ♪ YO SE QUE\nESTAS PENSANDOLO ♪ ♪ LLEVO TIEMPO INTENTANDOLO ♪ ♪ MAMI ESTO ES\nDANDO Y DANDOLO ♪ ♪ SABES QUE TU CORAZON\nCONMIGO TE HACE BAM BAM ♪ ♪ SABES QUE ESA BEBA ESTA\nBUSCANDO DE MI BAMBAM ♪ ♪ VEN PRUEBA DE MI BOCA\nPARA VER COMO TE SABE ♪ ♪ QUIERO QUIERO QUIERO VER\nCUANTO AMOR A TI TE CABE ♪ ♪ YO NO TENGO PRISA YO\nME QUIERO DAR EL VIAJE ♪ ♪ EMPEZAMOS LENTO\nDESPUES SALVAJE ♪ ♪ PASITO A PASITO\nSUAVE SUAVECITO ♪ ♪ NOS VAMOS PEGANDO\nPOQUITO A POQUITO ♪ ♪ CUANDO TU ME BESAS\nCON ESA DESTREZA ♪ ♪ CREO TU ERES MALICIA\nCON DELICADEZA ♪ ♪ PASITO A PASITO\nSUAVE SUAVECITO ♪ ♪ NOS VAMOS PEGANDO\nPOQUITO A POQUITO ♪ ♪ Y ES QUE ESA BELLEZA\nES UN ROMPE CABEZA ♪ ♪ PERO PA MONTARLO AQUI\nTENGO LA PIEZA (OYEEE) ♪ ♪ DESPACITO ♪ ♪ QUIERO RECORRERTE\nA BESOS DESPACITO ♪ ♪ DEJA QUE TE DIGA\nCOSAS AL OÍDO ♪ ♪ PARA QUE TE ACUERDES\nSI NO ESTÁS CONMIGO ♪ ♪ DESPECITO ♪ ♪ QUIERO RECORRERTE\nA BESOS DESPACITO ♪ ♪ DIME LAS PAREDES\nDE TU LABERINTO ♪ ♪ Y HACER DE TU CUERPO\nTODO UN MANUSCRITO ♪ ♪ (SUBE SUBE SUBE)\n(SUBE SUBE) ♪ ♪ QUIERO VER BAILAR TU\nPELO QUIERO SER TU RITMO ♪ ♪ QUE LE ENSEÑES A MI BOCA\nTUS LUGARES FAVORITOS ♪ ♪ FAVORITO FAVORITO ♪ ♪ DÉJAME SOBREPASAR\nTU ZONAS DE PELIGRO ♪ ♪ HASTA PROVOCAR TUS GRITOS\nY QUE OLVIDES TU APELLIDO ♪ ♪ DESPACITO ♪ ♪ VAMOS A HCERLO EN UNA\nPLAYA EN PUERTO RICO ♪ ♪ HASTA QUE LAS OLAS\nGRITEN: AY BENDITO! ♪ ♪ PARA QUE MI SELLO SE QUEDE\nCONTIGO (BAILALOOO) ♪ ♪ PASITO A PASITO\nSUAVE SUAVECITO ♪ ♪ NOS VAMOS PEGANDO\nPOQUITO A POQUITO ♪ ♪ QUE LE ENSEÑES A MI BOCA\nTUS LUGARES FAVORITOS ♪ ♪ PASITO A PASITO\nSUAVE SUAVECITO ♪ ♪ NOS VAMOS PEGANDO\nPOQUITO A POQUITO ♪ ♪ HASTA PROVOCAR TUS GRITOS\nY QUE OLVIDES TU APELLIDO ♪ ♪ DES...PA...CI...TO... ♪ ♪ PASITO A PASITO ♪ ♪ SUAVE, SUAVECITO ♪ ♪ NOS VAMOS PEGANDO ♪ ♪ POQUITO A POQUITO ♪ ♪ (HEY, HEY, HEY, HEY) ♪ ♪ PASITO A PASITO ♪ ♪ SUAVE, SUAVECITO ♪ ♪ NOS VAMOS PEGANDO ♪ ♪ POQUITO A POQUITO ♪ ♪ (HEY, HEY, HEY, HEY) ♪"
+    },
+    "metadata": {
+      "platform": "youtube",
+      "type": "video",
+      "id": "kJQP7kiw5Fk",
+      "url": "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
+      "title": "Luis Fonsi - Despacito ft. Daddy Yankee",
+      "description": "“Despacito” disponible ya en todas las plataformas digitales: https://UMLE.lnk.to/DOoUzFp \n“Imposible” disponible ya en todas las plataformas digitales: https://UMLE.lnk.to/IMPOSIBLEFp\n“Calypso” disponible ya en todas las plataformas digitales: https://UMLE.lnk.to/CLYPSFp\nEchame La Culpa disponible ya en todas las plataformas digitales: https://UMLE.lnk.to/ELCFp\n\n\nBest of Luis Fonsi / Lo mejor Luis Fonsi: https://goo.gl/KLWPSa \nSubscribe here: https://goo.gl/nkhcGc\nSigue a Luis Fonsi: \nOfficial Site: http://www.luisfonsi.com/ \nFacebook: https://www.facebook.com/luisfonsi/ \nTwitter: https://twitter.com/LuisFonsi \nInstagram: https://www.instagram.com/luisfonsi\n\n#LuisFonsi #Despacito #Imposible #Calypso #EchamelaCulpa #NadaEsImposible #NothingisImpossible #LF\n\n\nMusic video by Luis Fonsi performing Despacito. (C) 2017 Universal Music Latino",
+      "author": {
+        "displayName": "LuisFonsiVEVO"
+      },
+      "stats": {
+        "views": 9008866714,
+        "likes": 56164882,
+        "comments": null,
+        "shares": null
+      },
+      "media": {
+        "type": "video",
+        "duration": 282,
+        "thumbnailUrl": "https://i.ytimg.com/vi_webp/kJQP7kiw5Fk/maxresdefault.webp"
+      },
+      "tags": [
+        "Luis",
+        "Fonsi",
+        "Despacito",
+        "UMLE",
+        "Latino",
+        "Latin",
+        "Pop",
+        "Luis Fonsi",
+        "Daddy Yankee",
+        "Music Video",
+        "Oficial",
+        "Official Music Video",
+        "#Despacito",
+        "Zuleyka Rivera",
+        "Super model",
+        "Miss Universe",
+        "Puerto Rico",
+        "한글자막",
+        "日本語字幕",
+        "subtítulos en español",
+        "Türkçe Altyazılı",
+        "Phụ đề tiếng Việt",
+        "Subtitles in Tagalog",
+        "Teks dalam Bahasa Indonesia",
+        "उपशीर्षक हिंदी में",
+        "Sarikata Dalam Bahasa Malaysia",
+        "คำบรรยายภาษาไทย",
+        "ルイス・フォンシ",
+        "루이스 폰시",
+        "路易斯方辛",
+        "路易斯冯西"
+      ],
+      "createdAt": "2017-01-12T00:00:00.000Z",
+      "additionalData": {
+        "channelId": "UCLp8RBhQHu9wSsq62j_Md6A"
+      }
+    }
+  },
+  "analysis": {
+    "ok": false,
+    "duration_ms": 517,
+    "status": 429,
+    "error": "HTTP 429: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\\nPlease retry in 31.972853811s.\",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.go"
+  },
+  "total_duration_ms": 8167,
+  "failure_class": "gemini_quota"
+}
