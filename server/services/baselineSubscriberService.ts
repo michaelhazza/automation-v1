@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountBaselines } from '../db/schema/index.js';
 import { baselineReadinessService } from './baselineReadinessService.js';
@@ -22,6 +22,11 @@ export const baselineSubscriberService = {
     const result = await baselineReadinessService.evaluate(subaccountId, organisationId);
     if (!result.ready) return;
 
+    // Filter out reset rows so the post-admin-reset state (one reset row + one
+    // pending row) deterministically returns the new pending row. The partial
+    // UNIQUE index `subaccount_baselines_active_uniq WHERE status <> 'reset'`
+    // guarantees at most one non-reset row per subaccount, so no LIMIT or
+    // ORDER BY is needed once the reset filter is in place.
     const tx = getOrgScopedDb('baselineSubscriberService.onSyncCompleteEvaluateReadiness');
     const [row] = await tx
       .select({ id: subaccountBaselines.id, status: subaccountBaselines.status })
@@ -30,6 +35,7 @@ export const baselineSubscriberService = {
         and(
           eq(subaccountBaselines.subaccountId, subaccountId),
           eq(subaccountBaselines.organisationId, organisationId),
+          sql`status <> 'reset'`,
         ),
       );
 

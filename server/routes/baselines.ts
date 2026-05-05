@@ -1,24 +1,15 @@
 import { Router } from 'express';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, desc } from 'drizzle-orm';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountBaselines, subaccountBaselineMetrics } from '../db/schema/index.js';
 import { manualBaselineFormSchema, adminResetSchema } from '../../shared/schemas/baselineManualForm.js';
 import { captureBaselineService } from '../services/captureBaselineService.js';
 
 const router = Router();
-
-function handleServiceError(err: unknown, res: import('express').Response): boolean {
-  if (err && typeof err === 'object' && 'statusCode' in err) {
-    const e = err as { statusCode: number; errorCode: string; message?: string };
-    res.status(e.statusCode).json({ error: e.message ?? e.errorCode });
-    return true;
-  }
-  return false;
-}
 
 /**
  * GET /api/subaccounts/:subaccountId/baseline
@@ -33,7 +24,8 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const [row] = await db
+    const orgDb = getOrgScopedDb('baselines.getActive');
+    const [row] = await orgDb
       .select({
         id: subaccountBaselines.id,
         status: subaccountBaselines.status,
@@ -50,7 +42,7 @@ router.get(
           sql`status <> 'reset'`,
         ),
       )
-      .orderBy(subaccountBaselines.createdAt)
+      .orderBy(desc(subaccountBaselines.baselineVersion))
       .limit(1);
 
     if (!row) {
@@ -58,7 +50,7 @@ router.get(
       return;
     }
 
-    const metrics = await db
+    const metrics = await orgDb
       .select({
         metricSlug: subaccountBaselineMetrics.metricSlug,
         value: subaccountBaselineMetrics.value,
@@ -91,17 +83,12 @@ router.post(
       return;
     }
 
-    try {
-      await captureBaselineService.runManual({
-        organisationId: req.orgId!,
-        subaccountId,
-        userId: req.user!.id,
-        metricInputs: parsed.data.metrics,
-      });
-    } catch (err) {
-      if (!handleServiceError(err, res)) throw err;
-      return;
-    }
+    await captureBaselineService.runManual({
+      organisationId: req.orgId!,
+      subaccountId,
+      userId: req.user!.id,
+      metricInputs: parsed.data.metrics,
+    });
 
     res.json({ ok: true });
   }),
@@ -112,6 +99,11 @@ router.post(
  * Sysadmin-only. Marks the active baseline as 'reset', inserts a new pending baseline
  * at baseline_version+1. Delegates entirely to captureBaselineService.adminReset
  * (§5.2 single-writer rule; §6 single-transaction history-preservation invariant).
+ *
+ * The service resolves the target organisation internally via `withAdminConnection`
+ * + `SET LOCAL ROLE admin_role` so the cross-org lookup bypasses the FORCE-RLS
+ * policy on `subaccount_baselines`. The route does not need an org-id lookup of
+ * its own.
  */
 router.post(
   '/api/admin/subaccounts/:subaccountId/baseline/reset',
@@ -126,30 +118,11 @@ router.post(
       return;
     }
 
-    // Look up organisationId — sysadmin routes bypass org-scoped middleware.
-    const [sa] = await db
-      .select({ organisationId: subaccountBaselines.organisationId })
-      .from(subaccountBaselines)
-      .where(eq(subaccountBaselines.subaccountId, subaccountId))
-      .orderBy(subaccountBaselines.createdAt)
-      .limit(1);
-
-    if (!sa) {
-      res.status(404).json({ error: 'No baseline found for this subaccount' });
-      return;
-    }
-
-    try {
-      await captureBaselineService.adminReset({
-        organisationId: sa.organisationId,
-        subaccountId,
-        userId: req.user!.id,
-        reason: parsed.data.reason,
-      });
-    } catch (err) {
-      if (!handleServiceError(err, res)) throw err;
-      return;
-    }
+    await captureBaselineService.adminReset({
+      subaccountId,
+      userId: req.user!.id,
+      reason: parsed.data.reason,
+    });
 
     res.json({ ok: true });
   }),

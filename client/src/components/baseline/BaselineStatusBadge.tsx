@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import api from '../../lib/api';
 
 interface BaselineStatus {
   status: string;
@@ -27,14 +28,18 @@ export function BaselineStatusBadge({ subaccountId }: { subaccountId: string }) 
   const [data, setData] = useState<BaselineStatus | null>(null);
 
   useEffect(() => {
-    fetch(`/api/subaccounts/${subaccountId}/baseline`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token') ?? ''}`,
-      },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
+    let cancelled = false;
+    api
+      .get<BaselineStatus>(`/api/subaccounts/${subaccountId}/baseline`)
+      .then(({ data: body }) => {
+        if (!cancelled) setData(body);
+      })
+      .catch(() => {
+        if (!cancelled) setData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [subaccountId]);
 
   if (!data) return null;

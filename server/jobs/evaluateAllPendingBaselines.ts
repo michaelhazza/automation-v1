@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { withOrgTx } from '../instrumentation.js';
+import { logger } from '../lib/logger.js';
 import { baselineReadinessService } from '../services/baselineReadinessService.js';
 import { baselineSubscriberService } from '../services/baselineSubscriberService.js';
 
@@ -17,6 +18,10 @@ export async function evaluateAllPendingBaselinesHandler(_job: PgBoss.Job<unknow
     { source: 'baseline_evaluate_all_pending', skipAudit: true },
     async (adminDb) => {
       await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+      // Retry pickup matches the §5.4 backoff schedule. capture_attempt_count >= 3
+      // is intentionally excluded — by that point captureBaselineService.run has
+      // already transitioned the row to status='failed' (isRetryBudgetExhausted),
+      // so it is no longer 'ready' and never matched here.
       const result = await adminDb.execute(sql`
         SELECT id, organisation_id, subaccount_id, status, capture_attempt_count
         FROM subaccount_baselines
@@ -26,7 +31,6 @@ export async function evaluateAllPendingBaselinesHandler(_job: PgBoss.Job<unknow
              AND (
                (capture_attempt_count = 1 AND last_attempt_at <= now() - interval '1 hour')
                OR (capture_attempt_count = 2 AND last_attempt_at <= now() - interval '4 hours')
-               OR (capture_attempt_count = 3 AND last_attempt_at <= now() - interval '24 hours')
              )
            )
       `);
@@ -68,7 +72,12 @@ export async function evaluateAllPendingBaselinesHandler(_job: PgBoss.Job<unknow
         triggerSource: 'fallback',
       });
     } catch (err) {
-      console.error('[evaluateAllPendingBaselines] failed for baseline', c.id, err);
+      logger.error('baseline.evaluate_pending.candidate_failed', {
+        baseline_id: c.id,
+        organisation_id: c.organisation_id,
+        subaccount_id: c.subaccount_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

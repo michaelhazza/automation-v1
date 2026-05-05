@@ -1,5 +1,5 @@
-import { and, eq, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { and, eq, inArray, desc } from 'drizzle-orm';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { subaccountBaselines, subaccountBaselineMetrics } from '../../db/schema/index.js';
 import type { BaselineMetricSlug } from '../../../shared/constants/baselineMetrics.js';
 
@@ -22,22 +22,33 @@ export interface BaselineSnapshot {
 /**
  * F3 §7 — read the active captured baseline for a subaccount.
  * Returns null when no captured/manual baseline exists.
+ *
+ * Uses `getOrgScopedDb` so the FORCE-RLS policy on `subaccount_baselines` sees
+ * the right `app.organisation_id` GUC; bare `db` would run on a fresh pool
+ * connection without the GUC and silently filter to zero rows.
+ *
+ * Orders by `baseline_version DESC LIMIT 1` so that after an admin reset
+ * followed by a fresh capture the helper returns the latest captured/manual
+ * baseline rather than a non-deterministic prior row.
  */
 export async function getBaselineForSubaccount(
   organisationId: string,
   subaccountId: string,
 ): Promise<BaselineSnapshot | null> {
-  const [baseline] = await db
+  const orgDb = getOrgScopedDb('getBaselineForSubaccount');
+  const [baseline] = await orgDb
     .select()
     .from(subaccountBaselines)
     .where(and(
       eq(subaccountBaselines.organisationId, organisationId),
       eq(subaccountBaselines.subaccountId, subaccountId),
       inArray(subaccountBaselines.status, ['captured', 'manual']),
-    ));
+    ))
+    .orderBy(desc(subaccountBaselines.baselineVersion))
+    .limit(1);
   if (!baseline) return null;
 
-  const metrics = await db
+  const metrics = await orgDb
     .select()
     .from(subaccountBaselineMetrics)
     .where(eq(subaccountBaselineMetrics.baselineId, baseline.id));

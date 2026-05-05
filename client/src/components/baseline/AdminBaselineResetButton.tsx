@@ -34,8 +34,13 @@ export function AdminBaselineResetButton({
       setReason('');
       onReset?.();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to reset baseline');
+      const e = err as { response?: { data?: { error?: string | { code?: string; message?: string } } } };
+      const errBody = e.response?.data?.error;
+      const message =
+        typeof errBody === 'string'
+          ? errBody
+          : errBody?.message ?? 'Failed to reset baseline';
+      setError(message);
     } finally {
       setSaving(false);
     }

@@ -102,6 +102,26 @@ test('aggregateOutcome: non_retryable failure present → non_retryable_failure'
   expect(result).toEqual({ kind: 'non_retryable_failure', reason: 'integration_not_connected' });
 });
 
+test('aggregateOutcome: non_retryable propagates per-metric unavailableReason', () => {
+  const result = aggregateOutcome(
+    [{ source: 'unavailable', errorClass: 'non_retryable', unavailableReason: 'schema_mismatch' }],
+    5,
+  );
+  expect(result).toEqual({ kind: 'non_retryable_failure', reason: 'schema_mismatch' });
+});
+
+test('aggregateOutcome: first non_retryable wins when multiple have reasons', () => {
+  const result = aggregateOutcome(
+    [
+      { source: 'unavailable', errorClass: 'retryable', unavailableReason: 'no_data_yet' },
+      { source: 'unavailable', errorClass: 'non_retryable', unavailableReason: 'reader_not_implemented' },
+      { source: 'unavailable', errorClass: 'non_retryable', unavailableReason: 'http_4xx' },
+    ],
+    5,
+  );
+  expect(result).toEqual({ kind: 'non_retryable_failure', reason: 'reader_not_implemented' });
+});
+
 test('aggregateOutcome: optedInCount=0 forces partial even when captured >= 0 (vacuously true)', () => {
   const result = aggregateOutcome(
     [{ source: 'canonical_metric' }, { source: 'canonical_metric' }],

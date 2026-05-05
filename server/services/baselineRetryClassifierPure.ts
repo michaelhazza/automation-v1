@@ -43,7 +43,11 @@ export function isRetryBudgetExhausted(attemptCount: number): boolean {
   return attemptCount >= 3;
 }
 
-export interface MetricOutcome { source: 'canonical_metric' | 'unavailable'; errorClass?: ErrorClass; }
+export interface MetricOutcome {
+  source: 'canonical_metric' | 'unavailable';
+  errorClass?: ErrorClass;
+  unavailableReason?: FailureReason;
+}
 
 export type BaselineOutcome =
   | { kind: 'success'; confidence: 'confirmed' | 'partial' }
@@ -60,7 +64,12 @@ export function aggregateOutcome(
       optedInCount > 0 && captured >= optedInCount ? 'confirmed' : 'partial';
     return { kind: 'success', confidence };
   }
-  const hasNonRetryable = perMetric.some((m) => m.source === 'unavailable' && m.errorClass === 'non_retryable');
-  if (hasNonRetryable) return { kind: 'non_retryable_failure', reason: 'integration_not_connected' };
+  const firstNonRetryable = perMetric.find((m) => m.source === 'unavailable' && m.errorClass === 'non_retryable');
+  if (firstNonRetryable) {
+    return {
+      kind: 'non_retryable_failure',
+      reason: firstNonRetryable.unavailableReason ?? 'integration_not_connected',
+    };
+  }
   return { kind: 'retryable_failure' };
 }

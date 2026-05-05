@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { subaccountBaselines } from '../db/schema/subaccountBaselines.js';
 import { subaccountBaselineMetrics } from '../db/schema/subaccountBaselineMetrics.js';
 import { subaccounts } from '../db/schema/subaccounts.js';
@@ -163,7 +163,11 @@ export const captureBaselineService = {
 
     // Step 5: final-state decision
     const outcome = aggregateOutcome(
-      perMetric.map((m) => ({ source: m.result.source, errorClass: m.result.errorClass })),
+      perMetric.map((m) => ({
+        source: m.result.source,
+        errorClass: m.result.errorClass,
+        unavailableReason: m.result.unavailable_reason,
+      })),
       optedIn.length,
     );
 
@@ -301,8 +305,11 @@ export const captureBaselineService = {
       .select({ source: subaccountBaselineMetrics.source })
       .from(subaccountBaselineMetrics)
       .where(eq(subaccountBaselineMetrics.baselineId, baseline.id));
-    const hasNonManual = allRows.some((r) => r.source !== 'manual');
-    const newSource: 'manual' | 'mixed' = hasNonManual ? 'mixed' : 'manual';
+    // Spec §6 — 'mixed' means at least one row has a canonical-metric source.
+    // Treating 'unavailable' as non-manual (the prior coding) caused fully-manual
+    // overrides on top of unavailable readers to be misclassified as 'mixed'.
+    const hasCanonical = allRows.some((r) => r.source === 'canonical_metric');
+    const newSource: 'manual' | 'mixed' = hasCanonical ? 'mixed' : 'manual';
 
     const captured = allRows.filter((r) => r.source === 'canonical_metric' || r.source === 'manual').length;
     const [sub] = await orgDb
@@ -343,63 +350,77 @@ export const captureBaselineService = {
   },
 
   /**
-   * F3 §6 — admin reset. Opens its own db.transaction + set_config because it is called
-   * from a sysadmin HTTP route that does not hold an org-scoped ALS context for the
-   * target organisation. The explicit set_config satisfies the RLS FORCE policy.
+   * F3 §6 — admin reset. Sysadmin entrypoint; resolves the target organisation
+   * from the prior baseline row inside a `withAdminConnection` transaction
+   * (`SET LOCAL ROLE admin_role` bypasses RLS so the lookup is cross-org).
+   * Caller passes only `subaccountId` — the route does not perform an org lookup.
    */
   async adminReset(params: {
-    organisationId: string;
     subaccountId: string;
     userId: string;
     reason: string;
-  }): Promise<{ priorBaselineId: string; newBaselineId: string; newVersion: number }> {
-    return db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.organisation_id', ${params.organisationId}, true)`);
+  }): Promise<{ priorBaselineId: string; newBaselineId: string; newVersion: number; organisationId: string }> {
+    return withAdminConnection(
+      {
+        source: 'captureBaselineService.adminReset',
+        reason: `sysadmin reset: ${params.reason}`,
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      const [prior] = await tx
-        .select({ id: subaccountBaselines.id, version: subaccountBaselines.baselineVersion })
-        .from(subaccountBaselines)
-        .where(and(
-          eq(subaccountBaselines.subaccountId, params.subaccountId),
-          eq(subaccountBaselines.organisationId, params.organisationId),
-          sql`status <> 'reset'`,
-        ));
-      if (!prior) {
-        throw { statusCode: 404, errorCode: 'BASELINE_NOT_FOUND' };
-      }
+        const [prior] = await tx
+          .select({
+            id: subaccountBaselines.id,
+            version: subaccountBaselines.baselineVersion,
+            organisationId: subaccountBaselines.organisationId,
+          })
+          .from(subaccountBaselines)
+          .where(and(
+            eq(subaccountBaselines.subaccountId, params.subaccountId),
+            sql`status <> 'reset'`,
+          ));
+        if (!prior) {
+          throw { statusCode: 404, errorCode: 'BASELINE_NOT_FOUND' };
+        }
 
-      await tx
-        .update(subaccountBaselines)
-        .set({
-          status: 'reset',
-          resetAt: sql`now()`,
-          resetByUserId: params.userId,
-          adminResetReason: params.reason,
-        })
-        .where(eq(subaccountBaselines.id, prior.id));
+        await tx
+          .update(subaccountBaselines)
+          .set({
+            status: 'reset',
+            resetAt: sql`now()`,
+            resetByUserId: params.userId,
+            adminResetReason: params.reason,
+          })
+          .where(eq(subaccountBaselines.id, prior.id));
 
-      const newVersion = prior.version + 1;
-      const [inserted] = await tx
-        .insert(subaccountBaselines)
-        .values({
-          organisationId: params.organisationId,
-          subaccountId: params.subaccountId,
-          baselineVersion: newVersion,
-          status: 'pending',
-        })
-        .returning({ id: subaccountBaselines.id });
+        const newVersion = prior.version + 1;
+        const [inserted] = await tx
+          .insert(subaccountBaselines)
+          .values({
+            organisationId: prior.organisationId,
+            subaccountId: params.subaccountId,
+            baselineVersion: newVersion,
+            status: 'pending',
+          })
+          .returning({ id: subaccountBaselines.id });
 
-      createEvent('baseline.admin_reset', {
-        subaccount_id: params.subaccountId,
-        prior_baseline_id: prior.id,
-        new_baseline_id: inserted.id,
-        prior_version: prior.version,
-        new_version: newVersion,
-        user_id: params.userId,
-        reason: params.reason,
-      });
+        createEvent('baseline.admin_reset', {
+          subaccount_id: params.subaccountId,
+          prior_baseline_id: prior.id,
+          new_baseline_id: inserted.id,
+          prior_version: prior.version,
+          new_version: newVersion,
+          user_id: params.userId,
+          reason: params.reason,
+        });
 
-      return { priorBaselineId: prior.id, newBaselineId: inserted.id, newVersion };
-    });
+        return {
+          priorBaselineId: prior.id,
+          newBaselineId: inserted.id,
+          newVersion,
+          organisationId: prior.organisationId,
+        };
+      },
+    );
   },
 };

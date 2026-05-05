@@ -150,6 +150,46 @@ describe('Invariant 6: DB-time invariant — no Date.now() in F3 capture path', 
   });
 });
 
+// ── Invariant 8: Subscriber + helper select non-reset rows only ──────────────
+
+describe('Invariant 8: Subscriber + helper queries exclude reset rows', () => {
+  // After admin reset, two rows exist for the same subaccount: a status='reset'
+  // row at baseline_version=N and a status='pending' row at baseline_version=N+1.
+  // Without an explicit `status <> 'reset'` filter, Postgres returns rows in
+  // non-deterministic storage order — the subscriber/helper may pick the reset
+  // row and silently mis-route. Static check guards against regression.
+  it("baselineSubscriberService.onSyncCompleteEvaluateReadiness query filters status <> 'reset'", () => {
+    const out = execSync(
+      "grep -A 12 'onSyncCompleteEvaluateReadiness' server/services/baselineSubscriberService.ts 2>/dev/null || true",
+      { encoding: 'utf8', cwd: process.cwd(), shell: SHELL },
+    );
+    assert.ok(
+      /status\s*<>\s*'reset'/.test(out),
+      "subscriber query MUST include `status <> 'reset'` to disambiguate post-admin-reset state",
+    );
+  });
+
+  it("getBaselineForSubaccount uses getOrgScopedDb and orders by baseline_version DESC LIMIT 1", () => {
+    const orgScoped = execSync(
+      'grep -n "getOrgScopedDb" server/services/reportingAgent/baselineHelper.ts 2>/dev/null || true',
+      { encoding: 'utf8', cwd: process.cwd(), shell: SHELL },
+    );
+    assert.ok(orgScoped.trim().length > 0, 'baselineHelper must use getOrgScopedDb (FORCE-RLS GUC)');
+
+    const ordered = execSync(
+      'grep -nE "orderBy\\(desc\\(subaccountBaselines\\.baselineVersion\\)\\)" server/services/reportingAgent/baselineHelper.ts 2>/dev/null || true',
+      { encoding: 'utf8', cwd: process.cwd(), shell: SHELL },
+    );
+    assert.ok(ordered.trim().length > 0, 'baselineHelper must order by baselineVersion DESC for determinism');
+
+    const limited = execSync(
+      'grep -n "\\.limit(1)" server/services/reportingAgent/baselineHelper.ts 2>/dev/null || true',
+      { encoding: 'utf8', cwd: process.cwd(), shell: SHELL },
+    );
+    assert.ok(limited.trim().length > 0, 'baselineHelper must limit(1) so the post-reset state returns the new baseline');
+  });
+});
+
 // ── Invariant 7: next_attempt_at IS NOT NULL ↔ status = 'ready' ─────────────
 
 describe("Invariant 7: next_attempt_at IS NOT NULL ↔ status = 'ready'", () => {
