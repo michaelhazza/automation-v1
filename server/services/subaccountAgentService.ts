@@ -1,6 +1,7 @@
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
+import { isActive, assertActive } from '../lib/queryHelpers.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
@@ -66,7 +67,7 @@ export const subaccountAgentService = {
         workspaceIdentityStatus: workspaceIdentities.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .leftJoin(
         workspaceIdentities,
         and(
@@ -126,11 +127,12 @@ export const subaccountAgentService = {
   async linkAgent(organisationId: string, subaccountId: string, agentId: string) {
     // Verify agent belongs to this org
     const [agent] = await db
-      .select({ id: agents.id })
+      .select({ id: agents.id, deletedAt: agents.deletedAt })
       .from(agents)
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isActive(agents)));
 
     if (!agent) throw { statusCode: 404, message: 'Agent not found in this organisation' };
+    assertActive(agent, 'Agent'); // defence-in-depth
 
     // Load full agent to get default skill slugs + heartbeat config
     const [fullAgent] = await db
@@ -243,7 +245,7 @@ export const subaccountAgentService = {
         agentDeletedAt: agents.deletedAt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.id, linkId),
@@ -408,7 +410,7 @@ export const subaccountAgentService = {
         agentMasterPrompt: agents.masterPrompt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(and(
         eq(subaccountAgents.organisationId, organisationId),
         eq(subaccountAgents.subaccountId, subaccountId)
@@ -517,7 +519,7 @@ export const subaccountAgentService = {
     const [row] = await db
       .select({ systemAgentSlug: systemAgents.slug })
       .from(agents)
-      .leftJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
+      .leftJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
     return row?.systemAgentSlug ?? null;
   },

@@ -14,6 +14,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, systemAgents, agents } from '../db/schema/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import {
   resolveRootForScopePure,
   type OrgLevelLink,
@@ -55,7 +56,7 @@ async function resolveOrgLevelLink(organisationId: string): Promise<OrgLevelLink
       subaccountId: subaccountAgents.subaccountId,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isNull(agents.deletedAt)))
+    .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isActive(agents)))
     .where(and(...baseConditions))
     .orderBy(subaccountAgents.createdAt, subaccountAgents.id)
     .limit(1);

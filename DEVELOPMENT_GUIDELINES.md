@@ -213,6 +213,10 @@ Every `<button>` that does not intentionally submit a form must declare `type="b
 
 A system-disabled flag must short-circuit every route that touches the feature — mutation routes, read-through routes, picker/integration endpoints — not just the primary write path; partial gating leaves orphaned traffic and partial state when the flag is flipped.
 
+### 8.27 Soft-delete filter goes through `isActive(table)`
+
+Every join on a soft-deletable table uses `isActive(table)` from `server/lib/queryHelpers`. Raw `isNull(table.deletedAt)` is a lint-waivable finding that must be explicitly justified inline. For leftJoin, the filter MUST live in the join's ON clause, never the WHERE — placing it in WHERE converts outer to inner semantics.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)

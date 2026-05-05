@@ -16,9 +16,10 @@
  *   - perform side-effect cleanup on failure — idempotency + actions audit do that.
  */
 
-import { eq, and, sql, isNull } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions, agents, systemAgents } from '../db/schema/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import type { Action } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { skillExecutor, type SkillExecutionContext } from './skillExecutor.js';
@@ -71,10 +72,11 @@ export async function resolveConfigurationAssistantAgentId(
   const rows = await db
     .select({ agentId: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
     .where(
       and(
         eq(agents.organisationId, orgId),
+        isActive(agents),
         eq(systemAgents.slug, 'configuration-assistant'),
       ),
     );
