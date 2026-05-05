@@ -266,3 +266,92 @@ None required — round 3 was 100% technical / auto-execute.
 
 Top theme: directive-strengthening of implied invariants — turning "this is true because we wrote it correctly" into "this is enforced by signature / handler check / closed enum / runtime drop." Plus one observability metadata addition (severity classifier) for downstream alerting routing. ChatGPT verdict: **APPROVED — READY TO BUILD (no blockers)**.
 
+---
+
+## Round 4 — 2026-05-05T13-30-00Z
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> You're effectively done. This is now one of the cleanest pre-launch hardening specs I've seen: invariants are tight, failure modes are explicit, and every "must" is backed by a mechanism. There are no blockers and nothing here will bite you at runtime.
+>
+> What follows is the true final pass: only edge-case hardening and future-proofing. No structural changes.
+>
+> **Final micro-pass (nothing critical)**
+> 1. runId global uniqueness invariant — unique across all chains, even across different connectionIds.
+> 2. Pagination cursor trust boundary — pageCursor is opaque, not validated/parsed.
+> 3. Partial-index soft-delete interaction — soft-deleted row may be re-inserted (clarify).
+> 4. Audit immutability — rows MUST NEVER be updated or deleted.
+> 5. LRU dedupe process-bound + best-effort (resets on restart).
+> 6. Rate-limit explicit fail-open (existing posture).
+> 7. Severity declared at event declaration, MUST NOT be overridden at call site.
+> 8. AppError immutability — fields MUST NOT be mutated after construction.
+> 9. CI gates fail-fast (exit 1) + single-line actionable error.
+> 10. enrolCompleted context: `{ totalLocationsProcessed, totalPagesProcessed }` (optional but high leverage).
+>
+> **Optional last upgrade (high leverage):** Add a "failure playbook" section (1 page max) for `enrolFailed`, `enrolPartial`, `crossTenantAttempt`, `missingPrincipalContext` — what it means, what to check, expected operator action. Turns the spec into an operational runbook, not just a build doc.
+>
+> **Final verdict: ✅ APPROVED — BUILD WITH CONFIDENCE**
+>
+> 0 blockers. 0 risky ambiguities. 0 missing mechanisms.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F1 | runId global uniqueness invariant (across all connectionIds) | technical | apply | auto (apply) | low | Convention → directive; prevents accidental reuse in future refactors |
+| F2 | Cursor trust boundary — pageCursor is opaque, not validated | technical | apply | auto (apply) | low | Avoids future "validate the cursor" attempts coupling us to GHL's format |
+| F3 | Partial-index soft-delete interaction (re-insert allowed) | technical | apply | auto (apply) | low | Makes reuse-after-delete behaviour intentional |
+| F4 | Audit-event immutability — rows MUST NEVER be updated/deleted | technical | apply | auto (apply) | low | Forensic reliability; corrections via supersedes-event pattern |
+| F5 | LRU dedupe process-bound + best-effort | technical | apply | auto (apply) | low | Prevents future "make it durable" requests built on wrong assumption |
+| F6 | Rate-limit explicit fail-open | technical | apply | auto (apply) | low | Existing posture; making explicit prevents silent fail-closed change |
+| F7 | Severity declared at event declaration, immutable at call site | technical | apply | auto (apply) | low | Locks the model; prevents drift |
+| F8 | AppError immutability post-construction | technical | apply | auto (apply) | low | Prevents downstream-mutation bugs in logs |
+| F9 | CI gate failure posture (fail-fast + single-line actionable) | technical | apply | auto (apply) | low | Faster debugging; meta-rule for all verify-*.sh |
+| F10 | enrolCompleted context: totalLocationsProcessed + totalPagesProcessed | technical | apply | auto (apply) | low | Cheap observability; uniform across all closing event types |
+| F11 | Optional: 1-page operational "failure playbook" section in the spec | technical-escalated (defer) | defer | user (defer per recommendation) | low | Build doc vs runbook concern separation; runbook lives in `docs/runbooks/*.md` post-launch with real on-call signal, not pre-launch in a hardening spec |
+
+### Auto-execution summary (technical findings)
+
+- **Auto-applied (10):** F1, F2, F3, F4, F5, F6, F7, F8, F9, F10.
+- **Auto-rejected (0):** none.
+- **Escalated to operator (1):** F11 (defer carveout — silent technical defers escalate so the operator sees what's being held back).
+
+### User-facing approvals
+
+None. F11 escalated only because the recommendation is `defer` (per the carveout in §3a — silent technical defers escalate).
+
+### Operator decisions (round 4)
+
+- **F11 — failure playbook (defer):** operator replied **"as recommended"** → F11 deferred per agent recommendation. Routed to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3 as a post-launch task to author after first-agency monitoring + on-call rotation are in place.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto F1] §11 D.5 — runId global-uniqueness directive: `runId` MUST be globally unique across all chains regardless of connectionId; `crypto.randomUUID()` provides necessary entropy by construction; no other minting strategy permitted.
+- [auto F2] §11 D.5 — cursor trust boundary directive: `pageCursor` is opaque, MUST NOT be validated/parsed/interpreted. Safety nets (empty-page early exit + page-cap abort) handle invalid/stale/looping cursors. Future "validate the cursor" attempts are blocking findings.
+- [auto F3] §12.3 — partial-index soft-delete interaction made explicit: soft-deleted rows free the (org, external_id) for re-insertion (intentional — soft-delete is a tombstone for operator view, not a uniqueness reservation). Hard-delete-to-lock-external_id is a future spec.
+- [auto F4] §7.2 — audit-event immutability invariant: rows in `security_audit_events` MUST NEVER be UPDATEd or DELETEd post-insertion. Corrections insert a NEW event with `context.supersedes = '<original_event_id>'`. Retention/archival sweeps are a separate post-launch spec.
+- [auto F5] §7.6 — LRU dedupe persistence posture: process-local, resets on restart, best-effort only. Cross-restart / cross-process duplicates are not suppressed. Any future durable-dedupe feature MUST introduce its own mechanism.
+- [auto F6] §7.3 — rate-limit failure-mode directive: BOTH buckets fail OPEN if the storage backend errors. Auth-availability over abuse-resistance during incidents. Any future fail-closed change is a blocking finding. Fail-open path emits `auditEvent.security.rateLimitTrip` with `context.severity = 'configuration'` and `context.reason = 'BACKEND_UNAVAILABLE'` for post-mortem disambiguation.
+- [auto F7] §7.7 + §6 — severity-at-declaration immutability: severity is bound at the factory entry; `recordSecurityEvent` reads it from the factory, not from a caller-supplied parameter. Call-site overrides fail at the type level (the parameter doesn't exist).
+- [auto F8] §7.1 — AppError immutability: `code`, `statusCode`, `message`, `context` declared `readonly`; constructor freezes `context` via `Object.freeze`. Mutation attempts are blocking PR findings.
+- [auto F9] §11 B.5 — CI gate failure posture meta-rule: every gate fails fast (`exit 1`) on first violation with a single-line actionable error in the form `<script-name>: <one-sentence problem> at <file:line>`. No multi-page diffs; no warnings tier. Phase 3 codifies this for new gates; pre-existing scripts updated only when touched by a Phase 3 chunk file.
+- [auto F10] §7.4 — enrolCompleted/Failed/Partial context fields: all three closing events carry `{ totalLocationsProcessed, totalPagesProcessed }`; `enrolCompleted` adds `completedReason: 'all_pages_processed' | 'empty_page_early_exit'` for exit-path discrimination without reconstructing from progress events.
+- [user F11 → DEFER] no spec change — failure-playbook routed to tasks/todo.md as post-launch task ("Author OAuth-enrol + connection-token failure runbooks once first-agency monitoring is in place"). Lives at `docs/runbooks/*.md`, separate from the spec.
+
+### Integrity check (post-edit pass)
+
+- Forward references: §6 / §7.7 / §11 D.5 / §12.x all consistent with the new immutability and global-uniqueness directives. The new context fields (`completedReason`, `totalLocationsProcessed`, `totalPagesProcessed`, `BACKEND_UNAVAILABLE`, `supersedes`) are declared once in their canonical sections and referenced consistently.
+- Contradictions: zero. The four new "MUST NOT" directives (mutate AppError, override severity, update audit row, fail-closed RL) are non-overlapping and don't conflict with anything earlier.
+- Missing inputs/outputs: §15 file inventory unchanged — no new files in this round (all edits tighten existing contracts).
+- Issues found this round: 0 mechanical, 0 directional.
+- Integrity-check findings this round: auto: 0, escalated: 0.
+
+### Round 4 summary
+
+- **Auto-accepted (technical):** 10 applied, 0 rejected, 0 deferred.
+- **User-decided (user-facing + technical-escalated):** 0 applied, 0 rejected, 1 deferred.
+
+Top theme: turn implied invariants and conventions into directives — globally-unique runId, immutable AppError + audit rows, severity bound at factory, opaque cursor, fail-open RL. Plus one observability uniformity (closing-event totals). The spec is now closed under the "every MUST is mechanism-backed" rule. ChatGPT verdict: **APPROVED — BUILD WITH CONFIDENCE** (0 blockers / 0 ambiguities / 0 missing mechanisms).
+
