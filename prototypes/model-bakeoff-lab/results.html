@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Results · Run #31 · Model Bake-off Lab · Synthetos Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Verdict banner */
+.verdict-banner {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid #86efac;
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex; align-items: flex-start; gap: 16px;
+  margin-bottom: 20px;
+}
+.verdict-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--green-600); color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+}
+.verdict-main { flex: 1; }
+.verdict-headline { font-size: 16px; font-weight: 700; color: #14532d; margin-bottom: 6px; letter-spacing: -0.02em; }
+.verdict-detail { font-size: 13px; color: #166534; line-height: 1.55; }
+.verdict-model-name {
+  font-family: 'JetBrains Mono', monospace;
+  background: #dcfce7; padding: 1px 7px; border-radius: 5px;
+  font-size: 12px; border: 1px solid #86efac;
+}
+.verdict-actions { display: flex; gap: 8px; align-items: flex-start; flex-shrink: 0; margin-top: 2px; }
+
+/* Results table (the core UI) */
+.results-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--sl-200); }
+.results-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  min-width: 840px;
+}
+.results-table th {
+  padding: 10px 14px;
+  font-size: 11px; font-weight: 600; color: var(--sl-500);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--sl-200);
+  background: var(--sl-50);
+  white-space: nowrap; cursor: pointer; user-select: none;
+}
+.results-table th:hover { color: var(--sl-800); }
+.results-table th .sort-arrow { color: var(--indigo-500); margin-left: 3px; }
+.results-table td { padding: 11px 14px; border-bottom: 1px solid var(--sl-100); vertical-align: middle; }
+.results-table tbody tr:last-child td { border-bottom: 0; }
+.results-table tbody tr:hover { background: var(--sl-50); cursor: pointer; }
+
+/* Winner row highlight */
+.results-table tbody tr.winner-row { background: #f0fdf4; }
+.results-table tbody tr.winner-row td:first-child {
+  border-left: 3px solid #10b981;
+  padding-left: 11px;
+}
+.results-table tbody tr.winner-row:hover { background: #dcfce7; }
+
+/* Model name cell */
+.model-cell .mc-name { font-size: 13px; font-weight: 600; color: var(--sl-900); font-family: 'JetBrains Mono', monospace; letter-spacing: -0.01em; }
+.model-cell .mc-meta { display: flex; gap: 4px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+.winner-tag {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: #dcfce7; color: #15803d; border-radius: 4px;
+  font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border: 1px solid #86efac; letter-spacing: 0.02em; text-transform: uppercase;
+}
+
+/* Quality bar in table */
+.q-wrap { display: flex; align-items: center; gap: 8px; }
+.q-track { width: 80px; height: 6px; background: var(--sl-100); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+.q-fill { height: 100%; border-radius: 999px; }
+.q-fill-hi  { background: var(--green-600); }
+.q-fill-mid { background: var(--amber-600); }
+.q-fill-lo  { background: var(--red-500); }
+.q-score { font-size: 13px; font-weight: 600; color: var(--sl-800); min-width: 34px; }
+
+/* Cost cell */
+.cost-cell { }
+.cost-cell .cv-main { font-size: 13px; font-weight: 600; color: var(--sl-800); }
+.cost-cell .cv-sub { font-size: 11px; color: var(--sl-500); margin-top: 2px; }
+.cost-cell .cv-proj {
+  font-size: 13px; font-weight: 600; color: var(--sky-700);
+  font-style: italic;
+}
+.cost-cell .cv-proj-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: var(--sky-50); color: var(--sky-700);
+  border: 1px dashed #7dd3fc; border-radius: 4px;
+  font-size: 10px; padding: 1px 5px; font-style: normal; font-weight: 600;
+  margin-left: 4px;
+}
+
+/* Latency cell */
+.lat-cell { font-size: 13px; color: var(--sl-700); }
+.lat-cell .lat-sub { font-size: 11px; color: var(--sl-400); display: block; margin-top: 2px; }
+
+/* Value score bar (composite) */
+.vs-wrap { display: flex; align-items: center; gap: 6px; }
+.vs-bar { width: 60px; height: 8px; background: var(--sl-100); border-radius: 999px; overflow: hidden; }
+.vs-fill { height: 100%; border-radius: 999px; background: var(--indigo-500); }
+.vs-score { font-size: 12px; font-weight: 600; color: var(--sl-800); }
+
+/* Error badge */
+.err-rate { font-size: 12px; }
+.err-rate.none { color: var(--green-700); }
+.err-rate.low  { color: var(--amber-700); }
+.err-rate.high { color: var(--red-700); }
+
+/* Sort toggle bar */
+.sort-bar {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 12px; flex-wrap: wrap;
+}
+.sort-chip {
+  padding: 5px 11px; border-radius: 20px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--sl-200); background: white; color: var(--sl-600);
+  cursor: pointer; transition: border-color 120ms, background 120ms, color 120ms;
+}
+.sort-chip:hover { border-color: var(--sl-300); color: var(--sl-800); }
+.sort-chip.active { border-color: var(--indigo-500); background: var(--indigo-50); color: var(--indigo-700); }
+
+/* Details toggle in each row */
+.details-toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--indigo-600); cursor: pointer;
+  text-decoration: none;
+  padding: 3px 0;
+}
+.details-toggle:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- App bar -->
+<div class="appbar">
+  <div class="logo">S</div>
+  <span class="product">Synthetos</span>
+  <div class="crumbs">
+    <span class="sep">/</span>
+    <a href="#">Admin</a>
+    <span class="sep">/</span>
+    <a href="index.html">Model Bake-off Lab</a>
+    <span class="sep">/</span>
+    <span>Run #31 · Results</span>
+  </div>
+  <div class="admin-badge">ADMIN ONLY</div>
+  <div class="right">
+    <div class="user-pill"><div class="av">AK</div>Alex Kim</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Results — CRM Email Response Quality</div>
+      <div class="page-sub">Run #31 · 5 models · 8 cases · completed in 47s · judge: Claude Sonnet 4.6</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary btn-sm">Export CSV</button>
+      <a href="index.html" class="btn btn-secondary btn-sm">New run</button>
+    </div>
+  </div>
+
+  <!-- Profitability verdict -->
+  <div class="verdict-banner">
+    <div class="verdict-icon">✓</div>
+    <div class="verdict-main">
+      <div class="verdict-headline">Recommended for this workload: <span class="verdict-model-name">deepseek-ai/deepseek-v4-flash</span></div>
+      <div class="verdict-detail">
+        Scores <strong>88.1%</strong> quality vs. Claude Sonnet 4.6's <strong>91.3%</strong> — a 3.2 point gap within acceptable tolerance for this workload.
+        At projected production cost of <strong>$0.00016 per run</strong>, it is <strong>18x cheaper</strong> than Sonnet and <strong>7x cheaper</strong> than GPT-5.4 for the same throughput.
+        DeepSeek V4 Pro matches Sonnet quality (90.8%) at 13x lower projected cost — use it where quality margin is tighter.
+      </div>
+    </div>
+    <div class="verdict-actions">
+      <button class="btn btn-secondary btn-sm">Set as default model</button>
+    </div>
+  </div>
+
+  <!-- Sort bar -->
+  <div class="sort-bar">
+    <span style="font-size:12px;color:var(--sl-500);font-weight:500">Sort by:</span>
+    <button class="sort-chip active" onclick="setSort(this)">Value score</button>
+    <button class="sort-chip" onclick="setSort(this)">Quality</button>
+    <button class="sort-chip" onclick="setSort(this)">Projected cost</button>
+    <button class="sort-chip" onclick="setSort(this)">Latency p50</button>
+    <button class="sort-chip" onclick="setSort(this)">Error rate</button>
+  </div>
+
+  <!-- Results table -->
+  <div class="results-wrap">
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th style="min-width:200px">Model</th>
+          <th>Quality <span class="sort-arrow">↓</span></th>
+          <th>Value score</th>
+          <th>Cost / run <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">(8 cases)</span></th>
+          <th>Latency p50</th>
+          <th>Tokens in/out</th>
+          <th>Error rate</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- Winner: deepseek-v4-flash -->
+        <tr class="winner-row" onclick="window.location='drill-down.html'">
+          <td>
+            <div class="model-cell">
+              <div class="mc-name">deepseek-ai/deepseek-v4-flash</div>
+              <div class="mc-meta">
+                <span class="provider-chip provider-nvidia">NIM</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="winner-tag">★ Recommended</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="q-wrap">
+              <div class="q-track"><div class="q-fill q-fill-hi" style="width:88%"></div></div>
+              <div class="q-score">88.1%</div>
+            </div>
+          </td>
+          <td>
+            <div class="vs-wrap">
+              <div class="vs-bar"><div class="vs-fill" style="width:97%"></div></div>
+              <div class="vs-score">97</div>
+            </div>
+          </td>
+          <td class="cost-cell">
+            <div class="cv-proj">$0.00016</div>
+            <div class="cv-sub">proj. · DeepSeek API price</div>
+          </td>
+          <td class="lat-cell">
+            1.14s
+            <span class="lat-sub">p95: 1.62s</span>
+          </td>
+          <td class="num muted text-sm">847 / 412</td>
+          <td class="err-rate none">0%</td>
+          <td>
+            <a href="drill-down.html" class="details-toggle">
+              Compare ↗
+            </a>
+          </td>
+        </tr>
+
+        <!-- deepseek-v4-pro -->
+        <tr onclick="window.location='drill-down.html'">
+          <td>
+            <div class="model-cell">
+              <div class="mc-name">deepseek-ai/deepseek-v4-pro</div>
+              <div class="mc-meta">
+                <span class="provider-chip provider-nvidia">NIM</span>
+                <span class="cap-tag cap-free">free trial</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="q-wrap">
+              <div class="q-track"><div class="q-fill q-fill-hi" style="width:90.8%"></div></div>
+              <div class="q-score">90.8%</div>
+            </div>
+          </td>
+          <td>
+            <div class="vs-wrap">
+              <div class="vs-bar"><div class="vs-fill" style="width:84%"></div></div>
+              <div class="vs-score">84</div>
+            </div>
+          </td>
+          <td class="cost-cell">
+            <div class="cv-proj">$0.00131</div>
+            <div class="cv-sub">proj. · DeepSeek API price</div>
+          </td>
+          <td class="lat-cell">
+            1.83s
+            <span class="lat-sub">p95: 2.41s</span>
+          </td>
+          <td class="num muted text-sm">856 / 428</td>
+          <td class="err-rate none">0%</td>
+          <td>
+            <a href="drill-down.html" class="details-toggle">Compare ↗</a>
+          </td>
+        </tr>
+
+        <!-- claude-sonnet-4-6 · highest quality -->
+        <tr onclick="window.location='drill-down.html'">
+          <td>
+            <div class="model-cell">
+              <div class="mc-name">claude-sonnet-4-6</div>
+              <div class="mc-meta">
+                <span class="provider-chip provider-anthropic">Anthropic</span>
+                <span class="cap-tag cap-paid">paid</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="q-wrap">
+              <div class="q-track"><div class="q-fill q-fill-hi" style="width:91.3%"></div></div>
+              <div class="q-score">91.3%</div>
+            </div>
+          </td>
+          <td>
+            <div class="vs-wrap">
+              <div class="vs-bar"><div class="vs-fill" style="width:72%"></div></div>
+              <div class="vs-score">72</div>
+            </div>
+          </td>
+          <td class="cost-cell">
+            <div class="cv-main">$0.00287</div>
+            <div class="cv-sub">actual · paid provider</div>
+          </td>
+          <td class="lat-cell">
+            1.55s
+            <span class="lat-sub">p95: 2.08s</span>
+          </td>
+          <td class="num muted text-sm">847 / 390</td>
+          <td class="err-rate none">0%</td>
+          <td>
+            <a href="drill-down.html" class="details-toggle">Compare ↗</a>
+          </td>
+        </tr>
+
+        <!-- nemotron-super -->
+        <tr onclick="window.location='drill-down.html'">
+          <td>
+            <div class="model-cell">
+              <div class="mc-name">nvidia/llama-3.3-nemotron-super-49b-v1.5</div>
+              <div class="mc-meta">
+                <span class="provider-chip provider-nvidia">NIM</span>
+                <span class="cap-tag cap-free">free trial</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="q-wrap">
+              <div class="q-track"><div class="q-fill q-fill-mid" style="width:82%"></div></div>
+              <div class="q-score">82.0%</div>
+            </div>
+          </td>
+          <td>
+            <div class="vs-wrap">
+              <div class="vs-bar"><div class="vs-fill" style="width:90%"></div></div>
+              <div class="vs-score">90</div>
+            </div>
+          </td>
+          <td class="cost-cell">
+            <div class="cv-proj">$0.00006</div>
+            <div class="cv-sub">proj. · Llama 3.3 70B equiv.</div>
+          </td>
+          <td class="lat-cell">
+            2.41s
+            <span class="lat-sub">p95: 3.92s</span>
+          </td>
+          <td class="num muted text-sm">851 / 398</td>
+          <td class="err-rate none">0%</td>
+          <td>
+            <a href="drill-down.html" class="details-toggle">Compare ↗</a>
+          </td>
+        </tr>
+
+        <!-- gemini-2.5-pro -->
+        <tr onclick="window.location='drill-down.html'">
+          <td>
+            <div class="model-cell">
+              <div class="mc-name">openrouter/google/gemini-2.5-pro</div>
+              <div class="mc-meta">
+                <span class="provider-chip provider-openrouter">OpenRouter</span>
+                <span class="cap-tag cap-paid">paid</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="q-wrap">
+              <div class="q-track"><div class="q-fill q-fill-hi" style="width:87.4%"></div></div>
+              <div class="q-score">87.4%</div>
+            </div>
+          </td>
+          <td>
+            <div class="vs-wrap">
+              <div class="vs-bar"><div class="vs-fill" style="width:66%"></div></div>
+              <div class="vs-score">66</div>
+            </div>
+          </td>
+          <td class="cost-cell">
+            <div class="cv-main">$0.00194</div>
+            <div class="cv-sub">actual · paid provider</div>
+          </td>
+          <td class="lat-cell">
+            2.87s
+            <span class="lat-sub">p95: 4.33s</span>
+          </td>
+          <td class="num muted text-sm">898 / 441</td>
+          <td class="err-rate none">0%</td>
+          <td>
+            <a href="drill-down.html" class="details-toggle">Compare ↗</a>
+          </td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Cost legend -->
+  <div style="margin-top:10px;padding:10px 14px;background:var(--sl-50);border:1px solid var(--sl-100);border-radius:8px;font-size:12px;color:var(--sl-500);display:flex;gap:20px;flex-wrap:wrap;">
+    <span><strong style="color:var(--sl-800)">Actual cost</strong> — real spend billed by the provider for this run.</span>
+    <span><span style="color:var(--sky-700);font-weight:600;font-style:italic">Projected cost</span> — free-trial models billed $0 for this run; projected cost uses the model's published commercial API price to estimate production spend.</span>
+  </div>
+
+  <!-- Quality score legend -->
+  <div style="margin-top:8px;padding:10px 14px;background:var(--sl-50);border:1px solid var(--sl-100);border-radius:8px;font-size:12px;color:var(--sl-500);display:flex;gap:20px;flex-wrap:wrap;">
+    <span><strong style="color:var(--sl-800)">Quality score</strong> — LLM-judge rated each output 1–10 against per-case criteria. Score = average across all 8 cases, normalised to 100%.</span>
+    <span><strong style="color:var(--sl-800)">Value score</strong> — composite: (quality / projected_cost_per_run). Sorted descending by default.</span>
+  </div>
+
+  <!-- Re-run strip -->
+  <div style="margin-top:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <a href="index.html" class="btn btn-secondary btn-sm">New run</a>
+    <button class="btn btn-secondary btn-sm">Re-run with added models</button>
+    <button class="btn btn-secondary btn-sm">Clone and adjust parameters</button>
+    <button class="btn btn-ghost btn-sm" style="margin-left:auto">Share results link</button>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+function setSort(btn) {
+  document.querySelectorAll('.sort-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

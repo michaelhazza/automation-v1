@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Suite Editor · Model Bake-off Lab · Synthetos Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Two-panel editor layout */
+.editor-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) { .editor-layout { grid-template-columns: 1fr; } }
+
+/* Case list panel */
+.case-list-panel {
+  background: white; border: 1px solid var(--sl-200); border-radius: 10px;
+  overflow: hidden; position: sticky; top: 64px;
+}
+.case-list-head {
+  padding: 12px 16px; border-bottom: 1px solid var(--sl-100);
+  background: var(--sl-50); display: flex; align-items: center; justify-content: space-between;
+}
+.case-list-head h2 { font-size: 13px; font-weight: 600; color: var(--sl-900); }
+.case-list-scroll { max-height: calc(100vh - 200px); overflow-y: auto; }
+.case-list-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--sl-100);
+  cursor: pointer; transition: background 100ms;
+  position: relative;
+}
+.case-list-item:last-child { border-bottom: 0; }
+.case-list-item:hover { background: var(--sl-50); }
+.case-list-item.active { background: var(--indigo-50); border-right: 3px solid var(--indigo-500); }
+.case-num {
+  width: 24px; height: 24px; border-radius: 6px;
+  background: var(--sl-100); color: var(--sl-600);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.case-list-item.active .case-num { background: var(--indigo-600); color: white; }
+.case-list-info { flex: 1; min-width: 0; }
+.case-list-title { font-size: 12px; font-weight: 500; color: var(--sl-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.case-list-type { font-size: 11px; color: var(--sl-400); margin-top: 1px; }
+.case-drag-handle { color: var(--sl-300); cursor: grab; font-size: 14px; flex-shrink: 0; }
+.case-drag-handle:hover { color: var(--sl-500); }
+.case-delete {
+  color: var(--sl-300); font-size: 14px; cursor: pointer;
+  display: none; flex-shrink: 0;
+}
+.case-list-item:hover .case-delete { display: block; }
+.case-delete:hover { color: var(--red-500); }
+
+/* Case editor panel */
+.case-editor { }
+.case-editor-card {
+  background: white; border: 1px solid var(--sl-200); border-radius: 10px;
+  overflow: hidden; margin-bottom: 12px;
+}
+.ced-head {
+  padding: 14px 18px; border-bottom: 1px solid var(--sl-100);
+  background: var(--sl-50); display: flex; align-items: center; gap: 10px;
+}
+.ced-head h2 { font-size: 14px; font-weight: 600; color: var(--sl-900); }
+.ced-body { padding: 18px; }
+
+/* Assertion type picker */
+.assertion-type-group { display: flex; gap: 6px; margin-bottom: 14px; }
+.at-btn {
+  flex: 1; padding: 8px 10px; border: 1px solid var(--sl-200);
+  border-radius: 7px; background: white; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--sl-600);
+  text-align: center; transition: border-color 120ms, background 120ms;
+}
+.at-btn:hover { border-color: var(--sl-300); }
+.at-btn.active { border-color: var(--indigo-500); background: var(--indigo-50); color: var(--indigo-700); }
+
+/* Tool schema editor */
+.schema-editor {
+  background: var(--sl-900); border-radius: 7px; padding: 14px;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px;
+  color: #e2e8f0; line-height: 1.65;
+}
+.schema-editor .se-comment { color: #64748b; }
+.schema-editor .se-key { color: #fbbf24; }
+.schema-editor .se-val { color: #86efac; }
+.schema-editor .se-type { color: #a5f3fc; }
+
+/* Inline test preview */
+.preview-box {
+  background: var(--sl-50); border: 1px solid var(--sl-100);
+  border-radius: 8px; padding: 12px 14px; font-size: 12px;
+  color: var(--sl-600); line-height: 1.6; min-height: 60px;
+}
+.preview-box.pass { border-color: #86efac; background: #f0fdf4; color: #166534; }
+.preview-box.fail { border-color: #fecaca; background: var(--red-50); color: var(--red-700); }
+
+/* Tags / category chips for suite meta */
+.tag-input-wrap { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--indigo-50); color: var(--indigo-700);
+  border: 1px solid var(--indigo-200); border-radius: 5px;
+  padding: 2px 8px; font-size: 12px;
+}
+.tag-chip .remove { cursor: pointer; color: var(--indigo-400); font-size: 14px; line-height: 1; }
+.tag-chip .remove:hover { color: var(--red-500); }
+</style>
+</head>
+<body>
+
+<!-- App bar -->
+<div class="appbar">
+  <div class="logo">S</div>
+  <span class="product">Synthetos</span>
+  <div class="crumbs">
+    <span class="sep">/</span>
+    <a href="#">Admin</a>
+    <span class="sep">/</span>
+    <a href="index.html">Model Bake-off Lab</a>
+    <span class="sep">/</span>
+    <span>Suite Editor</span>
+  </div>
+  <div class="admin-badge">ADMIN ONLY</div>
+  <div class="right">
+    <div class="user-pill"><div class="av">AK</div>Alex Kim</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Suite Editor</div>
+      <div class="page-sub">Define or edit test cases for a benchmark suite.</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a href="index.html" class="btn btn-ghost btn-sm">Cancel</a>
+      <button class="btn btn-primary">Save suite</button>
+    </div>
+  </div>
+
+  <!-- Suite metadata -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head"><h2>Suite Details</h2></div>
+    <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="field">
+        <label class="field-label">Suite name</label>
+        <input class="field-input" type="text" value="CRM Email Response Quality">
+      </div>
+      <div class="field">
+        <label class="field-label">Workload category</label>
+        <select class="field-select">
+          <option selected>CRM / Sales</option>
+          <option>Customer support</option>
+          <option>Document processing</option>
+          <option>Code generation</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="field" style="grid-column:1/-1">
+        <label class="field-label">Description (optional)</label>
+        <input class="field-input" type="text" value="8 cases covering tone, summarisation, tool-call accuracy, and refusal handling for CRM agent workloads.">
+      </div>
+    </div>
+  </div>
+
+  <div class="editor-layout">
+
+    <!-- Left: case list -->
+    <div class="case-list-panel">
+      <div class="case-list-head">
+        <h2>Cases <span style="font-size:11px;color:var(--sl-400);font-weight:400">(8)</span></h2>
+        <button class="btn btn-ghost btn-sm" onclick="addCase()">+ Add</button>
+      </div>
+      <div class="case-list-scroll">
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">1</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Formal reply to angry customer</div>
+            <div class="case-list-type">LLM judge</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item active" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">2</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Tool-call: extract structured fields</div>
+            <div class="case-list-type">Tool-call + assertion</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">3</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Summarise thread to 3 bullets</div>
+            <div class="case-list-type">LLM judge</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">4</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Refusal: out-of-scope request</div>
+            <div class="case-list-type">Deterministic regex</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">5</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Identify when to escalate</div>
+            <div class="case-list-type">LLM judge</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">6</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Multi-turn context maintenance</div>
+            <div class="case-list-type">LLM judge</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">7</div>
+          <div class="case-list-info">
+            <div class="case-list-title">VIP informal tone</div>
+            <div class="case-list-type">LLM judge</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+        <div class="case-list-item" onclick="selectCase(this)">
+          <span class="case-drag-handle">⠿</span>
+          <div class="case-num">8</div>
+          <div class="case-list-info">
+            <div class="case-list-title">Ambiguous intent edge case</div>
+            <div class="case-list-type">LLM judge</div>
+          </div>
+          <span class="case-delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+
+      </div>
+    </div><!-- /case-list-panel -->
+
+    <!-- Right: case editor -->
+    <div class="case-editor">
+
+      <!-- Case prompt -->
+      <div class="case-editor-card">
+        <div class="ced-head">
+          <div style="width:24px;height:24px;background:var(--indigo-600);color:white;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</div>
+          <h2>Tool-call: extract structured fields</h2>
+        </div>
+        <div class="ced-body">
+          <div class="field">
+            <label class="field-label">Case title</label>
+            <input class="field-input" type="text" value="Tool-call: extract structured fields">
+          </div>
+          <div class="field">
+            <label class="field-label">System prompt</label>
+            <textarea class="field-input" style="min-height:70px;resize:vertical;padding:8px 11px;line-height:1.5;font-family:inherit">You are a CRM assistant. Extract the following structured fields from the customer email and return them using the extract_fields tool: customer_name, company, sentiment, urgency, issue_category.</textarea>
+          </div>
+          <div class="field">
+            <label class="field-label">User message / prompt</label>
+            <textarea class="field-input" style="min-height:110px;resize:vertical;padding:8px 11px;line-height:1.5;font-family:inherit">"Hi, I'm Sarah Chen from Meridian Corp. Our contract renewal is in 3 days and we still haven't received the pricing update your team promised two weeks ago. This is extremely urgent — we have a board sign-off deadline."</textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tool schema -->
+      <div class="case-editor-card">
+        <div class="ced-head">
+          <h2>Tool Definition</h2>
+          <div style="font-size:12px;color:var(--sl-500)">Optional — required only for tool-call test cases</div>
+        </div>
+        <div class="ced-body">
+          <div class="schema-editor">
+            <div class="se-comment">// Tool schema passed to the model</div>
+            {<br>
+            &nbsp;&nbsp;<span class="se-key">"name"</span>: <span class="se-val">"extract_fields"</span>,<br>
+            &nbsp;&nbsp;<span class="se-key">"description"</span>: <span class="se-val">"Extract structured fields from a customer email"</span>,<br>
+            &nbsp;&nbsp;<span class="se-key">"parameters"</span>: {<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="se-key">"customer_name"</span>: { <span class="se-key">"type"</span>: <span class="se-type">"string"</span> },<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="se-key">"company"</span>: { <span class="se-key">"type"</span>: <span class="se-type">"string"</span> },<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="se-key">"sentiment"</span>: { <span class="se-key">"type"</span>: <span class="se-type">"enum"</span>, <span class="se-key">"values"</span>: <span class="se-val">["positive","neutral","negative"]</span> },<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="se-key">"urgency"</span>: { <span class="se-key">"type"</span>: <span class="se-type">"enum"</span>, <span class="se-key">"values"</span>: <span class="se-val">["low","medium","high"]</span> },<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="se-key">"issue_category"</span>: { <span class="se-key">"type"</span>: <span class="se-type">"string"</span> }<br>
+            &nbsp;&nbsp;}<br>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- Assertion / expected output -->
+      <div class="case-editor-card">
+        <div class="ced-head">
+          <h2>Expected Output / Assertion</h2>
+        </div>
+        <div class="ced-body">
+          <div class="assertion-type-group">
+            <div class="at-btn" onclick="setAssertion(this)">
+              <div style="font-size:14px">🔍</div>
+              <div>Regex match</div>
+            </div>
+            <div class="at-btn active" onclick="setAssertion(this)">
+              <div style="font-size:14px">🔧</div>
+              <div>Tool-call match</div>
+            </div>
+            <div class="at-btn" onclick="setAssertion(this)">
+              <div style="font-size:14px">⚖️</div>
+              <div>LLM judge criteria</div>
+            </div>
+            <div class="at-btn" onclick="setAssertion(this)">
+              <div style="font-size:14px">👍</div>
+              <div>Human rating</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Expected tool call arguments</label>
+            <div style="font-size:11px;color:var(--sl-500);margin-bottom:6px">Model must call <code style="background:var(--sl-100);padding:1px 4px;border-radius:3px">extract_fields</code> with these exact field values (partial match is also supported).</div>
+            <textarea class="field-input" style="min-height:100px;font-family:'JetBrains Mono',monospace;font-size:12px;resize:vertical;padding:8px 11px;line-height:1.6">{
+  "customer_name": "Sarah Chen",
+  "company": "Meridian Corp",
+  "sentiment": "negative",
+  "urgency": "high",
+  "issue_category": "pricing / renewal"
+}</textarea>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Match mode</label>
+            <select class="field-select" style="max-width:220px">
+              <option selected>Exact match (all fields required)</option>
+              <option>Partial match (required fields only)</option>
+              <option>Semantic match (LLM judge)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Case actions -->
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary btn-sm">Duplicate case</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red-600)">Delete case</button>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto">Preview prompt →</button>
+      </div>
+
+    </div><!-- /case-editor -->
+  </div><!-- /editor-layout -->
+
+  <!-- Footer actions -->
+  <div style="margin-top:20px;padding:14px 18px;background:white;border:1px solid var(--sl-200);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <div style="font-size:13px;color:var(--sl-500)">
+      8 cases · LLM judge (5), tool-call assertion (1), regex (1), human rating (1)
+    </div>
+    <div style="display:flex;gap:8px;">
+      <a href="index.html" class="btn btn-ghost btn-sm">Cancel</a>
+      <button class="btn btn-primary">Save suite</button>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+function selectCase(item) {
+  document.querySelectorAll('.case-list-item').forEach(i => i.classList.remove('active'));
+  item.classList.add('active');
+}
+function addCase() {
+  // In a real implementation, this would add a new case
+}
+function setAssertion(btn) {
+  document.querySelectorAll('.at-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

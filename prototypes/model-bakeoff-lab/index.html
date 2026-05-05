@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Model Bake-off Lab · Synthetos Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Index-page-specific layout */
+.setup-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1000px) { .setup-layout { grid-template-columns: 1fr; } }
+
+/* Sticky run CTA panel */
+.run-panel {
+  position: sticky;
+  top: 72px;
+  background: white;
+  border: 1px solid var(--sl-200);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.run-panel-head { padding: 14px 18px; border-bottom: 1px solid var(--sl-100); }
+.run-panel-body { padding: 18px; }
+.run-summary-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; color: var(--sl-600);
+  padding: 5px 0; border-bottom: 1px dashed var(--sl-100);
+}
+.run-summary-row:last-child { border-bottom: none; }
+.run-summary-row strong { color: var(--sl-800); font-weight: 600; }
+.model-count-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--indigo-600); color: white;
+  border-radius: 999px; width: 20px; height: 20px;
+  font-size: 11px; font-weight: 700;
+}
+.run-total-cost {
+  padding: 12px 0 0;
+  font-size: 12px; color: var(--sl-500); text-align: center;
+}
+.run-total-cost strong { color: var(--sl-800); font-size: 13px; }
+
+/* Model picker search + filter bar */
+.picker-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sl-100);
+  background: var(--sl-50);
+}
+.picker-search-wrap { position: relative; flex: 1; }
+.picker-search-wrap svg {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--sl-400); pointer-events: none;
+}
+.picker-search {
+  width: 100%; padding: 7px 10px 7px 32px;
+  border: 1px solid var(--sl-200); border-radius: 7px;
+  font-size: 13px; background: white; font-family: inherit;
+  color: var(--sl-800); outline: none; box-sizing: border-box;
+}
+.picker-search:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px var(--indigo-100); }
+.filter-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 11px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--sl-200); background: white; color: var(--sl-600);
+  cursor: pointer; white-space: nowrap; transition: border-color 120ms, background 120ms;
+}
+.filter-btn:hover { border-color: var(--sl-300); background: var(--sl-50); }
+.filter-btn.active { border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700); }
+
+/* Model list scroll area */
+.model-list {
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.model-list::-webkit-scrollbar { width: 4px; }
+.model-list::-webkit-scrollbar-track { background: transparent; }
+.model-list::-webkit-scrollbar-thumb { background: var(--sl-200); border-radius: 2px; }
+
+/* Suite picker tabs */
+.suite-mode-tabs {
+  display: flex; gap: 0;
+  border-bottom: 1px solid var(--sl-200);
+  padding: 0 18px;
+  background: var(--sl-50);
+}
+.suite-mode-tabs button {
+  padding: 10px 14px; font-size: 12px; font-weight: 500;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--sl-500); cursor: pointer; transition: color 120ms;
+  margin-bottom: -1px;
+}
+.suite-mode-tabs button:hover { color: var(--sl-800); }
+.suite-mode-tabs button.active { color: var(--sl-900); border-bottom-color: var(--indigo-600); font-weight: 600; }
+
+.suite-pane { padding: 16px 18px; }
+.suite-pane.hidden { display: none; }
+.suite-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* Suite card */
+.suite-card {
+  border: 1px solid var(--sl-200); border-radius: 9px; padding: 13px 14px;
+  background: white; cursor: pointer; transition: border-color 120ms, box-shadow 120ms;
+  position: relative;
+}
+.suite-card:hover { border-color: var(--sl-300); }
+.suite-card.selected { border-color: var(--indigo-500); box-shadow: 0 0 0 3px var(--indigo-100); }
+.suite-card .suite-name { font-size: 13px; font-weight: 600; color: var(--sl-900); padding-right: 20px; }
+.suite-card .suite-meta { font-size: 11px; color: var(--sl-500); margin-top: 4px; }
+.suite-card .suite-cases { font-size: 11px; color: var(--sl-400); margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.suite-card .radio-dot {
+  position: absolute; top: 12px; right: 12px;
+  width: 14px; height: 14px; border-radius: 999px; border: 2px solid var(--sl-300);
+}
+.suite-card.selected .radio-dot {
+  border-color: var(--indigo-600);
+  background: radial-gradient(circle, var(--indigo-600) 4px, white 5px);
+}
+
+/* Judge mode selector */
+.judge-mode-group { display: flex; gap: 8px; }
+.judge-btn {
+  flex: 1; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--sl-200);
+  background: white; cursor: pointer; text-align: center;
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
+}
+.judge-btn:hover { border-color: var(--sl-300); }
+.judge-btn.active { border-color: var(--indigo-500); background: var(--indigo-50); box-shadow: 0 0 0 3px var(--indigo-100); }
+.judge-btn .jb-icon { font-size: 18px; display: block; margin-bottom: 4px; }
+.judge-btn .jb-label { font-size: 12px; font-weight: 600; color: var(--sl-800); display: block; }
+.judge-btn .jb-sub   { font-size: 11px; color: var(--sl-500); display: block; margin-top: 2px; }
+.judge-btn.active .jb-label { color: var(--indigo-700); }
+</style>
+</head>
+<body>
+
+<!-- App bar -->
+<div class="appbar">
+  <div class="logo">S</div>
+  <span class="product">Synthetos</span>
+  <div class="crumbs">
+    <span class="sep">/</span>
+    <a href="#">Admin</a>
+    <span class="sep">/</span>
+    <span>Model Bake-off Lab</span>
+  </div>
+  <div class="admin-badge">ADMIN ONLY</div>
+  <div class="right">
+    <div class="user-pill">
+      <div class="av">AK</div>
+      Alex Kim
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Model Bake-off Lab</div>
+      <div class="page-sub">Compare models across providers on quality, latency, and projected production cost.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <a href="#" class="btn btn-ghost btn-sm">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+        Past runs
+      </a>
+    </div>
+  </div>
+
+  <div class="setup-layout">
+
+    <!-- LEFT COLUMN: Suite + judge mode -->
+    <div>
+
+      <!-- Test suite -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-head">
+          <div>
+            <h2>Test Suite</h2>
+            <div class="sub">Select or create the prompts to run</div>
+          </div>
+          <a href="suite-editor.html" class="btn btn-ghost btn-sm">+ New suite</a>
+        </div>
+        <div class="suite-mode-tabs">
+          <button class="active" onclick="showTab('saved')">Saved suites</button>
+          <button onclick="showTab('agent-import')">Import from agent run</button>
+        </div>
+
+        <div id="tab-saved" class="suite-pane">
+          <div class="suite-grid">
+            <div class="suite-card selected" onclick="selectSuite(this)">
+              <div class="radio-dot"></div>
+              <div class="suite-name">CRM Email Response Quality</div>
+              <div class="suite-meta">8 test cases</div>
+              <div class="suite-cases">
+                <span class="cap-tag cap-tools">tool-calling</span>
+                <span class="cap-tag cap-agent">tone</span>
+              </div>
+            </div>
+            <div class="suite-card" onclick="selectSuite(this)">
+              <div class="radio-dot"></div>
+              <div class="suite-name">Support Ticket Triage</div>
+              <div class="suite-meta">12 test cases</div>
+              <div class="suite-cases">
+                <span class="cap-tag cap-tools">tool-calling</span>
+              </div>
+            </div>
+            <div class="suite-card" onclick="selectSuite(this)">
+              <div class="radio-dot"></div>
+              <div class="suite-name">Document Summarisation</div>
+              <div class="suite-meta">6 test cases</div>
+              <div class="suite-cases">
+                <span class="cap-tag cap-long">long context</span>
+              </div>
+            </div>
+            <div class="suite-card" onclick="selectSuite(this)">
+              <div class="radio-dot"></div>
+              <div class="suite-name">Structured Data Extraction</div>
+              <div class="suite-meta">10 test cases</div>
+              <div class="suite-cases">
+                <span class="cap-tag cap-tools">tool-calling</span>
+              </div>
+            </div>
+          </div>
+          <!-- Selected suite preview -->
+          <div style="margin-top:14px; padding:12px 14px; background:var(--sl-50); border:1px solid var(--sl-200); border-radius:8px;">
+            <div style="font-size:12px; font-weight:600; color:var(--sl-700); margin-bottom:8px;">CRM Email Response Quality — 8 test cases</div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <div style="display:flex;gap:8px;font-size:12px;color:var(--sl-600);align-items:center">
+                <span style="width:6px;height:6px;border-radius:999px;background:var(--indigo-400);flex-shrink:0;display:inline-block"></span>
+                Tone: formal reply to angry customer
+              </div>
+              <div style="display:flex;gap:8px;font-size:12px;color:var(--sl-600);align-items:center">
+                <span style="width:6px;height:6px;border-radius:999px;background:var(--indigo-400);flex-shrink:0;display:inline-block"></span>
+                Tool-call: extract structured fields from email body
+              </div>
+              <div style="display:flex;gap:8px;font-size:12px;color:var(--sl-600);align-items:center">
+                <span style="width:6px;height:6px;border-radius:999px;background:var(--indigo-400);flex-shrink:0;display:inline-block"></span>
+                Summarise thread to 3 bullet points
+              </div>
+              <div style="display:flex;gap:8px;font-size:12px;color:var(--sl-500);align-items:center">
+                <span style="width:6px;height:6px;border-radius:999px;background:var(--sl-300);flex-shrink:0;display:inline-block"></span>
+                + 5 more cases
+                <a href="suite-editor.html" style="color:var(--indigo-600);font-size:11px;text-decoration:none;">View all</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-agent-import" class="suite-pane hidden">
+          <div style="text-align:center;padding:24px 0;color:var(--sl-500);font-size:13px;">
+            <div style="font-size:28px;margin-bottom:8px;">📋</div>
+            <div style="font-weight:500;color:var(--sl-700);margin-bottom:6px;">Import from a recent agent run</div>
+            <div style="font-size:12px;margin-bottom:14px;">Pull real prompts from production runs to use as ground-truth test cases.</div>
+            <select class="field-select" style="max-width:280px;margin:0 auto;">
+              <option>Select agent run...</option>
+              <option>CRM Agent · run #1847 · 2h ago</option>
+              <option>Support Triage · run #1839 · 6h ago</option>
+              <option>Lead Qualifier · run #1821 · 1d ago</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quality scoring mode -->
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Quality Scoring</h2>
+            <div class="sub">How outputs are evaluated</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="judge-mode-group">
+            <div class="judge-btn" onclick="selectJudge(this)">
+              <span class="jb-icon">🔍</span>
+              <span class="jb-label">Deterministic</span>
+              <span class="jb-sub">Regex / JSON match</span>
+            </div>
+            <div class="judge-btn active" onclick="selectJudge(this)">
+              <span class="jb-icon">⚖️</span>
+              <span class="jb-label">LLM Judge</span>
+              <span class="jb-sub">Default · most flexible</span>
+            </div>
+            <div class="judge-btn" onclick="selectJudge(this)">
+              <span class="jb-icon">👍</span>
+              <span class="jb-label">Human Rating</span>
+              <span class="jb-sub">Thumbs up / down</span>
+            </div>
+          </div>
+          <!-- Judge model selector (shown for LLM mode) -->
+          <div id="judge-model-select" style="margin-top:14px;">
+            <label class="field-label">Judge model</label>
+            <select class="field-select">
+              <option>Claude Sonnet 4.6 (recommended)</option>
+              <option>Claude Haiku 4.5 (fastest)</option>
+              <option>GPT-5.4</option>
+            </select>
+            <div class="field-hint">The judge model rates each output 1-10 against the expected criteria. Judge cost is included in the run total.</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN: Model picker -->
+    <div>
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <div>
+            <h2>Select Models</h2>
+            <div class="sub">Choose from any combination of providers</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="model-count-badge" id="model-count">5</span>
+            <span style="font-size:12px;color:var(--sl-500);">selected</span>
+          </div>
+        </div>
+
+        <!-- Toolbar: search + filters -->
+        <div class="picker-toolbar">
+          <div class="picker-search-wrap">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input class="picker-search" type="text" placeholder="Search models...">
+          </div>
+          <button class="filter-btn active" onclick="toggleFilter(this,'tools')">
+            🛠 Tool-calling
+          </button>
+          <button class="filter-btn" onclick="toggleFilter(this,'agentic')">
+            🤖 Agentic
+          </button>
+          <button class="filter-btn" onclick="toggleFilter(this,'free')">
+            🆓 Free tier
+          </button>
+        </div>
+
+        <!-- Model list -->
+        <div class="model-list" id="model-list">
+
+          <!-- Anthropic -->
+          <div class="provider-section-head">
+            <span class="provider-chip provider-anthropic">Anthropic</span>
+            <span class="text-xs muted">3 models · paid</span>
+          </div>
+
+          <label class="model-row selected" onclick="toggleRow(this)">
+            <input type="checkbox" checked>
+            <div style="flex:1;min-width:0">
+              <div class="model-name">claude-sonnet-4-6</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">200k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$3 / $15</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">claude-opus-4-7</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">200k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$15 / $75</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">claude-haiku-4-5</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">200k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$0.80 / $4</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+          <!-- OpenAI -->
+          <div class="provider-section-head">
+            <span class="provider-chip provider-openai">OpenAI</span>
+            <span class="text-xs muted">2 models · paid</span>
+          </div>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">gpt-5.4</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$5 / $15</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">gpt-5.4-mini</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$0.15 / $0.60</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+          <!-- NVIDIA NIM -->
+          <div class="provider-section-head">
+            <span class="provider-chip provider-nvidia">NVIDIA NIM</span>
+            <span class="text-xs muted">9 models · free trial · projected cost shown</span>
+          </div>
+          <div style="padding: 4px 14px 2px; font-size:11px; color:var(--sky-700); background:var(--sky-50); border-bottom:1px solid #e0f2fe; display:flex;align-items:center;gap:6px;">
+            <span>ℹ</span> NIM trial usage is free. Projected cost uses published commercial API prices for production planning.
+          </div>
+
+          <label class="model-row selected" onclick="toggleRow(this)">
+            <input type="checkbox" checked>
+            <div style="flex:1;min-width:0">
+              <div class="model-name">deepseek-ai/deepseek-v4-flash</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.27/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">DeepSeek API price</span>
+            </div>
+          </label>
+
+          <label class="model-row selected" onclick="toggleRow(this)">
+            <input type="checkbox" checked>
+            <div style="flex:1;min-width:0">
+              <div class="model-name">deepseek-ai/deepseek-v4-pro</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $2.19/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">DeepSeek API price</span>
+            </div>
+          </label>
+
+          <label class="model-row selected" onclick="toggleRow(this)">
+            <input type="checkbox" checked>
+            <div style="flex:1;min-width:0">
+              <div class="model-name">nvidia/llama-3.3-nemotron-super-49b-v1.5</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.13/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">Llama 3.3 70B equiv.</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">nvidia/llama-3.1-nemotron-ultra-253b-v1</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.54/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">based on Llama 3.1 405B</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">moonshotai/kimi-k2.6</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.60/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">Moonshot API price</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">qwen/qwen3-coder-480b-a35b-instruct</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">32k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.30/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">Qwen API price</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">meta/llama-4-maverick-17b-128e-instruct</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.19/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">via Groq pricing</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">mistralai/mistral-large-3-675b-instruct-2512</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $2.00/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">Mistral API price</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">z-ai/glm-4.7</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-free">free trial</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:11px;color:var(--sky-700);font-weight:600;font-style:italic;">proj. $0.14/M</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">GLM API price</span>
+            </div>
+          </label>
+
+          <!-- OpenRouter -->
+          <div class="provider-section-head">
+            <span class="provider-chip provider-openrouter">OpenRouter</span>
+            <span class="text-xs muted">2 models · paid</span>
+          </div>
+
+          <label class="model-row selected" onclick="toggleRow(this)">
+            <input type="checkbox" checked>
+            <div style="flex:1;min-width:0">
+              <div class="model-name">openrouter/google/gemini-2.5-pro</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-agent">agentic</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">1M ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$1.25 / $10</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+          <label class="model-row" onclick="toggleRow(this)">
+            <input type="checkbox">
+            <div style="flex:1;min-width:0">
+              <div class="model-name">openrouter/meta-llama/llama-4-maverick</div>
+              <div class="model-meta">
+                <span class="cap-tag cap-tools">tools</span>
+                <span class="cap-tag cap-paid">paid</span>
+                <span class="cap-tag cap-long">128k ctx</span>
+              </div>
+            </div>
+            <div class="model-price">
+              <span style="font-size:12px;font-weight:600;color:var(--sl-800);">$0.22 / $0.88</span>
+              <span style="font-size:10px;color:var(--sl-400);display:block">per M tokens in/out</span>
+            </div>
+          </label>
+
+        </div><!-- /model-list -->
+      </div>
+
+    </div><!-- /right col -->
+
+  </div><!-- /setup-layout -->
+
+  <!-- Run CTA — full width bottom bar -->
+  <div style="position:sticky;bottom:0;margin-top:20px;background:white;border:1px solid var(--sl-200);border-radius:10px;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;box-shadow:0 -4px 12px rgba(15,23,42,0.06);">
+    <div style="display:flex;align-items:center;gap:20px;font-size:13px;color:var(--sl-600);">
+      <span><strong style="color:var(--sl-900)">5 models</strong> selected</span>
+      <span>•</span>
+      <span><strong style="color:var(--sl-900)">8 test cases</strong> per model</span>
+      <span>•</span>
+      <span>40 total completions</span>
+      <span>•</span>
+      <span>Est. cost: <strong style="color:var(--sl-800)">~$0.06</strong> <span style="font-size:11px;color:var(--sl-400)">(paid models only)</span></span>
+      <span>•</span>
+      <span>Judge: <strong style="color:var(--sl-800)">Claude Sonnet 4.6</strong></span>
+    </div>
+    <a href="running.html" class="btn btn-primary btn-lg">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Run Benchmark
+    </a>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.suite-pane').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.suite-mode-tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.remove('hidden');
+  event.target.classList.add('active');
+}
+
+function selectSuite(card) {
+  document.querySelectorAll('.suite-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+}
+
+function toggleRow(label) {
+  const cb = label.querySelector('input[type=checkbox]');
+  // Let browser handle checkbox toggle naturally via label
+  // Just update visual after a tick
+  setTimeout(() => {
+    if (cb.checked) { label.classList.add('selected'); }
+    else { label.classList.remove('selected'); }
+    updateCount();
+  }, 10);
+}
+
+function updateCount() {
+  const count = document.querySelectorAll('.model-row input:checked').length;
+  document.getElementById('model-count').textContent = count;
+}
+
+function selectJudge(btn) {
+  document.querySelectorAll('.judge-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function toggleFilter(btn, type) {
+  btn.classList.toggle('active');
+}
+</script>
+</body>
+</html>

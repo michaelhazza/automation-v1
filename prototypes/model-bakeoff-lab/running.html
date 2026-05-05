@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Running Benchmark · Model Bake-off Lab · Synthetos Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Progress ring (overall) */
+.run-hero {
+  background: white; border: 1px solid var(--sl-200); border-radius: 10px;
+  padding: 24px 28px; display: flex; align-items: center; gap: 28px;
+  margin-bottom: 16px;
+}
+.run-hero .ring-wrap { position: relative; flex-shrink: 0; }
+.run-hero .ring-wrap svg { display: block; }
+.run-hero .ring-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+}
+.run-hero .ring-pct { font-size: 22px; font-weight: 700; color: var(--sl-900); letter-spacing: -0.04em; }
+.run-hero .ring-label { font-size: 11px; color: var(--sl-500); font-weight: 500; }
+.run-hero .run-info { flex: 1; }
+.run-hero .run-title { font-size: 16px; font-weight: 600; color: var(--sl-900); margin-bottom: 6px; }
+.run-hero .run-meta { font-size: 13px; color: var(--sl-600); display: flex; gap: 20px; flex-wrap: wrap; }
+.run-hero .run-meta span strong { color: var(--sl-800); }
+.run-hero .run-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Model-by-model run rows */
+.model-run-table { border-radius: 10px; overflow: hidden; border: 1px solid var(--sl-200); background: white; }
+.model-run-row {
+  display: grid;
+  grid-template-columns: 240px 1fr 130px 90px;
+  gap: 0;
+  align-items: center;
+  border-bottom: 1px solid var(--sl-100);
+  padding: 12px 18px;
+}
+.model-run-row:last-child { border-bottom: 0; }
+.model-run-row:hover { background: var(--sl-50); }
+
+.mrr-name { font-size: 13px; font-weight: 600; color: var(--sl-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mrr-provider { font-size: 11px; color: var(--sl-500); margin-top: 2px; }
+.mrr-progress { padding: 0 16px; }
+.mrr-prog-bar { height: 5px; background: var(--sl-100); border-radius: 999px; overflow: hidden; margin-bottom: 5px; }
+.mrr-prog-bar .fill { height: 100%; border-radius: 999px; transition: width 0.6s ease; }
+.fill-indigo { background: var(--indigo-500); }
+.fill-green  { background: var(--green-600); }
+.fill-red    { background: var(--red-500); }
+.fill-slate  { background: var(--sl-300); }
+.mrr-prog-text { font-size: 11px; color: var(--sl-500); }
+.mrr-timing { font-size: 12px; color: var(--sl-600); text-align: right; padding-right: 12px; }
+.mrr-status { display: flex; justify-content: flex-end; }
+
+/* Case-level mini grid (visible in expanded state) */
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  padding: 8px 18px 12px 264px;
+}
+.case-dot {
+  height: 6px; border-radius: 2px; background: var(--sl-200);
+  position: relative;
+}
+.case-dot.done-pass { background: #10b981; }
+.case-dot.done-fail { background: #f87171; }
+.case-dot.running   { background: var(--indigo-400); animation: pulse-fill 1.2s ease-in-out infinite; }
+
+@keyframes pulse-fill {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Error callout inline */
+.error-inline {
+  padding: 8px 18px 10px 264px;
+  font-size: 12px; color: var(--red-700);
+  display: flex; align-items: center; gap: 8px;
+}
+.error-inline .err-icon { flex-shrink: 0; }
+
+/* Run log (collapsed) */
+.run-log-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--sl-500); cursor: pointer;
+  padding: 10px 0 0;
+}
+.run-log-toggle:hover { color: var(--sl-800); }
+</style>
+</head>
+<body>
+
+<!-- App bar -->
+<div class="appbar">
+  <div class="logo">S</div>
+  <span class="product">Synthetos</span>
+  <div class="crumbs">
+    <span class="sep">/</span>
+    <a href="#">Admin</a>
+    <span class="sep">/</span>
+    <a href="index.html">Model Bake-off Lab</a>
+    <span class="sep">/</span>
+    <span>Run #31</span>
+  </div>
+  <div class="admin-badge">ADMIN ONLY</div>
+  <div class="right">
+    <div class="user-pill"><div class="av">AK</div>Alex Kim</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Overall progress hero -->
+  <div class="run-hero">
+    <div class="ring-wrap">
+      <svg width="88" height="88" viewBox="0 0 88 88">
+        <circle cx="44" cy="44" r="36" fill="none" stroke="#e2e8f0" stroke-width="8"/>
+        <!-- 63% done: circumference of r=36 circle = 226.2px; 63% = 142.5px -->
+        <circle cx="44" cy="44" r="36" fill="none" stroke="#6366f1" stroke-width="8"
+          stroke-dasharray="142.5 226.2" stroke-dashoffset="0"
+          stroke-linecap="round" transform="rotate(-90 44 44)"/>
+      </svg>
+      <div class="ring-center">
+        <div class="ring-pct">63%</div>
+        <div class="ring-label">complete</div>
+      </div>
+    </div>
+    <div class="run-info">
+      <div class="run-title">CRM Email Response Quality — Run #31</div>
+      <div class="run-meta">
+        <span><strong>5</strong> models</span>
+        <span><strong>8</strong> cases each</span>
+        <span><strong>40</strong> completions</span>
+        <span>Started <strong>43s ago</strong></span>
+        <span>Judge: <strong>Claude Sonnet 4.6</strong></span>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:6px;align-items:center;font-size:12px;color:var(--sl-500);">
+        <span class="pill pill-green" style="font-size:11px;"><span class="dot"></span>25 passed</span>
+        <span class="pill pill-red" style="font-size:11px;"><span class="dot"></span>0 failed</span>
+        <span class="pill pill-indigo" style="font-size:11px;"><span class="dot"></span>10 running</span>
+        <span class="pill pill-slate" style="font-size:11px;"><span class="dot"></span>5 queued</span>
+      </div>
+    </div>
+    <div class="run-actions">
+      <button class="btn btn-secondary btn-sm">Pause</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--red-600);">Cancel run</button>
+    </div>
+  </div>
+
+  <!-- Per-model progress -->
+  <div style="font-size:12px;font-weight:600;color:var(--sl-600);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:10px;">Per-model progress</div>
+
+  <div class="model-run-table">
+
+    <!-- Row header -->
+    <div class="model-run-row" style="background:var(--sl-50);border-bottom:1px solid var(--sl-200);">
+      <div style="font-size:11px;font-weight:600;color:var(--sl-500);text-transform:uppercase;letter-spacing:0.04em">Model</div>
+      <div style="font-size:11px;font-weight:600;color:var(--sl-500);text-transform:uppercase;letter-spacing:0.04em;padding-left:16px">Progress (8 cases)</div>
+      <div style="font-size:11px;font-weight:600;color:var(--sl-500);text-transform:uppercase;letter-spacing:0.04em;text-align:right;padding-right:12px">Elapsed</div>
+      <div style="font-size:11px;font-weight:600;color:var(--sl-500);text-transform:uppercase;letter-spacing:0.04em;text-align:right">Status</div>
+    </div>
+
+    <!-- claude-sonnet-4-6 · done -->
+    <div>
+      <div class="model-run-row">
+        <div>
+          <div class="mrr-name">claude-sonnet-4-6</div>
+          <div class="mrr-provider">Anthropic · paid</div>
+        </div>
+        <div class="mrr-progress">
+          <div class="mrr-prog-bar"><div class="fill fill-green" style="width:100%"></div></div>
+          <div class="mrr-prog-text">8 / 8 complete</div>
+        </div>
+        <div class="mrr-timing">12.4s total</div>
+        <div class="mrr-status">
+          <span class="pill pill-green"><span class="dot"></span>Done</span>
+        </div>
+      </div>
+      <div class="case-grid">
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+      </div>
+    </div>
+
+    <!-- deepseek-v4-flash · done -->
+    <div>
+      <div class="model-run-row">
+        <div>
+          <div class="mrr-name">deepseek-ai/deepseek-v4-flash</div>
+          <div class="mrr-provider">NVIDIA NIM · free trial</div>
+        </div>
+        <div class="mrr-progress">
+          <div class="mrr-prog-bar"><div class="fill fill-green" style="width:100%"></div></div>
+          <div class="mrr-prog-text">8 / 8 complete</div>
+        </div>
+        <div class="mrr-timing">9.1s total</div>
+        <div class="mrr-status">
+          <span class="pill pill-green"><span class="dot"></span>Done</span>
+        </div>
+      </div>
+      <div class="case-grid">
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+      </div>
+    </div>
+
+    <!-- deepseek-v4-pro · running 5/8 -->
+    <div>
+      <div class="model-run-row">
+        <div>
+          <div class="mrr-name">deepseek-ai/deepseek-v4-pro</div>
+          <div class="mrr-provider">NVIDIA NIM · free trial</div>
+        </div>
+        <div class="mrr-progress">
+          <div class="mrr-prog-bar"><div class="fill fill-indigo" style="width:62.5%"></div></div>
+          <div class="mrr-prog-text">5 / 8 complete · case 6 running</div>
+        </div>
+        <div class="mrr-timing">23.7s so far</div>
+        <div class="mrr-status">
+          <span class="pill pill-indigo"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;margin-right:3px"></span>Running</span>
+        </div>
+      </div>
+      <div class="case-grid">
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot running"></div>
+        <div class="case-dot"></div>
+        <div class="case-dot"></div>
+      </div>
+    </div>
+
+    <!-- nemotron-super · running 4/8 -->
+    <div>
+      <div class="model-run-row">
+        <div>
+          <div class="mrr-name">nvidia/llama-3.3-nemotron-super-49b-v1.5</div>
+          <div class="mrr-provider">NVIDIA NIM · free trial</div>
+        </div>
+        <div class="mrr-progress">
+          <div class="mrr-prog-bar"><div class="fill fill-indigo" style="width:50%"></div></div>
+          <div class="mrr-prog-text">4 / 8 complete · case 5 running</div>
+        </div>
+        <div class="mrr-timing">29.2s so far</div>
+        <div class="mrr-status">
+          <span class="pill pill-indigo"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;margin-right:3px"></span>Running</span>
+        </div>
+      </div>
+      <div class="case-grid">
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot done-pass"></div>
+        <div class="case-dot running"></div>
+        <div class="case-dot"></div>
+        <div class="case-dot"></div>
+        <div class="case-dot"></div>
+      </div>
+    </div>
+
+    <!-- gemini-2.5-pro · queued -->
+    <div>
+      <div class="model-run-row">
+        <div>
+          <div class="mrr-name">openrouter/google/gemini-2.5-pro</div>
+          <div class="mrr-provider">OpenRouter · paid</div>
+        </div>
+        <div class="mrr-progress">
+          <div class="mrr-prog-bar"><div class="fill fill-slate" style="width:0%"></div></div>
+          <div class="mrr-prog-text" style="color:var(--sl-400)">Queued — starts when a slot opens</div>
+        </div>
+        <div class="mrr-timing" style="color:var(--sl-400)">—</div>
+        <div class="mrr-status">
+          <span class="pill pill-slate"><span class="dot"></span>Queued</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /model-run-table -->
+
+  <!-- Re-run / action strip (shown post-completion) -->
+  <div style="margin-top:16px;padding:14px 18px;background:white;border:1px solid var(--sl-200);border-radius:10px;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--sl-500);">
+    <span>When complete:</span>
+    <a href="results.html" class="btn btn-primary">View Results</a>
+    <button class="btn btn-secondary btn-sm">Re-run failed only</button>
+    <button class="btn btn-secondary btn-sm">Add another model</button>
+    <button class="btn btn-ghost btn-sm">Clone run with different params</button>
+  </div>
+
+  <!-- Detail toggle (collapsed by default) -->
+  <div class="run-log-toggle" onclick="toggleLog()">
+    <svg width="13" height="13" id="log-chev" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    Show raw request log
+  </div>
+  <div id="run-log" style="display:none;margin-top:8px;background:var(--sl-900);border-radius:8px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#94a3b8;line-height:1.7;max-height:180px;overflow-y:auto;">
+    <div style="color:#4ade80">[00:00.012] Run #31 started · 5 models · 8 cases · judge: claude-sonnet-4-6</div>
+    <div>[00:00.048] → claude-sonnet-4-6 · case 1 dispatched</div>
+    <div>[00:00.051] → deepseek-v4-flash · case 1 dispatched</div>
+    <div>[00:01.140] ✓ claude-sonnet-4-6 · case 1 · 1102ms · 847 tok · judge: 8.4/10</div>
+    <div>[00:01.290] ✓ deepseek-v4-flash · case 1 · 1242ms · 891 tok · judge: 8.1/10</div>
+    <div style="color:#818cf8">[00:43.000] Progress: 25/40 completions · 3 models in-flight</div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+function toggleLog() {
+  const log = document.getElementById('run-log');
+  const chev = document.getElementById('log-chev');
+  if (log.style.display === 'none') {
+    log.style.display = 'block';
+    chev.setAttribute('d','M18 15l-6-6-6 6');
+  } else {
+    log.style.display = 'none';
+    chev.setAttribute('d','M6 9l6 6 6-6');
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Drill-down · Run #31 · Model Bake-off Lab · Synthetos Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Case selector nav */
+.case-nav {
+  display: flex; align-items: center; gap: 4px;
+  padding: 12px 18px; background: var(--sl-50);
+  border: 1px solid var(--sl-200); border-radius: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.case-nav-label { font-size: 12px; font-weight: 500; color: var(--sl-500); margin-right: 6px; }
+.case-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 7px;
+  font-size: 12px; font-weight: 600; border: 1px solid var(--sl-200);
+  background: white; color: var(--sl-600); cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+  position: relative;
+}
+.case-btn:hover { border-color: var(--indigo-400); color: var(--indigo-700); background: var(--indigo-50); }
+.case-btn.active { border-color: var(--indigo-500); background: var(--indigo-600); color: white; }
+.case-btn .case-score-dot {
+  position: absolute; bottom: -3px; right: -3px;
+  width: 8px; height: 8px; border-radius: 999px; border: 1.5px solid white;
+}
+.dot-hi   { background: #10b981; }
+.dot-mid  { background: #f59e0b; }
+.dot-lo   { background: #ef4444; }
+
+/* Model columns side-by-side */
+.compare-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 900px) { .compare-layout { grid-template-columns: 1fr; } }
+
+/* Left: case context panel */
+.case-context {
+  background: white; border: 1px solid var(--sl-200); border-radius: 10px;
+  overflow: hidden;
+  position: sticky; top: 64px;
+}
+.case-context-head { padding: 12px 16px; border-bottom: 1px solid var(--sl-100); background: var(--sl-50); }
+.case-context-head .cc-title { font-size: 13px; font-weight: 600; color: var(--sl-900); }
+.case-context-head .cc-sub { font-size: 11px; color: var(--sl-500); margin-top: 2px; }
+.case-context-body { padding: 14px 16px; }
+.prompt-label { font-size: 11px; font-weight: 600; color: var(--sl-500); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.prompt-box {
+  background: var(--sl-50); border: 1px solid var(--sl-100); border-radius: 7px;
+  padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--sl-700);
+  max-height: 200px; overflow-y: auto;
+}
+.assertion-box {
+  background: var(--indigo-50); border: 1px solid var(--indigo-100); border-radius: 7px;
+  padding: 9px 12px; font-size: 12px; line-height: 1.5; color: var(--indigo-700);
+  margin-top: 10px;
+}
+.assertion-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; color: var(--indigo-500); }
+
+/* Response columns */
+.response-col { }
+.response-col .rc-head {
+  padding: 12px 14px; border-radius: 10px 10px 0 0;
+  border: 1px solid var(--sl-200); border-bottom: 1px solid var(--sl-100);
+  display: flex; align-items: flex-start; gap: 10px; background: var(--sl-50);
+}
+.rc-head.winner-head { background: #f0fdf4; border-color: #86efac; border-bottom-color: #bbf7d0; }
+.rc-model-name { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--sl-900); }
+.rc-provider-tag { margin-top: 3px; }
+.rc-score-badge {
+  margin-left: auto; text-align: center; flex-shrink: 0;
+  min-width: 46px;
+}
+.rc-score-big { font-size: 20px; font-weight: 700; color: var(--sl-900); letter-spacing: -0.04em; }
+.rc-score-label { font-size: 10px; color: var(--sl-500); }
+.rc-score-badge.winner-score .rc-score-big { color: #15803d; }
+
+.rc-body {
+  border: 1px solid var(--sl-200); border-top: none; border-radius: 0 0 10px 10px;
+  padding: 14px;
+}
+.rc-body.winner-body { border-color: #86efac; }
+.rc-response-text {
+  font-size: 13px; line-height: 1.65; color: var(--sl-800);
+  min-height: 120px;
+}
+.rc-response-text .highlight {
+  background: #d1fae5; border-radius: 2px; padding: 1px 2px;
+}
+.rc-metrics {
+  display: flex; gap: 16px; padding-top: 10px; margin-top: 10px;
+  border-top: 1px solid var(--sl-100); font-size: 12px; color: var(--sl-500);
+  flex-wrap: wrap;
+}
+.rc-metrics span { display: flex; align-items: center; gap: 4px; }
+.rc-metrics strong { color: var(--sl-700); }
+
+/* Judge reasoning (collapsed) */
+.judge-reasoning {
+  margin-top: 12px; padding: 10px 12px;
+  background: var(--amber-50); border: 1px solid var(--amber-100);
+  border-radius: 7px;
+}
+.judge-reasoning .jr-label { font-size: 11px; font-weight: 600; color: var(--amber-700); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px; }
+.judge-reasoning .jr-text { font-size: 12px; color: var(--amber-700); line-height: 1.5; }
+
+/* Tool-call trace */
+.tool-trace-block {
+  background: var(--sl-900); border-radius: 7px; padding: 12px 14px; margin-top: 10px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94a3b8; line-height: 1.7;
+  overflow-x: auto;
+}
+.tt-label { color: #64748b; font-size: 10px; letter-spacing: 0.04em; margin-bottom: 6px; display: block; }
+.tt-fn     { color: #818cf8; }
+.tt-key    { color: #fbbf24; }
+.tt-val    { color: #86efac; }
+.tt-result { color: #a5f3fc; margin-top: 6px; padding-top: 6px; border-top: 1px solid #1e293b; display: block; }
+
+/* Model selector (swap which models are shown) */
+.model-swap-bar {
+  display: flex; gap: 8px; align-items: center;
+  margin-bottom: 12px; flex-wrap: wrap;
+}
+.model-swap-bar label { font-size: 12px; color: var(--sl-500); }
+.model-swap-bar select { padding: 5px 8px; border: 1px solid var(--sl-200); border-radius: 6px; font-size: 12px; font-family: inherit; }
+</style>
+</head>
+<body>
+
+<!-- App bar -->
+<div class="appbar">
+  <div class="logo">S</div>
+  <span class="product">Synthetos</span>
+  <div class="crumbs">
+    <span class="sep">/</span>
+    <a href="#">Admin</a>
+    <span class="sep">/</span>
+    <a href="index.html">Model Bake-off Lab</a>
+    <span class="sep">/</span>
+    <a href="results.html">Run #31 Results</a>
+    <span class="sep">/</span>
+    <span>Drill-down</span>
+  </div>
+  <div class="admin-badge">ADMIN ONLY</div>
+  <div class="right">
+    <div class="user-pill"><div class="av">AK</div>Alex Kim</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Response Comparison</div>
+      <div class="page-sub">CRM Email Response Quality · Run #31 · Comparing models case-by-case</div>
+    </div>
+    <a href="results.html" class="btn btn-ghost btn-sm">← Back to results</a>
+  </div>
+
+  <!-- Case selector -->
+  <div class="case-nav">
+    <span class="case-nav-label">Test case:</span>
+    <button class="case-btn" onclick="selectCase(this, 1)" title="Tone: formal reply to angry customer">
+      1<span class="case-score-dot dot-hi"></span>
+    </button>
+    <button class="case-btn active" onclick="selectCase(this, 2)" title="Tool-call: extract structured fields">
+      2<span class="case-score-dot dot-hi"></span>
+    </button>
+    <button class="case-btn" onclick="selectCase(this, 3)" title="Summarise thread to 3 bullets">
+      3<span class="case-score-dot dot-hi"></span>
+    </button>
+    <button class="case-btn" onclick="selectCase(this, 4)" title="Refusal: handle out-of-scope request">
+      4<span class="case-score-dot dot-mid"></span>
+    </button>
+    <button class="case-btn" onclick="selectCase(this, 5)" title="Escalation: identify when to escalate">
+      5<span class="case-score-dot dot-hi"></span>
+    </button>
+    <button class="case-btn" onclick="selectCase(this, 6)" title="Multi-turn: maintain context across turns">
+      6<span class="case-score-dot dot-hi"></span>
+    </button>
+    <button class="case-btn" onclick="selectCase(this, 7)" title="Tone: informal to a VIP">
+      7<span class="case-score-dot dot-hi"></span>
+    </button>
+    <button class="case-btn" onclick="selectCase(this, 8)" title="Edge case: ambiguous intent">
+      8<span class="case-score-dot dot-mid"></span>
+    </button>
+    <div style="margin-left:auto;display:flex;gap:4px;">
+      <button class="btn btn-ghost btn-sm" onclick="prevCase()">← Prev</button>
+      <button class="btn btn-ghost btn-sm" onclick="nextCase()">Next →</button>
+    </div>
+  </div>
+
+  <!-- Model swap bar -->
+  <div class="model-swap-bar">
+    <label>Comparing:</label>
+    <select id="model-a-select">
+      <option selected>deepseek-ai/deepseek-v4-flash (recommended)</option>
+      <option>deepseek-ai/deepseek-v4-pro</option>
+      <option>claude-sonnet-4-6</option>
+      <option>nvidia/llama-3.3-nemotron-super-49b-v1.5</option>
+      <option>openrouter/google/gemini-2.5-pro</option>
+    </select>
+    <label>vs.</label>
+    <select id="model-b-select">
+      <option>deepseek-ai/deepseek-v4-flash</option>
+      <option>deepseek-ai/deepseek-v4-pro</option>
+      <option selected>claude-sonnet-4-6</option>
+      <option>nvidia/llama-3.3-nemotron-super-49b-v1.5</option>
+      <option>openrouter/google/gemini-2.5-pro</option>
+    </select>
+  </div>
+
+  <!-- Three-column compare: prompt | model A | model B -->
+  <div class="compare-layout">
+
+    <!-- Left: prompt + assertion -->
+    <div class="case-context">
+      <div class="case-context-head">
+        <div class="cc-title">Case 2 of 8</div>
+        <div class="cc-sub">Tool-call: extract structured fields</div>
+      </div>
+      <div class="case-context-body">
+        <div class="prompt-label">Prompt</div>
+        <div class="prompt-box">
+          You are a CRM assistant. Extract the following structured fields from this customer email and return them as a JSON object using the <code>extract_fields</code> tool:
+          <br><br>
+          <strong>Fields:</strong> customer_name, company, sentiment (positive/neutral/negative), urgency (low/medium/high), issue_category.<br><br>
+          <strong>Email:</strong> "Hi, I'm Sarah Chen from Meridian Corp. Our contract renewal is in 3 days and we still haven't received the pricing update your team promised two weeks ago. This is extremely urgent — we have a board sign-off deadline."
+        </div>
+
+        <div class="assertion-box">
+          <div class="assertion-label">Expected output</div>
+          <code style="font-family:monospace;font-size:11px;line-height:1.6;display:block">
+            customer_name: "Sarah Chen"<br>
+            company: "Meridian Corp"<br>
+            sentiment: "negative"<br>
+            urgency: "high"<br>
+            issue_category: "pricing / renewal"
+          </code>
+        </div>
+
+        <div style="margin-top:12px;font-size:11px;color:var(--sl-500);">
+          <div style="margin-bottom:4px"><strong style="color:var(--sl-700)">Scoring:</strong> LLM judge · exact-field match</div>
+          <div><strong style="color:var(--sl-700)">Tool schema:</strong> <code style="font-size:10px;background:var(--sl-100);padding:1px 4px;border-radius:3px">extract_fields()</code></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Model A: deepseek-v4-flash (winner) -->
+    <div class="response-col">
+      <div class="rc-head winner-head">
+        <div style="flex:1">
+          <div class="rc-model-name">deepseek-ai/deepseek-v4-flash</div>
+          <div class="rc-provider-tag">
+            <span class="provider-chip provider-nvidia">NIM</span>
+            <span class="cap-tag cap-free" style="margin-left:4px">free trial</span>
+            <span class="winner-tag" style="margin-left:4px">★ Recommended</span>
+          </div>
+        </div>
+        <div class="rc-score-badge winner-score">
+          <div class="rc-score-big">9.2</div>
+          <div class="rc-score-label">/ 10 judge</div>
+        </div>
+      </div>
+      <div class="rc-body winner-body">
+        <div class="rc-response-text">
+          Called <code style="background:var(--indigo-50);padding:1px 4px;border-radius:3px;font-size:12px">extract_fields()</code> correctly with all 5 fields extracted.
+        </div>
+
+        <div class="tool-trace-block">
+          <span class="tt-label">TOOL CALL</span>
+          <span class="tt-fn">extract_fields</span>({<br>
+          &nbsp;&nbsp;<span class="tt-key">"customer_name"</span>: <span class="tt-val">"Sarah Chen"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"company"</span>: <span class="tt-val">"Meridian Corp"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"sentiment"</span>: <span class="tt-val">"negative"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"urgency"</span>: <span class="tt-val">"high"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"issue_category"</span>: <span class="tt-val">"pricing / renewal"</span><br>
+          })<br>
+          <span class="tt-result">→ Tool result: {"status": "ok", "fields_saved": 5}</span>
+        </div>
+
+        <div class="judge-reasoning">
+          <div class="jr-label">Judge reasoning (score 9.2)</div>
+          <div class="jr-text">All 5 fields extracted correctly. Sentiment correctly identified as negative (not neutral). Urgency correctly mapped to "high" based on explicit language. Issue category slightly generic — "pricing / renewal" is correct but could be more specific. Deducting 0.8 for that.</div>
+        </div>
+
+        <div class="rc-metrics">
+          <span><strong>1.14s</strong> latency</span>
+          <span><strong>847</strong> in / <strong>412</strong> out tokens</span>
+          <span style="color:var(--sky-700);font-style:italic"><strong>$0.00004</strong> proj. cost</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Model B: claude-sonnet-4-6 -->
+    <div class="response-col">
+      <div class="rc-head">
+        <div style="flex:1">
+          <div class="rc-model-name">claude-sonnet-4-6</div>
+          <div class="rc-provider-tag">
+            <span class="provider-chip provider-anthropic">Anthropic</span>
+            <span class="cap-tag cap-paid" style="margin-left:4px">paid</span>
+          </div>
+        </div>
+        <div class="rc-score-badge">
+          <div class="rc-score-big">9.5</div>
+          <div class="rc-score-label">/ 10 judge</div>
+        </div>
+      </div>
+      <div class="rc-body">
+        <div class="rc-response-text">
+          Called <code style="background:var(--indigo-50);padding:1px 4px;border-radius:3px;font-size:12px">extract_fields()</code> correctly with all 5 fields plus an additional commentary field not in the schema.
+        </div>
+
+        <div class="tool-trace-block">
+          <span class="tt-label">TOOL CALL</span>
+          <span class="tt-fn">extract_fields</span>({<br>
+          &nbsp;&nbsp;<span class="tt-key">"customer_name"</span>: <span class="tt-val">"Sarah Chen"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"company"</span>: <span class="tt-val">"Meridian Corp"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"sentiment"</span>: <span class="tt-val">"negative"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"urgency"</span>: <span class="tt-val">"high"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"issue_category"</span>: <span class="tt-val">"contract renewal / pricing delay"</span>,<br>
+          &nbsp;&nbsp;<span class="tt-key">"notes"</span>: <span class="tt-val">"Board sign-off deadline — time-critical"</span><br>
+          })<br>
+          <span class="tt-result">→ Tool result: {"status": "ok", "fields_saved": 6}</span>
+        </div>
+
+        <div class="judge-reasoning">
+          <div class="jr-label">Judge reasoning (score 9.5)</div>
+          <div class="jr-text">All required fields correct. More precise issue_category. Added "notes" field outside schema — this demonstrates richer contextual understanding though it slightly exceeds the spec. Overall highest accuracy on this case.</div>
+        </div>
+
+        <div class="rc-metrics">
+          <span><strong>1.55s</strong> latency</span>
+          <span><strong>847</strong> in / <strong>390</strong> out tokens</span>
+          <span><strong>$0.00036</strong> actual cost</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /compare-layout -->
+
+  <!-- Cross-case summary strip -->
+  <div style="margin-top:20px; background:white; border:1px solid var(--sl-200); border-radius:10px; overflow:hidden;">
+    <div style="padding:12px 18px; border-bottom:1px solid var(--sl-100); display:flex; align-items:center; justify-content:space-between;">
+      <div style="font-size:13px;font-weight:600;color:var(--sl-900)">All cases — quick view</div>
+      <span class="text-xs muted">Click any cell to jump to that case</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="table" style="min-width:600px">
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>deepseek-v4-flash</th>
+            <th>claude-sonnet-4-6</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="color:var(--sl-600);font-size:12px">1 · Formal tone</td><td><span class="pill pill-green text-xs">8.8</span></td><td><span class="pill pill-green text-xs">9.1</span></td><td style="font-size:12px;color:var(--sl-500)">Sonnet +0.3</td></tr>
+          <tr style="background:var(--indigo-50)"><td style="color:var(--sl-600);font-size:12px"><strong>2 · Tool-call extract ←</strong></td><td><span class="pill pill-green text-xs">9.2</span></td><td><span class="pill pill-green text-xs">9.5</span></td><td style="font-size:12px;color:var(--sl-500)">Sonnet +0.3</td></tr>
+          <tr><td style="color:var(--sl-600);font-size:12px">3 · Summarise thread</td><td><span class="pill pill-green text-xs">8.9</span></td><td><span class="pill pill-green text-xs">9.0</span></td><td style="font-size:12px;color:var(--sl-500)">Tie ~</td></tr>
+          <tr><td style="color:var(--sl-600);font-size:12px">4 · Refusal handling</td><td><span class="pill pill-amber text-xs">7.1</span></td><td><span class="pill pill-green text-xs">8.2</span></td><td style="font-size:12px;color:var(--sl-500)">Sonnet +1.1</td></tr>
+          <tr><td style="color:var(--sl-600);font-size:12px">5 · Escalation</td><td><span class="pill pill-green text-xs">9.0</span></td><td><span class="pill pill-green text-xs">9.2</span></td><td style="font-size:12px;color:var(--sl-500)">Tie ~</td></tr>
+          <tr><td style="color:var(--sl-600);font-size:12px">6 · Multi-turn context</td><td><span class="pill pill-green text-xs">8.8</span></td><td><span class="pill pill-green text-xs">9.1</span></td><td style="font-size:12px;color:var(--sl-500)">Sonnet +0.3</td></tr>
+          <tr><td style="color:var(--sl-600);font-size:12px">7 · VIP informal tone</td><td><span class="pill pill-green text-xs">9.1</span></td><td><span class="pill pill-green text-xs">9.3</span></td><td style="font-size:12px;color:var(--sl-500)">Tie ~</td></tr>
+          <tr><td style="color:var(--sl-600);font-size:12px">8 · Ambiguous intent</td><td><span class="pill pill-amber text-xs">7.4</span></td><td><span class="pill pill-amber text-xs">7.8</span></td><td style="font-size:12px;color:var(--sl-500)">Both fair</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:10px 18px; background:var(--sl-50); border-top:1px solid var(--sl-100); font-size:12px; color:var(--sl-600);">
+      Average across 8 cases: <strong>deepseek-v4-flash 88.1%</strong> · <strong>claude-sonnet-4-6 91.3%</strong> · Gap: 3.2 points within workload tolerance
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+let currentCase = 2;
+
+function selectCase(btn, num) {
+  document.querySelectorAll('.case-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentCase = num;
+}
+function prevCase() {
+  if (currentCase > 1) {
+    currentCase--;
+    document.querySelectorAll('.case-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === currentCase - 1);
+    });
+  }
+}
+function nextCase() {
+  if (currentCase < 8) {
+    currentCase++;
+    document.querySelectorAll('.case-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === currentCase - 1);
+    });
+  }
+}
+</script>
+</body>
+</html>
