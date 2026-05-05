@@ -101,6 +101,10 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(password, 12);
 
     const now = new Date();
+    // Floor to second-precision so passwordChangedAt never exceeds the JWT iat (which is
+    // second-precision). Sub-millisecond DB timestamps would otherwise cause immediate
+    // token_revoked on the first request after invite acceptance.
+    const passwordChangedAt = new Date(Math.floor(now.getTime() / 1000) * 1000);
     await db
       .update(users)
       .set({
@@ -110,7 +114,7 @@ export class AuthService {
         status: 'active',
         inviteToken: null,
         inviteExpiresAt: null,
-        passwordChangedAt: now,
+        passwordChangedAt,
         updatedAt: now,
       })
       .where(eq(users.id, user.id));
@@ -284,6 +288,7 @@ export class AuthService {
           lastName: lastName || 'User',
           role: 'org_admin',
           status: 'active',
+          passwordChangedAt: new Date(0),
         })
         .returning();
 

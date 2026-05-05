@@ -3011,3 +3011,42 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
   - Spec section: Mini-spec § Chunk 6 — *"capture pre-Phase-2 baseline counts before testing changes them"*
   - Gap: `tasks/builds/pre-launch-phase-2/progress.md` records section heading but the two count rows are placeholder text ("update with actual count from first CI run"), not actual numbers from a CI run.
   - Suggested approach: after the next CI run on this branch, read the warning counts from `verify-input-validation.sh` and `verify-permission-scope.sh` outputs and update progress.md. Not auto-fixable from a local session because the values come from CI, not local invocation, and CLAUDE.md forbids local gate runs.
+
+---
+
+## Deferred from adversarial-review — pre-launch-phase-2 (2026-05-05)
+
+**Captured:** 2026-05-05T07:11:14Z
+**Source log:** `tasks/review-logs/adversarial-review-log-pre-launch-phase-2-2026-05-05T07-11-14Z.md`
+**Branch:** `claude/pre-launch-phase-2`
+
+**Confirmed hole — fixed in-session:**
+- [x] AR-2.1 — Signup/acceptInvite JWT revoked on first use due to DB/Node clock skew. Fixed: `authService.signup()` now sets `passwordChangedAt: new Date(0)`; `acceptInvite` floors `now` to second-precision before storing. See commit following this entry.
+
+**Likely holes — design decisions required:**
+
+- [ ] AR-3.1 — Advisory lock scope ambiguity for pg-boss dispatch
+  - `server/services/workflowEngineService.ts:840, 1897-1924`
+  - `pg_try_advisory_xact_lock` at line 840 is `xact`-scoped (releases on commit). Confirm that `pgboss.send()` at line 1897 runs inside the same DB transaction so the lock holds for the full dispatch. If outside, two concurrent workers can both pass the lock check (though `singletonKey` deduplication at the pg-boss level prevents double-execution). Verify the transaction boundary; if send() is outside, either accept the singletonKey defence or move the lock to cover the send.
+
+- [ ] AR-5.1 — Login rate limiter bypassable via IP rotation (no per-email bucket)
+  - `server/lib/rateLimitKeys.ts:24-28`, `server/routes/auth.ts:64-77`
+  - Both rate-limit windows key on `ip:email`. A botnet rotating IPs can exceed the nominal 50/hour limit against a single email. Add a separate `rl:v1:auth:login:email:<normalised-email>` bucket (e.g., 100/3600s) as a belt-and-suspenders cap. Design decision: what limit makes sense vs. false-positive risk for shared IPs (offices, universities)?
+
+**Worth-confirming — may close without code change:**
+
+- [ ] AR-1.1 — `security_audit_events` login-failure rows stored under sentinel UUID `00000000-0000-0000-0000-000000000000`
+  - `server/routes/auth.ts:92`, `server/services/securityAuditService.ts:16`
+  - Intentional for pre-auth events. Admin queries scoped to a real org UUID will not see login-failure rows. Confirm the admin login-failure audit query is aware of this and handles the sentinel UUID explicitly if needed.
+
+- [ ] AR-2.2 — `requireSubaccountPermission` emits no `auth.permission_denied` security event
+  - `server/middleware/auth.ts:349-394`
+  - `requireOrgPermission` records the event; subaccount variant does not. Add `recordSecurityEvent({ eventType: 'auth.permission_denied', ... })` in the 403 branch of `requireSubaccountPermission`, matching the org-level pattern.
+
+- [ ] AR-4.1 — PII blacklist in `normaliseSecurityEvent` is exact-key-match only
+  - `server/services/securityAuditServicePure.ts:31-38`
+  - `PII_BLACKLIST` does not match composite keys like `accessToken`, `refreshToken`, `passwordHash`. Extend to substring-match (e.g., `PII_SUBSTRINGS = ['password', 'token', 'secret', 'authorization', 'credential']`) so future callers can't accidentally store credential material. Low urgency — current callers are safe.
+
+- [ ] AR-6.1 — `connectionTokenService.refreshIfExpired` relies on caller discipline for org scoping
+  - `server/services/connectionTokenService.ts:147-174`
+  - The `guard-ignore-next-line` exemption requires every caller to fetch the connection via an org-scoped query. Audit all call sites of `getAccessToken` to confirm each path obtains the connection through an org-scoped lookup before passing it here. If any admin-path caller exists, add an assertion: `if (connection.organisationId !== principalOrgId) throw new Error(...)`.  
