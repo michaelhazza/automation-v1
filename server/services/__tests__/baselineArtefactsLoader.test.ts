@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="tests inline null-guard reproduction only; importing memoryBlockService.js pulls in the DB module which requires DATABASE_URL — guard not needed here"
 /**
  * baselineArtefactsLoader.test.ts — null-guard test for getTier1Blocks.
  *
