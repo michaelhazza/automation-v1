@@ -6,6 +6,7 @@ import { orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../
 import { env } from '../lib/env.js';
 import { auditService } from '../services/auditService.js';
 import { withOrgTx } from '../instrumentation.js';
+import { recordSecurityEvent } from '../services/securityAuditService.js';
 
 export interface JwtPayload {
   id: string;
@@ -94,6 +95,17 @@ export const authenticate = async (
           path: req.path,
         },
         ipAddress: req.ip,
+      });
+      void recordSecurityEvent({
+        organisationId: payload.organisationId,
+        actorUserId:    payload.id,
+        actorRole:      payload.role,
+        eventType:      'auth.cross_org_access',
+        targetType:     'organisation',
+        targetId:       headerOrgId,
+        ip:             req.ip ?? null,
+        userAgent:      req.get('user-agent') ?? null,
+        meta:           { route: req.path, method: req.method, targetOrganisationId: headerOrgId },
       });
     }
   } else {
@@ -280,6 +292,15 @@ export const requireOrgPermission = (permissionKey: string) => {
       }
 
       if (!req._orgPermissionCache.has(permissionKey)) {
+        void recordSecurityEvent({
+          organisationId: organisationId,
+          actorUserId:    req.user.id,
+          actorRole:      req.user.role,
+          eventType:      'auth.permission_denied',
+          ip:             req.ip ?? null,
+          userAgent:      req.get('user-agent') ?? null,
+          meta:           { route: req.path, method: req.method, requiredPermission: permissionKey },
+        });
         res.status(403).json({ error: 'You do not have permission to perform this action. Contact your organisation administrator if you believe this is a mistake.' });
         return;
       }

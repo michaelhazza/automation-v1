@@ -33,7 +33,8 @@ router.get('/api/ghl/oauth-url', authenticate, asyncHandler(async (req, res) => 
   }
 
   const nonce = crypto.randomBytes(32).toString('hex');
-  await setGhlOAuthState(nonce, orgId);
+  const pendingRunId = (req.query.pendingRunId ?? req.body?.pendingRunId) as string | undefined;
+  await setGhlOAuthState(nonce, orgId, pendingRunId || undefined);
 
   const appBase = process.env.OAUTH_CALLBACK_BASE_URL || process.env.APP_BASE_URL || '';
   const redirectUri = `${appBase}/api/oauth/callback`;

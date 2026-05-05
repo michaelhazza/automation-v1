@@ -3,6 +3,7 @@ import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { auditService } from '../services/auditService.js';
+import { recordSecurityEvent } from '../services/securityAuditService.js';
 import { validateBody } from '../middleware/validate.js';
 import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, signupBody } from '../schemas/auth.js';
 import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
@@ -43,6 +44,13 @@ router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (re
     entityId: result.user.id,
     ipAddress: req.ip,
   });
+  void recordSecurityEvent({
+    organisationId: result.user.organisationId,
+    actorUserId:    result.user.id,
+    eventType:      'auth.signup',
+    ip:             req.ip ?? null,
+    userAgent:      req.get('user-agent') ?? null,
+  });
   res.status(201).json(result);
 }));
 
@@ -74,6 +82,13 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     entityType: 'user',
     entityId: result.user.id,
     ipAddress: req.ip,
+  });
+  void recordSecurityEvent({
+    organisationId: result.user.organisationId,
+    actorUserId:    result.user.id,
+    eventType:      'auth.login.success',
+    ip:             req.ip ?? null,
+    userAgent:      req.get('user-agent') ?? null,
   });
   res.json(result);
 }));
@@ -137,6 +152,14 @@ router.get('/api/auth/me', authenticate, asyncHandler(async (req, res) => {
 
 router.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
   const result = await authService.logout();
+  void recordSecurityEvent({
+    organisationId: req.user!.organisationId,
+    actorUserId:    req.user!.id,
+    actorRole:      req.user!.role,
+    eventType:      'auth.logout',
+    ip:             req.ip ?? null,
+    userAgent:      req.get('user-agent') ?? null,
+  });
   res.json(result);
 }));
 
