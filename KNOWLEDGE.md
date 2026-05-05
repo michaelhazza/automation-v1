@@ -2328,3 +2328,158 @@ When ChatGPT is given only the GitHub PR summary (no diff), Round 1 produces a *
 Adjudication shape for these rounds: each "concern" is a verification request, not a defect claim. Treat them as `reject` with a verification-trail rationale, not as `implement` or `defer`. The session log carries the verification (e.g. "verified by partial UNIQUE index `subaccount_baselines_active_uniq` in migration 0280") rather than a code change. Round 2 onwards (with the diff bundle uploaded) sharpens to specific findings; substantive duplicates of Round 1 concerns auto-apply the prior-round decision per the duplicate-detection rule.
 
 Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05T10-17-27Z.md` — 3 rounds, 15 rejections, 0 code changes, APPROVED verdict. Round 1 raised 6 generic concerns; Round 2 sharpened to 5 (3 new, 2 duplicates of R1); Round 3 dropped to 4 paranoia-level concerns. The verification trail in the log is the audit artifact, not the (empty) implementation diff.
+
+### 2026-05-05 Pattern — Branded type with single-constructor invariant beats grep gates for input-normalisation enforcement
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 1-3 (NormalisedEmail brand pattern).
+
+When a function depends on a string being in a normalised form (lowercase, trimmed, hashed, sanitised), the canonical enforcement is **a branded type constructed by exactly one function**, NOT a grep gate that scans for normalisation calls.
+
+Pattern shape (TypeScript):
+
+```typescript
+// In server/lib/<helper>.ts — the ONLY constructor
+export type NormalisedEmail = string & { readonly __brand: 'NormalisedEmail' };
+export function normaliseEmail(input: string): NormalisedEmail {
+  return input.trim().toLowerCase() as NormalisedEmail;
+}
+
+// In any consumer
+export function loginEmailOnlyKey(email: NormalisedEmail): string { ... }
+```
+
+Three rules make the brand load-bearing:
+
+1. **Type is structurally unconstructable from raw `string`** — the `readonly __brand` intersection means TypeScript treats the type as nominal-flavoured.
+2. **Exactly one exporter** — the single constructor is the only legitimate path; any helper that accepts the branded type must take it as input, not produce it.
+3. **Consumer signatures take the branded type, never raw string** — the type system rejects raw-string callers at the helper signature.
+
+The single escape hatch is the `as NormalisedEmail` cast. A grep gate scoped to "find this exact cast pattern outside the constructor file" is a cheap supplement to the type system — not the primary control. Data-flow tracing approaches are explicitly **rejected**: static grep cannot reliably trace value flow across a typed module boundary, and false negatives compound silently as the codebase grows.
+
+**Where it generalises.** Any normalisation gate where the cost of forgetting to normalise is silent correctness drift: rate-limit keys (case-sensitivity bypass), URL/slug builders (path injection), sanitised user input (XSS surface), hashed identifiers (lookup miss). The pattern is heavier than a grep gate AND more robust — pick it whenever the consumer set is more than one or two callers.
+
+**Anti-pattern.** Two exporters of the branded type (e.g. `normaliseEmail` AND `lowercaseEmail` both returning `NormalisedEmail`). The second exporter defeats the single-constructor invariant — adding it should be a blocking PR finding, not a nit.
+
+### 2026-05-05 Pattern — Factory const-object as the ONLY source for closed string-enum values
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 1-3 (auditEvent factory).
+
+When a closed set of string values represents a domain enum (event names, action types, error codes, audit categories), prefer a **factory const-object** as the sole source of values, with the discriminated union derived from it via `typeof`. Do NOT export the union directly without a factory.
+
+Pattern shape (TypeScript):
+
+```typescript
+// In shared/types/<domain>.ts
+export const auditEvent = {
+  auth: { loginFailed: 'auth.login_failed', loginSucceeded: 'auth.login_succeeded' },
+  oauth: { stateExpired: 'oauth.state_expired', stateConsumed: 'oauth.state_consumed' },
+  security: { crossTenantAttempt: 'security.cross_tenant_attempt' },
+} as const;
+
+type Namespace = keyof typeof auditEvent;
+type Event<N extends Namespace> = typeof auditEvent[N][keyof typeof auditEvent[N]];
+export type SecurityAuditEventName = { [N in Namespace]: Event<N> }[Namespace];
+
+// In any producer
+recordSecurityEvent(auditEvent.auth.loginFailed, ...);  // ONLY way
+```
+
+Three properties make this beat a raw union:
+
+1. **Producer ergonomics** — `auditEvent.auth.loginFailed` is autocomplete-friendly and structurally namespaced; raw `'auth.login_failed'` invites typos.
+2. **Bypass-cast detection is grep-able to a single token** — `as SecurityAuditEventName` becomes the one and only escape hatch; grep `as <UnionTypeName>` and fail on hits.
+3. **Per-event metadata is a property, not a parallel registry** — extending the factory entry to `{ name: '...', severity: '...' }` keeps name + classification co-located. Severity (or any classifier) is bound at declaration site, NOT at the call site — the recordEvent type signature reads metadata from the factory entry, callers cannot override.
+
+**Where it applies.** Any closed enum of string values used at write/emit time where (a) producers should not write raw literals and (b) downstream consumers may need per-value metadata for routing/alerting/severity tiering. Telemetry events, audit events, action types in command buses, error code registries, status enums.
+
+**Anti-pattern.** Define the union directly (`type EventName = 'a' | 'b' | 'c'`) and rely on a grep gate to forbid raw literals. The grep gate is a backstop; the structural source must be the factory. A grep-only enforcement decays the moment a developer writes `'a' as EventName` to silence a type error — the cast bypasses both the union and the grep.
+
+### 2026-05-05 Pattern — Single-writer pg-boss job: connection-scoped singletonKey + cursor in payload
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3 round 1 finding F2 + round 2 finding F1 (GHL pagination).
+
+For any pg-boss job that processes a paginated upstream (cursor-based API, batched DB scan, multi-page external resource) and re-enqueues itself for the next page, the singleton key MUST be scoped to the **resource being mutated**, NOT to the page cursor. The cursor lives in the job payload.
+
+```typescript
+await pgboss.send('ghl:auto-enrol-locations-page', {
+  connectionId, runId, pageCursor, pageIndex
+}, {
+  singletonKey: `ghl-enrol:${connectionId}`,  // resource-scoped
+});
+```
+
+Why cursor-scoped is wrong: two jobs with different cursors slip past the singleton check and run concurrently against the same resource. If the upstream API's pagination is non-stable (same item appears across two pages due to a write between requests), both jobs do work for the overlapping item. DB constraints handle the data correctness via ON CONFLICT, but progress-event emission becomes non-deterministic — duplicate "enrolled X" events from two writers. Observability silently degrades.
+
+Connection-scoped singleton + cursor-in-payload gives:
+
+- **True single-writer per resource** — at most one job per connection runs at any moment, regardless of which page.
+- **Crash recovery is intentional** — if a worker crashes mid-page, the next worker picks up the chain via re-enqueue (or fresh dispatch) and resumes from `pageCursor` in payload with the SAME `runId`. Per-item idempotency (DB partial-unique constraint with ON CONFLICT DO NOTHING) backstops correctness.
+- **runId is the chain identifier** — globally unique (`crypto.randomUUID()`), preserved across re-enqueues, NEVER reused on operator-driven re-trigger.
+
+**Where it applies.** Any job pattern where (a) the work is paginated, (b) processing-per-item must be idempotent, and (c) you care about deterministic observability events. Webhook back-pressure handlers, full-table scans, large-list syncs, multi-page enrolment flows.
+
+**Anti-pattern.** `singletonKey: \`ghl-enrol:${connectionId}:${pageCursor}\`` — looks safer (stronger key) but lets concurrent cursors race on the same resource. The cursor is a position in a sequence, not an identifier — it doesn't belong in a uniqueness key.
+
+### 2026-05-05 Pattern — Three-state job chain: terminal vs non-terminal checkpoint
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 2-3 (GHL pagination state machine).
+
+A long-running job that may legitimately stop short of completion (cap reached, operator wants to resume later, scheduled boundary) needs a **third closing state** that is chain-closing but NOT terminal. Forcing every closing event to be `completed | failed` mis-classifies safety aborts as failures and inflates failure rates in post-launch monitoring.
+
+The three-state model:
+
+| State | Closes the chain? | Counted as success? | Counted as failure? | Resumable? |
+|-------|-------------------|---------------------|---------------------|------------|
+| `completed` | yes (terminal) | yes | no | no — fresh chain only |
+| `failed` | yes (terminal) | no | yes | no — fresh chain only |
+| `partial` | yes (checkpoint) | no | no | yes — fresh chain with new chain identifier |
+
+Critical invariants:
+
+1. **Terminal exclusivity AND chain-closure.** Once any of the three closing events fires for a `(resource, chainId)`, NO further events of any type may emit. Late retries are dropped at the handler. Per-item idempotency (DB constraint) is the correctness backstop; the explicit handler-level drop is the contract.
+2. **`partial` is chain-closing.** A chain that emits `partial` cannot be resumed in-place — the chain ends at the checkpoint. Resumption requires a fresh chain with a new chain identifier; the resume-trigger preserves the cursor (or other progress state) but mints a new `runId`.
+3. **`failed` is reserved for unrecoverable errors.** Auth-token revoked, API 5xx beyond retry budget, schema constraint violations not absorbed by ON CONFLICT. Safety aborts (page-cap reached, scheduled-stop window hit) emit `partial`, NEVER `failed`.
+
+**Where it applies.** Any job where the three categories — succeeded fully / failed fatally / stopped at a safe checkpoint — are operationally distinct. Pagination jobs with caps, batched migrations with maintenance windows, scheduled-pause sync jobs, multi-step workflows with operator-controlled gates.
+
+**Anti-pattern.** Re-using `failed` for both unrecoverable errors AND safety aborts. Post-launch dashboards show "failure rate spike" and waste investigation cycles on what was actually a deliberate cap. Or worse: the team starts ignoring "failure" alerts because so many are noise, and a real failure goes unnoticed.
+
+### 2026-05-05 Pattern — Audit logs are observational, not causal: chain identifiers are the only ordering source
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3 rounds 2-4 (audit causality posture).
+
+A multi-writer append-only audit table (`security_audit_events`, `agent_execution_events`, anything `INSERT`-only with a `created_at` timestamp) is **NOT a source of truth for causality**. Two complementary directives are required to prevent future misuse:
+
+**Negative directive (forbid the misuse):** consumers MUST NOT infer "X happened before Y" from `created_at` timestamps across concurrent writers. Cross-writer same-millisecond ordering is undefined; clock skew between hosts compounds it; `ORDER BY created_at DESC` is a display convention, not a serialisability guarantee.
+
+**Positive directive (prescribe the alternative):** consumers requiring causal ordering MUST use explicit chain identifiers carried in the event `context` payload — `runId`, `connectionId`, transactional lock keys, FK relationships. Every event that participates in a multi-step flow MUST carry the chain identifier in `context`. Dashboards, alerting rules, and post-mortem queries query by chain identifier first, use timestamps only for display ordering within a chain.
+
+**Append-only is absolute.** Rows in the audit table MUST NEVER be UPDATEd or DELETEd post-insertion. Corrections, retractions, and amendments insert a NEW event with `context.supersedes = '<original_event_id>'`; the original row stays as-is. Forensic and observability integrity depend on this — any future feature proposing UPDATE/DELETE on the audit table is a blocking finding requiring a spec amendment.
+
+**Why both directives matter.** Without the positive directive, consumers default to the most natural query (`ORDER BY created_at DESC`) and silently produce wrong causality. Without the negative directive, future maintainers add a "fix" that uses timestamps + a tiebreaker and feel they've solved the problem. Without immutability, retention/cleanup features quietly destroy forensic capability.
+
+**Where it applies.** Any append-only event stream consumed by dashboards or post-mortems. Distinguish from transactional logs (which DO carry happens-before via the lock manager) and trace systems (which carry causality via parent-span IDs). Audit logs sit between — observable but not causal — and the documentation must say so explicitly.
+
+### 2026-05-05 Pattern — chatgpt-spec-review terminal round produces zero findings; that IS the closure signal
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3 round 5 (terminal zero-findings round).
+
+A multi-round chatgpt-spec-review converges when ChatGPT produces a round with no actionable findings AND an explicit "FINAL" or "BUILD WITH CONFIDENCE" verdict. The zero-findings round is not a wasted iteration — it is the closure signal that confirms the spec is locked.
+
+Operational shape:
+
+- **Round N-1 verdict:** "APPROVED — BUILD WITH CONFIDENCE" or equivalent, with optional micro-tightenings.
+- **Round N (terminal):** ChatGPT produces zero findings, explicit "FINAL" verdict, optional non-actionable observation about post-launch evolution (e.g. "you'll likely derive a chain summary; not a spec change").
+- **Operator instruction:** "lock down" / "finalise" / "done" — finalisation triggers.
+
+The terminal round IS logged with full session-log structure (raw response, decisions table — empty, integrity-check — n/a, summary). Skipping the log for "no findings" loses the convergence signal; future audit queries can't tell whether the spec ran 4 rounds and stopped or 5 rounds and converged.
+
+**Heuristic for declaring convergence early.** If round N produces only "nice-to-have" findings already labelled optional by the reviewer, AND the verdict has stabilised at APPROVED for two consecutive rounds, AND the operator has signalled finalisation intent, run the zero-findings validation round explicitly to confirm. This prevents premature finalisation on a spec that has lurking issues the reviewer hasn't surfaced yet.
+
+**Anti-pattern.** Treating a terminal zero-findings round as "wasted" and skipping it. The convergence signal is the audit artifact — without it, the spec's "ready to build" status is operator assertion, not reviewer-confirmed.

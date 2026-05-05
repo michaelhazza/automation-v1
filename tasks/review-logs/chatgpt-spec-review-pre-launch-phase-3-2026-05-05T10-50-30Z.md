@@ -3,13 +3,16 @@
 ## Session Info
 
 - **Started:** 2026-05-05T10:50:30Z
+- **Finished:** 2026-05-05T14:00:00Z
 - **Mode:** manual
 - **Spec:** `tasks/builds/pre-launch-phase-3/spec.md`
 - **Spec commit at start:** `29c64f44`
+- **Spec commit at finish:** `cbe80c53` (round-4 commit; round 5 introduced no edits)
 - **Branch:** `claude/pre-launch-phase-3`
 - **Coordinator:** spec-coordinator (Opus, inline)
 - **Driving rule:** operator copies the spec + prompt into ChatGPT-web; pastes ChatGPT's response back here. Coordinator triages each finding (technical → auto-implement; user-facing → operator approval).
 - **Project context loaded:** CLAUDE.md, docs/spec-context.md, DEVELOPMENT_GUIDELINES.md (read previously this session).
+- **Verdict:** APPROVED (5 rounds; final-validation round 5 = zero findings)
 
 ## Spec metadata
 
@@ -354,4 +357,99 @@ None. F11 escalated only because the recommendation is `defer` (per the carveout
 - **User-decided (user-facing + technical-escalated):** 0 applied, 0 rejected, 1 deferred.
 
 Top theme: turn implied invariants and conventions into directives — globally-unique runId, immutable AppError + audit rows, severity bound at factory, opaque cursor, fail-open RL. Plus one observability uniformity (closing-event totals). The spec is now closed under the "every MUST is mechanism-backed" rule. ChatGPT verdict: **APPROVED — BUILD WITH CONFIDENCE** (0 blockers / 0 ambiguities / 0 missing mechanisms).
+
+---
+
+## Round 5 — 2026-05-05T14-00-00Z (zero-findings final validation)
+
+### ChatGPT Feedback (raw)
+
+> Executive summary
+>
+> This is fully closed. The spec is internally consistent, every invariant is enforced by mechanism, and the remaining deferred item is correctly scoped post-launch. There are no gaps, no contradictions, and no hidden failure modes left.
+>
+> You're past "review" and into "execution confidence."
+>
+> **Final validation (true last pass)**
+>
+> I went looking specifically for: hidden race conditions, unbounded loops or retries, ambiguity between invariants, "looks correct but isn't enforceable" rules. **Nothing material came up.**
+>
+> **What you got especially right**
+> 1. Chain closure model — terminal exclusivity + post-terminal silence + runId monotonic & globally unique. Removes ghost retries, duplicate completion, ambiguous observability.
+> 2. Idempotency design — keyed on location, not cursor. Avoids cursor drift, upstream pagination bugs, replay inconsistencies.
+> 3. Audit system discipline — append-only + typed namespace + severity bound at declaration + "audit is observational, not causal."
+> 4. Failure-mode clarity — failed (unrecoverable) / partial (safe checkpoint) / completed (terminal success), with partial as chain-closing-but-not-terminal.
+> 5. Defensive boundaries are actually enforceable — CI grep gates, type system, DB constraints, runtime assertions. No "soft rules" left.
+>
+> **The only thing worth calling out (not a blocker)**
+> Observability edge — chain-level summary derivation. Most dashboards will want a single derived chain summary `{ connectionId, runId, finalState, totalLocationsProcessed, totalPagesProcessed, duration, exitReason }`. Not a spec change; just expect it post-launch.
+>
+> **Deferred item check (F11)** — Right call. Pre-launch runbooks tend to be wrong; waiting for real signal is correct.
+>
+> **Final verdict: ✅ APPROVED — FINAL**
+>
+> Spec is complete. All invariants enforceable. All failure modes bounded. All concurrency paths safe. No hidden coupling remains.
+
+### Recommendations and Decisions
+
+(None — round 5 is a zero-findings validation round.)
+
+### Auto-execution summary (technical findings)
+
+- **Auto-applied (0):** none — zero findings.
+- **Auto-rejected (0):** none.
+- **Escalated to operator (0):** none.
+
+### User-facing approvals
+
+None.
+
+### Operator decisions (round 5)
+
+Operator instruction: **"final round of feedback, lock down the spec after this"** → finalise.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+No spec changes this round. The chain-summary observation is non-actionable per ChatGPT's own framing ("Not a spec change, just awareness") — captured in the post-launch observability backlog as informational only, not a deferred item.
+
+### Integrity check (post-edit pass)
+
+- Forward references: n/a — no edits.
+- Contradictions: n/a — no edits.
+- Missing inputs/outputs: n/a — no edits.
+- Issues found this round: 0 mechanical, 0 directional.
+- Integrity-check findings this round: auto: 0, escalated: 0.
+
+### Round 5 summary
+
+- **Auto-accepted (technical):** 0 applied, 0 rejected, 0 deferred.
+- **User-decided (user-facing + technical-escalated):** 0 applied, 0 rejected, 0 deferred.
+
+Top theme: validation only — ChatGPT confirmed the spec is closed under the "every MUST is mechanism-backed" rule and called out one post-launch observability evolution that is explicitly NOT a spec change. Round 5 functions as the locked-in final-verdict round.
+
+---
+
+## Final Summary
+
+- **Rounds:** 5 (round 5 was a zero-findings final-validation pass)
+- **Auto-accepted (technical):** 33 applied | 1 rejected | 0 deferred
+- **User-decided:** 0 applied | 0 rejected | 2 deferred
+- **Index write failures:** 0 (clean)
+- **Deferred to tasks/todo.md § Spec Review deferred items / pre-launch-phase-3:**
+  - [user] **CI gate: "no raw DB writes outside transaction helpers"** — Phase 4 candidate; outside Phase 3's deferred-backlog charter; co-locate with R3-2 AppError taxonomy backfill (also Phase 4) — both items "tighten the write surface."
+  - [user] **OAuth-enrol + connection-token failure runbooks** — post-launch task; lives at `docs/runbooks/*.md` separate from spec; defer until first-agency monitoring + on-call rotation provide real signal patterns.
+- **Consistency warnings:** 0 (no cross-round contradictions; six themes tracked — AppError, audit-event factory, GHL pagination, NormalisedEmail, LRU dedupe, CI gates — all strictly cumulative).
+- **Implementation-readiness checklist:** all five criteria pass (inputs / outputs / failure modes / ordering / forward references).
+- **KNOWLEDGE.md updated:** yes (6 entries: branded-type single-constructor, factory const-object enum, pg-boss singleton+cursor-in-payload, three-state job chain, audit causality posture, terminal zero-findings round)
+- **architecture.md updated:** no — checked `recordSecurityEvent`, `securityAuditService.recordEvent`, `connectionTokenService`, `loginIpEmailKey`, `loginEmailOnlyKey`, `MAX_GHL_LOCATIONS`, `MAX_GHL_PAGES`, `SecurityAuditEventName`, `auditEvent.`, `NormalisedEmail`, `AppError` against architecture.md; existing references (only `connectionTokenService` in Stripe-agent context, line 1678+) still accurate (spec preserves public API). New names not in architecture.md yet — correct, since Phase 3 implementation hasn't landed; `feature-coordinator` D.5 will add them when the build commits.
+- **capabilities.md updated:** n/a — no skill / capability / integration add/remove/rename in this PR (pre-launch hardening only).
+- **integration-reference.md updated:** n/a — no integration scope/skill/OAuth-provider/MCP-preset/capability-slug/alias changes; spec adds telemetry on existing GHL OAuth flow without altering integration surface.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — checked § 8 (development discipline), § 8.17 (multi-source UI merges with stable tiebreaker — analogous principle the spec references for audit-stream reads), § 8.19 (error-code extraction helper); zero stale references. Spec's reference to "§ 8 invariant in DEVELOPMENT_GUIDELINES" applies to the existing § 8.17 family; no edit needed.
+- **spec-context.md updated:** yes (bumped `last_reviewed_at` to 2026-05-05 per the update-trigger rule "verified current"). `accepted_primitives` does not yet list the new factory / branded-type patterns because they are spec-only — `feature-coordinator` doc-sync will add them when Phase 3 ships.
+- **frontend-design-principles.md updated:** n/a — no UI surface in Phase 3.
+- **PR:** to be created by `feature-coordinator` Phase 2 (no implementation commits yet on this branch).
+
+**Final ChatGPT verdict: ✅ APPROVED — FINAL.** Spec is complete; all invariants enforceable; all failure modes bounded; all concurrency paths safe; no hidden coupling remains.
+
+**Next:** hand off to architect (Opus plan breakdown) → feature-coordinator (Phase 2 build).
 
