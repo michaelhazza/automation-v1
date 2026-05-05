@@ -17,21 +17,10 @@ import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
 import { subaccountOnboardingService } from '../services/subaccountOnboardingService.js';
 import { isBaselineSlug } from '../../shared/constants/baselineArtefacts.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
-
-// ─── Helper: verify subaccount belongs to the request's org ──────────────────
-
-async function resolveSubaccount(subaccountId: string, organisationId: string) {
-  const [sa] = await db
-    .select()
-    .from(subaccounts)
-    .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)));
-
-  if (!sa) throw { statusCode: 404, message: 'Subaccount not found' };
-  return sa;
-}
 
 // ─── Subaccounts CRUD ─────────────────────────────────────────────────────────
 

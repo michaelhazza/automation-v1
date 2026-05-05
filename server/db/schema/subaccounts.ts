@@ -82,7 +82,7 @@ export const subaccounts = pgTable(
     // Tracks per-artefact completion state across three tiers. Null until
     // first onboarding wizard visit; default set by migration for existing rows.
     baselineArtefactsStatus: jsonb('baseline_artefacts_status').default(
-      sql`'{"version":1,"tier1":{"brand_identity":{"status":"not_started"},"voice_tone":{"status":"not_started"}},"tier2":{"offer_positioning":{"status":"not_started"},"audience_icp":{"status":"not_started"}},"tier3":{"operating_constraints":{"status":"not_started"},"proof_library":{"status":"not_started"}}}'::jsonb`
+      sql`'{"version":1,"tier1":{"brand_identity":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null},"voice_tone":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null}},"tier2":{"offer_positioning":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null},"audience_icp":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null}},"tier3":{"operating_constraints":{"status":"not_started","captured_at":null,"skipped_at":null,"workspace_memory_id":null,"captured_by_user_id":null},"proof_library":{"status":"not_started","captured_at":null,"skipped_at":null,"workspace_memory_id":null,"captured_by_user_id":null}}}'::jsonb`
     ),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
