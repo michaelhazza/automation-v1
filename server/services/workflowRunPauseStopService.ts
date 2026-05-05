@@ -9,8 +9,8 @@
  */
 
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { workflowRuns } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { emitWorkflowRunUpdate } from '../websocket/emitters.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
@@ -49,20 +49,18 @@ export const WorkflowRunPauseStopService = {
     // No assertValidTransition here: the WHERE status='running' guard in the
     // UPDATE below is the actual safety mechanism. A hardcoded 'running' assertion
     // before reading the DB provides no additional protection.
-    let updated: (typeof workflowRuns.$inferSelect)[] = [];
-    await db.transaction(async (tx) => {
-      updated = await tx
-        .update(workflowRuns)
-        .set({ status: 'paused', updatedAt: new Date() })
-        .where(
-          and(
-            eq(workflowRuns.id, runId),
-            eq(workflowRuns.organisationId, organisationId),
-            eq(workflowRuns.status, 'running'),
-          ),
-        )
-        .returning();
-    });
+    const orgDb = getOrgScopedDb('workflowRunPauseStopService.pauseRun');
+    const updated = await orgDb
+      .update(workflowRuns)
+      .set({ status: 'paused', updatedAt: new Date() })
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, organisationId),
+          eq(workflowRuns.status, 'running'),
+        ),
+      )
+      .returning();
 
     if (updated.length === 0) {
       return { paused: false, reason: 'not_running' };
@@ -122,7 +120,8 @@ export const WorkflowRunPauseStopService = {
     cap?: 'cost_ceiling' | 'wall_clock';
   }> {
     // Load run.
-    const [run] = await db
+    const orgDb = getOrgScopedDb('workflowRunPauseStopService.resumeRun');
+    const [run] = await orgDb
       .select()
       .from(workflowRuns)
       .where(
@@ -138,7 +137,7 @@ export const WorkflowRunPauseStopService = {
     }
 
     // Compute elapsed seconds using DB clock — never Date.now().
-    const elapsedResult = await db.execute(
+    const elapsedResult = await orgDb.execute(
       sql`SELECT EXTRACT(EPOCH FROM (now() - ${workflowRuns.startedAt}))::integer AS elapsed_seconds
           FROM ${workflowRuns}
           WHERE ${workflowRuns.id} = ${runId}`,
@@ -192,34 +191,31 @@ export const WorkflowRunPauseStopService = {
       to: 'running',
     });
 
-    // Single transaction: update status + apply extensions.
-    let updatedRows: (typeof workflowRuns.$inferSelect)[] = [];
-    await db.transaction(async (tx) => {
-      updatedRows = await tx
-        .update(workflowRuns)
-        .set({
-          status: 'running',
-          effectiveCostCeilingCents: costCeiling !== null
-            ? costCeiling + (opts?.extendCostCents ?? 0)
-            : null,
-          effectiveWallClockCapSeconds: wallClockCap !== null
-            ? wallClockCap + (opts?.extendSeconds ?? 0)
-            : null,
-          extensionCount: run.extensionCount + (hasExtension ? 1 : 0),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(workflowRuns.id, runId),
-            eq(workflowRuns.status, 'paused'),
-          ),
-        )
-        .returning();
-    });
+    // Update status + apply extensions within the org-scoped tx.
+    const updatedRows = await orgDb
+      .update(workflowRuns)
+      .set({
+        status: 'running',
+        effectiveCostCeilingCents: costCeiling !== null
+          ? costCeiling + (opts?.extendCostCents ?? 0)
+          : null,
+        effectiveWallClockCapSeconds: wallClockCap !== null
+          ? wallClockCap + (opts?.extendSeconds ?? 0)
+          : null,
+        extensionCount: run.extensionCount + (hasExtension ? 1 : 0),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.status, 'paused'),
+        ),
+      )
+      .returning();
 
     if (updatedRows.length === 0) {
       // Race: another action transitioned the run out of 'paused'. Load fresh status.
-      const [freshRun] = await db
+      const [freshRun] = await orgDb
         .select({ status: workflowRuns.status })
         .from(workflowRuns)
         .where(eq(workflowRuns.id, runId));
@@ -278,7 +274,8 @@ export const WorkflowRunPauseStopService = {
     userId: string,
   ): Promise<{ stopped: boolean; reason?: string; currentStatus?: string }> {
     // Load run.
-    const [run] = await db
+    const orgDb = getOrgScopedDb('workflowRunPauseStopService.stopRun');
+    const [run] = await orgDb
       .select()
       .from(workflowRuns)
       .where(
@@ -295,43 +292,44 @@ export const WorkflowRunPauseStopService = {
 
     assertValidTransition({ kind: 'workflow_run', recordId: runId, from: run.status, to: 'failed' });
 
-    let stoppedRows: (typeof workflowRuns.$inferSelect)[] = [];
-    await db.transaction(async (tx) => {
-      // Cascade orphaned gates before status update (invariant).
-      const { resolved } = await WorkflowStepGateService.resolveOpenGatesForRun(
+    // Cascade orphaned gates before status update (invariant), then update status.
+    // Both operations run on the same org-scoped tx so they are atomic.
+    // The tx is the outer Postgres transaction opened by the HTTP auth middleware
+    // (server/middleware/auth.ts:106 db.transaction()) or the createWorker wrapper.
+    // getOrgScopedDb() returns that tx handle from ALS — no local transaction needed.
+    const { resolved } = await WorkflowStepGateService.resolveOpenGatesForRun(
+      runId,
+      organisationId,
+      orgDb,
+    );
+    if (resolved > 0) {
+      logger.info('workflow_run_gates_cascaded', {
         runId,
-        organisationId,
-        tx,
-      );
-      if (resolved > 0) {
-        logger.info('workflow_run_gates_cascaded', {
-          runId,
-          resolved,
-          trigger: 'stopRun',
-        });
-      }
+        resolved,
+        trigger: 'stopRun',
+      });
+    }
 
-      stoppedRows = await tx
-        .update(workflowRuns)
-        .set({
-          status: 'failed',
-          error: 'stopped_by_user',
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(workflowRuns.id, runId),
-            eq(workflowRuns.organisationId, organisationId),
-            // Optimistic guard: only update non-terminal rows.
-            sql`${workflowRuns.status} NOT IN ('completed', 'completed_with_errors', 'failed', 'cancelled', 'partial')`,
-          ),
-        )
-        .returning();
-    });
+    const stoppedRows = await orgDb
+      .update(workflowRuns)
+      .set({
+        status: 'failed',
+        error: 'stopped_by_user',
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, organisationId),
+          // Optimistic guard: only update non-terminal rows.
+          sql`${workflowRuns.status} NOT IN ('completed', 'completed_with_errors', 'failed', 'cancelled', 'partial')`,
+        ),
+      )
+      .returning();
 
     if (stoppedRows.length === 0) {
       // Race: run reached a terminal status between the pre-check and the write.
-      const [freshRun] = await db
+      const [freshRun] = await orgDb
         .select({ status: workflowRuns.status })
         .from(workflowRuns)
         .where(eq(workflowRuns.id, runId));

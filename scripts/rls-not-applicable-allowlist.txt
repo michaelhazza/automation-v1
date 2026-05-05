@@ -67,6 +67,7 @@
 # (Add new entries below in alphabetical order by table name.)
 
 llm_inflight_history  Reads are system-admin only and intentionally cross-tenant (same posture as llm_requests_archive); the table is a short-TTL forensic ledger of in-flight add/remove events, not per-org ownership data.  [ref: spec §3.3.1]
+oauth_state_nonces  Short-lived CSRF nonces consumed pre-auth during the OAuth callback before any session or org context is available; tenant isolation is enforced by nonce uniqueness (UUID primary key) and a 10-minute TTL, not by RLS.  [ref: migrations/0278_oauth_state_pending_run.sql]
 permission_groups  Table was created with organisation_id in migration 0000 but dropped entirely in migration 0005 — it does not exist at runtime and cannot receive an RLS policy.
 playbook_runs  Table was renamed to workflow_runs in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_runs in migration 0245.
 playbook_templates  Table was renamed to workflow_templates in migration 0221; the CREATE TABLE (with organisation_id) is in migration 0076 under the old name. RLS policy lives on workflow_templates in migration 0245.

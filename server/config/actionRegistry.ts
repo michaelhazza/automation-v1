@@ -172,6 +172,15 @@ export interface ActionDefinition {
   requiredIntegration?: RequiredIntegrationSlug;
 
   /**
+   * E-D4 — marks tools that cannot safely pause mid-execution to wait for an
+   * OAuth connection. When true and the required integration is missing,
+   * checkRequiredIntegration returns { allowed: false, code: 'TOOL_NOT_RESUMABLE' }
+   * instead of a block-state payload, causing the run to be cancelled rather than paused.
+   * Use for tools with irreversible or time-sensitive external side effects.
+   */
+  integrationNotResumable?: true;
+
+  /**
    * Agentic Commerce — marks skills that move real money through chargeRouterService.
    * When true, policyEngineService evaluates a spendDecision in addition to the
    * standard gate decision. Reviewed by verify-idempotency-strategy-declared.sh (CI).

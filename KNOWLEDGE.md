@@ -2142,3 +2142,97 @@ Today: emit is WebSocket-only — the live socket records state, but a client op
 **Why it matters:** A boot-time sweep failing for 1 of 200 rows shows up as "registered 199" in the integer model — operationally invisible. The split-counts model exposes the failure rate as a first-class field; partial failures fire dashboards instead of disappearing into a successful-looking log line.
 
 Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.
+
+### 2026-05-05 Resolution — task_events table (migration 0279) closes the persistence gap above
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening)
+**Resolves:** the 2026-05-04 gotcha immediately above.
+
+Pre-launch hardening D-P0-5 sidesteps the `agent_execution_events.run_id NOT NULL` problem by writing task-shaped events to a **separate** table — `task_events` (migration 0279, FORCE RLS) — keyed `(task_id, seq)` and indexed by `(task_id, seq, created_at)`. `appendAndEmitTaskEvent` now performs the seq allocation and the durable INSERT inside the same `db.transaction()`; the WebSocket emit fires only after commit so the DB row is the source of truth. Replay endpoint can now reconstruct historical task events for clients that join late.
+
+Trade-off accepted: two physically separate tables (`agent_execution_events` for run-scoped events, `task_events` for task-scoped events) instead of one. The original "make `run_id` nullable + add `workflow_run_id` with at-least-one-of" plan was heavier (schema migration on a hot table, validator changes, query path changes across the LiveAgentExecutionLog read path); the dedicated `task_events` table is additive and ships independently. Cross-table reads at the UI layer (per-task drilldown showing both event sources) remain a future optimisation; today the OpenTaskView only consumes the task_events stream.
+
+### 2026-05-05 Gotcha — db.transaction() opened from module-level pool runs WITHOUT GUC; FORCE-RLS writes silently no-op
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening). Surfaced TWICE in the same branch — `taskEventService.ts` (D-P0-5) and `workflowRunPauseStopService.ts` (migrated to `getOrgScopedDb` mid-build).
+
+The fail mode: a service imports `db` from `server/db/index.js` at module top, opens its own `await db.transaction(async (tx) => ...)`, and writes to a FORCE-RLS table. The transaction inherits no `app.organisation_id` GUC because the pooled connection was not entered via `withOrgTx` / `getOrgScopedDb`. FORCE-RLS policies fail-closed: `WITH CHECK` rejects every INSERT silently (0 rows affected, no error thrown — Postgres returns "command complete"). The read side is similarly invisible: `SELECT` returns zero rows even when rows exist.
+
+Two ways out, used in this branch:
+
+1. **Explicit GUC inside the tx** — first statement in the transaction is `await tx.execute(sql\`SELECT set_config('app.organisation_id', \${ctx.organisationId}, true)\`)`. The `true` third argument scopes the setting to the transaction so it does not leak back into the connection pool. Used by `taskEventService.appendAndEmitTaskEvent` (the service is fire-and-forget — its callers are not guaranteed to be inside an outer `withOrgTx`, so the service must own the GUC).
+2. **Migrate to `getOrgScopedDb`** — replace the module-level `db` import with a function-scope `const db = getOrgScopedDb('serviceName')`. The wrapper requires an active `withOrgTx` ALS context and throws `failure('missing_org_context')` if absent — converts the silent fail into a loud one. Used by `workflowRunPauseStopService` (callers always pass through an authenticated route or job handler that has `withOrgTx`).
+
+Choice rule: services on hot/authenticated paths use option 2 (loud fail catches caller misuse). Fire-and-forget / unauthenticated-path services use option 1 (the explicit GUC is the contract — there's no upstream context to inherit). The wrong combination — option 2 on a fire-and-forget caller, or option 1 inside a service that ALWAYS runs inside `withOrgTx` — produces either a hard crash on legitimate calls or duplicates the GUC unnecessarily.
+
+Detection heuristic: grep `db\.transaction\(` in services that touch FORCE-RLS tables. Every hit must either (a) be inside `getOrgScopedDb`'s contract, or (b) issue `SELECT set_config('app.organisation_id', ...)` as the first statement. A bare `db.transaction()` on a FORCE-RLS table is the bug.
+
+### 2026-05-05 Pattern — `app.set('trust proxy', N)` MUST be a hop count, not `true`
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), adversarial-reviewer AR-2.1.
+
+Express's `req.ip` derivation reads `X-Forwarded-For` from right-to-left and returns the leftmost address that is NOT a trusted proxy. The setting controls "how many hops to trust":
+
+- `app.set('trust proxy', 1)` — trust the FIRST upstream proxy only (the one directly fronting the app). The right-most XFF address is treated as the proxy; everything to its left is taken at face value. This is what production behind a single load balancer (Replit, Render, Vercel, AWS ALB → app) needs.
+- `app.set('trust proxy', true)` — trust ALL proxies in the chain. Any client can spoof `req.ip` by setting their own `X-Forwarded-For` header, because Express will walk the entire chain looking for a non-trusted address and find none. **Security regression** — rate limiters keyed on `req.ip` are now per-X-Forwarded-For-claim, not per-real-client.
+- `app.set('trust proxy', false)` (default) — trust no proxies. `req.ip` is always the proxy's address. Behind a load balancer, this means every client looks like the same IP — rate limiters become global locks.
+
+Rule for new app configs: pick the integer that matches the deployment's hop count. Never `true`. Never `false` if a load balancer is in front. Re-validate when the deployment topology changes (e.g. adding a CDN in front of the existing LB takes the count from 1 to 2). Implemented in `server/index.ts` (`isProduction → app.set('trust proxy', 1)`) per pre-launch S-P0-5 / AR-2.1.
+
+### 2026-05-05 Gotcha — `db.execute(sql\`...\`)` returns `QueryResult`, not a bare array
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), chatgpt-pr-review round 2 (real-bug catch in `oauthStateCleanupJob.ts`).
+
+When using Drizzle with the node-postgres driver, `await db.execute(sql\`...\`)` returns a `QueryResult` object whose row data lives on `.rows`. Treating the return as a bare array (`result.length`, `result.map(...)`, `result[0]`) silently returns wrong values — for `RETURNING`-style DELETEs the count is consistently 0 even when rows were deleted.
+
+The cleanup job ran for two months silently reporting `rowsDeleted: 0` because the `(result as unknown as Array<...>).length` cast compiled fine and produced a number, just always wrong. The bug was invisible until ChatGPT round 2 read the diff carefully.
+
+Fix shape:
+
+\`\`\`ts
+const result = await db.execute<{ ok: number }>(sql\`DELETE … RETURNING 1 AS ok\`);
+const rows = (result as unknown as { rows?: Array<{ ok: number }> }).rows ?? [];
+return { rowsDeleted: rows.length };
+\`\`\`
+
+Detection: any service / job that uses `db.execute(sql\`...\`)` and reads `.length` or indexes into the result directly is wrong. Drizzle's typed query builder (`db.select()`, `db.delete().returning()`) returns the bare array as expected — `db.execute(sql)` is the escape hatch and carries the QueryResult shape.
+
+### 2026-05-05 Pattern — Catch blocks around fire-and-forget enqueues must log; the enqueue itself does not
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), chatgpt-pr-review round 2.
+
+The pre-launch GHL onboarding migration replaced an inline call with a pg-boss enqueue (`enqueueGhlOnboarding`). Several callers wrapped the new enqueue in `try { ... } catch { /* swallow */ }` because the original inline call was best-effort and the surrounding webhook handler must always return 200. **The enqueue function itself does NOT log on internal failure** — pg-boss client errors throw raw, and the per-call context (orgId, subaccountId, webhook event id) lives only at the call site.
+
+Rule: when a fire-and-forget enqueue is wrapped in a swallow-catch, the catch block must `logger.warn(...)` with all available context BEFORE swallowing. The job-side handler will not log this failure — it never ran. The on-call engineer needs the call-site log to even know the enqueue failed.
+
+Wider rule: utility functions whose contract is "throw on failure" require their callers to either propagate the throw or log+swallow with full context. A bare `catch {}` on such a function is a silent-failure regression. Audit when introducing a new "thin wrapper around external system" function: the wrapper either logs internally and never throws, or it throws and forces every caller to choose. Mixed contracts ("sometimes I log, sometimes I throw") are the worst — callers can't reason about coverage.
+
+### 2026-05-05 Gotcha — `withOrgTx({ tx: db })` in unauthenticated callbacks fakes ALS context without setting a GUC
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), adversarial-reviewer AR-3.1 worth-confirming (deferred).
+
+Pattern in `server/routes/oauthIntegrations.ts` (and a few other unauthenticated callback paths): `withOrgTx({ tx: db, organisationId }, async () => { ... })`. Passing the module-level `db` as `tx` makes the ALS context "look right" — `getCurrentOrgContext()` returns the orgId — but no actual GUC is bound to any DB connection. Code inside the closure that uses `getOrgScopedDb()` to get a connection will receive a connection with no `app.organisation_id` set, and FORCE-RLS writes will fail-closed silently (per the gotcha above).
+
+Today this works in the OAuth callback because `autoEnrolAgencyLocations` opens its own per-location `db.transaction()` with explicit `SET set_config(...)`. The fragile invariant is "the closure body must never rely on inherited GUC". Any future refactor that introduces a `getOrgScopedDb()` call inside the closure will silently break.
+
+Fix shape (deferred to Phase 2): replace `withOrgTx({ tx: db }, ...)` with `withOrgTx({ organisationId }, ...)` (no `tx` override) so the wrapper opens a real transaction and binds the GUC properly. The current `tx: db` override exists because the callers want to defer DB-pool acquisition until per-location work — a refactor to acquire connections later still works but needs explicit GUC management at each acquisition site.
+
+Detection heuristic: grep `withOrgTx\(\{[^)]*tx:\s*db` — every hit is either a deliberate optimisation (currently 1 site in `routes/oauthIntegrations.ts`) or a misuse. Document the deliberate sites with an inline comment so future refactors don't propagate the pattern unaware.
+
+### 2026-05-04 Correction — Riley waves ship independently
+
+W1 shipped via PR #186 + migrations 0219-0222. W2 schema landed in migration 0230 out-of-band from `pre-launch-hardening`; W2 services / UI did not. W3 and W4 unstarted in code. Don't conflate the four waves when reading Riley docs — check migrations and `server/lib/tracing.ts` for actual state.
+
+### 2026-05-04 Pattern — F1 Sub-Account Baseline Artefacts (migration 0277)
+
+Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `memory_blocks.applies_to_domains` (TEXT[]), and `subaccounts.baseline_artefacts_status` (versioned JSONB). Six reserved-slug artefacts are captured at onboarding via the `baseline-artefacts-capture` workflow. Tier-1 blocks prepend to the system prompt via `memoryBlockService.getTier1Blocks` (sorted by name ASC for hash-stable prefix caching). Tier-2 blocks load when `applies_to_domains @> ARRAY[agentDomain]` matches. Tier-3 lives in `workspace_memory_entries` under `domain='baseline'`.
+
+F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
+
+JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.

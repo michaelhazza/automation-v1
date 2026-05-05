@@ -40,6 +40,17 @@ Every proposed change in this spec has: a clear contract, named files/surfaces, 
 
 ---
 
+## Shipping status (as of 2026-05-01)
+
+| Wave | State | Notes |
+|------|-------|-------|
+| W1 — naming + `invoke_automation` | **SHIPPED** | PR #186, migrations 0219-0222 |
+| W2 — Explore/Execute mode | **SCHEMA-ONLY** | Migration 0230 added `workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, `system_skills.side_effects`. No services, routes, UI, or tests. |
+| W3 — context-assembly telemetry | **NOT STARTED** | No `context.assembly.complete` event in `server/lib/tracing.ts`; no emit in `agentExecutionService.ts`. |
+| W4 — heartbeat gate | **NOT STARTED** | Prep columns in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Gate service, dispatcher, event registry, and UI all pending. |
+
+---
+
 ## 1. Goals, non-goals, success criteria
 
 ### 1.1 Goals
@@ -196,6 +207,8 @@ Anything not listed here that a future UI change introduces must pass the [front
 ---
 
 ## 4. Part 1 — Naming pass
+
+> **Status: SHIPPED** — PR #186, migrations 0219-0222. Full implementation including services, routes, and tests.
 
 Three-step ordered rename: clear the `workflow*` namespace, rename `processes → automations`, rename `playbooks → workflows`. All three steps ship in one PR. Each step produces a distinct commit that is green (tests pass, types compile) before the next step begins.
 
@@ -618,6 +631,8 @@ Architect pass runs `grep -rE "'playbook_|playbook_id|playbook_run_id|playbook_s
 
 ## 5. Part 2 — Workflows calling Automations (composition)
 
+> **Status: SHIPPED** — PR #186 (same PR as W1). `invoke_automation` step type including pure dispatcher, stateful service, schema validator, tracing events, and Studio UI.
+
 ### 5.1 Purpose
 
 A Workflow (native orchestration) should be able to invoke a registered Automation (external engine wrapper) as one of its steps. This is what makes the two-concept model feel like one coherent system from a user's perspective: they compose native and external capabilities in the same builder.
@@ -943,6 +958,8 @@ Exact component file names and placement within `WorkflowStudioPage.tsx` / run-l
 
 ## 6. Part 3 — Explore Mode / Execute Mode
 
+> **Status: SCHEMA-ONLY** — Migration 0230 (from `pre-launch-hardening` build, not Riley) added `workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, and `system_skills.side_effects`. Services, routes, UI, and tests have not started. Note: this wave does NOT include skill-execution timing capture.
+
 ### 6.1 Purpose
 
 Promote the safety affordance from a hidden toggle to a first-class interaction pillar. Every agent run and every Workflow run is in exactly one of two modes, and the mode is always visible on the run surface.
@@ -1242,6 +1259,8 @@ Event registers in `server/lib/tracing.ts` alongside other run-lifecycle events.
 
 ## 7. Part 4 — Heartbeat activity-gate
 
+> **Status: NOT STARTED** — Two prep columns landed in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Gate service, dispatcher, event registry, and UI all pending.
+
 ### 7.1 Purpose
 
 Portfolio Health Agent ticks every 4h unconditionally. Add a deterministic pre-dispatch gate that skips ticks when there's no signal. No LLM — just rules over data we already have. Cheap, predictable, debuggable.
@@ -1480,6 +1499,8 @@ System-admin only in v1. Agency-admin exposure follows after operational validat
 ---
 
 ## 8. Part 5 — Context-assembly telemetry
+
+> **Status: NOT STARTED** — No `context.assembly.complete` event registered in `server/lib/tracing.ts`, no emit in `agentExecutionService.ts`, no helper module.
 
 ### 8.1 Purpose
 

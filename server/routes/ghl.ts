@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { authenticate, checkOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId } from '../config/oauthProviders.js';
-import { setGhlOAuthState } from '../lib/ghlOAuthStateStore.js';
+import { setGhlOAuthState } from '../services/ghlOAuthStateStore.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
@@ -33,7 +33,7 @@ router.get('/api/ghl/oauth-url', authenticate, asyncHandler(async (req, res) => 
   }
 
   const nonce = crypto.randomBytes(32).toString('hex');
-  setGhlOAuthState(nonce, orgId);
+  await setGhlOAuthState(nonce, orgId);
 
   const appBase = process.env.OAUTH_CALLBACK_BASE_URL || process.env.APP_BASE_URL || '';
   const redirectUri = `${appBase}/api/oauth/callback`;

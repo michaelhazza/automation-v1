@@ -86,6 +86,13 @@ export const EVENT_NAMES = [
   // invoke_automation step telemetry (spec §5.9)
   'workflow.step.automation.dispatched',
   'workflow.step.automation.completed',
+  // F1 baseline artefacts — emitted once per tier-1/tier-2 block injected into context
+  'baseline_artefact.tier_loaded',
+  // F1 baseline artefacts — capture workflow lifecycle events
+  'artefact.capture.started',
+  'artefact.capture.completed',
+  'artefact.capture.skipped',
+  'artefact.capture.edited',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

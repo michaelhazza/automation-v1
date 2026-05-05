@@ -48,7 +48,7 @@ test('every builder emits the rl:v1 version prefix', () => {
   const samples = [
     rateLimitKeys.authLogin('1.2.3.4', 'a@x.com'),
     rateLimitKeys.authSignup('1.2.3.4'),
-    rateLimitKeys.authForgot('1.2.3.4'),
+    rateLimitKeys.authForgot('1.2.3.4', 'a@x.com'),
     rateLimitKeys.authReset('1.2.3.4'),
     rateLimitKeys.publicFormIp('1.2.3.4'),
     rateLimitKeys.publicFormPage('page-1'),

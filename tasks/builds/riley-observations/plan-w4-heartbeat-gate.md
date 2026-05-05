@@ -1,5 +1,7 @@
 # Riley Observations — W4 Heartbeat Activity-Gate
 
+> **Not started.** Two prep columns landed in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Gate service, dispatcher, UI, and event registry all pending.
+
 **Wave:** 4 of 4 (final wave)
 **Source spec:** `docs/riley-observations-dev-spec.md` §7 (Part 4 — Heartbeat activity-gate), §10.1 row 5 (migration 0206), §11.2 Part 4 (test strategy), §12.4 (open questions 15–17)
 **Classification:** Significant (new service, schema change, new telemetry event, UI edit, depends on prior waves)

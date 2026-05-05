@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { connectorLocationTokens } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { logger } from '../lib/logger.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -32,7 +32,7 @@ export async function getLocationToken(
   agencyConnection: { id: string; companyId: string | null; organisationId: string; accessToken?: string | null },
   locationId: string,
 ): Promise<string> {
-  const [cached] = await db
+  const [cached] = await getOrgScopedDb('locationTokenService')
     .select()
     .from(connectorLocationTokens)
     .where(
@@ -107,7 +107,8 @@ async function mintLocationToken(
   const claimedAt = new Date();
   const expiresAt = computeLocationTokenExpiresAt(claimedAt, data.expires_in);
 
-  const [inserted] = await db
+  const orgDb = getOrgScopedDb('locationTokenService');
+  const [inserted] = await orgDb
     .insert(connectorLocationTokens)
     .values({
       connectorConfigId: agencyConnection.id,
@@ -121,7 +122,7 @@ async function mintLocationToken(
     .returning();
 
   if (!inserted) {
-    const [winner] = await db
+    const [winner] = await orgDb
       .select()
       .from(connectorLocationTokens)
       .where(
@@ -192,7 +193,7 @@ async function refreshLocationToken(
   } catch (err) {
     const e = err as { statusCode?: number };
     if (e.statusCode === 401) {
-      await db
+      await getOrgScopedDb('locationTokenService')
         .update(connectorLocationTokens)
         .set({ deletedAt: new Date() })
         .where(eq(connectorLocationTokens.id, tokenRowId));
@@ -216,7 +217,7 @@ async function refreshLocationToken(
   // isNull(deletedAt) guard the refresh would land on a tombstoned row that
   // every live-read query filters out, leaving the system to mint a duplicate
   // and burn an extra GHL refresh token.
-  await db
+  await getOrgScopedDb('locationTokenService')
     .update(connectorLocationTokens)
     .set({
       accessToken: connectionTokenService.encryptToken(data.access_token),
@@ -247,7 +248,7 @@ export async function handleLocationToken401(
   agencyConnection: { id: string; companyId: string | null; organisationId: string },
   locationId: string,
 ): Promise<string> {
-  await db
+  await getOrgScopedDb('locationTokenService')
     .update(connectorLocationTokens)
     .set({ deletedAt: new Date() })
     .where(

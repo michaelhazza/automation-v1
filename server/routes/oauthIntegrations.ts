@@ -17,6 +17,9 @@ import { integrationConnectionService } from '../services/integrationConnectionS
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
+// guard-ignore-next-line: rls-contract-compliance reason="db is passed as connection handle to withOrgTx for GUC propagation on the pre-auth GHL callback path — no direct queries issued here; no authenticated org context is available for getOrgScopedDb"
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const router = Router();
@@ -284,12 +287,27 @@ router.get(
         console.warn('[OAuth] run resume failed after connect:', err);
       }
 
+      // Target the app origin (NOT window.location.origin, which equals the API
+      // origin in split-origin deployments). The browser drops postMessage when
+      // targetOrigin ≠ opener origin, so a same-origin fallback would silently
+      // fail to notify the popup parent in split-origin setups.
+      let appOrigin: string | null;
+      try {
+        appOrigin = new URL(appBase).origin;
+      } catch {
+        appOrigin = null;
+      }
+      // If APP_BASE_URL is malformed, fall back to the same-origin behaviour
+      // (broken in split-origin deploys, but this is the pre-fix default).
+      const targetOriginExpr = appOrigin
+        ? JSON.stringify(appOrigin)
+        : 'window.location.origin';
       return res.send(`<!DOCTYPE html>
 <html>
 <head><title>Connected</title></head>
 <body>
 <script>
-  try { window.opener && window.opener.postMessage({ type: 'oauth_success' }, window.location.origin); } catch (e) {}
+  try { window.opener && window.opener.postMessage({ type: 'oauth_success' }, ${targetOriginExpr}); } catch (e) {}
   window.close();
 </script>
 <p>Connected! You may close this window.</p>
@@ -332,12 +350,20 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
     return res.redirect(`${appBase}/onboarding?error=invalid_callback`);
   }
 
-  const { consumeGhlOAuthState } = await import('../lib/ghlOAuthStateStore.js');
-  const ghlOrgId = consumeGhlOAuthState(state);
-  if (!ghlOrgId) {
+  const { consumeGhlOAuthState } = await import('../services/ghlOAuthStateStore.js');
+  const stateData = await consumeGhlOAuthState(state);
+  if (!stateData) {
+    // Expired, already consumed, and unknown nonces all return null (intentional —
+    // avoids an oracle that distinguishes the three cases). Log for observability.
+    logger.warn('oauth_state.consume_failed', {
+      event: 'oauth_state.consume_failed',
+      noncePrefix: typeof state === 'string' ? state.slice(0, 6) : 'unknown',
+      reason: 'expired_or_missing',
+    });
     logCallbackFailure('invalid_state', null, null);
     return res.redirect(`${appBase}/onboarding?error=invalid_state`);
   }
+  const ghlOrgId = stateData.organisationId;
 
   const callbackBase = env.OAUTH_CALLBACK_BASE_URL || env.APP_BASE_URL;
   const redirectUri = `${callbackBase}/api/oauth/callback`;
@@ -395,19 +421,23 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   });
 
   // Fire sub-account enumeration + enrolment. Best-effort — connection stays active
-  // even if enumeration fails. Hard timeout: 15s. autoEnrolAgencyLocations is added
-  // in Task 9; imported via unknown cast to avoid a typecheck error before that chunk lands.
+  // even if enumeration fails. Hard timeout: 15s. Wrapped in withOrgTx so that
+  // any downstream service call that reads getOrgTxContext() receives the correct
+  // org context (S-P0-4: GUC propagation on unauthenticated callback paths).
   try {
     const svc = await import('../services/ghlAgencyOauthService.js') as unknown as {
       autoEnrolAgencyLocations?: (orgId: string, connection: unknown, label: string) => Promise<void>;
     };
     if (typeof svc.autoEnrolAgencyLocations === 'function') {
-      await Promise.race([
-        svc.autoEnrolAgencyLocations(ghlOrgId, connection, `oauth_callback:${connection.id}`),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
-        ),
-      ]);
+      await withOrgTx(
+        { tx: db, organisationId: ghlOrgId, source: 'oauth:callback:ghl:enrol' },
+        () => Promise.race([
+          svc.autoEnrolAgencyLocations!(ghlOrgId, connection, `oauth_callback:${connection.id}`),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
+          ),
+        ]),
+      );
     }
   } catch (err) {
     logger.warn('ghl.oauth.callback_enrol_failed', {
@@ -420,6 +450,17 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
       error: { message: String(err) },
     });
   }
+
+  // C-P0-2: agent resume after OAuth.
+  // The JWT-based OAuth flow (/api/integrations/oauth2/callback) handles
+  // agent run resume via resumeFromIntegrationConnect when payload.resumeToken
+  // is set. The GHL agency OAuth path (/api/oauth/callback) is initiated from
+  // the settings/onboarding UI (routes/ghl.ts), which never passes pendingRunId
+  // to setGhlOAuthState — so stateData.pendingRunId is always null here.
+  // The oauth_state_nonces.pending_run_id column and enqueueResumeAfterOAuth
+  // are pre-built for a future agent-triggered GHL OAuth path; when that path
+  // is wired, the initiation site (routes/ghl.ts) must pass pendingRunId and
+  // the consume site here must call enqueueResumeAfterOAuth(stateData.pendingRunId).
 
   return res.redirect(`${appBase}/onboarding?connected=ghl`);
 }));

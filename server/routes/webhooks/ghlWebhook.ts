@@ -75,8 +75,14 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), asyncHandler
     }
 
     // §5.4 hard invariant: side effects FIRST, dedupe mark only on success.
-    // Do not call isDuplicate before dispatch — a 503 must leave the dedupe store
-    // unmarked so GHL will re-deliver on retry.
+    // hasBeenProcessed is a read-only check — it does not consume the token, so
+    // a 503 on the previous delivery leaves the store unmarked and GHL can retry.
+    // isDuplicate (called after success) is the authoritative mark.
+    if (webhookDedupeStore.hasBeenProcessed(webhookId)) {
+      res.status(200).json({ received: true });
+      return;
+    }
+
     let dispatchResult: Awaited<ReturnType<typeof dispatchWebhookSideEffects>>;
     try {
       dispatchResult = await dispatchWebhookSideEffects({

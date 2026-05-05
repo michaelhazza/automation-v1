@@ -1,4 +1,4 @@
-﻿import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -111,6 +111,11 @@ export const memoryBlocks = pgTable(
     qualityScore: numeric('quality_score', { precision: 3, scale: 2 }).notNull().default('0.50'),
     capturedVia: text('captured_via').notNull().default('manual_edit').$type<MemoryBlockCapturedVia>(),
 
+    // F1 baseline artefacts (migration 0277, spec §3) — tier classification
+    // (1 = foundational, 2 = strategic) and domain-scoping for injection filtering.
+    tier: smallint('tier').$type<1 | 2>(),
+    appliesToDomains: text('applies_to_domains').array(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -131,6 +136,10 @@ export const memoryBlocks = pgTable(
     activeIdx: index('memory_blocks_active_idx')
       .on(table.organisationId, table.subaccountId)
       .where(sql`${table.status} = 'active' AND ${table.deletedAt} IS NULL`),
+    // F1 baseline artefacts (migration 0277) — tier lookup for injection filtering.
+    tierIdx: index('memory_blocks_tier_idx')
+      .on(table.organisationId, table.subaccountId, table.tier)
+      .where(sql`${table.tier} IS NOT NULL`),
   })
 );
 
