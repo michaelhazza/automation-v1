@@ -435,6 +435,15 @@ Automated configuration auditing that detects drift, misconfigurations, and oper
 
 The Sub-account Optimiser is the first consumer of the agent recommendations primitive. It runs a daily scan per subaccount at 06:00 local time (staggered by hash to distribute load) and surfaces findings across eight categories: agent over-budget, playbook escalation rate, slow skills compared to peer benchmarks, inactive workflows, repeat escalation phrases, low memory citation efficiency, routing uncertainty, and poor LLM cache reuse. Operator-facing copy is plain English; no internal category slugs appear in the dashboard.
 
+### Sub-account Baseline
+
+Quantitative starting numbers captured at sub-account onboarding so progress is measurable from day one.
+
+- **Five core metrics** — lead count, open opportunities, pipeline value, last 30 days revenue, conversation engagement. Captured automatically once a CRM is connected and has settled enough data to be representative.
+- **Manual entry override** — operators can enter values directly when CRM data is incomplete or when starting from a non-CRM source of truth. A historical-maximum cap on lead count guards against order-of-magnitude data-entry mistakes.
+- **Confidence flag** — every baseline is tagged confirmed (all opted-in metrics captured), partial (some metrics unavailable), or estimated (manual entry). Reporting surfaces show the flag so operators can interpret deltas accurately.
+- **Admin reset** — sysadmins can reset a sub-account's baseline when the operator legitimately starts over (post-migration, scope change). Prior baselines stay on file with the reset reason and timestamp.
+
 ### Activity & Analytics
 
 Unified operational view across all activity types with advanced filtering and real-time updates.

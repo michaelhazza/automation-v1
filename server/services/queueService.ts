@@ -1363,6 +1363,33 @@ export const queueService = {
       // Consumed by the IEE worker; main app does not register a handler for this queue.
       // Declared here for documentation completeness. The worker polls by correlationId.
 
+      // F3 §4 — daily fallback: evaluate pending baselines and enqueue capture jobs.
+      await (boss as any).work('evaluate-all-pending-baselines', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { evaluateAllPendingBaselinesHandler } = await import('../jobs/evaluateAllPendingBaselines.js');
+          await withTimeout(evaluateAllPendingBaselinesHandler(job).then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'evaluate-all-pending-baselines', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('evaluate-all-pending-baselines', '0 6 * * *', {});
+
+      // F3 §5 — per-baseline capture worker (event-driven; enqueued by subscriber + cron).
+      await (boss as any).work('capture-baseline', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { captureBaselineJobHandler } = await import('../jobs/captureBaselineJob.js');
+          await withTimeout(captureBaselineJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'capture-baseline', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

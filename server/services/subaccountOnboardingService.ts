@@ -27,6 +27,7 @@ import {
   systemWorkflowTemplates,
   workspaceMemoryEntries,
   memoryBlocks,
+  subaccountBaselines,
 } from '../db/schema/index.js';
 import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
 import { WorkflowRunService } from './workflowRunService.js';
@@ -738,6 +739,33 @@ class SubaccountOnboardingService {
       prior_version: 'v1',
       new_version: 'v1',
     });
+  }
+
+  /**
+   * F3 §4 — insert the initial `pending` baseline row at sub-account creation.
+   * Idempotent: the partial UNIQUE index on (subaccount_id) WHERE status <> 'reset'
+   * prevents a duplicate row if the hook fires twice.
+   *
+   * Single-writer rule: this is the ONLY surface that writes the initial `pending`
+   * row. After this insert, captureBaselineService is the only writer.
+   */
+  async markBaselinePending(params: {
+    organisationId: string;
+    subaccountId: string;
+  }): Promise<void> {
+    try {
+      const tx = getOrgScopedDb('subaccountOnboardingService.markBaselinePending');
+      await tx.insert(subaccountBaselines).values({
+        organisationId: params.organisationId,
+        subaccountId: params.subaccountId,
+        baselineVersion: 1,
+        status: 'pending',
+      });
+    } catch (err) {
+      const pgErr = err as { code?: string };
+      if (pgErr?.code === '23505') return;
+      throw err;
+    }
   }
 }
 

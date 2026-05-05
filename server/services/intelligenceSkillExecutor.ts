@@ -5,6 +5,8 @@ import { subaccountTagService } from './subaccountTagService.js';
 import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
 import { db } from '../db/index.js';
+import { getBaselineForSubaccount, computeDelta, type MetricDelta } from './reportingAgent/baselineHelper.js';
+import { isBaselineMetricSlug } from '../../shared/constants/baselineMetrics.js';
 import {
   clientPulseHealthSnapshots,
   clientPulseChurnAssessments,
@@ -650,6 +652,7 @@ export async function executeGeneratePortfolioReport(
   const orgInsights = await orgMemoryService.getInsightsForPrompt(context.organisationId);
 
   const accountHealthData = [];
+  const sinceOnboardingByAccountId = new Map<string, MetricDelta[]>();
   for (const account of accounts) {
     const snapshot = await canonicalDataService.getLatestHealthSnapshot(principal, account.id);
     accountHealthData.push({
@@ -659,6 +662,17 @@ export async function executeGeneratePortfolioReport(
       trend: snapshot?.trend ?? null,
       confidence: snapshot?.confidence ?? null,
     });
+
+    if (account.subaccountId) {
+      const baseline = await getBaselineForSubaccount(context.organisationId, account.subaccountId);
+      if (baseline) {
+        const rawMetrics = await canonicalDataService.getMetricsByAccount(principal, account.id);
+        const currentMetrics = rawMetrics
+          .filter((m) => isBaselineMetricSlug(m.metricSlug))
+          .map((m) => ({ slug: m.metricSlug as MetricDelta['slug'], numeric: parseFloat(m.currentValue) }));
+        sinceOnboardingByAccountId.set(account.id, computeDelta(baseline, currentMetrics));
+      }
+    }
   }
 
   const scoredAccounts = accountHealthData.filter(a => a.healthScore !== null);
@@ -689,6 +703,7 @@ export async function executeGeneratePortfolioReport(
       accountId: a.accountId,
       healthScore: a.healthScore,
       trend: a.trend,
+      sinceOnboarding: sinceOnboardingByAccountId.get(a.accountId) ?? null,
     })),
     activeAnomalies: criticalAnomalies.slice(0, 10).map(a => ({
       accountId: a.accountId,
@@ -701,6 +716,7 @@ export async function executeGeneratePortfolioReport(
       displayName: a.displayName,
       accountId: a.accountId,
       healthScore: a.healthScore,
+      sinceOnboarding: sinceOnboardingByAccountId.get(a.accountId) ?? null,
     })),
     baselineBuilding: coldStart.map(a => ({
       displayName: a.displayName,
