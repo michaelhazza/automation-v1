@@ -87,9 +87,15 @@ router.post(
       return;
     }
 
-    const attachTo = req.body?.attachTo
-      ? (JSON.parse(req.body.attachTo as string) as { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string })
-      : undefined;
+    let attachTo: { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string } | undefined;
+    if (req.body?.attachTo) {
+      try {
+        attachTo = JSON.parse(req.body.attachTo as string) as { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string };
+      } catch {
+        res.status(400).json({ error: { code: 'invalid_json_input', message: 'attachTo field could not be parsed as JSON' } });
+        return;
+      }
+    }
     const bundleName = (req.body?.bundleName as string | undefined) ?? undefined;
 
     // Validate: bundleName requires >= 2 files
@@ -101,7 +107,12 @@ router.post(
     // Validate names array.
     let names: string[] = [];
     if (req.body?.names) {
-      names = Array.isArray(req.body.names) ? req.body.names : JSON.parse(req.body.names as string);
+      try {
+        names = Array.isArray(req.body.names) ? req.body.names : JSON.parse(req.body.names as string);
+      } catch {
+        res.status(400).json({ error: { code: 'invalid_json_input', message: 'names field could not be parsed as JSON' } });
+        return;
+      }
     }
     if (names.length > 0 && names.length !== files.length) {
       res.status(400).json({ error: 'names array length must match files array length', code: 'CACHED_CONTEXT_UPLOAD_NAMES_LENGTH_MISMATCH' });

@@ -15,8 +15,9 @@
 //     precise historical replay).
 // ---------------------------------------------------------------------------
 
-import { and, desc, eq, gte, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, ne } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { isActive } from '../lib/queryHelpers.js';
 import { assertScope } from '../lib/scopeAssertion.js';
 import {
   agentRuns,
@@ -120,7 +121,7 @@ export async function listScheduleCalendar(
       agent: agents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
     .where(
       and(
         eq(subaccountAgents.organisationId, orgId),

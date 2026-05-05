@@ -38,8 +38,8 @@ test('same userId on testRun vs sessionMessage produces distinct keys', () => {
 });
 
 test('same IP on auth vs public routes produces distinct keys', () => {
-  expect(rateLimitKeys.authLogin('1.2.3.4', 'a@x.com')).not.toBe(rateLimitKeys.authSignup('1.2.3.4'));
-  expect(rateLimitKeys.authSignup('1.2.3.4')).not.toBe(rateLimitKeys.publicFormIp('1.2.3.4'));
+  expect(rateLimitKeys.authLogin('1.2.3.4', 'a@x.com')).not.toBe(rateLimitKeys.authSignup('1.2.3.4', 'a@x.com'));
+  expect(rateLimitKeys.authSignup('1.2.3.4', 'a@x.com')).not.toBe(rateLimitKeys.publicFormIp('1.2.3.4'));
   expect(rateLimitKeys.publicFormIp('1.2.3.4')).not.toBe(rateLimitKeys.publicTrackIp('1.2.3.4'));
 });
 
@@ -47,7 +47,7 @@ test('same IP on auth vs public routes produces distinct keys', () => {
 test('every builder emits the rl:v1 version prefix', () => {
   const samples = [
     rateLimitKeys.authLogin('1.2.3.4', 'a@x.com'),
-    rateLimitKeys.authSignup('1.2.3.4'),
+    rateLimitKeys.authSignup('1.2.3.4', 'a@x.com'),
     rateLimitKeys.authForgot('1.2.3.4', 'a@x.com'),
     rateLimitKeys.authReset('1.2.3.4'),
     rateLimitKeys.publicFormIp('1.2.3.4'),

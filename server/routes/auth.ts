@@ -3,6 +3,7 @@ import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { auditService } from '../services/auditService.js';
+import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from '../services/securityAuditService.js';
 import { validateBody } from '../middleware/validate.js';
 import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, signupBody } from '../schemas/auth.js';
 import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
@@ -21,13 +22,14 @@ function validatePasswordStrength(password: string): string | null {
 }
 
 router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (req, res) => {
-  const limitResult = await rateLimitCheck(rateLimitKeys.authSignup(req.ip ?? 'unknown'), 10, 900);
+  const { agencyName, password } = req.body as SignupInput;
+  const email = (req.body as SignupInput).email.trim().toLowerCase();
+  const limitResult = await rateLimitCheck(rateLimitKeys.authSignup(req.ip ?? 'unknown', email), 10, 900);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
     return;
   }
-  const { agencyName, email, password } = req.body as SignupInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {
     res.status(400).json({ error: 'Validation failed', details: { password: [passwordError] } });
@@ -43,17 +45,37 @@ router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (re
     entityId: result.user.id,
     ipAddress: req.ip,
   });
+  void recordSecurityEvent({
+    organisationId: result.user.organisationId,
+    actorUserId:    result.user.id,
+    eventType:      'auth.signup',
+    ip:             req.ip ?? null,
+    userAgent:      req.get('user-agent') ?? null,
+  });
   res.status(201).json(result);
 }));
 
 router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req, res) => {
-  const { email, password, organisationSlug } = req.body as LoginInput;
-  const limitResult = await rateLimitCheck(rateLimitKeys.authLogin(req.ip ?? 'unknown', String(email)), 10, 60);
-  if (!limitResult.allowed) {
-    setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
-    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+  const { password, organisationSlug } = req.body as LoginInput;
+  const email = (req.body as LoginInput).email.trim().toLowerCase();
+  const ip = req.ip ?? 'unknown';
+
+  // Bucket 1 — short: 10 attempts / 60s (burst protection)
+  const rlShort = await rateLimitCheck(rateLimitKeys.authLogin(ip, email), 10, 60);
+  if (!rlShort.allowed) {
+    setRateLimitDeniedHeaders(res, rlShort.resetAt, rlShort.nowEpochMs);
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.', reason: 'short_window' });
     return;
   }
+
+  // Bucket 2 — long: 50 attempts / 3600s (credential-stuffing prevention)
+  const rlLong = await rateLimitCheck(rateLimitKeys.authLoginLong(ip, email), 50, 3600);
+  if (!rlLong.allowed) {
+    setRateLimitDeniedHeaders(res, rlLong.resetAt, rlLong.nowEpochMs);
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.', reason: 'long_window' });
+    return;
+  }
+
   let result;
   try {
     result = await authService.login(email, password, organisationSlug);
@@ -61,8 +83,17 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     auditService.log({
       actorType: 'user',
       action: 'login_failed',
-      metadata: { email: String(email).toLowerCase(), reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
+      metadata: { email, reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
       ipAddress: req.ip,
+    });
+    // auth.login.failure — org is unknown at this point (login rejected before session established).
+    // Emit to the system sentinel org so the event is recorded; meta carries the redacted email.
+    void recordSecurityEvent({
+      organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+      eventType:      'auth.login.failure',
+      ip:             req.ip ?? null,
+      userAgent:      req.get('user-agent') ?? null,
+      meta:           { emailDomain: email.split('@')[1] ?? 'unknown' },
     });
     throw err;
   }
@@ -74,6 +105,13 @@ router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req,
     entityType: 'user',
     entityId: result.user.id,
     ipAddress: req.ip,
+  });
+  void recordSecurityEvent({
+    organisationId: result.user.organisationId,
+    actorUserId:    result.user.id,
+    eventType:      'auth.login.success',
+    ip:             req.ip ?? null,
+    userAgent:      req.get('user-agent') ?? null,
   });
   res.json(result);
 }));
@@ -90,8 +128,8 @@ router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHand
 }));
 
 router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
-  const { email } = req.body as ForgotPasswordInput;
-  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown', String(email)), 5, 300);
+  const email = String((req.body as ForgotPasswordInput).email).trim().toLowerCase();
+  const limitResult = await rateLimitCheck(rateLimitKeys.authForgot(req.ip ?? 'unknown', email), 5, 300);
   if (!limitResult.allowed) {
     setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
     res.status(429).json({ error: 'Too many password reset requests. Please try again later.' });
@@ -137,6 +175,14 @@ router.get('/api/auth/me', authenticate, asyncHandler(async (req, res) => {
 
 router.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
   const result = await authService.logout();
+  void recordSecurityEvent({
+    organisationId: req.user!.organisationId,
+    actorUserId:    req.user!.id,
+    actorRole:      req.user!.role,
+    eventType:      'auth.logout',
+    ip:             req.ip ?? null,
+    userAgent:      req.get('user-agent') ?? null,
+  });
   res.json(result);
 }));
 

@@ -692,7 +692,7 @@ export const CANONICAL_DICTIONARY_REGISTRY: CanonicalTableEntry[] = [
     commonJoins: ['Any canonical table via canonical_row_id WHERE canonical_table = \'<table>\''],
     antiPatterns: ['Do not query without filtering canonical_table — cross-table row IDs may collide'],
   },
-  // ── F3 Baseline Capture (migration 0282) ─────────────────────────────────
+  // ── F3 Baseline Capture (migration 0284) ─────────────────────────────────
   {
     tableName: 'subaccount_baselines',
     humanName: 'Subaccount Baselines',

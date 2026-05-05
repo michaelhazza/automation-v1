@@ -210,8 +210,19 @@ export async function autoEnrolAgencyLocations(
   agencyConnection: { id: string; companyId: string | null; organisationId: string; accessToken?: string | null },
   correlationId?: string,
 ): Promise<{ enrolled: number; insertedCount: number }> {
+  const MAX_GHL_LOCATIONS_TO_ENROL = 50;
   const effectiveCorrelationId = correlationId ?? agencyConnection.id;
-  const locations = await enumerateAgencyLocations(agencyConnection, effectiveCorrelationId);
+  const allLocations = await enumerateAgencyLocations(agencyConnection, effectiveCorrelationId);
+  const locations = allLocations.slice(0, MAX_GHL_LOCATIONS_TO_ENROL);
+  if (allLocations.length > MAX_GHL_LOCATIONS_TO_ENROL) {
+    logger.warn('ghl.enrol.locations_capped', {
+      event: 'ghl.enrol.locations_capped',
+      provider: 'ghl',
+      orgId,
+      total: allLocations.length,
+      enrolled: MAX_GHL_LOCATIONS_TO_ENROL,
+    });
+  }
   let insertedCount = 0;
 
   // FORCE RLS on subaccounts — both the OAuth callback and INSTALL_company

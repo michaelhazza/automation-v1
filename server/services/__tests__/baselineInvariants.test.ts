@@ -46,9 +46,9 @@ describe('Invariant 1: Exactly one active baseline per sub-account', () => {
     );
   });
 
-  it('RLS policy exists for subaccount_baselines in migration 0282', () => {
+  it('RLS policy exists for subaccount_baselines in migration 0284', () => {
     const rls = execSync(
-      'grep -c "subaccount_baselines_org_isolation" migrations/0282_baseline_rls_and_dictionary.sql 2>/dev/null || echo 0',
+      'grep -c "subaccount_baselines_org_isolation" migrations/0284_baseline_rls_and_dictionary.sql 2>/dev/null || echo 0',
       { encoding: 'utf8', cwd: process.cwd(), shell: SHELL },
     );
     assert.ok(parseInt(rls.trim(), 10) > 0, 'RLS policy must exist for subaccount_baselines');

@@ -5,6 +5,7 @@ import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import * as slackConversationService from '../../services/slackConversationService.js';
 import type { SlackInboundPayload } from '../../jobs/slackInboundJob.js';
+import { recordIncident } from '../../services/incidentIngestor.js';
 
 const router = Router();
 
@@ -80,6 +81,14 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandl
     }
   } catch (err) {
     console.error('[Slack Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+    await recordIncident({
+      source: 'route',
+      summary: 'Slack webhook DB lookup failed',
+      fingerprintOverride: 'webhook:slack:db_lookup_failed',
+      severity: 'medium',
+      stack: err instanceof Error ? err.stack : undefined,
+      errorDetail: { eventType: (event as Record<string, unknown>)?.type },
+    });
     res.status(500).json({ error: 'Internal error' });
     return;
   }
@@ -175,6 +184,16 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandl
     }
   } catch (err) {
     console.error('[Slack Webhook] Error processing event:', err instanceof Error ? err.message : err);
+    const orgId = config?.organisationId;
+    await recordIncident({
+      source: 'route',
+      summary: 'Slack webhook event processing failed',
+      fingerprintOverride: 'webhook:slack:handler_failed',
+      severity: 'medium',
+      organisationId: orgId ?? null,
+      stack: err instanceof Error ? err.stack : undefined,
+      errorDetail: { eventType: (event as Record<string, unknown>)?.type },
+    });
   }
 }));
 

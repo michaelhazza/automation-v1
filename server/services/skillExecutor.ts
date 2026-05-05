@@ -1,4 +1,5 @@
-﻿import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+﻿import { eq, and, count, inArray } from 'drizzle-orm';
+import { isActive } from '../lib/queryHelpers.js';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
 import { insertOutcomeSafe } from './delegationOutcomeService.js';
@@ -3515,7 +3516,7 @@ async function executeTriageIntake(
     const conditions = [
       eq(tasks.subaccountId, context.subaccountId!),
       eq(tasks.status, 'inbox'),
-      isNull(tasks.deletedAt),
+      isActive(tasks),
     ];
     if (scope === 'single' && relatedTaskId) {
       conditions.push(eq(tasks.id, relatedTaskId));
@@ -3683,7 +3684,7 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       sa: subaccountAgents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, req.subaccountId),
@@ -3896,7 +3897,7 @@ async function executeReassignTask(
     const [saLinkRow] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
@@ -4145,7 +4146,7 @@ async function executeSpawnSubAgents(
     const [saLink] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),

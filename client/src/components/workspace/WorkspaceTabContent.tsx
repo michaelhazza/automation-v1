@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SeatsPanel } from './SeatsPanel';
 import { getSubaccountWorkspaceConfig, configureWorkspace } from '../../lib/api';
+import { logAndSwallow } from '../../lib/silentCatchHelper';
 import { MigrateWorkspaceModal } from './MigrateWorkspaceModal';
 
 type Backend = 'synthetos_native' | 'google_workspace' | null;
@@ -26,7 +27,7 @@ export function WorkspaceTabContent({ subaccountId }: { subaccountId: string }) 
         setConfig(data);
         setSelectedBackend(data.backend);
       })
-      .catch(() => {});
+      .catch(logAndSwallow('WorkspaceTabContent: workspace config fetch'));
   }, [subaccountId]);
 
   async function handleConfigureNative() {

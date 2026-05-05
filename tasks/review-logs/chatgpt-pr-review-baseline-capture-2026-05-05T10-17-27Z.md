@@ -67,7 +67,7 @@ For each generic concern raised, verified the codebase against actual code:
 
 **Concern 4 — Unbounded growth patterns**
 - `server/jobs/evaluateAllPendingBaselines.ts:31-43` has explicit `LIMIT 1000` cap on the daily scan and `ORDER BY created_at ASC` for FIFO fairness — `:25-29` documents the rationale.
-- `subaccount_baseline_metrics` schema (migration 0281) has `ON DELETE CASCADE` from `subaccount_baselines(id)` — no orphan rows.
+- `subaccount_baseline_metrics` schema (migration 0283) has `ON DELETE CASCADE` from `subaccount_baselines(id)` — no orphan rows.
 - New baseline rows are inserted only on (a) sub-account onboarding (one-shot) and (b) sysadmin admin reset (manually triggered, audited via `baseline.admin_reset` event). No auto-creation from polling, no fan-out.
 - No drift.
 

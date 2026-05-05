@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import { useSocket } from '../hooks/useSocket';
 import { isWizardCompletable, type BaselineArtefactsStatus } from '../../../shared/schemas/subaccount';
 
@@ -594,7 +595,7 @@ function Step4Baseline({ onComplete }: { onComplete: () => void }) {
                         : t2?.audience_icp.status !== 'completed' ? 'audience_icp'
                         : t3?.operating_constraints.status !== 'completed' ? 'operating_constraints'
                         : 'proof_library';
-                      api.post(`/api/subaccounts/${row.subaccountId}/baseline-artefacts/started`, { slug: `baseline.${firstIncomplete}` }).catch(() => {});
+                      api.post(`/api/subaccounts/${row.subaccountId}/baseline-artefacts/started`, { slug: `baseline.${firstIncomplete}` }).catch(logAndSwallow('OnboardingWizardPage: baseline artefact started telemetry'));
                     }}
                   >
                     Start capture
@@ -706,7 +707,7 @@ export default function OnboardingWizardPage() {
           c.providerType === 'stripe_agent' && c.connectionStatus === 'active',
         );
       setNeedsSptOnboarding(hasBudgets && !hasStripeAgent);
-    }).catch(() => {});
+    }).catch(logAndSwallow('OnboardingWizardPage: SPT onboarding check'));
   }, []);
 
   // Handle GHL OAuth callback errors

@@ -3,6 +3,7 @@ import { connectorConfigService } from '../../services/connectorConfigService.js
 import { adapters } from '../../adapters/index.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
+import { recordIncident } from '../../services/incidentIngestor.js';
 
 const router = Router();
 
@@ -66,6 +67,14 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), asyncHa
     }
   } catch (err) {
     console.error('[Teamwork Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+    await recordIncident({
+      source: 'route',
+      summary: 'Teamwork webhook DB lookup failed',
+      fingerprintOverride: 'webhook:teamwork:db_lookup_failed',
+      severity: 'medium',
+      stack: err instanceof Error ? err.stack : undefined,
+      errorDetail: { eventType: (event as Record<string, unknown>)?.event },
+    });
     res.status(500).json({ error: 'Internal error' });
     return;
   }
@@ -97,6 +106,16 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), asyncHa
     // Future: publish to event bus / pg-boss queue for agent processing.
   } catch (err) {
     console.error('[Teamwork Webhook] Error processing event:', err instanceof Error ? err.message : err);
+    const orgId = config?.organisationId;
+    await recordIncident({
+      source: 'route',
+      summary: 'Teamwork webhook event processing failed',
+      fingerprintOverride: 'webhook:teamwork:handler_failed',
+      severity: 'medium',
+      organisationId: orgId ?? null,
+      stack: err instanceof Error ? err.stack : undefined,
+      errorDetail: { eventType: (event as Record<string, unknown>)?.event },
+    });
   }
 }));
 
