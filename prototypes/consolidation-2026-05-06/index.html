@@ -84,15 +84,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 2
+    Prototype Round 3
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>~92 pages and ~45+ left-nav items consolidated into ~16 nav items. Every before page maps each source page. Every after page has a Replaces callout. Click Before links to see what is being replaced.</p>
+  <p>~117 pages mapped. ~16 nav items proposed. Every before page maps source pages. Every after page has a Replaces callout. Round 3 adds: home, glossary, page-disposition, onboarding, agents before/after, workflows before/after, and three pattern reference galleries.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 2</div>
+    <div class="meta-item"><strong>Round:</strong> 3</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 20 screens (10 consolidated + 9 before pages + nav)</div>
+    <div class="meta-item"><strong>Files:</strong> 40+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -348,6 +348,184 @@
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
         <a href="before-manage-org.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- ── Round 3: Net-new surfaces ──────────────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#10b981"></div>
+    Round 3 — Net-new surfaces
+  </div>
+  <div class="card-grid">
+
+    <a class="proto-card" href="home.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Home (default route)</div>
+        <div class="proto-card-file">home.html</div>
+      </div>
+      <div class="proto-card-desc">Operator daily landing page. Inline state for agents needing attention, automations awaiting approval, recent runs, and today's schedule. Primary action: New agent. Replaces DashboardPage as the default route.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">DashboardPage</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+      </div>
+    </a>
+
+    <a class="proto-card" href="glossary.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">System Model (Glossary)</div>
+        <div class="proto-card-file">glossary.html</div>
+      </div>
+      <div class="proto-card-desc">Plain-language definitions for every concept: Agent, Automation, Workflow, Run, Job, Skill, Block, Block Type, Org/Tenant, Subaccount/Client, Project, Knowledge, Memory Block. Relationship diagram. Linked from help icon in shell.</div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+      </div>
+    </a>
+
+    <a class="proto-card" href="page-disposition.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Page Disposition Table</div>
+        <div class="proto-card-file">page-disposition.html</div>
+      </div>
+      <div class="proto-card-desc">Canonical reference: all 117 source pages mapped to disposition (KEEP / MERGED / TO DRAWER / RENAMED / REMOVED / SYSTEM ONLY / AUTH). Sortable by any column. Filterable by disposition and category. Used by engineering and operators to track consolidation work.</div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open reference &#8594;</div>
+      </div>
+    </a>
+
+    <a class="proto-card" href="onboarding.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Onboarding (first-run setup)</div>
+        <div class="proto-card-file">onboarding.html</div>
+      </div>
+      <div class="proto-card-desc">5-step first-run flow: Welcome, Connect first integration, Create first agent (from template), Set up first automation (optional), Done. Each step shows what state the tenant ends up in. Skippable at each step.</div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- ── Round 3: Changing existing surfaces ────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#6366f1"></div>
+    Round 3 — Changing existing surfaces (before + after)
+  </div>
+  <div class="card-grid">
+
+    <a class="proto-card" href="agents.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Agents (unified list)</div>
+        <div class="proto-card-file">agents.html</div>
+      </div>
+      <div class="proto-card-desc">Unified agents list consolidating AdminAgentsPage, AgentsPage, SubaccountAgentsPage. 4-column table (Agent, Status, Last run, Actions). Inline status dot + last run time. No duplicate pages by role. Tag filter, search, live count pill.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 6 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">AdminAgentsPage</span>
+          <span class="replace-pill strike">AgentsPage</span>
+          <span class="replace-pill strike">SubaccountAgentsPage</span>
+          <span class="replace-pill strike">AgentTriggersPage</span>
+          <span class="replace-pill strike">SubaccountBlueprintsPage</span>
+          <span class="replace-pill strike">OrgAgentConfigsPage</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-agents.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+      </div>
+    </a>
+
+    <a class="proto-card" href="workflows.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Workflows (kept separate)</div>
+        <div class="proto-card-file">workflows.html</div>
+      </div>
+      <div class="proto-card-desc">Workflows remain a separate primitive from Automations. WorkflowsLibraryPage stays. WorkflowStudioPage moved to system-admin only (server already enforces this). Recent runs shown inline. Decision: NOT merged into automations.html.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Changes</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill">WorkflowsLibraryPage kept</span>
+          <span class="replace-pill strike">WorkflowStudioPage removed from operator nav</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-workflows.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- ── Round 3: Skipped pages (no change) ─────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#94a3b8"></div>
+    Round 3 — Skipped (not changing in this consolidation)
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;font-size:12.5px;color:#64748b;line-height:1.7;">
+    <strong style="color:#334155;">Client Pulse (4 pages):</strong> ClientPulseDashboardPage, ClientPulseClientsListPage, ClientPulseDrilldownPage, ClientPulseSettingsPage. Not in consolidation scope. Confirmed in Round 2 decisions box. No before/after needed.
+    <br>
+    <strong style="color:#334155;">Portal (4 pages):</strong> PortalPage, PortalLandingPage, PortalExecutionPage, PortalExecutionHistoryPage. Client-facing portal is a separate product surface, out of scope.
+    <br>
+    <strong style="color:#334155;">Reports (2 pages):</strong> ReportsListPage, ReportDetailPage. Part of Client Pulse product area. Unchanged.
+    <br>
+    <strong style="color:#334155;">Tasks primitive:</strong> OpenTaskView, WorkspaceBoardPage, BriefDetailPage. Tasks are KEPT as-is (not merging into Inbox). Inbox unifies HITL items only; workspace tasks remain separate.
+  </div>
+</div>
+
+<!-- ── Round 3: Pattern reference galleries ───────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#f59e0b"></div>
+    Round 3 — Pattern reference galleries
+  </div>
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12px;color:#78350f;margin-bottom:12px;">
+    Pattern galleries are builder references, not real pages. They document the canonical patterns to use across all consolidated pages.
+  </div>
+  <div class="card-grid">
+
+    <a class="proto-card" href="empty-states.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Empty States</div>
+        <div class="proto-card-file">empty-states.html</div>
+      </div>
+      <div class="proto-card-desc">Gallery of empty state patterns: agents, inbox, knowledge (auto + authored), connections, runs, automations, calendar. Each has exactly one primary action. Rules embedded at top.</div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open gallery &#8594;</div>
+      </div>
+    </a>
+
+    <a class="proto-card" href="permissions.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Permission Patterns</div>
+        <div class="proto-card-file">permissions.html</div>
+      </div>
+      <div class="proto-card-desc">Gallery of permission states: admin-only sections (dashed amber), locked rows, gated action buttons, full-page no-access states, role badge in topbar. Rules embedded at top.</div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open gallery &#8594;</div>
+      </div>
+    </a>
+
+    <a class="proto-card" href="lifecycle-errors.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Lifecycle Error Patterns</div>
+        <div class="proto-card-file">lifecycle-errors.html</div>
+      </div>
+      <div class="proto-card-desc">Gallery of error and blocked states: failed run with retry, expired credential with reconnect, blocked agent with unblock, rate-limited integration, schema migration in progress. Each error has one recovery action.</div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open gallery &#8594;</div>
       </div>
     </a>
 

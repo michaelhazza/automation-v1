@@ -110,3 +110,64 @@
 - `prototypes/consolidation-2026-05-06/automation-detail.html` (updated)
 - `prototypes/consolidation-2026-05-06/index.html` (rewritten)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (updated)
+
+## Round 3 — 2026-05-06 18:00
+
+**Operator feedback:** "Mock everything that is changing, base it on what's there now, show before and after." Full brief: fill audit gaps from round 2. Net-new surfaces (home, glossary, page-disposition, onboarding), changing existing surfaces with before/after (agents, workflows/tasks/client-pulse/portal/reports with disposition check), cross-cutting pattern galleries (empty-states, permissions, lifecycle-errors).
+
+**Changes made:**
+- `page-disposition.html` created: canonical reference table for all 117 source pages. Disposition column has 8 values (KEEP / MERGED / TO DRAWER / RENAMED / REMOVED / NEW / SYSTEM ONLY / AUTH). Sortable by any column. Filterable by disposition and free-text search. Count chips update live. Grounded in actual `client/src/pages/` directory listing.
+- `home.html` created: operator daily landing page. Replaces DashboardPage as default route. 7-item "Needs your attention" list with inline approve/reject/review/fix actions. Recent runs list with inline status dots. Sidebar: inbox summary counts, agent status list, today's schedule. Primary action: "New agent".
+- `glossary.html` created: system model one-page reference. Definitions for Agent, Automation, Workflow, Run, Job, Skill, Block, Block Type, Org, Subaccount, Project, Knowledge, Memory Block. Relationship diagram using visual nodes. Linked from help icon in shell.
+- `before-agents.html` created: grounded in actual AdminAgentsPage source (3 tabs, 6-column table, live count badge, Install from Library modal), AgentsPage (card grid, no actions, heartbeat), SubaccountAgentsPage (Role+Title columns, scoped view). Problems list identifies specific UX issues.
+- `agents.html` created: unified agents list. 4 columns (Agent, Status, Last run, Actions). Inline status dot + last run time with outcome. Tag chips. Search + filter pills. Live count pill. Primary action: New agent. Edit/Run/Fix inline row actions. Replaces 6 pages.
+- `before-workflows.html` created: grounded in source -- WorkflowsLibraryPage (template cards, start run modal, org templates empty), WorkflowStudioPage (3-pane editor with Validate/Simulate/Estimate/Save+PR tools, system-admin only), WorkflowRunDetailPage (step list, phase 1). Disposition note explains why workflows are kept separate.
+- `workflows.html` created: workflows kept as separate primitive. WorkflowsLibraryPage stays as nav item. Studio moves to system-admin. Recent runs shown inline. "What's a workflow?" help link to glossary. Replaces callout clarifies disposition.
+- `onboarding.html` created: 5-step first-run flow with step bar. Step 1: Welcome (overview of setup). Step 2: Connect first integration (Gmail, CRM, Slack options with selection state). Step 3: Create first agent (3 template cards, recommended badge). Step 4: First automation (2 template options, marked optional). Step 5: Done (org state summary: 1 connection, 1 agent, 1 automation). Each step skippable. State outcome boxes show what the tenant ends up with after each step.
+- `empty-states.html` created: pattern gallery. 8 states: agents, inbox (caught up), knowledge auto-memory, knowledge authored, connections, run history, automations, calendar. Rules embedded at top. Each has exactly one primary action.
+- `permissions.html` created: pattern gallery. 4 sections: admin-only sections within page (dashed amber border), locked rows (item visible, actions greyed with lock icon), gated action buttons (greyed with role note), full-page no-access state. Role badge in topbar pattern.
+- `lifecycle-errors.html` created: pattern gallery. 5 sections: failed run with retry (run list inline + run trace header), expired credential with reconnect (credential row + expiring-soon proactive warning), blocked agent (HITL approval + manual deactivation), rate-limited integration (hit + queued runs), migration in progress (DB migration progress bar + first-sync progress with account count). Each error has one recovery action.
+- `index.html` updated: Round 3 metadata (40+ files). Added 4 new sections: "Round 3 Net-new surfaces", "Round 3 Changing existing surfaces (before + after)", "Round 3 Skipped (no change)", "Round 3 Pattern reference galleries". Each card links to before page where applicable.
+
+**Discoveries:**
+- Client Pulse (4 pages), Portal (4 pages), Reports (2 pages): NOT changing in this consolidation. Confirmed per round 2 decisions. Skipped with note in index.html.
+- Tasks primitive (OpenTaskView, WorkspaceBoardPage, BriefDetailPage): KEPT as-is. Inbox unifies HITL items only; workspace tasks are a separate thing. No before/after needed.
+- Workflows are a SEPARATE primitive from Automations (WorkflowsLibraryPage, WorkflowStudioPage, WorkflowRunDetailPage exist). Decision: keep separate. WorkflowStudioPage already server-enforces system-admin. Change: remove from operator nav.
+- AdminAgentsPage has 3 tabs (Agents / Org Execution / Team Templates) that embed OrgAgentConfigsPage and SubaccountBlueprintsPage respectively -- these all get merged into unified agents.html.
+- Total page count in `client/src/pages/` is 117 (including subaccount/ subdirectory), not 92 as stated in round 2. Updated in index.html masthead.
+
+**Frontend-design-principles checks:**
+- Start with primary task:
+  - home.html: yes -- primary task is "deal with what needs attention today", not "review KPI dashboard". Opens on attention list, not on stats.
+  - agents.html: yes -- primary task is "find and manage an agent". Opens on list with inline state, not on analytics.
+  - onboarding.html: yes -- each step is one action. No feature tour, no multiple choices per screen.
+  - glossary.html: yes -- purely informational reference, no primary action needed.
+  - page-disposition.html: yes -- primary task is "find a page's disposition". Opens on full searchable table.
+  - pattern galleries: yes -- reference pages, no primary task, no deception.
+- Default to hidden: yes -- home.html has no KPI tiles (DashboardPage had MetricCard components). Attention list and agent status are inline state. No trend charts. Run history is a plain list (6 items), not a histogram or dashboard.
+- One primary action: yes -- home.html primary action is "New agent". agents.html: "New agent". onboarding steps: one CTA per step (Get started / Connect Gmail / Create agent / Continue). glossary: read-only. page-disposition: no action, reference only. Patterns: no action.
+- Inline state: yes -- home.html shows agent status inline in sidebar (dot + last run text). Agents list shows last run outcome inline. Onboarding shows org state after each step inline in an outcome box.
+- Re-check passed: yes -- non-technical operator on home.html sees their attention items immediately and can approve/reject inline without navigating. Agents list answers "is my agent running, did it fail?" without clicking into each agent. Onboarding guides through setup step by step.
+
+**Rule violations flagged:** none
+
+**Skipped pages (explicitly decided):**
+- Client Pulse (dashboard, clients list, drilldown, settings) -- not in consolidation scope
+- Portal (landing, page, execution, history) -- client-facing surface, out of scope
+- Reports (list, detail) -- part of Client Pulse, unchanged
+- Tasks (OpenTaskView, WorkspaceBoardPage, BriefDetailPage) -- KEPT as-is, no before/after needed
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/page-disposition.html` (created)
+- `prototypes/consolidation-2026-05-06/home.html` (created)
+- `prototypes/consolidation-2026-05-06/glossary.html` (created)
+- `prototypes/consolidation-2026-05-06/before-agents.html` (created)
+- `prototypes/consolidation-2026-05-06/agents.html` (created)
+- `prototypes/consolidation-2026-05-06/before-workflows.html` (created)
+- `prototypes/consolidation-2026-05-06/workflows.html` (created)
+- `prototypes/consolidation-2026-05-06/onboarding.html` (created)
+- `prototypes/consolidation-2026-05-06/empty-states.html` (created)
+- `prototypes/consolidation-2026-05-06/permissions.html` (created)
+- `prototypes/consolidation-2026-05-06/lifecycle-errors.html` (created)
+- `prototypes/consolidation-2026-05-06/index.html` (updated)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (updated)

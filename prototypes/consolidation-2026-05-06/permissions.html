@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Permission Patterns — Pattern Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.pattern-header {
+  background: var(--slate-900); border-radius: 12px;
+  padding: 24px 28px; margin-bottom: 28px; color: white;
+}
+.pattern-header-eyebrow { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #818cf8; margin-bottom: 6px; }
+.pattern-header h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.02em; }
+.pattern-header p { font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.6; max-width: 640px; }
+.pattern-header .rules { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+.pattern-header .rule { font-size: 12px; color: rgba(255,255,255,0.5); display: flex; gap: 6px; align-items: flex-start; }
+.pattern-header .rule::before { content: 'rule'; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #818cf8; background: rgba(99,102,241,0.15); padding: 1px 5px; border-radius: 3px; margin-top: 1px; flex-shrink: 0; }
+
+.section-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--slate-400); margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--slate-200); }
+
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+
+.pattern-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.pattern-card-label {
+  padding: 10px 16px;
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--slate-400);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.pattern-card-label-context { font-size: 10.5px; font-weight: 500; color: var(--slate-400); text-transform: none; letter-spacing: 0; font-style: italic; }
+.pattern-card-body { padding: 12px; }
+
+/* Admin-only banner */
+.admin-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--amber-50); border: 1px solid #fde68a;
+  border-radius: 8px;
+}
+.admin-banner-text { font-size: 12.5px; color: var(--amber-700); line-height: 1.5; }
+.admin-banner-text strong { font-weight: 700; }
+
+/* Locked row */
+.demo-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.demo-table th { background: var(--slate-50); padding: 7px 12px; text-align: left; font-size: 10px; font-weight: 700; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--slate-200); }
+.demo-table td { padding: 8px 12px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); }
+.demo-table tr:last-child td { border-bottom: none; }
+.locked-row td { color: var(--slate-400); background: var(--slate-50); }
+
+.lock-icon { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--slate-400); }
+
+/* Gated action button */
+.gated-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  background: var(--slate-100); color: var(--slate-400);
+  border: 1px solid var(--slate-200); cursor: not-allowed;
+}
+
+/* No access full page state */
+.no-access-state {
+  text-align: center; padding: 36px 20px;
+  background: var(--slate-50); border: 1px solid var(--slate-200);
+  border-radius: 8px;
+}
+.no-access-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: var(--slate-200);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 14px;
+}
+
+/* Inline permission note */
+.inline-perm-note {
+  font-size: 11.5px; color: var(--slate-400);
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--slate-50); border: 1px solid var(--slate-200);
+  border-radius: 4px; padding: 2px 8px;
+}
+
+/* Role badge */
+.role-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600;
+}
+.role-admin  { background: var(--violet-50); color: var(--violet-600); border: 1px solid var(--violet-200); }
+.role-manager{ background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+.role-viewer { background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200); }
+
+/* Section within page for admin-only */
+.admin-section {
+  border: 1.5px dashed #fde68a;
+  border-radius: 8px; padding: 14px 16px;
+  background: var(--amber-50);
+}
+.admin-section-head {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--amber-600); margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.demo-form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.demo-form-label { font-size: 12px; font-weight: 500; color: var(--slate-700); }
+.demo-form-input { padding: 7px 10px; border: 1px solid var(--slate-300); border-radius: 6px; font-size: 12.5px; color: var(--slate-800); background: white; }
+</style>
+</head>
+<body>
+<div style="padding: 32px 40px; max-width: 1280px; margin: 0 auto;">
+
+  <div class="pattern-header">
+    <div class="pattern-header-eyebrow">Pattern Reference</div>
+    <h1>Permission Patterns</h1>
+    <p>How to communicate permission boundaries in the UI. Use these patterns consistently across all pages. Builder reference, not a real page.</p>
+    <div class="rules">
+      <div class="rule">Admin-only content is dashed-amber bordered and labelled, not hidden. It should be visible to non-admins but clearly scoped.</div>
+      <div class="rule">Locked rows are greyed, not removed. Operators should know the item exists, just not be able to act on it.</div>
+      <div class="rule">Gated action buttons are greyed out with a lock icon and a tooltip explaining the required role. They are never invisible.</div>
+      <div class="rule">"You don't have access" full-screen states are only for routes that are entirely inaccessible (not just partially restricted).</div>
+    </div>
+  </div>
+
+  <div class="section-label">1. Admin-only sections within a page</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Admin section in org settings
+        <span class="pattern-card-label-context">manage-org.html / General tab</span>
+      </div>
+      <div class="pattern-card-body">
+        <!-- Normal section -->
+        <div style="margin-bottom:12px;">
+          <div class="demo-form-row">
+            <label class="demo-form-label">Organisation name</label>
+            <input class="demo-form-input" value="Maple Agency" style="max-width:240px;">
+          </div>
+          <div class="demo-form-row">
+            <label class="demo-form-label">Timezone</label>
+            <select class="demo-form-input" style="max-width:200px;"><option>America/New_York</option></select>
+          </div>
+        </div>
+        <!-- Admin-only section -->
+        <div class="admin-section">
+          <div class="admin-section-head">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Admin only
+          </div>
+          <div class="demo-form-row">
+            <label class="demo-form-label" style="color:var(--amber-700);">Plan status</label>
+            <select class="demo-form-input" style="max-width:160px;"><option>Active</option></select>
+          </div>
+          <div class="demo-form-row" style="margin-bottom:0;">
+            <label class="demo-form-label" style="color:var(--amber-700);">Max agents</label>
+            <input class="demo-form-input" value="25" style="max-width:100px;">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Admin-only banner (page-level)
+        <span class="pattern-card-label-context">automations.html / admin viewing</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="admin-banner" style="margin-bottom:12px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <div class="admin-banner-text"><strong>Admin view.</strong> You can see and manage all automations in this org. Other roles see only automations assigned to them.</div>
+        </div>
+        <div style="font-size:12px;color:var(--slate-400);font-style:italic;">...rest of automations list below</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">2. Locked rows (item exists, user can see it, not act on it)</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Locked agent row
+        <span class="pattern-card-label-context">agents.html / viewer role</span>
+      </div>
+      <div class="pattern-card-body">
+        <table class="demo-table">
+          <thead><tr><th>Agent</th><th>Status</th><th>Last run</th><th>Actions</th></tr></thead>
+          <tbody>
+            <!-- Normal row -->
+            <tr>
+              <td><strong>Research Agent</strong><br><span style="font-size:10.5px;color:#64748b;">Your agent</span></td>
+              <td><span class="badge badge-green" style="font-size:10.5px;">Active</span></td>
+              <td style="font-size:11.5px;color:#64748b;">8m ago</td>
+              <td><span style="display:inline-flex;gap:4px;"><button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;">Edit</button><button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;">Run</button></span></td>
+            </tr>
+            <!-- Locked row -->
+            <tr class="locked-row">
+              <td>
+                <strong style="color:var(--slate-400);">Compliance Agent</strong>
+                <div class="lock-icon">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  Admin only
+                </div>
+              </td>
+              <td><span class="badge badge-slate" style="font-size:10.5px;">Active</span></td>
+              <td style="font-size:11.5px;">—</td>
+              <td><span class="gated-btn btn-sm">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Edit
+              </span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Locked credential row
+        <span class="pattern-card-label-context">integrations.html / manager role</span>
+      </div>
+      <div class="pattern-card-body">
+        <table class="demo-table">
+          <thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Gmail</strong><br><span style="font-size:10.5px;color:#64748b;">OAuth - your account</span></td>
+              <td><span class="badge badge-green" style="font-size:10.5px;">Valid</span></td>
+              <td><button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;">Manage</button></td>
+            </tr>
+            <tr class="locked-row">
+              <td>
+                <strong style="color:var(--slate-400);">S3 (org credentials)</strong>
+                <div class="lock-icon">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  Admin only
+                </div>
+              </td>
+              <td><span class="badge badge-slate" style="font-size:10.5px;">Valid</span></td>
+              <td><span class="gated-btn btn-sm">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Manage
+              </span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">3. Gated actions</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Gated delete button
+        <span class="pattern-card-label-context">Any list / non-admin</span>
+      </div>
+      <div class="pattern-card-body" style="padding:16px;">
+        <div style="font-size:12.5px;color:var(--slate-600);margin-bottom:12px;">You can run and view this automation, but only admins can delete it.</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="btn btn-secondary btn-sm">Run now</button>
+          <button class="btn btn-secondary btn-sm">View history</button>
+          <span class="gated-btn" title="Requires admin role">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Delete
+          </span>
+        </div>
+        <div style="margin-top:8px;">
+          <span class="inline-perm-note">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Delete requires Admin role
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Gated save in settings
+        <span class="pattern-card-label-context">manage-org.html / manager role</span>
+      </div>
+      <div class="pattern-card-body" style="padding:16px;">
+        <div class="demo-form-row">
+          <label class="demo-form-label">Organisation name</label>
+          <input class="demo-form-input" value="Maple Agency" disabled style="background:var(--slate-50);color:var(--slate-400);max-width:240px;">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+          <span class="gated-btn">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Save changes
+          </span>
+          <span class="inline-perm-note">Editing requires Admin role</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">4. Full-page "no access" state</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Route entirely inaccessible
+        <span class="pattern-card-label-context">/admin/settings — non-admin user</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="no-access-state">
+          <div class="no-access-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <div style="font-size:14.5px;font-weight:700;color:var(--slate-700);margin-bottom:5px;">You don't have access to this page</div>
+          <div style="font-size:12.5px;color:var(--slate-400);max-width:260px;margin:0 auto 16px;line-height:1.5;">Admin settings require the Admin role. Contact your organisation admin for access.</div>
+          <a href="home.html" class="btn btn-secondary btn-sm">Go to Home</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Role indicator in top bar
+        <span class="pattern-card-label-context">Topbar / all pages</span>
+      </div>
+      <div class="pattern-card-body" style="padding:16px;">
+        <div style="font-size:12.5px;color:var(--slate-600);margin-bottom:12px;">The current user's role is shown as a small badge in the topbar profile area. It never appears in the primary content area (not a warning, just a label).</div>
+        <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;font-size:12px;color:var(--slate-500);">Sarah Chen</div>
+          <span class="role-badge role-admin">Admin</span>
+        </div>
+        <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-top:6px;">
+          <div style="flex:1;font-size:12px;color:var(--slate-500);">James Kirk</div>
+          <span class="role-badge role-manager">Manager</span>
+        </div>
+        <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;margin-top:6px;">
+          <div style="flex:1;font-size:12px;color:var(--slate-500);">Dana White</div>
+          <span class="role-badge role-viewer">Viewer</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

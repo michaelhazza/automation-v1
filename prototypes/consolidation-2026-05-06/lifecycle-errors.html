@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lifecycle Error Patterns — Pattern Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.pattern-header {
+  background: var(--slate-900); border-radius: 12px;
+  padding: 24px 28px; margin-bottom: 28px; color: white;
+}
+.pattern-header-eyebrow { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #f87171; margin-bottom: 6px; }
+.pattern-header h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.02em; }
+.pattern-header p { font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.6; max-width: 640px; }
+.pattern-header .rules { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+.pattern-header .rule { font-size: 12px; color: rgba(255,255,255,0.5); display: flex; gap: 6px; align-items: flex-start; }
+.pattern-header .rule::before { content: 'rule'; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #f87171; background: rgba(239,68,68,0.15); padding: 1px 5px; border-radius: 3px; margin-top: 1px; flex-shrink: 0; }
+
+.section-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--slate-400); margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--slate-200); }
+
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
+
+.pattern-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.pattern-card-label {
+  padding: 10px 16px;
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--slate-400);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.pattern-card-label-context { font-size: 10.5px; font-weight: 500; color: var(--slate-400); text-transform: none; letter-spacing: 0; font-style: italic; }
+.pattern-card-body { padding: 14px 16px; }
+
+/* Error state row in a list */
+.error-row {
+  background: var(--red-50); border: 1px solid #fecaca;
+  border-radius: 8px; padding: 12px 14px;
+}
+.error-row-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.error-row-icon {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: white; border: 1px solid #fecaca;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.error-row-name { font-size: 13px; font-weight: 600; color: var(--red-700); }
+.error-row-detail { font-size: 12px; color: var(--red-600); margin-top: 2px; }
+.error-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Credential expired inline -->
+.cred-expired-block {
+  background: var(--amber-50); border: 1px solid #fde68a;
+  border-radius: 8px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 12px;
+}
+.cred-expired-text { flex: 1; }
+.cred-expired-text-head { font-size: 13px; font-weight: 700; color: var(--amber-700); }
+.cred-expired-text-sub { font-size: 12px; color: var(--amber-600); margin-top: 2px; }
+
+/* Blocked agent banner */
+.blocked-banner {
+  background: var(--red-50); border: 1px solid #fecaca;
+  border-radius: 8px; padding: 12px 14px;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+
+/* Rate limited integration -->
+.rate-limit-block {
+  background: #fffbeb; border: 1px solid #fde68a;
+  border-radius: 8px; padding: 12px 14px;
+}
+
+/* Schema migration progress -->
+.migration-block {
+  background: var(--indigo-50); border: 1px solid var(--indigo-200);
+  border-radius: 8px; padding: 14px 16px;
+}
+.progress-bar-wrap { height: 6px; background: var(--slate-200); border-radius: 3px; margin: 8px 0; overflow: hidden; }
+.progress-bar-fill { height: 100%; border-radius: 3px; background: var(--indigo-500); }
+
+/* Inline action buttons (reused) */
+.act-retry    { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); padding: 4px 10px; border-radius: 5px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.act-reconnect{ background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a; padding: 4px 10px; border-radius: 5px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.act-unblock  { background: var(--red-50); color: var(--red-600); border: 1px solid #fecaca; padding: 4px 10px; border-radius: 5px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.act-dismiss  { background: transparent; color: var(--slate-400); border: 1px solid var(--slate-200); padding: 4px 10px; border-radius: 5px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+
+.context-label { font-size: 11.5px; color: var(--slate-400); margin-bottom: 8px; font-style: italic; }
+</style>
+</head>
+<body>
+<div style="padding: 32px 40px; max-width: 1280px; margin: 0 auto;">
+
+  <div class="pattern-header">
+    <div class="pattern-header-eyebrow">Pattern Reference</div>
+    <h1>Lifecycle Error Patterns</h1>
+    <p>How errors and blocked states surface in the UI. Each error state offers exactly one primary recovery action. Builder reference, not a real page.</p>
+    <div class="rules">
+      <div class="rule">Every error state has one primary recovery action. Show the action inline, not in a separate settings page.</div>
+      <div class="rule">Explain what failed in plain language, not in technical terms. "Gmail credential expired" not "OAuth token invalid".</div>
+      <div class="rule">Blocked states are amber (recoverable) or red (failed). Distinguish them visually.</div>
+      <div class="rule">Progress states (migration, syncing) are indigo, never red -- they are expected, not errors.</div>
+    </div>
+  </div>
+
+  <div class="section-label">1. Failed run with retry</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Failed run in run list (inline)
+        <span class="pattern-card-label-context">home.html / runs section</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="context-label">Recent runs list shows the failed run inline:</div>
+        <div class="error-row">
+          <div class="error-row-head">
+            <div class="error-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <div>
+              <div class="error-row-name">Blocker Agent failed</div>
+              <div class="error-row-detail">Gmail credential expired. Last run: 2h ago, Maple Digital.</div>
+            </div>
+          </div>
+          <div class="error-row-actions">
+            <button class="act-reconnect">Reconnect Gmail</button>
+            <a href="run-trace.html" class="act-retry">View trace</a>
+            <button class="act-dismiss">Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Failed run in run trace header
+        <span class="pattern-card-label-context">run-trace.html / failed run</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="context-label">The run trace header shows the error prominently:</div>
+        <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:14px 16px;">
+          <div style="display:flex;align-items:flex-start;gap:12px;">
+            <div style="flex:1;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                <span class="badge badge-red">Failed</span>
+                <span style="font-size:12px;color:var(--slate-400);">2 hours ago</span>
+              </div>
+              <div style="font-size:14px;font-weight:700;color:var(--slate-900);margin-bottom:2px;">Blocker Agent</div>
+              <div style="font-size:12.5px;color:var(--red-600);margin-bottom:10px;">Gmail credential expired. Step "send_summary_email" could not authenticate.</div>
+            </div>
+          </div>
+          <div style="background:var(--red-50);border:1px solid #fecaca;border-radius:6px;padding:10px 12px;display:flex;align-items:center;gap:10px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            <div style="flex:1;font-size:12.5px;color:var(--red-700);">Reconnect Gmail to retry this run from the failed step.</div>
+            <button class="act-reconnect">Reconnect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">2. Expired credential with reconnect</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Expired credential in connection row
+        <span class="pattern-card-label-context">integrations.html / connection row</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="context-label">The service row shows the expired credential badge:</div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <div style="width:36px;height:36px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;font-weight:700;color:#dc2626;">G</div>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:700;color:var(--slate-900);">Gmail / Google Workspace</div>
+              <div style="font-size:11.5px;color:var(--slate-500);">OAuth - sarah@mapleagency.com</div>
+            </div>
+            <span class="badge badge-red">Expired</span>
+          </div>
+          <div class="cred-expired-block">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div class="cred-expired-text">
+              <div class="cred-expired-text-head">Credential expired</div>
+              <div class="cred-expired-text-sub">Gmail OAuth token expired 3 days ago. 2 agents are affected.</div>
+            </div>
+            <button class="act-reconnect">Reconnect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Expiring soon (proactive warning)
+        <span class="pattern-card-label-context">integrations.html / credential expiring soon</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="context-label">Amber warning before expiry (e.g. API key with TTL):</div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <div style="width:36px;height:36px;border-radius:8px;background:var(--amber-50);border:1px solid #fde68a;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;font-weight:700;color:#d97706;">S</div>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:700;color:var(--slate-900);">Amazon S3</div>
+              <div style="font-size:11.5px;color:var(--slate-500);">API key - expires in 4 days</div>
+            </div>
+            <span class="badge badge-amber">Expiring soon</span>
+          </div>
+          <div style="background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:10px 12px;display:flex;align-items:center;gap:10px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <div style="flex:1;font-size:12.5px;color:var(--amber-700);">Rotate this API key before it expires to avoid disruption.</div>
+            <button class="act-reconnect">Rotate key</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">3. Blocked agent with unblock action</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Agent blocked by HITL gate
+        <span class="pattern-card-label-context">agents.html / row state</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="context-label">The run is paused waiting for a human action:</div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="status-dot dot-amber"></span>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Outreach Agent</div>
+              <div style="font-size:11.5px;color:var(--amber-700);">Paused, waiting for approval</div>
+            </div>
+            <span class="badge badge-amber">Blocked</span>
+          </div>
+        </div>
+        <div class="blocked-banner">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <div style="flex:1;">
+            <div style="font-size:12.5px;font-weight:700;color:var(--amber-700);">Approval required</div>
+            <div style="font-size:12px;color:var(--amber-600);margin-top:2px;">The agent is waiting for you to approve sending emails to 142 contacts. Approve in Inbox to continue.</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;flex-direction:column;">
+            <a href="inbox.html" class="act-reconnect" style="text-decoration:none;display:inline-block;text-align:center;">Go to Inbox</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Agent manually blocked (deactivated)
+        <span class="pattern-card-label-context">agents.html / deactivated agent</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="context-label">Agent was manually deactivated by an admin:</div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:8px;background:var(--slate-50);">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="status-dot dot-slate"></span>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;color:var(--slate-600);">Compliance Agent</div>
+              <div style="font-size:11.5px;color:var(--slate-400);">Inactive - was deactivated 3 days ago</div>
+            </div>
+            <span class="badge badge-slate">Inactive</span>
+          </div>
+        </div>
+        <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:6px;padding:10px 12px;display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;font-size:12.5px;color:var(--slate-500);">This agent won't run until reactivated. Runs and schedules are paused.</div>
+          <button class="btn btn-primary btn-sm">Activate</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">4. Rate-limited integration</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Rate limit hit on connection
+        <span class="pattern-card-label-context">integrations.html / Issues tab</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="rate-limit-block">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;color:var(--amber-700);margin-bottom:3px;">Gmail API rate limit reached</div>
+              <div style="font-size:12px;color:var(--amber-600);line-height:1.5;margin-bottom:8px;">2,000 emails sent today. Google allows 2,000 per day. New emails will be queued and sent after midnight UTC.</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span style="font-size:11.5px;color:var(--amber-600);">Resets in: 6h 24m</span>
+                <button class="act-dismiss">Got it</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Runs queued due to rate limit
+        <span class="pattern-card-label-context">home.html / attention items</span>
+      </div>
+      <div class="pattern-card-body">
+        <div style="background:var(--amber-50);border:1px solid #fde68a;border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <div style="width:28px;height:28px;border-radius:6px;background:var(--amber-500);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;color:var(--amber-800);margin-bottom:2px;">3 runs queued - Gmail rate limited</div>
+              <div style="font-size:12px;color:var(--amber-700);line-height:1.5;">Outreach Agent has 3 pending send actions that will resume automatically after midnight UTC when the daily limit resets.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">5. Schema migration in progress</div>
+  <div class="gallery-grid">
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Migration in progress banner
+        <span class="pattern-card-label-context">Any page / during a DB migration</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="migration-block">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;color:var(--indigo-700);margin-bottom:3px;">Database migration in progress</div>
+              <div style="font-size:12px;color:var(--indigo-600);margin-bottom:6px;">We're upgrading your knowledge base index. New memory entries and knowledge updates are paused until complete. Read access is not affected.</div>
+              <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:67%;"></div></div>
+              <div style="font-size:11.5px;color:var(--indigo-500);">67% complete. Estimated: 4 minutes remaining.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        First sync in progress (onboarding)
+        <span class="pattern-card-label-context">After connecting a new CRM integration</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="migration-block" style="background:var(--sky-50);border-color:#bae6fd;">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <div style="animation:pulse-dot 1.5s infinite;display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#0ea5e9;flex-shrink:0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:700;color:#0369a1;margin-bottom:3px;">Syncing CRM data</div>
+              <div style="font-size:12px;color:#0284c7;margin-bottom:6px;">Importing contacts and pipeline data from GoHighLevel. This happens once and takes 2-5 minutes.</div>
+              <div class="progress-bar-wrap" style="background:#bae6fd;"><div class="progress-bar-fill" style="width:42%;background:#0ea5e9;"></div></div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11.5px;color:#0369a1;">
+                <span>3 of 7 accounts synced</span>
+                <span style="color:#bae6fd;">|</span>
+                <span>1,247 contacts imported so far</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

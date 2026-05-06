@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home — Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.replaces-banner {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 20px;
+  font-size: 12px; color: #92400e;
+  display: flex; align-items: center; gap: 8px;
+}
+.replaces-banner strong { font-weight: 700; }
+
+/* Home-specific layout */
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 20px;
+  align-items: start;
+}
+.home-main { display: flex; flex-direction: column; gap: 16px; }
+.home-sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+/* Greeting */
+.greeting-block { margin-bottom: 4px; }
+.greeting-name { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.02em; }
+.greeting-sub { font-size: 13.5px; color: var(--slate-500); margin-top: 3px; }
+.greeting-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
+
+/* Attention section */
+.attention-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.attention-title { font-size: 13px; font-weight: 700; color: var(--slate-700); }
+.attention-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  background: var(--amber-500); color: white;
+  border-radius: 10px; font-size: 11px; font-weight: 700;
+}
+
+.attention-list { display: flex; flex-direction: column; gap: 1px; }
+.attention-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px;
+  background: white; border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer; transition: all 0.1s;
+}
+.attention-item:hover { border-color: var(--indigo-200); background: var(--indigo-50); }
+.attention-item-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 14px;
+}
+.ai-amber { background: var(--amber-50); }
+.ai-red   { background: var(--red-50); }
+.ai-indigo{ background: var(--indigo-50); }
+.ai-blue  { background: #eff6ff; }
+.ai-violet{ background: var(--violet-50); }
+.ai-emerald{ background: var(--emerald-50); }
+
+.attention-item-body { flex: 1; min-width: 0; }
+.attention-item-title { font-size: 13px; font-weight: 600; color: var(--slate-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attention-item-sub { font-size: 12px; color: var(--slate-500); margin-top: 1px; }
+.attention-item-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.attention-age { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+
+/* Inline action buttons */
+.btn-approve {
+  padding: 4px 10px; font-size: 11.5px; font-weight: 600; border-radius: 5px;
+  background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0;
+  cursor: pointer; transition: all 0.1s;
+}
+.btn-approve:hover { background: #d1fae5; }
+.btn-decline {
+  padding: 4px 10px; font-size: 11.5px; font-weight: 600; border-radius: 5px;
+  background: var(--red-50); color: var(--red-600); border: 1px solid #fecaca;
+  cursor: pointer; transition: all 0.1s;
+}
+.btn-decline:hover { background: #fee2e2; }
+.btn-review {
+  padding: 4px 10px; font-size: 11.5px; font-weight: 600; border-radius: 5px;
+  background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200);
+  cursor: pointer; transition: all 0.1s;
+}
+.btn-review:hover { background: var(--indigo-100); }
+
+/* Recent runs */
+.run-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: white; border: 1px solid var(--border); border-radius: 8px;
+}
+.run-agent { font-size: 13px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; }
+.run-client { font-size: 12px; color: var(--slate-500); }
+.run-time { font-size: 11.5px; color: var(--slate-400); white-space: nowrap; }
+.run-list { display: flex; flex-direction: column; gap: 1px; }
+
+/* Sidebar cards */
+.sidebar-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+.sidebar-card-head {
+  padding: 12px 16px; background: var(--slate-50);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-card-head-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
+.sidebar-card-body { padding: 12px 16px; }
+
+.agent-status-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--slate-100);
+}
+.agent-status-row:last-child { border-bottom: none; }
+.agent-status-name { font-size: 12.5px; font-weight: 500; color: var(--slate-700); flex: 1; }
+.agent-status-last { font-size: 11px; color: var(--slate-400); }
+.agent-status-run { font-size: 11px; color: var(--slate-500); white-space: nowrap; }
+
+.schedule-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--slate-100);
+}
+.schedule-item:last-child { border-bottom: none; }
+.schedule-time { font-size: 11px; font-weight: 600; color: var(--indigo-600); width: 44px; flex-shrink: 0; }
+.schedule-name { font-size: 12.5px; font-weight: 500; color: var(--slate-700); }
+.schedule-client { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+
+.inbox-summary-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--slate-100);
+}
+.inbox-summary-row:last-child { border-bottom: none; }
+.inbox-type { font-size: 12.5px; color: var(--slate-700); }
+.inbox-badge {
+  min-width: 20px; height: 20px; padding: 0 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 10px; font-size: 11px; font-weight: 700;
+}
+.inbox-badge-red    { background: var(--red-50); color: var(--red-600); border: 1px solid #fecaca; }
+.inbox-badge-amber  { background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a; }
+.inbox-badge-slate  { background: var(--slate-100); color: var(--slate-500); }
+
+.link-text { font-size: 12px; color: var(--indigo-600); font-weight: 600; text-decoration: none; cursor: pointer; }
+.link-text:hover { text-decoration: underline; }
+
+/* View-all footer */
+.card-footer-link {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Automation OS</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a href="home.html" class="sidebar-link active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a href="inbox.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Inbox
+        <span class="sidebar-badge amber">7</span>
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Operate</div>
+      <a href="agents.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Agents
+      </a>
+      <a href="automations.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Automations
+      </a>
+      <a href="calendar.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Calendar
+      </a>
+      <a href="knowledge.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        Knowledge
+      </a>
+      <a href="integrations.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><path d="M13 13h9v9h-9z" stroke-dasharray="2 2"/></svg>
+        Connections
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Settings</div>
+      <a href="manage-org.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Manage org
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Home</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:var(--slate-500);">Wednesday, 7 May 2026</span>
+    </div>
+
+    <div class="page-body">
+
+      <div class="replaces-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span><strong>Replaces:</strong> DashboardPage (current main dashboard). This becomes the default route on login.</span>
+      </div>
+
+      <!-- Greeting -->
+      <div class="greeting-row">
+        <div class="greeting-block">
+          <div class="greeting-name">Good morning, Sarah</div>
+          <div class="greeting-sub">7 items need your attention. 2 automations are awaiting approval.</div>
+        </div>
+        <button class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New agent
+        </button>
+      </div>
+
+      <div class="home-grid">
+        <!-- Main column -->
+        <div class="home-main">
+
+          <!-- Needs attention -->
+          <div>
+            <div class="attention-header">
+              <div class="attention-title">Needs your attention</div>
+              <span class="attention-count">7</span>
+            </div>
+            <div class="attention-list">
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-amber">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Belief conflict: Acme Corp contact record has diverging phone data</div>
+                  <div class="attention-item-sub">Research Agent flagged 2 conflicting values. Review and pick one.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">14m ago</span>
+                  <button class="btn-review">Review</button>
+                </div>
+              </div>
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-indigo">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Automation approval: "Weekly nurture sequence" needs sign-off</div>
+                  <div class="attention-item-sub">Email Automation Agent requested permission to send 142 contacts.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">32m ago</span>
+                  <button class="btn-approve">Approve</button>
+                  <button class="btn-decline">Decline</button>
+                </div>
+              </div>
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-indigo">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 4v4"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Automation approval: "Lead re-engagement batch" needs sign-off</div>
+                  <div class="attention-item-sub">CRM Automation Agent requested permission to update 67 records.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">1h ago</span>
+                  <button class="btn-approve">Approve</button>
+                  <button class="btn-decline">Decline</button>
+                </div>
+              </div>
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-red">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Run failed: "Morning report" — Blocker Agent, Maple Digital</div>
+                  <div class="attention-item-sub">Gmail credential expired. Reconnect to retry.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">2h ago</span>
+                  <button class="btn-review">Fix</button>
+                </div>
+              </div>
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-blue">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Clarification request: "Which pipeline stage for Stark Industries?"</div>
+                  <div class="attention-item-sub">Outreach Agent paused and is waiting for your answer.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">3h ago</span>
+                  <button class="btn-review">Reply</button>
+                </div>
+              </div>
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-violet">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Memory block proposal: add rule "Always CC legal on NDAs"</div>
+                  <div class="attention-item-sub">Contract Agent suggested this rule. Accept to add it to Knowledge.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">4h ago</span>
+                  <button class="btn-approve">Accept</button>
+                  <button class="btn-decline">Reject</button>
+                </div>
+              </div>
+
+              <div class="attention-item">
+                <div class="attention-item-icon ai-amber">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
+                <div class="attention-item-body">
+                  <div class="attention-item-title">Scheduled run overdue: "Weekly pipeline review" for Nova Agency</div>
+                  <div class="attention-item-sub">Was due 6h ago. Agent is active — trigger manually or reschedule.</div>
+                </div>
+                <div class="attention-item-actions">
+                  <span class="attention-age">6h ago</span>
+                  <button class="btn-review">Run now</button>
+                </div>
+              </div>
+
+            </div>
+            <div style="margin-top:8px;text-align:right;">
+              <a href="inbox.html" class="link-text">View all in Inbox (7 unread) &#8594;</a>
+            </div>
+          </div>
+
+          <!-- Recent runs -->
+          <div>
+            <div class="attention-header">
+              <div class="attention-title">Recent runs</div>
+              <a href="#" class="link-text" style="font-size:12px;">View run log &#8594;</a>
+            </div>
+            <div class="run-list">
+
+              <div class="run-row">
+                <div class="status-dot dot-green"></div>
+                <div class="run-agent">Research Agent</div>
+                <div class="run-client">Acme Corp</div>
+                <span class="badge badge-green">Completed</span>
+                <span class="run-time">8m ago</span>
+              </div>
+
+              <div class="run-row">
+                <div class="status-dot dot-blue dot-pulse"></div>
+                <div class="run-agent">Outreach Agent</div>
+                <div class="run-client">Stark Industries</div>
+                <span class="badge badge-indigo">Running</span>
+                <span class="run-time">12m ago</span>
+              </div>
+
+              <div class="run-row">
+                <div class="status-dot dot-green"></div>
+                <div class="run-agent">Reporting Agent</div>
+                <div class="run-client">Maple Digital</div>
+                <span class="badge badge-green">Completed</span>
+                <span class="run-time">1h ago</span>
+              </div>
+
+              <div class="run-row">
+                <div class="status-dot dot-red"></div>
+                <div class="run-agent">Blocker Agent</div>
+                <div class="run-client">Maple Digital</div>
+                <span class="badge badge-red">Failed</span>
+                <span class="run-time">2h ago</span>
+              </div>
+
+              <div class="run-row">
+                <div class="status-dot dot-green"></div>
+                <div class="run-agent">CRM Agent</div>
+                <div class="run-client">Nova Agency</div>
+                <span class="badge badge-green">Completed</span>
+                <span class="run-time">3h ago</span>
+              </div>
+
+              <div class="run-row">
+                <div class="status-dot dot-amber"></div>
+                <div class="run-agent">Email Agent</div>
+                <div class="run-client">Beacon Consulting</div>
+                <span class="badge badge-amber">Awaiting approval</span>
+                <span class="run-time">3h ago</span>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Sidebar column -->
+        <div class="home-sidebar">
+
+          <!-- Inbox summary -->
+          <div class="sidebar-card">
+            <div class="sidebar-card-head">
+              <span class="sidebar-card-head-title">Inbox</span>
+              <a href="inbox.html" class="link-text">Open &#8594;</a>
+            </div>
+            <div class="sidebar-card-body">
+              <div class="inbox-summary-row">
+                <span class="inbox-type">Approvals needed</span>
+                <span class="inbox-badge inbox-badge-amber">2</span>
+              </div>
+              <div class="inbox-summary-row">
+                <span class="inbox-type">Conflicts to resolve</span>
+                <span class="inbox-badge inbox-badge-amber">1</span>
+              </div>
+              <div class="inbox-summary-row">
+                <span class="inbox-type">Clarifications pending</span>
+                <span class="inbox-badge inbox-badge-red">1</span>
+              </div>
+              <div class="inbox-summary-row">
+                <span class="inbox-type">Memory proposals</span>
+                <span class="inbox-badge inbox-badge-slate">1</span>
+              </div>
+              <div class="inbox-summary-row">
+                <span class="inbox-type">Failed runs</span>
+                <span class="inbox-badge inbox-badge-red">1</span>
+              </div>
+              <div class="inbox-summary-row" style="border-bottom:none;">
+                <span class="inbox-type">Overdue schedules</span>
+                <span class="inbox-badge inbox-badge-amber">1</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active agents -->
+          <div class="sidebar-card">
+            <div class="sidebar-card-head">
+              <span class="sidebar-card-head-title">Agents</span>
+              <a href="agents.html" class="link-text">All agents &#8594;</a>
+            </div>
+            <div class="sidebar-card-body">
+              <div class="agent-status-row">
+                <div class="status-dot dot-blue dot-pulse"></div>
+                <span class="agent-status-name">Outreach Agent</span>
+                <span class="agent-status-run">Running</span>
+              </div>
+              <div class="agent-status-row">
+                <div class="status-dot dot-green"></div>
+                <span class="agent-status-name">Research Agent</span>
+                <span class="agent-status-last">8m ago</span>
+              </div>
+              <div class="agent-status-row">
+                <div class="status-dot dot-green"></div>
+                <span class="agent-status-name">CRM Agent</span>
+                <span class="agent-status-last">3h ago</span>
+              </div>
+              <div class="agent-status-row">
+                <div class="status-dot dot-red"></div>
+                <span class="agent-status-name">Blocker Agent</span>
+                <span class="agent-status-last">Failed 2h ago</span>
+              </div>
+              <div class="agent-status-row">
+                <div class="status-dot dot-slate"></div>
+                <span class="agent-status-name">Contract Agent</span>
+                <span class="agent-status-last">Yesterday</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Today's schedule -->
+          <div class="sidebar-card">
+            <div class="sidebar-card-head">
+              <span class="sidebar-card-head-title">Scheduled today</span>
+              <a href="calendar.html" class="link-text">Calendar &#8594;</a>
+            </div>
+            <div class="sidebar-card-body">
+              <div class="schedule-item">
+                <div class="schedule-time">10:00</div>
+                <div>
+                  <div class="schedule-name">Weekly pipeline review</div>
+                  <div class="schedule-client">Nova Agency</div>
+                </div>
+              </div>
+              <div class="schedule-item">
+                <div class="schedule-time">14:00</div>
+                <div>
+                  <div class="schedule-name">Lead scoring update</div>
+                  <div class="schedule-client">Acme Corp</div>
+                </div>
+              </div>
+              <div class="schedule-item">
+                <div class="schedule-time">16:30</div>
+                <div>
+                  <div class="schedule-name">EOD summary report</div>
+                  <div class="schedule-client">All clients</div>
+                </div>
+              </div>
+              <div class="schedule-item" style="border-bottom:none;">
+                <div class="schedule-time">18:00</div>
+                <div>
+                  <div class="schedule-name">Nurture sequence prep</div>
+                  <div class="schedule-client">Maple Digital</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

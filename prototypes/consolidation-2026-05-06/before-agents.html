@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before — Agents (Current State)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.before-header {
+  background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px;
+  padding: 12px 18px; margin-bottom: 24px;
+}
+.before-header h2 { font-size: 14px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
+.before-header p { font-size: 12.5px; color: #78350f; line-height: 1.55; }
+
+.page-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.page-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+.page-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.page-card-head {
+  background: var(--slate-800); color: white;
+  padding: 10px 16px;
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.page-card-route { font-family: monospace; font-size: 10.5px; color: rgba(255,255,255,0.5); }
+.page-card-body { padding: 16px; }
+
+/* Simulated UI elements */
+.sim-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.sim-h1 { font-size: 17px; font-weight: 800; color: var(--slate-800); }
+.sim-sub { font-size: 11.5px; color: var(--slate-500); margin-top: 2px; }
+.sim-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 10px; }
+.sim-tab {
+  padding: 6px 12px; font-size: 11.5px; font-weight: 500;
+  color: var(--slate-500); border-bottom: 2px solid transparent; cursor: default;
+}
+.sim-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+.sim-filter-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.sim-filter {
+  padding: 3px 10px; font-size: 11px; font-weight: 600; border-radius: 6px;
+  background: var(--slate-100); color: var(--slate-500); cursor: default;
+}
+.sim-filter.active { background: var(--indigo-100); color: var(--indigo-700); }
+
+.sim-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.sim-table th { background: var(--slate-50); padding: 6px 10px; text-align: left; font-size: 10px; font-weight: 700; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--slate-200); }
+.sim-table td { padding: 7px 10px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); }
+.sim-table tr:last-child td { border-bottom: none; }
+
+.sim-btn { display: inline-block; padding: 4px 10px; font-size: 10.5px; font-weight: 600; border-radius: 5px; border: none; cursor: default; }
+.sim-btn-primary { background: var(--indigo-600); color: white; }
+.sim-btn-secondary { background: white; color: var(--slate-600); border: 1px solid var(--slate-300); }
+.sim-btn-sm { padding: 3px 8px; font-size: 10px; }
+
+.sim-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sim-agent-card {
+  background: var(--slate-50); border: 1px solid var(--slate-200);
+  border-radius: 8px; padding: 10px;
+}
+.sim-agent-name { font-size: 12.5px; font-weight: 700; color: var(--slate-800); margin-bottom: 4px; }
+.sim-agent-desc { font-size: 10.5px; color: var(--slate-500); line-height: 1.4; margin-bottom: 6px; }
+.sim-skills { display: flex; flex-wrap: wrap; gap: 3px; }
+.sim-skill-chip {
+  font-size: 9.5px; padding: 1px 5px; border-radius: 3px;
+  background: var(--indigo-50); color: var(--indigo-600);
+}
+
+.sim-live-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px;
+  background: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe;
+  font-size: 10px; font-weight: 600;
+}
+.sim-pulse { width: 6px; height: 6px; border-radius: 50%; background: #3b82f6; animation: pulse-dot 1.5s infinite; }
+
+.duplication-note {
+  background: var(--red-50); border: 1px solid #fecaca; border-radius: 6px;
+  padding: 8px 12px; margin-top: 10px;
+  font-size: 11.5px; color: var(--red-700); line-height: 1.5;
+}
+.duplication-note strong { font-weight: 700; }
+
+.overlap-arrow {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px; font-size: 20px; color: var(--red-400);
+}
+</style>
+</head>
+<body>
+<div style="padding: 32px 40px; max-width: 1280px; margin: 0 auto;">
+
+  <div style="margin-bottom: 20px;">
+    <a href="agents.html" style="font-size:12px;font-weight:600;color:#4f46e5;text-decoration:none;">&larr; View after (new agents.html)</a>
+  </div>
+
+  <div class="before-header">
+    <h2>Current state — Agents (3 separate pages, same data, different scopes)</h2>
+    <p>The same agents list exists in three places depending on who you are and what URL you visit. AdminAgentsPage has tabs (List / Org Execution / Team Templates) plus an "Install from System Library" modal. AgentsPage is the subaccount-scoped card grid with heartbeat status. SubaccountAgentsPage is a third variant scoped to a specific client. All three make the same /api/agents call.</p>
+  </div>
+
+  <div class="page-grid three" style="margin-bottom:20px;">
+
+    <!-- AdminAgentsPage -->
+    <div class="page-card">
+      <div class="page-card-head">
+        AdminAgentsPage
+        <span class="page-card-route">/admin/agents</span>
+      </div>
+      <div class="page-card-body">
+        <div class="sim-header">
+          <div>
+            <div class="sim-h1">Agents <span class="sim-live-badge"><span class="sim-pulse"></span>3 running</span></div>
+            <div class="sim-sub">Create and manage AI agent configurations</div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <span class="sim-btn sim-btn-secondary" style="font-size:10px;">&#x2193; Install from System Library</span>
+            <span class="sim-btn sim-btn-primary">+ New Agent</span>
+          </div>
+        </div>
+
+        <div class="sim-tabs">
+          <div class="sim-tab active">Agents</div>
+          <div class="sim-tab">Org Execution</div>
+          <div class="sim-tab">Team Templates</div>
+        </div>
+
+        <div class="sim-filter-row">
+          <span class="sim-filter active">All (6)</span>
+          <span class="sim-filter">Active (4)</span>
+          <span class="sim-filter">Inactive (1)</span>
+          <span class="sim-filter">Draft (1)</span>
+        </div>
+
+        <table class="sim-table">
+          <thead><tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Model</th>
+            <th>Data Sources</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><strong>Research Agent</strong><br><span style="font-size:10px;color:#64748b;">Finds and verifies information</span></td><td><span class="badge badge-green" style="font-size:10px;">active</span></td><td style="font-size:11px;">claude-3-5-sonnet</td><td>2 sources</td><td>Jan 12</td><td><span class="sim-btn sim-btn-secondary sim-btn-sm">Manage</span> <span class="sim-btn sim-btn-sm" style="background:#fee2e2;color:#dc2626;font-size:10px;">Deactivate</span></td></tr>
+            <tr><td><strong>CRM Agent</strong><br><span style="font-size:10px;color:#64748b;">Updates contact records</span></td><td><span class="badge badge-green" style="font-size:10px;">active</span></td><td style="font-size:11px;">claude-3-5-sonnet</td><td>1 source</td><td>Jan 18</td><td><span class="sim-btn sim-btn-secondary sim-btn-sm">Manage</span></td></tr>
+            <tr><td><strong>Outreach Agent</strong></td><td><span class="badge badge-green" style="font-size:10px;">active</span></td><td style="font-size:11px;">claude-3-haiku</td><td>0 sources</td><td>Feb 3</td><td><span class="sim-btn sim-btn-secondary sim-btn-sm">Manage</span></td></tr>
+            <tr><td><strong>Blocker Agent</strong></td><td><span class="badge badge-red" style="font-size:10px;">inactive</span></td><td style="font-size:11px;">claude-3-5-sonnet</td><td>1 source</td><td>Feb 10</td><td><span class="sim-btn sim-btn-secondary sim-btn-sm">Manage</span> <span class="sim-btn sim-btn-sm" style="background:#f0fdf4;color:#15803d;font-size:10px;">Activate</span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="duplication-note">
+          <strong>Issue:</strong> 6 columns in the table. "Data Sources" rarely scanned. No last-run info inline. Status filter duplicates tab-level Org Execution tab.
+        </div>
+      </div>
+    </div>
+
+    <!-- AgentsPage (subaccount-scoped card grid) -->
+    <div class="page-card">
+      <div class="page-card-head">
+        AgentsPage
+        <span class="page-card-route">/:subaccountId/agents or /agents</span>
+      </div>
+      <div class="page-card-body">
+        <div class="sim-header">
+          <div>
+            <div class="sim-h1">Your Agents</div>
+            <div class="sim-sub">AI workers assigned to this workspace</div>
+          </div>
+        </div>
+
+        <div class="sim-card-grid">
+          <div class="sim-agent-card">
+            <div class="sim-agent-name">Research Agent</div>
+            <div class="sim-agent-desc">Finds and verifies information from the web and internal docs</div>
+            <div class="sim-skills">
+              <span class="sim-skill-chip">Web search</span>
+              <span class="sim-skill-chip">Read tasks</span>
+              <span class="sim-skill-chip">+2 more</span>
+            </div>
+          </div>
+          <div class="sim-agent-card">
+            <div class="sim-agent-name">CRM Agent</div>
+            <div class="sim-agent-desc">Updates CRM records based on conversation context</div>
+            <div class="sim-skills">
+              <span class="sim-skill-chip">Update tasks</span>
+              <span class="sim-skill-chip">Run automations</span>
+            </div>
+          </div>
+          <div class="sim-agent-card">
+            <div class="sim-agent-name">Outreach Agent</div>
+            <div class="sim-agent-desc">Composes and sends outreach emails</div>
+            <div class="sim-skills">
+              <span class="sim-skill-chip">Send email</span>
+            </div>
+          </div>
+          <div class="sim-agent-card" style="opacity:0.5;">
+            <div class="sim-agent-name">Daily Brief Agent</div>
+            <div class="sim-agent-desc">Generates morning summary reports</div>
+            <div class="sim-skills">
+              <span class="sim-skill-chip">Create deliverables</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="duplication-note">
+          <strong>Issue:</strong> Card grid with no status dot, no last-run info, no action buttons. Operator has to navigate to agent edit to do anything. No "New Agent" CTA. Heartbeat status visible but no run history.
+        </div>
+      </div>
+    </div>
+
+    <!-- SubaccountAgentsPage -->
+    <div class="page-card">
+      <div class="page-card-head">
+        SubaccountAgentsPage
+        <span class="page-card-route">/admin/subaccounts/:id/agents</span>
+      </div>
+      <div class="page-card-body">
+        <div class="sim-header">
+          <div>
+            <div class="sim-h1">Agents</div>
+            <div class="sim-sub">Maple Digital — scoped view</div>
+          </div>
+          <span class="sim-btn sim-btn-primary">+ New Agent</span>
+        </div>
+
+        <table class="sim-table">
+          <thead><tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Role</th>
+            <th>Title</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><strong>Research Agent</strong> <span style="font-size:9px;background:#ede9fe;color:#7c3aed;padding:1px 4px;border-radius:3px;">System</span></td><td><span class="badge badge-green" style="font-size:10px;">active</span></td><td><span style="font-size:10px;background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:10px;">specialist</span></td><td style="font-size:11px;">—</td><td><span class="sim-btn sim-btn-secondary sim-btn-sm">Edit</span></td></tr>
+            <tr><td><strong>CRM Agent</strong></td><td><span class="badge badge-green" style="font-size:10px;">active</span></td><td><span style="font-size:10px;background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:10px;">worker</span></td><td style="font-size:11px;">CRM Specialist</td><td><span class="sim-btn sim-btn-secondary sim-btn-sm">Edit</span></td></tr>
+          </tbody>
+        </table>
+
+        <div class="duplication-note">
+          <strong>Issue:</strong> A third separate page for the same data, client-scoped. Has Role and Title columns (from org hierarchy) not shown on the other pages. No cross-page consistency.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Problems summary -->
+  <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:16px 20px;">
+    <div style="font-size:13px;font-weight:700;color:#be123c;margin-bottom:8px;">Problems with the current state</div>
+    <ul style="list-style:none;display:flex;flex-direction:column;gap:5px;">
+      <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#9f1239;"><span style="color:#f43f5e;margin-top:2px;">&#8226;</span> Three separate pages serve essentially the same data with different layouts, forcing the operator to know which URL to visit based on role.</li>
+      <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#9f1239;"><span style="color:#f43f5e;margin-top:2px;">&#8226;</span> No inline last-run status on any list view. Operator must click into each agent to see when it last ran or if it failed.</li>
+      <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#9f1239;"><span style="color:#f43f5e;margin-top:2px;">&#8226;</span> Card grid (AgentsPage) has no actions. Table (AdminAgentsPage) has 6 columns. Neither has a consistent pattern.</li>
+      <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#9f1239;"><span style="color:#f43f5e;margin-top:2px;">&#8226;</span> "Team Templates" and "Org Execution" tabs in AdminAgentsPage embed entire separate pages (SubaccountBlueprintsPage, OrgAgentConfigsPage) inside a tab -- creating visual mismatch.</li>
+      <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#9f1239;"><span style="color:#f43f5e;margin-top:2px;">&#8226;</span> No quick path from the agents list to running an agent or seeing recent runs inline.</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

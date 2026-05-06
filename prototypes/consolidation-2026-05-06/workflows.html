@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflows — Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.replaces-banner {
+  background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 20px;
+  font-size: 12px; color: #166534;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.replaces-banner strong { font-weight: 700; }
+
+.workflow-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer; transition: all 0.12s;
+  display: flex; gap: 16px; align-items: flex-start;
+}
+.workflow-card:hover { border-color: var(--indigo-200); box-shadow: 0 4px 16px rgba(99,102,241,0.1); transform: translateY(-1px); }
+
+.wf-icon {
+  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.wf-body { flex: 1; min-width: 0; }
+.wf-name { font-size: 14px; font-weight: 700; color: var(--slate-900); margin-bottom: 3px; }
+.wf-desc { font-size: 12.5px; color: var(--slate-500); line-height: 1.5; margin-bottom: 8px; }
+.wf-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.wf-steps { font-size: 11.5px; color: var(--slate-500); }
+.wf-version { font-size: 11px; background: var(--slate-100); color: var(--slate-500); padding: 1px 7px; border-radius: 4px; font-weight: 600; }
+
+.section-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--slate-400); margin: 20px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--slate-200); }
+
+.recent-run-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: white; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 1px;
+}
+.run-wf-name { font-size: 13px; font-weight: 600; color: var(--slate-800); flex: 1; }
+.run-client { font-size: 12px; color: var(--slate-500); }
+.run-time { font-size: 11.5px; color: var(--slate-400); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Automation OS</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a href="home.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a href="inbox.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Inbox
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Operate</div>
+      <a href="agents.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Agents
+      </a>
+      <a href="automations.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Automations
+      </a>
+      <a href="workflows.html" class="sidebar-link active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        Workflows
+      </a>
+      <a href="calendar.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Calendar
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Workflows</span>
+      </div>
+      <div class="topbar-spacer"></div>
+    </div>
+
+    <div class="page-body">
+
+      <div class="replaces-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span><strong>Disposition: KEEP (separate from Automations).</strong> Workflows remain distinct from Automations. WorkflowStudioPage moves to system-admin only (hidden from operator nav). WorkflowRunDetailPage stays as a sub-screen. No merge into automations.html.</span>
+      </div>
+
+      <!-- Page header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;">
+        <div>
+          <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;">Workflows</h1>
+          <p style="font-size:13.5px;color:var(--slate-500);margin-top:4px;">Multi-step processes that coordinate agents, automations, and human review checkpoints.</p>
+        </div>
+        <a href="glossary.html#workflows" class="btn btn-secondary btn-sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          What's a workflow?
+        </a>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <div class="search-wrap" style="flex:1;max-width:320px;">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-box" type="text" placeholder="Search workflows...">
+        </div>
+      </div>
+
+      <div class="section-head">System templates</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+
+        <div class="workflow-card">
+          <div class="wf-icon" style="background:var(--indigo-50);border:1px solid var(--indigo-200);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div class="wf-body">
+            <div class="wf-name">Lead Nurture Flow</div>
+            <div class="wf-desc">Research a prospect, draft personalised outreach, schedule follow-up. Human review checkpoint before sending.</div>
+            <div class="wf-meta">
+              <span class="wf-steps">4 steps</span>
+              <span class="wf-version">v2</span>
+              <span class="badge badge-indigo">1 HITL checkpoint</span>
+            </div>
+          </div>
+          <div style="flex-shrink:0;">
+            <button class="btn btn-primary btn-sm">Start run</button>
+          </div>
+        </div>
+
+        <div class="workflow-card">
+          <div class="wf-icon" style="background:var(--emerald-50);border:1px solid #a7f3d0;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          </div>
+          <div class="wf-body">
+            <div class="wf-name">Client Onboarding</div>
+            <div class="wf-desc">Provision workspace, sync CRM data, send welcome sequence, schedule initial brief. Fully automated once approved.</div>
+            <div class="wf-meta">
+              <span class="wf-steps">7 steps</span>
+              <span class="wf-version">v1</span>
+              <span class="badge badge-indigo">2 HITL checkpoints</span>
+            </div>
+          </div>
+          <div style="flex-shrink:0;">
+            <button class="btn btn-primary btn-sm">Start run</button>
+          </div>
+        </div>
+
+        <div class="workflow-card">
+          <div class="wf-icon" style="background:#eff6ff;border:1px solid #bfdbfe;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </div>
+          <div class="wf-body">
+            <div class="wf-name">Weekly Portfolio Review</div>
+            <div class="wf-desc">Pull data across all clients, score pipeline health, generate report draft, send to operator for sign-off.</div>
+            <div class="wf-meta">
+              <span class="wf-steps">5 steps</span>
+              <span class="wf-version">v1</span>
+              <span class="badge badge-slate">No HITL required</span>
+            </div>
+          </div>
+          <div style="flex-shrink:0;">
+            <button class="btn btn-primary btn-sm">Start run</button>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="section-head" style="margin-top:28px;">Org templates <span style="font-size:11px;color:var(--slate-400);font-weight:400;font-style:italic;margin-left:6px;">Fork a system template to customise it</span></div>
+
+      <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:32px;text-align:center;">
+        <div style="width:40px;height:40px;background:var(--slate-100);border-radius:10px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:var(--slate-600);margin-bottom:5px;">No org templates yet</div>
+        <div style="font-size:12.5px;color:var(--slate-400);max-width:300px;margin:0 auto;">Fork one of the system templates above to create a customised version for your org.</div>
+      </div>
+
+      <div class="section-head" style="margin-top:28px;">Recent runs</div>
+      <div style="display:flex;flex-direction:column;gap:1px;">
+        <div class="recent-run-row">
+          <span class="status-dot dot-green"></span>
+          <span class="run-wf-name">Lead Nurture Flow</span>
+          <span class="run-client">Acme Corp</span>
+          <span class="badge badge-green">Completed</span>
+          <span class="run-time">2 hours ago</span>
+          <button class="btn btn-ghost btn-xs">View run</button>
+        </div>
+        <div class="recent-run-row">
+          <span class="status-dot dot-amber"></span>
+          <span class="run-wf-name">Client Onboarding</span>
+          <span class="run-client">Stark Industries</span>
+          <span class="badge badge-amber">Awaiting approval</span>
+          <span class="run-time">5 hours ago</span>
+          <button class="btn btn-ghost btn-xs">View run</button>
+        </div>
+        <div class="recent-run-row">
+          <span class="status-dot dot-green"></span>
+          <span class="run-wf-name">Weekly Portfolio Review</span>
+          <span class="run-client">All clients</span>
+          <span class="badge badge-green">Completed</span>
+          <span class="run-time">Yesterday</span>
+          <button class="btn btn-ghost btn-xs">View run</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

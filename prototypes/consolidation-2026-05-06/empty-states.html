@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Empty States — Pattern Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.pattern-header {
+  background: var(--slate-900); border-radius: 12px;
+  padding: 24px 28px; margin-bottom: 28px; color: white;
+}
+.pattern-header-eyebrow {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #818cf8; margin-bottom: 6px;
+}
+.pattern-header h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.02em; }
+.pattern-header p { font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.6; max-width: 640px; }
+.pattern-header .rules { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+.pattern-header .rule { font-size: 12px; color: rgba(255,255,255,0.5); display: flex; gap: 6px; align-items: flex-start; }
+.pattern-header .rule::before { content: 'rule'; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #818cf8; background: rgba(99,102,241,0.15); padding: 1px 5px; border-radius: 3px; margin-top: 1px; flex-shrink: 0; }
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.pattern-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.pattern-card-label {
+  padding: 10px 16px;
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--slate-400);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.pattern-card-label-context { font-size: 10.5px; font-weight: 500; color: var(--slate-400); text-transform: none; letter-spacing: 0; font-style: italic; }
+.pattern-card-body { padding: 8px; }
+
+/* Empty state component */
+.empty-state-demo {
+  padding: 36px 20px; text-align: center;
+  background: white; border: 1px solid var(--slate-100);
+  border-radius: 8px;
+}
+.es-icon-wrap {
+  width: 48px; height: 48px; border-radius: 12px;
+  margin: 0 auto 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.es-icon-indigo { background: var(--indigo-50); }
+.es-icon-amber  { background: var(--amber-50); }
+.es-icon-emerald{ background: var(--emerald-50); }
+.es-icon-violet { background: var(--violet-50); }
+.es-icon-slate  { background: var(--slate-100); }
+.es-icon-sky    { background: var(--sky-50); }
+
+.es-heading { font-size: 14.5px; font-weight: 700; color: var(--slate-800); margin-bottom: 5px; }
+.es-sub { font-size: 12.5px; color: var(--slate-400); line-height: 1.5; max-width: 260px; margin: 0 auto 16px; }
+.es-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div style="padding: 32px 40px; max-width: 1280px; margin: 0 auto;">
+
+  <div class="pattern-header">
+    <div class="pattern-header-eyebrow">Pattern Reference</div>
+    <h1>Empty States</h1>
+    <p>Canonical empty-state patterns for each major list/collection in Automation OS. Each pattern has exactly one primary action. Builder reference, not a real page.</p>
+    <div class="rules">
+      <div class="rule">Every empty state has exactly one primary action. Not two, not a tour, not tips.</div>
+      <div class="rule">The action should create the first item of that type or navigate to the right place to do so.</div>
+      <div class="rule">Short headline: "No [thing] yet." Short body: one sentence about what [thing] does. CTA: the logical first step.</div>
+      <div class="rule">No empty-state chart, no placeholder data, no "here's what you could do" lists.</div>
+    </div>
+  </div>
+
+  <div class="gallery-grid">
+
+    <!-- Agents -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Agents list
+        <span class="pattern-card-label-context">agents.html / first use</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap es-icon-indigo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <div class="es-heading">No agents yet</div>
+          <div class="es-sub">Agents are AI workers that run tasks for your clients on demand or on a schedule.</div>
+          <div class="es-actions">
+            <button class="btn btn-primary btn-sm">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              New agent
+            </button>
+            <button class="btn btn-secondary btn-sm">Install from library</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inbox -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Inbox (all caught up)
+        <span class="pattern-card-label-context">inbox.html / no items</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap es-icon-emerald">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div class="es-heading">All caught up</div>
+          <div class="es-sub">No items need your attention right now. New approvals and alerts will appear here.</div>
+          <div class="es-actions">
+            <button class="btn btn-secondary btn-sm">Go to Home</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Knowledge: no entries -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Knowledge (no entries)
+        <span class="pattern-card-label-context">knowledge.html Auto-memory / first use</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap" style="background:#fff7ed;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </div>
+          <div class="es-heading">No memory entries yet</div>
+          <div class="es-sub">Entries appear after your agent completes its first run. They record what the agent observed.</div>
+          <div class="es-actions">
+            <a href="agents.html" class="btn btn-primary btn-sm">Run an agent</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Knowledge: no authored -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Knowledge (no authored content)
+        <span class="pattern-card-label-context">knowledge.html Authored tab</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap es-icon-violet">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </div>
+          <div class="es-heading">No authored knowledge yet</div>
+          <div class="es-sub">Add rules, facts, and guidelines that your agents should always know and follow.</div>
+          <div class="es-actions">
+            <button class="btn btn-primary btn-sm">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add rule or fact
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connections: none connected -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Connections (nothing connected)
+        <span class="pattern-card-label-context">integrations.html / first use</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap es-icon-sky">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg>
+          </div>
+          <div class="es-heading">No connections yet</div>
+          <div class="es-sub">Agents need connections to take action in the world. Connect email, CRM, or other services.</div>
+          <div class="es-actions">
+            <button class="btn btn-primary btn-sm">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Connect service
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Runs: no runs yet -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Run history (no runs)
+        <span class="pattern-card-label-context">agent-edit.html Runs tab / new agent</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap es-icon-emerald">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="es-heading">No runs yet</div>
+          <div class="es-sub">This agent hasn't been run. Trigger it manually from the Configure tab or add it to a schedule.</div>
+          <div class="es-actions">
+            <button class="btn btn-primary btn-sm">Run now</button>
+            <button class="btn btn-secondary btn-sm">Add schedule</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Automations: none -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Automations list (empty)
+        <span class="pattern-card-label-context">automations.html / first use</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap" style="background:var(--violet-50);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <div class="es-heading">No automations yet</div>
+          <div class="es-sub">Automations trigger a single action when something happens: a webhook fires, a schedule runs, or an agent calls it.</div>
+          <div class="es-actions">
+            <button class="btn btn-primary btn-sm">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              New automation
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calendar: no events today -->
+    <div class="pattern-card">
+      <div class="pattern-card-label">
+        Calendar (no scheduled tasks)
+        <span class="pattern-card-label-context">calendar.html / no schedules set</span>
+      </div>
+      <div class="pattern-card-body">
+        <div class="empty-state-demo">
+          <div class="es-icon-wrap es-icon-indigo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div class="es-heading">Nothing scheduled</div>
+          <div class="es-sub">Scheduled tasks appear here once you set up a recurring agent run or automation trigger.</div>
+          <div class="es-actions">
+            <a href="agents.html" class="btn btn-primary btn-sm">Schedule an agent</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

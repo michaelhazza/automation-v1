@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Model — Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.help-banner {
+  background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 24px;
+  font-size: 12.5px; color: var(--indigo-700);
+  display: flex; align-items: center; gap: 8px;
+}
+
+.glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  gap: 14px;
+}
+
+.term-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; padding: 0; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.term-card-head {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--slate-100);
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.term-icon {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.term-name {
+  font-size: 15px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em;
+}
+.term-type {
+  display: inline-block;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  padding: 1px 7px; border-radius: 4px; margin-top: 3px;
+}
+.type-primitive   { background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+.type-execution   { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+.type-container   { background: var(--violet-50); color: var(--violet-500); border: 1px solid var(--violet-200); }
+.type-capability  { background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a; }
+.type-tenant      { background: var(--sky-50); color: var(--sky-500); border: 1px solid #bae6fd; }
+.type-knowledge   { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+
+.term-body { padding: 14px 18px; }
+.term-definition { font-size: 13.5px; color: var(--slate-700); line-height: 1.65; margin-bottom: 10px; }
+.term-contrast {
+  font-size: 12px; color: var(--slate-500); line-height: 1.55;
+  background: var(--slate-50); border-radius: 6px; padding: 8px 10px;
+  border-left: 3px solid var(--slate-200); margin-bottom: 10px;
+}
+.term-contrast strong { color: var(--slate-600); font-weight: 600; }
+.term-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; font-weight: 600; color: var(--indigo-600);
+  text-decoration: none; cursor: pointer;
+}
+.term-link:hover { text-decoration: underline; }
+.term-link svg { opacity: 0.7; }
+
+.term-examples {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+}
+.term-example-chip {
+  font-size: 11.5px; font-weight: 500;
+  padding: 2px 9px; border-radius: 4px;
+  background: var(--slate-100); color: var(--slate-600);
+  border: 1px solid var(--slate-200);
+}
+
+.section-divider {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--slate-400); margin: 28px 0 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--slate-200);
+}
+
+.diagram-block {
+  background: white; border: 1px solid var(--border); border-radius: 10px;
+  padding: 20px 24px; margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.diagram-title { font-size: 13px; font-weight: 700; color: var(--slate-700); margin-bottom: 14px; }
+.diagram-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--slate-700); margin-bottom: 8px;
+}
+.diag-node {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+  border: 1.5px solid currentColor;
+}
+.dn-indigo { color: var(--indigo-600); background: var(--indigo-50); }
+.dn-emerald { color: var(--emerald-600); background: var(--emerald-50); }
+.dn-violet { color: var(--violet-500); background: var(--violet-50); }
+.dn-amber { color: var(--amber-600); background: var(--amber-50); }
+.dn-sky { color: var(--sky-500); background: var(--sky-50); }
+.dn-orange { color: #c2410c; background: #fff7ed; }
+.diag-arrow { color: var(--slate-400); font-size: 16px; }
+.diag-label { font-size: 11.5px; color: var(--slate-400); font-style: italic; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Automation OS</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a href="home.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a href="inbox.html" class="sidebar-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Inbox
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Help</div>
+      <a href="glossary.html" class="sidebar-link active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        System model
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span style="color:var(--slate-400)">Help</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        <span class="topbar-breadcrumb-current">System model</span>
+      </div>
+      <div class="topbar-spacer"></div>
+    </div>
+
+    <div class="page-body">
+
+      <div class="page-header">
+        <h1>System model</h1>
+        <p>Plain-language definitions of every concept in Automation OS. Use this when you need to understand how pieces fit together.</p>
+      </div>
+
+      <div class="help-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        This page is linked from the help icon in the shell. It is a reference only -- nothing on this page changes your configuration.
+      </div>
+
+      <!-- Relationship diagram -->
+      <div class="diagram-block">
+        <div class="diagram-title">How the pieces relate</div>
+        <div class="diagram-row">
+          <span class="diag-node dn-sky">Tenant / Org</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">has many</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-node dn-indigo">Agents</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">run</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-node dn-emerald">Runs</span>
+        </div>
+        <div class="diagram-row" style="margin-top:4px;">
+          <span class="diag-node dn-indigo">Agents</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">use</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-node dn-amber">Skills</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">composed of</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-node dn-amber">Blocks</span>
+        </div>
+        <div class="diagram-row" style="margin-top:4px;">
+          <span class="diag-node dn-violet">Automations</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">triggered by</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">webhook / schedule / agent action</span>
+        </div>
+        <div class="diagram-row" style="margin-top:4px;">
+          <span class="diag-node dn-violet">Workflows</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">multi-step orchestration, can call</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-node dn-violet">Automations</span>
+        </div>
+        <div class="diagram-row" style="margin-top:4px;">
+          <span class="diag-node dn-orange">Knowledge</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-label">provides context to</span>
+          <span class="diag-arrow">&#8594;</span>
+          <span class="diag-node dn-indigo">Agents</span>
+        </div>
+      </div>
+
+      <!-- Primitives section -->
+      <div class="section-divider">Core primitives</div>
+      <div class="glossary-grid">
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--indigo-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Agent</div>
+              <span class="term-type type-primitive">Primitive</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">An AI worker with a name, a role, a set of skills, and a personality defined by its system prompt. Agents run tasks, communicate with external services, and report back. Think of an agent as a persistent employee who is always ready to take instructions.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A "run" is a single execution of the agent doing something. The agent is the worker; the run is the work session.</div>
+            <div class="term-examples">
+              <span class="term-example-chip">Research Agent</span>
+              <span class="term-example-chip">CRM Agent</span>
+              <span class="term-example-chip">Outreach Agent</span>
+              <span class="term-example-chip">Daily Brief Agent</span>
+            </div>
+            <div style="margin-top:10px;">
+              <a class="term-link" href="agents.html">View Agents page &#8594;</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--violet-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Automation</div>
+              <span class="term-type type-primitive">Primitive</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A single-action trigger-and-run unit. Automations are triggered by a webhook, a schedule, or an agent action. They execute a defined task (e.g. "send a summary email", "create a CRM record") and complete. They are stateless -- each run is independent.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A Workflow is a multi-step orchestration that can chain automations together. An Automation is one step; a Workflow is a process with multiple steps.</div>
+            <div style="margin-top:10px;">
+              <a class="term-link" href="automations.html">View Automations page &#8594;</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:#eff6ff;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Workflow</div>
+              <span class="term-type type-primitive">Primitive</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A multi-step orchestration that coordinates agents, automations, and human review checkpoints in a defined sequence. Workflows are authored using the Workflow Studio (system admin) and instantiated as runs. Each step can wait for human approval before proceeding.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> An Automation is one discrete action. A Workflow chains many actions together, can branch, can pause for HITL, and has an overall lifecycle from "started" to "complete".</div>
+            <div style="margin-top:10px;">
+              <a class="term-link" href="#">View Workflows page &#8594;</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--emerald-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Run</div>
+              <span class="term-type type-execution">Execution</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A single execution of an Agent, Automation, or Workflow. A run has a start time, an end time, a status (pending, running, awaiting input, completed, failed), and a trace log of every step taken. Runs are immutable once complete.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A Job is a queued unit of work waiting to become a run. The run is the live or completed execution; the job is the scheduler or queue entry that produced it.</div>
+            <div class="term-examples">
+              <span class="term-example-chip">status: running</span>
+              <span class="term-example-chip">status: completed</span>
+              <span class="term-example-chip">status: failed</span>
+              <span class="term-example-chip">status: awaiting_input</span>
+            </div>
+            <div style="margin-top:10px;">
+              <a class="term-link" href="run-trace.html">View Run Trace page &#8594;</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--amber-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Job</div>
+              <span class="term-type type-execution">Execution</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A unit of work in the queue, waiting to be picked up and executed. Jobs are created by schedules, webhooks, agent tool calls, and API requests. A job transitions to a run when it starts executing. If no worker is available the job waits; if it fails to start it can be retried.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A run is the live execution. A job is the entry in the queue before execution starts. Most operators never need to see jobs directly.</div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--amber-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Skill</div>
+              <span class="term-type type-capability">Capability</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A packaged capability that an Agent can use. Skills define what an agent is allowed to do: search the web, read CRM records, send emails, create tasks. Each skill has a name, a tool definition, and optional parameters. Agents can have many skills; skills can be shared across agents.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A Block is the implementation unit inside a skill (the actual code or API call). A skill is the contract; a block is the implementation.</div>
+            <div class="term-examples">
+              <span class="term-example-chip">web_search</span>
+              <span class="term-example-chip">send_email</span>
+              <span class="term-example-chip">create_crm_contact</span>
+              <span class="term-example-chip">read_calendar</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--amber-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Block</div>
+              <span class="term-type type-capability">Capability</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">The implementation unit inside a Skill. A block is a single executable step: call an API, transform data, run a subagent, wait for a condition. Skills are composed of one or more blocks. Blocks are versioned and can be reused across skills.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A Block Type is the template or class. A Block is an instance of a Block Type configured with specific parameters.</div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--slate-100);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77"/><path d="M3 11V3h8"/><path d="M12 21H4a1 1 0 0 1-1-1V7"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Block Type</div>
+              <span class="term-type type-capability">Capability</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">The schema and behaviour template for a class of Blocks. Block Types are defined by system administrators (e.g. "HTTP request", "Run subagent", "Wait for approval", "Evaluate condition"). Operators instantiate blocks from block types when building skills.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A Block is a configured instance. A Block Type is the template. The relationship is the same as a class (Block Type) and an object (Block).</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Tenant section -->
+      <div class="section-divider">Tenancy</div>
+      <div class="glossary-grid">
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:var(--sky-50);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Org (Tenant)</div>
+              <span class="term-type type-tenant">Tenancy</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">An Organisation is the top-level tenant in Automation OS. It owns agents, automations, workflows, connections, and knowledge. All billing, permissions, and data isolation are per-org. When you log in, you are always acting inside one org.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> A Subaccount (Client) is a workspace inside your org, typically representing one of your end clients. The org is your agency; the subaccount is each client you serve.</div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:#f0f9ff;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Subaccount (Client)</div>
+              <span class="term-type type-tenant">Tenancy</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A Subaccount represents one client (end customer) inside your org. Agents can be scoped to run work for a specific subaccount -- reading that client's data, generating reports for them, or sending communications on their behalf. Subaccounts have their own knowledge, tags, team members, and permissions.</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> The Org is your agency. A Subaccount is one client. An Agent can work for multiple subaccounts, but its runs are always tagged to the subaccount they were running for.</div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:#f5f3ff;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Project</div>
+              <span class="term-type type-container">Container</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A container that groups work items (tasks, boards, deliverables) together for a specific objective. Projects belong to a subaccount. An agent working on a project can create tasks inside it, move items between stages, and generate deliverables.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Knowledge section -->
+      <div class="section-divider">Knowledge</div>
+      <div class="glossary-grid">
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:#fff7ed;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Knowledge</div>
+              <span class="term-type type-knowledge">Knowledge</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">Everything an Agent knows about your organisation, clients, and rules. Knowledge has two sources: Auto-memory (things the agent observed and stored automatically from past runs) and Authored knowledge (documents, rules, and facts you wrote explicitly). Agents load relevant knowledge into context before each run.</div>
+            <div style="margin-top:10px;">
+              <a class="term-link" href="knowledge.html">View Knowledge page &#8594;</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="term-card">
+          <div class="term-card-head">
+            <div class="term-icon" style="background:#fff7ed;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div>
+              <div class="term-name">Memory Block</div>
+              <span class="term-type type-knowledge">Knowledge</span>
+            </div>
+          </div>
+          <div class="term-body">
+            <div class="term-definition">A single stored memory -- a fact, a rule, a preference, or an observation -- that an agent extracted from past runs or that you authored explicitly. Memory blocks have a type (rule, fact, preference, observation) and a dot-notation label for identification (e.g. client.communication_style.tone).</div>
+            <div class="term-contrast"><strong>Not to confuse with:</strong> An Entry is an auto-memory record tied to a specific run event. A Memory Block is a distilled, reusable fact surfaced from entries.</div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>
