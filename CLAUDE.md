@@ -38,6 +38,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Be specific. Vague entries do not prevent future mistakes.
 - Never edit or remove existing entries — only append new ones
 - Convert every failure into a reusable rule
+- Ruthlessly iterate on these lessons until the mistake rate drops
 
 ## 4. Verification Before Done
 
@@ -393,6 +394,8 @@ See [`architecture.md` § Architecture Rules](./architecture.md). Violations are
 ## Core Principles
 
 Simplicity first — minimal code, root causes, no lazy patches. Systems over prompts. Verification over generation. Iteration over perfection. Structure over volume.
+
+**No laziness.** Find root causes, not symptoms. No temporary fixes, no TODOs left behind, no "good enough for now." Hold yourself to senior-engineer standards on every change.
 
 ---
 
