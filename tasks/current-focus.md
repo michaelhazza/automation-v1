@@ -9,7 +9,7 @@ last_merged_pr: #267
 last_merged_slug: pre-launch-phase-3-deferred-backlog
 last_merged_branch: claude/pre-launch-phase-3
 last_merged_at: 2026-05-06T14:15:00Z
-last_merged_commit: TBD
+last_merged_commit: 8b6f8d80
 -->
 
 <!-- mission-control-parallel
