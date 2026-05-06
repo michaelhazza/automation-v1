@@ -768,3 +768,27 @@ index.html:
 - `prototypes/consolidation-2026-05-06/before-automations.html` (rewritten)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions box, automations card description)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-7 — 2026-05-06 (retry)
+
+**Operator feedback:** Restructure knowledge.html tabs from Summary / Auto-memory / Authored to Memory / Notes / Documents. Memory tab combines authored entries and memory blocks with org-inheritance chips and rich-text authoring. Notes tab is renamed Auto-memory with promote-to-memory action. Documents tab is new with 2-column card grid, org-inherited chips, upload modal, Drive connect, and version history drawer.
+
+**Changes made:**
+- `knowledge.html` fully rewritten: three tabs (Memory / Notes / Documents) replace prior three tabs (Summary / Auto-memory / Authored). Summary tab removed. Rich-text authoring drawer (640px) added with full toolbar: bold, italic, underline, strikethrough, H2, H3, bullet list, numbered list, link, blockquote, code block — all using document.execCommand. Memory tab: 14 items (3 org-inherited blocks, 5 subaccount blocks, 6 authored entries). Each item shows type chip, inheritance chip, tier badge for blocks, last updated, source/author. Org-inherited items open a locked drawer with "Edit at organisation level" link. Documents tab: 2-column card grid with 4 org-inherited docs and 6 client docs. Doc drawer includes version history collapsible with revert buttons, replace drop zone, and archive action. Upload modal and Connect Drive modal present. Notes tab: 10 auto-extracted note entries plus 2 block proposals with Promote to Memory and Suppress actions, confidence display, and source links preserved.
+- `before-knowledge.html` banner updated to describe the 4 source pages being merged and what the new structure adds.
+- `index.html` masthead updated to Round 7b-7 with description of Memory/Notes/Documents restructure. Round 7b-7 entry added to round changelog list.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Memory tab default active. Operator's primary task is read and manage what agents know. Tab opens immediately on combined memory list.
+- Default to hidden: yes -- no KPI tiles, no metric dashboards. Tier information and inheritance scope are inline chips. Documents tab is behind a tab click.
+- One primary action: yes -- Memory tab: "+ New" dropdown (New entry / New block). Notes tab: read-focused, no primary action. Documents tab: "+ Upload document" primary.
+- Inline state: yes -- inheritance scope, tier badge, last updated, author all inline on rows. File size and version count inline on doc cards.
+- Re-check passed: yes -- a non-technical operator can read an entry, click Edit, author rich-text, and save without technical context. Lock notice on org-inherited items is clear and actionable.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/knowledge.html` (rewritten)
+- `prototypes/consolidation-2026-05-06/before-knowledge.html` (banner updated)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead 7b-7, changelog entry added)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

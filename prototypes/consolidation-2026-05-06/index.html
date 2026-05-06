@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-6
+    Prototype Round 7b-7
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-6: Automations page restructured into a three-tab consolidated surface (Workflows / Automations / Triggers). Previously four separate routes (WorkflowsLibraryPage, AutomationsPage, AdminAutomationsPage, TriggersPage) are now one page. Context-aware primary CTA changes label per active tab. Workflow card grid with step count, last run status, trigger source. Automations table with trigger description, action description, engine, status, and fire count. Triggers table with source badge, event filter, linked target chips, and cross-tab navigation. Drawers for workflow detail (Steps / Run history), trigger detail (Detail / Run history with test-fire button), and new-item creation per tab. Before companion updated to 3-column layout showing all three production surfaces side by side with annotated problems.</p>
+  <p>Round 7b-7: Knowledge page restructured. Three tabs: Memory (default, combines authored entries and memory blocks with org-inheritance chips and rich-text authoring), Notes (formerly Auto-memory, confidence display and promote-to-memory action), Documents (new, 2-column card grid with org-inherited and client-scoped docs, upload modal, Drive connect, version history drawer). Round 7b-6: Automations page restructured into a three-tab consolidated surface (Workflows / Automations / Triggers).</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-6</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-7</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 50+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -131,6 +131,7 @@
     <li>Round 7b-4: Spending page: SpendingBudgetsPage and SpendLedgerPage merged into spending.html with two tabs. Org-level cap card with progress bar and pace line. Per-workspace caps table with inline edit, status badges (within cap, over-pace amber, near cap red). Ledger tab with 25+ transactions, KPI strip, group-by (None / Day / Subaccount / Agent). Transaction detail drawer with cost breakdown and run trace link. Edit cap modal with validation (daily and monthly). _sidebar.js Spending link in Org mode changed from stub to spending.html.</li>
     <li>Round 7b-5: Pages surface: PageProjectsPage + PageProjectDetailPage consolidated into pages.html. Nav item renamed "Sites" to "Pages". Card grid with browser-frame thumbnails and status badges replaces flat table. Detail opens in 600px side drawer (Settings / Content / SEO / Analytics tabs). New page modal with slug auto-gen and color picker. _sidebar.js Pages link in Workspace External section changed from stub to pages.html.</li>
     <li>Round 7b-6: Automations page restructured: three tabs (Workflows / Automations / Triggers) replace four separate routes. Context-aware primary CTA. Cross-tab navigation via trig-chip clicks. before-automations.html updated to 3-column before-state showing all three production pages with annotated problems.</li>
+    <li>Round 7b-7: Knowledge page restructured: Memory / Notes / Documents tabs replace Summary / Auto-memory / Authored. Memory tab combines authored entries and memory blocks with org-inheritance chips, tier badges, and 640px rich-text drawer (contentEditable + execCommand toolbar). Notes tab is renamed Auto-memory with promote-to-memory action. Documents tab is new: 2-column card grid, org-inherited section, upload modal, Drive connect, version history collapsible in doc drawer.</li>
   </ul>
 </div>
 
