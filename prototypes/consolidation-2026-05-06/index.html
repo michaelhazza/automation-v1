@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Automation OS Consolidation 2026-05-06 | Prototype Navigator</title>
+<title>Automation OS Consolidation Prototype</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; -webkit-font-smoothing: antialiased; }
-  body { padding: 40px 48px; max-width: 1160px; margin: 0 auto; }
+  body { padding: 40px 48px; max-width: 1240px; margin: 0 auto; }
 
-  .masthead { margin-bottom: 40px; }
+  .masthead { margin-bottom: 36px; }
   .masthead-eyebrow {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
@@ -20,25 +20,26 @@
     border-radius: 5px; padding: 3px 8px; margin-bottom: 12px;
   }
   .masthead h1 { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 8px; }
-  .masthead p { font-size: 14px; color: #64748b; max-width: 680px; line-height: 1.6; }
+  .masthead p { font-size: 14px; color: #64748b; max-width: 720px; line-height: 1.6; }
   .meta-row { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
   .meta-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #64748b; }
   .meta-item strong { color: #334155; font-weight: 600; }
 
-  .section { margin-bottom: 40px; }
+  .section { margin-bottom: 36px; }
   .section-heading {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    display: flex; align-items: baseline; gap: 12px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
     color: #94a3b8; margin-bottom: 14px; padding-bottom: 10px;
     border-bottom: 1px solid #e2e8f0;
   }
-  .section-heading-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .section-heading-count { color: #cbd5e1; font-weight: 500; }
+  .section-heading-desc { font-size: 12.5px; font-weight: 400; color: #94a3b8; text-transform: none; letter-spacing: 0; margin-left: auto; }
 
   .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
 
   .proto-card {
     background: white; border: 1px solid #e8ecf0; border-radius: 12px;
-    padding: 18px 20px; color: inherit;
+    padding: 16px 18px; color: inherit;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     transition: all 0.15s; display: block;
     position: relative;
@@ -47,23 +48,24 @@
   .proto-card-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }
   .before-link { position: relative; z-index: 2; }
 
-  .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
   .proto-card-title { font-size: 14px; font-weight: 700; color: #0f172a; }
   .proto-card-file { font-size: 11px; font-family: monospace; color: #94a3b8; background: #f1f5f9; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
-  .proto-card-desc { font-size: 12.5px; color: #64748b; line-height: 1.55; margin-bottom: 10px; }
-  .proto-card-replaces { margin-bottom: 8px; }
-  .proto-card-replaces-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
-  .proto-card-replaces-list { display: flex; flex-wrap: wrap; gap: 4px; }
-  .replace-pill {
-    display: inline-flex; align-items: center;
-    font-size: 11px; color: #475569;
-    background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px;
-    padding: 2px 7px;
+  .proto-card-desc { font-size: 12.5px; color: #64748b; line-height: 1.5; margin-bottom: 8px; }
+  .proto-card-footer { display: flex; align-items: center; justify-content: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f1f5f9; gap: 8px; }
+  .before-link { font-size: 11px; color: #b45309; font-weight: 600; background: #fef9c3; border: 1px solid #fde68a; border-radius: 4px; padding: 2px 7px; }
+  .before-link:hover { background: #fef08a; }
+
+  .preview-links { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+  .preview-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: #4f46e5; font-weight: 600;
+    padding: 5px 10px;
+    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 5px;
+    width: max-content;
   }
-  .replace-pill.strike { text-decoration: line-through; color: #94a3b8; }
-  .proto-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; }
-  .proto-card-link { font-size: 12px; font-weight: 600; color: #4f46e5; display: inline-flex; align-items: center; gap: 4px; }
-  .before-link { font-size: 11px; color: #f59e0b; font-weight: 600; background: #fef9c3; border: 1px solid #fde68a; border-radius: 4px; padding: 2px 7px; }
+  .preview-link:hover { background: #e0e7ff; }
+  .preview-link-note { font-size: 11px; color: #94a3b8; font-style: italic; margin-top: 4px; }
 
   .decisions-box {
     background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
@@ -77,1066 +79,423 @@
   }
   .decisions-box li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #f59e0b; margin-top: 6px; flex-shrink: 0; }
 
-  .sub-screens-note {
-    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;
-    padding: 8px 12px; font-size: 12px; color: #166534; margin-bottom: 12px;
-  }
+  .reference-section .proto-card { background: #fafbfc; border-style: dashed; }
+  .reference-section .proto-card-title { color: #475569; }
+  a { text-decoration: none; }
 </style>
 </head>
 <body>
 
 <div class="masthead">
-  <div class="masthead-eyebrow">
-    Prototype Round 7e-3
-  </div>
-  <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7e-3: Recurring tasks surface added. Consolidates the <strong>scheduled_tasks</strong> schema (ScheduledTasksPage, RRULE-based recurring invocations) and <strong>agent_triggers</strong> schema (TriggersPage, event-based invocations) into a single "Recurring tasks" page. Both are a rule that describes when to invoke an agent; only the fire condition differs. The new surface adds a unified 17-row table with fire condition badges (Schedule / Event / Manual), filter chips, fire count/30d, next fire, and a 560px drawer with Configure / History / Test tabs. "+ New recurring task" modal creates and opens the drawer. Before companion documents the split and 8 problems. Triggers tab retired from automations.html in Round 7e-2 (already done). Sidebar updated: Recurring tasks added between Automations and Knowledge in the Build section. Round 7e-1 (Skills + Data sources tabs) remains complete.</p>
+  <div class="masthead-eyebrow">UI Consolidation Prototype</div>
+  <h1>Automation OS — UI Consolidation</h1>
+  <p>Clickable HTML prototypes for the consolidated UI. Each card links to a redesigned surface; if a "View before" link is present, it opens the depiction of the current production state for comparison. Use the demo profile selector at the top of the sidebar (Workspace operator / Org admin / System admin) to see permission-gated views.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7e-3</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 56+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
 <div class="decisions-box">
-  <h3>Confirmed decisions (not up for re-debate)</h3>
+  <h3>Confirmed product decisions</h3>
   <ul>
-    <li>Knowledge = Memory (auto) + Authored knowledge. Review Queue moved to Inbox.</li>
-    <li>Capabilities tab: toggle rows grouped by category, no kit+library split. Skills drop from main nav.</li>
-    <li>Inbox unifies all HITL surfaces: tasks, approvals, belief conflicts, block proposals, clarifications, failed runs, suppressed memory.</li>
-    <li>Automation Detail is NOT a top-level nav item. Opens from automation name row click.</li>
-    <li>Connections table-density: single dense table, filter chips, sort: Connected first.</li>
-    <li>Categories renamed to Tags in all UI copy.</li>
-    <li>OrgSettingsPage Memory and Integrations tabs removed from Manage Org. Both have dedicated nav items.</li>
-    <li>Workflows and Automations stay separate. Workflow steps can call automations.</li>
-    <li>Client Pulse deferred (stub links in sidebar under ClientPulse section, labeled "separate thread").</li>
-    <li>Per-skill visibility: Hidden (default) or Visible. Two options only.</li>
-    <li>Knowledge: 3 tabs (Summary / Auto-memory / Authored). Single meta line replaces metric strip.</li>
-    <li>Home: 4-widget grid: runs sparkline, active agents, today's schedule, spend and cap. Inbox as right sidebar preview.</li>
-    <li>Run trace: all 6 event types wired. Calendar: 7/14/30 day views.</li>
-    <li>Three-mode sidebar: Workspace (subaccount context), Org (organisation admin), System (platform admin). Mode persists in localStorage key "prototype.sidebar.mode".</li>
-    <li>Workspace nav: exhaustive list including Tasks, Sites, Triggers, Goals, Org Chart, Portal, Team, Activity, Action Log as stubs. Knowledge, Connections, ClientPulse sections separate. Bottom: Manage link.</li>
-    <li>Org mode: separate nav with Companies, Agents, Calendar, Automations, Knowledge, Connections, Skills, Workflows, Health, Spending Budgets, Team, Teams, Activity.</li>
-    <li>System mode: left-nav only. No new page content. Links to system stubs only, except Activity which links to activity.html?scope=system.</li>
-    <li>Activity page: three scopes (Subaccount / Org / System). Full filter bar. 28 rows across all 24 activity types. Slide-in drawer with type-specific fields. Links to run-trace.html and inbox.html from drawer.</li>
-    <li>Tasks consolidated to Inbox (HITL). Scheduled to Calendar. Action Log kept as stub. Skills folded into Capabilities tab. Reports under ClientPulse stub.</li>
-    <li>Round 7d: Knowledge terminology rebuild: tabs renamed to Authored memory / Auto-memory / Documents. Schema verbs removed from all UI copy. "Suppress" becomes "Ignore" / "Ignored memories". "Re-add" becomes "Track again". "Re-suppress" becomes "Keep ignoring". "Promote" becomes "Approve as authored" or "Edit and approve". "Review queue" becomes "Pending review" filter chip within each tab.</li>
-    <li>Round 7d: Suggested groupings (was "block proposals"): surfaced as special card type in Auto-memory tab. Shows extracted observations, proposes a tier entry, allows Approve grouping / Edit and approve / Reject.</li>
-    <li>Round 7d: Inheritance visibility: workspace operators see subaccount items only (no inherited items shown). Org and system admins see inherited items tagged "Admin view" with eye icon, tooltip, and lock-icon Edit linking to org-knowledge.html.</li>
-    <li>Round 7d: inbox.html: "Suppressed memory" item type renamed "Memory update". Plain-English body text replaces schema-verb descriptions. Buttons: "Track again" (primary) and "Keep ignoring" (outlined). Keyboard hints: T to track, K to keep ignoring.</li>
-    <li>Round 7b-1: Workspace nav grouped into Work / Build / Tasks / External / Setup sections. Workflows, Goals, Org Chart, Triggers removed as standalone items (folded into Automations tabs / Team tab / retired). Sites renamed to Pages.</li>
-    <li>Round 7b-1: Org mode grouped into Clients / Build / Operate / Setup. Health removed (into Activity with filter). Spending Budgets and Spend Ledger merged into one Spending item. Team+Teams merged into one Team item. Workflows folded into Automations.</li>
-    <li>Round 7b-1: System mode grouped into Inventory / Operate / Setup. Diagnostics+Job Queues merged into one Queues item. LLM P&L renamed to Financials.</li>
-    <li>Round 7b-1: Calendar period navigation: back/forward arrows, current period label, Today reset button. Period type buttons renamed Week / Fortnight / Month.</li>
-    <li>Round 7b-1: Connections page: inline SVG monogram logos for all 8 connections (Gmail, Salesforce, HubSpot, Zapier, AWS S3, Slack, Google Analytics, generic servers).</li>
-    <li>Round 7b-1: Inbox action buttons: uniform sizing (padding 7px 14px, font-size 13px) across all item types. Archive is now an outlined button, not a plain text link. Primary actions solid indigo, secondary actions outlined slate.</li>
-    <li>Round 7b-2: Team page: SubaccountTeamPage and OrgChartPage merged into one page with Members + Org Chart tabs. Member detail drawer is shared across both tabs (click a row or an org card). Invite modal adds a pending row to the Members table. Org chart is CSS flexbox only (read view), no D3 or graph library.</li>
-    <li>Round 7b-4: Spending page: SpendingBudgetsPage and SpendLedgerPage merged into spending.html with two tabs. Org-level cap card with progress bar and pace line. Per-workspace caps table with inline edit, status badges (within cap, over-pace amber, near cap red). Ledger tab with 25+ transactions, KPI strip, group-by (None / Day / Subaccount / Agent). Transaction detail drawer with cost breakdown and run trace link. Edit cap modal with validation (daily and monthly). _sidebar.js Spending link in Org mode changed from stub to spending.html.</li>
-    <li>Round 7b-5: Pages surface: PageProjectsPage + PageProjectDetailPage consolidated into pages.html. Nav item renamed "Sites" to "Pages". Card grid with browser-frame thumbnails and status badges replaces flat table. Detail opens in 600px side drawer (Settings / Content / SEO / Analytics tabs). New page modal with slug auto-gen and color picker. _sidebar.js Pages link in Workspace External section changed from stub to pages.html.</li>
-    <li>Round 7b-6: Automations page restructured: three tabs (Workflows / Automations / Triggers) replace four separate routes. Context-aware primary CTA. Cross-tab navigation via trig-chip clicks. before-automations.html updated to 3-column before-state showing all three production pages with annotated problems.</li>
-    <li>Round 7b-7: Knowledge page restructured: Memory / Notes / Documents tabs replace Summary / Auto-memory / Authored. Memory tab combines authored entries and memory blocks with org-inheritance chips, tier badges, and 640px rich-text drawer (contentEditable + execCommand toolbar). Notes tab is renamed Auto-memory with promote-to-memory action. Documents tab is new: 2-column card grid, org-inherited section, upload modal, Drive connect, version history collapsible in doc drawer.</li>
-    <li>Round 7b-8: Org Knowledge page (org-knowledge.html): unified org-level Knowledge with Memory and Documents tabs. Memory tab shows 7 blocks (3 tiers) and 5 authored entries with "Inherited by N of 4 workspaces" usage indicators. Documents tab shows 7-card 2-column grid. Drawer includes per-subaccount inheritance toggles and "Override at workspace level" links. Upload modal includes "Push to all workspaces" toggle. _sidebar.js org Build section Knowledge link promoted from stub to org-knowledge.html.</li>
-    <li>Round 7b-9: Capabilities tab is inheritance-aware. Skills assigned realistic tiers (System / Org / This client). Tier chip on every skill row. Three-dot overflow menu builds dynamically per tier: System (View source, Configure, Disable only), Org (adds Override locally and Edit at org level link), This client (full: Edit, Configure, View parameters, Disable, Delete). Skill creator drawer with 4 tabs (Basic info, Parameters, Implementation, Test). Scope breadcrumb above skill list. Scope toggle in footer (This client / Organisation). Save and enable adds skill row live.</li>
-    <li>Round 7b-10: org-agent-edit.html added as the org-level agent definition editor. Two-tier Capabilities view (System skills read-only, Org-custom skills full edit). Deployments tab new: table of 4 workspaces with status badge, override count, custom skill count, last run, 30-day run count. Row click opens 520px drawer with side-by-side org vs workspace override comparison, custom skills list, recent runs, and force re-sync action. "Deploy to additional workspaces" modal with workspace checklist. Skill creator drawer scope locked to Organisation. _sidebar.js Agents link in Org/Build section promoted from stub to org-agent-edit.html. before-org-agent-edit.html added with simulated production flat editor and 8-item problems list.</li>
-    <li>Round 7b-11 (FINAL): Goals tree retired. Per-project Objective field added to project-edit.html. Objective textarea (larger font, helper band explaining agent runtime injection, word count, expandable example objectives). Migration notice card for projects that had a goal_id. before-project-edit.html depicts split: left = project edit with no Objective (only description), right = GoalsPage OKR tree annotated as zero hits in server/services/agent*/. Goals already removed from sidebar in 7b-1. 7b chain complete.</li>
-    <li>Round 7c: permission demos for mode switcher and skill creator scope toggle (production gates these via real permission checks, not demo toggles). Sidebar "Demo: viewing as" dropdown simulates three profiles: System admin sees all three mode pills, Org admin sees Workspace + Org, Workspace operator sees no pill row. Skill creator drawer adds collapsible "Demo controls" with Org admin vs Workspace user states; Workspace user disables Organisation scope option with lock icon and tooltip, auto-selects This client, shows static scope label.</li>
-    <li>Round 7e-1: Capabilities tab retired (jargony, did not scale). Replaced with Skills and Data sources as top-level tabs on both agent-edit.html and org-agent-edit.html. agent-edit.html tab strip: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab: Enabled section (compact toggle rows with tier chip) and Add skills section (search-driven, filter chips: All 247 / System 180 / Organisation 15 / This client 3 / Custom only 18; results grouped by tier, collapsible). Data sources tab: Enabled section with type-coloured icon rows and toggle; Add data sources section with search, filter chips (All / Memory / Documents / Bundles / Live integrations), and Add source dropdown. org-agent-edit.html receives the same restructure with two-tier skill view (System + Organisation only; no This client tier at org level). before-agent-edit.html and before-org-agent-edit.html updated with augmented banners and problems-with-current-state lists documenting the Capabilities IA gaps.</li>
+    <li>Three sidebar modes (Workspace / Org / System) with permission-gated mode switcher.</li>
+    <li>Inbox unifies all human-in-the-loop surfaces: approvals, clarifications, tasks, failed runs, memory updates.</li>
+    <li>Knowledge has three tabs: Authored memory, Auto-memory, Documents (with Documents and Bundles sub-tabs).</li>
+    <li>Memory is split by who wrote it (you vs the system). Pending review is a status that applies in either tab.</li>
+    <li>Org-inherited content is hidden from workspace operators. Visible to org admins as "Admin view" with a tooltip.</li>
+    <li>Capabilities tab retired. Replaced by separate Skills and Data sources top-level tabs on agent edit. Skills tab uses search-driven UX scaling to 200+ skills.</li>
+    <li>MCP tool servers are invisible to operators. Skills are the unit of agent capability; MCP-derived skills are bundled by capability theme (Option C).</li>
+    <li>Triggers retired as a standalone surface. Folded into a unified "Recurring tasks" page with Schedule / Event / Manual fire conditions.</li>
+    <li>Workflows + External automations consolidated under one Automations page with tabs.</li>
+    <li>Goals retired. Replaced by a per-project Objective field that is read by agent execution at runtime.</li>
+    <li>ClientPulse stays as a separate thread (links in sidebar, surface untouched).</li>
+    <li>Spend and cap widget on home; full Spending page consolidates Budgets and Ledger.</li>
+    <li>Connections page uses plain language: Sign in / Key / Web login replace OAuth / API key / web_login.</li>
+    <li>Onboarding uses multi-select for integrations / agents / automations; background data pull begins on each connection.</li>
+    <li>Calendar nav: Today + previous / next inline with the period label; view switcher (Week / Fortnight / Month) on the right.</li>
   </ul>
 </div>
 
-<!-- ── Primitive consolidation ──────────────────────────────── -->
+<!-- ============================================================ -->
+<!-- WORKSPACE — day-to-day operator surfaces                     -->
+<!-- ============================================================ -->
 <div class="section">
   <div class="section-heading">
-    <div class="section-heading-dot" style="background:#6366f1"></div>
-    Primitive consolidation
+    <span>Workspace</span>
+    <span class="section-heading-desc">Day-to-day operator surfaces</span>
   </div>
   <div class="card-grid">
 
-    <div class="proto-card">
+    <a href="home.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Knowledge</div>
-        <div class="proto-card-file">knowledge.html</div>
+        <div class="proto-card-title">Home</div>
+        <div class="proto-card-file">home.html</div>
       </div>
-      <div class="proto-card-desc">Round 7d: full terminology rebuild. Tabs: Authored memory / Auto-memory / Documents. Authored memory: 8 active entries + 2 pending review + 3 org-inherited (admin view only). Auto-memory: 2 suggested groupings + 8 pending entries + 2 approved. Documents sub-tabs: Documents (8 subaccount + 4 inherited) / Bundles (4 cards with drawer). Ignored memories replaces Suppressed. All schema verbs removed from UI copy.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 4 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">SubaccountKnowledgePage</span>
-          <span class="replace-pill strike">WorkspaceMemoryPage</span>
-          <span class="replace-pill strike">MemoryBlockDetailPage</span>
-          <span class="replace-pill strike">MemoryReviewQueuePage</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">4-widget grid (Today's runs sparkline, Active agents, Today's schedule, Spend &amp; cap) plus Inbox preview, Recent runs list and Recent activity list.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="knowledge.html">Open mockup &#8594;</a>
-        <a href="before-knowledge.html" class="before-link">Before</a>
+        <a href="before-home.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
-    <div class="proto-card">
+    <a href="inbox.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Inbox (NEW)</div>
+        <div class="proto-card-title">Inbox</div>
         <div class="proto-card-file">inbox.html</div>
       </div>
-      <div class="proto-card-desc">Unified HITL feed: 15-20 mixed items across tasks, approvals, belief conflicts, block proposals, clarifications, failed runs. Inline approve/reject for simple items. Drawer with diff view for complex items. Filters: status/type/client/age/sort.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 4 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">InboxPage</span>
-          <span class="replace-pill strike">AgentMailboxPage</span>
-          <span class="replace-pill strike">MemoryReviewQueuePage</span>
-          <span class="replace-pill strike">ReviewQueuePage (admin)</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">Unified human-in-the-loop queue. Approvals, clarifications, tasks, failed runs, and memory updates in one stream. Action buttons consistent across item types.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="inbox.html">Open mockup &#8594;</a>
-        <a href="before-inbox.html" class="before-link">Before</a>
+        <a href="before-inbox.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Agent Edit</div>
-        <div class="proto-card-file">agent-edit.html</div>
-      </div>
-      <div class="proto-card-desc">Round 7e-1a: Capabilities tab replaced with Skills and Data sources top-level tabs. Tab strip: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab uses a search-driven Enabled / Add structure scaling to 200+ skills (filter chips: All 247 / System 180 / Organisation 15 / This client 3 / Custom only 18; results grouped by tier). Data sources tab elevated to a top-level surface with type-coloured rows (blue=doc, violet=memory, purple=bundle, green=live). Skill edit drawer and skill creator drawer preserved.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 5 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">AdminAgentEditPage</span>
-          <span class="replace-pill strike">AdminSkillsPage</span>
-          <span class="replace-pill strike">AdminSkillEditPage</span>
-          <span class="replace-pill strike">SkillStudioPage</span>
-          <span class="replace-pill strike">SkillAnalyzerPage</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="agent-edit.html">Open mockup &#8594;</a>
-        <a href="before-agent-edit.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Org Agent Edit <span style="font-size:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7b-10</span></div>
-        <div class="proto-card-file">org-agent-edit.html</div>
-      </div>
-      <div class="proto-card-desc">Org-level agent definition editor. Round 7e-1b: same Capabilities-to-Skills+Data-sources restructure as agent-edit.html. Tab strip: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Deployments. Skills tab shows System and Organisation tiers only (no This client tier at org level). Filter chips: All 11 / System 8 / Org-custom 3. Data sources tab with type-coloured rows. Deployments tab: 4-workspace table, row-click drawer with side-by-side field comparison, force re-sync, workspace agent link. Deploy-to-workspaces modal.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces / improves</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">AdminAgentEditPage (org context)</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="org-agent-edit.html">Open mockup &#8594;</a>
-        <a href="before-org-agent-edit.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Run Trace</div>
-        <div class="proto-card-file">run-trace.html</div>
-      </div>
-      <div class="proto-card-desc">Auto-detects state: live runs show streaming events; historical runs show static trace. Same layout, different state badge and toolbar. Chain sidebar, delegation graph, event detail panel preserved.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">AgentRunLivePage</span>
-          <span class="replace-pill strike">RunTraceViewerPage</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="run-trace.html">Open mockup &#8594;</a>
-        <a href="before-run-trace.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Page merge ──────────────────────────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#10b981"></div>
-    Page merge
-  </div>
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Recurring tasks</div>
-        <div class="proto-card-file">recurring-tasks.html</div>
-      </div>
-      <div class="proto-card-desc">Unified surface for all rule-fires-agent patterns. 17 tasks across three fire conditions (Schedule-fired 8, Event-fired 6, Manual 3). Filter chips, fire count/30d, next fire column. 560px drawer with Configure / History / Test tabs. Fire condition radio cards swap the sub-form (RRULE fields / event type and filter / manual run-now). Retry policy, token budget, status toggle. "+ New recurring task" modal. Round 7e-3.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Consolidates 2 schemas / 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">ScheduledTasksPage (scheduled_tasks)</span>
-          <span class="replace-pill strike">TriggersPage (agent_triggers)</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="recurring-tasks.html">Open mockup &#8594;</a>
-        <a href="before-recurring-tasks.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Automations</div>
-        <div class="proto-card-file">automations.html</div>
-      </div>
-      <div class="proto-card-desc">Three-tab consolidated surface: Workflows (card grid, 10 items), Automations (table, 12 items), Triggers (table, 8 items). Context-aware primary CTA. Workflow detail drawer with Steps and Run history tabs. Trigger detail drawer with Detail/Run-history tabs and test-fire button. Cross-tab navigation via target chips on trigger rows. Round 7b-6 restructure.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 4 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">WorkflowsLibraryPage</span>
-          <span class="replace-pill strike">AutomationsPage</span>
-          <span class="replace-pill strike">AdminAutomationsPage</span>
-          <span class="replace-pill strike">TriggersPage</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="automations.html">Open mockup &#8594;</a>
-        <a href="before-automations.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
+    <a href="calendar.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
         <div class="proto-card-title">Calendar</div>
         <div class="proto-card-file">calendar.html</div>
       </div>
-      <div class="proto-card-desc">Context-aware calendar. Scope filter pills (All clients / per-client) replace dual routes. Per-client colored dot indicators, 7/14/30 day window selector, legend row.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">ScheduleCalendarPage</span>
-          <span class="replace-pill strike">SubaccountScheduleCalendarPage</span>
-        </div>
+      <div class="proto-card-desc">Schedule visualisation with Week / Fortnight / Month views. Today + previous / next inline navigation. Shows scheduled fires across all recurring tasks and agent runs.</div>
+      <div class="proto-card-footer">
+        <a href="before-calendar.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="activity.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Activity</div>
+        <div class="proto-card-file">activity.html</div>
+      </div>
+      <div class="proto-card-desc">Cross-cutting activity feed. Subaccount / Org / System scope toggle. 24+ event types with type, status, severity filters. Slide-in drawer for event detail.</div>
+      <div class="proto-card-footer"></div>
+    </a>
+
+    <a href="recurring-tasks.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Recurring tasks</div>
+        <div class="proto-card-file">recurring-tasks.html</div>
+      </div>
+      <div class="proto-card-desc">Unified surface for rule-fires-agent. Each task has a fire condition (Schedule / Event / Manual) and an action (invoke agent + optional pinned workflow). Replaces ScheduledTasks and Triggers.</div>
+      <div class="proto-card-footer">
+        <a href="before-recurring-tasks.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="run-trace.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Run trace</div>
+        <div class="proto-card-file">run-trace.html</div>
+      </div>
+      <div class="proto-card-desc">Per-run forensic timeline. All 6 event types (RUN_START, LLM_CALL, TOOL_CALL, TOOL_RESULT, HITL_GATE, DELEGATION) clickable with type-specific detail panel and absolute timestamps.</div>
+      <div class="proto-card-footer">
+        <a href="before-run-trace.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- AGENT MANAGEMENT                                             -->
+<!-- ============================================================ -->
+<div class="section">
+  <div class="section-heading">
+    <span>Agent management</span>
+    <span class="section-heading-desc">Define, configure, and deploy agents</span>
+  </div>
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Agents</div>
+        <div class="proto-card-file">agents.html</div>
+      </div>
+      <div class="proto-card-desc">Single mode-aware page that morphs based on context. Open all three side-by-side to see the differences.</div>
+      <div class="preview-links">
+        <a href="agents.html?view=workspace" class="preview-link">Workspace view (subaccount deployments)</a>
+        <a href="agents.html?view=org" class="preview-link">Organisation view (templates)</a>
+        <a href="agents.html?view=system" class="preview-link">System view (platform catalogue)</a>
+        <span class="preview-link-note">Each link sets the demo profile and renders the appropriate view.</span>
       </div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="calendar.html">Open mockup &#8594;</a>
-        <a href="before-calendar.html" class="before-link">Before</a>
+        <a href="before-agents.html" class="before-link">View before</a>
       </div>
     </div>
 
-    <div class="proto-card">
+    <a href="agent-edit.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Agent edit</div>
+        <div class="proto-card-file">agent-edit.html</div>
+      </div>
+      <div class="proto-card-desc">Subaccount-level agent edit. Tabs: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab uses search-driven Enabled / Add structure with tier chips (System / Org / This client).</div>
+      <div class="proto-card-footer">
+        <a href="before-agent-edit.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="org-agent-edit.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Org agent edit</div>
+        <div class="proto-card-file">org-agent-edit.html</div>
+      </div>
+      <div class="proto-card-desc">Org-level agent definition (the template that subaccounts inherit). Same tab structure as workspace agent edit, plus a Deployments tab. Two-tier skills (System + Organisation).</div>
+      <div class="proto-card-footer">
+        <a href="before-org-agent-edit.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="project-edit.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Project edit</div>
+        <div class="proto-card-file">project-edit.html</div>
+      </div>
+      <div class="proto-card-desc">Project configuration with the new Objective field that is injected into agent context at run time. Replaces the retired Goals OKR tree.</div>
+      <div class="proto-card-footer">
+        <a href="before-project-edit.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- KNOWLEDGE & CONNECTIONS                                      -->
+<!-- ============================================================ -->
+<div class="section">
+  <div class="section-heading">
+    <span>Knowledge &amp; connections</span>
+    <span class="section-heading-desc">Memory, documents, and external integrations</span>
+  </div>
+  <div class="card-grid">
+
+    <a href="knowledge.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Knowledge (workspace)</div>
+        <div class="proto-card-file">knowledge.html</div>
+      </div>
+      <div class="proto-card-desc">Authored memory, Auto-memory, Documents (with Documents / Bundles sub-tabs). Rich-text authoring on Authored. Pending review status with Approve / Edit and approve / Reject. Org admin profile sees inherited items as Admin view.</div>
+      <div class="proto-card-footer">
+        <a href="before-knowledge.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="org-knowledge.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Knowledge (org)</div>
+        <div class="proto-card-file">org-knowledge.html</div>
+      </div>
+      <div class="proto-card-desc">Org-level Knowledge editing surface. Same Authored / Auto-memory / Documents structure, with "Used by N of 4 workspaces" indicators on every item. No inheritance chips (this is the source).</div>
+      <div class="proto-card-footer">
+        <a href="before-org-knowledge.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="integrations.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
         <div class="proto-card-title">Connections</div>
         <div class="proto-card-file">integrations.html</div>
       </div>
-      <div class="proto-card-desc">Service-first connections list (one row per service). Multiple credential types: API key, OAuth, Web login (URL+user+pass+TOTP), Cookie session, Certificate. Per-connection drawer: Credentials, Agent access, Data sync, Issues, Audit log.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">IntegrationsAndCredentialsPage</span>
-          <span class="replace-pill strike">AdminHealthFindingsPage</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">App connections and Logins. Universal search at the top. Plain-language method labels (Sign in / Key / Web login) replace OAuth / API key / cookie session.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="integrations.html">Open mockup &#8594;</a>
-        <a href="before-integrations.html" class="before-link">Before</a>
+        <a href="before-integrations.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
   </div>
 </div>
 
-<!-- ── Sub-screens (opened from list, not top-level nav) ─────── -->
+<!-- ============================================================ -->
+<!-- AUTOMATION & OPERATIONS                                      -->
+<!-- ============================================================ -->
 <div class="section">
   <div class="section-heading">
-    <div class="section-heading-dot" style="background:#7c3aed"></div>
-    Sub-screens (not top-level nav)
-  </div>
-  <div class="sub-screens-note">
-    These pages open from a parent list row click, not from sidebar navigation.
+    <span>Automation &amp; operations</span>
+    <span class="section-heading-desc">Workflows, external automations, system queues</span>
   </div>
   <div class="card-grid">
 
-    <div class="proto-card">
+    <a href="automations.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Automation Detail</div>
+        <div class="proto-card-title">Automations</div>
+        <div class="proto-card-file">automations.html</div>
+      </div>
+      <div class="proto-card-desc">Two tabs: Workflows (internal multi-step flows) and External (webhook-based recipes). Triggers retired and folded into Recurring tasks.</div>
+      <div class="proto-card-footer">
+        <a href="before-automations.html" class="before-link">View before</a>
+      </div>
+    </a>
+
+    <a href="automation-detail.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Automation detail</div>
         <div class="proto-card-file">automation-detail.html</div>
       </div>
-      <div class="proto-card-desc">Opens when clicking an automation name in the Automations list. Tabs: Definition (schema, webhook, tags), Run sandbox (JSON input + file upload + live console), History (past executions with detail drawer). Edit mode is an inline toggle.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 3 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">AutomationExecutionPage</span>
-          <span class="replace-pill strike">ExecutionDetailPage</span>
-          <span class="replace-pill strike">AdminAutomationEditPage</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">Sub-screen reachable when clicking an automation row. Execution detail, run history, configuration. Not a top-level nav item.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="automation-detail.html">Open mockup &#8594;</a>
-        <a href="before-automation-detail.html" class="before-link">Before</a>
+        <a href="before-automation-detail.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
+
+    <a href="queues.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Queues (system)</div>
+        <div class="proto-card-file">queues.html</div>
+      </div>
+      <div class="proto-card-desc">System-admin operations surface. Two tabs: Queue health (live BullMQ aggregates per tier) and Execution log (per-execution forensic). Drawer with sparkline, errors, DLQ, pause / resume.</div>
+      <div class="proto-card-footer">
+        <a href="before-queues.html" class="before-link">View before</a>
+      </div>
+    </a>
 
   </div>
 </div>
 
-<!-- ── Nav restructure ──────────────────────────────────────── -->
+<!-- ============================================================ -->
+<!-- ORG & ADMIN                                                  -->
+<!-- ============================================================ -->
 <div class="section">
   <div class="section-heading">
-    <div class="section-heading-dot" style="background:#f59e0b"></div>
-    Nav restructure
+    <span>Org &amp; admin</span>
+    <span class="section-heading-desc">Team, spending, organisation settings, external pages</span>
   </div>
   <div class="card-grid">
 
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Left Nav (Before / After)</div>
-        <div class="proto-card-file">shell-nav.html</div>
-      </div>
-      <div class="proto-card-desc">Before: all ~92 pages with disposition tags (MERGED/INTO/DRAWER/KEPT/SYSTEM). After: 16-item nav with plain-language descriptions. Full mapping table: every page with its route, destination, and method.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Represents</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">~92 pages mapped</span>
-          <span class="replace-pill">16 nav items proposed</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="shell-nav.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Manage Org</div>
-        <div class="proto-card-file">manage-org.html</div>
-      </div>
-      <div class="proto-card-desc">Consolidated org settings. Tabs: General, Tags (was Categories), Engines, Board Templates, Permission Sets, Spending, Health Audit. Memory and Integrations tabs removed (both have dedicated nav items). No fields dropped.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Consolidates</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">OrgSettingsPage (7 tabs, 5 embedded sub-pages)</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="manage-org.html">Open mockup &#8594;</a>
-        <a href="before-manage-org.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 3: Net-new surfaces ──────────────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#10b981"></div>
-    Round 3, Net-new surfaces
-  </div>
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Home (default route)</div>
-        <div class="proto-card-file">home.html</div>
-      </div>
-      <div class="proto-card-desc">Round 6 redesign: 4-widget dashboard (Today's runs sparkline, Active agents list, Today's schedule, Recent successes). Drops "Needs your attention" section that duplicated Inbox. Right-side Inbox preview retained. Primary action: New agent.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">DashboardPage</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="home.html">Open mockup &#8594;</a>
-        <a href="before-home.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">System Model (Glossary)</div>
-        <div class="proto-card-file">glossary.html</div>
-      </div>
-      <div class="proto-card-desc">Plain-language definitions for every concept: Agent, Automation, Workflow, Run, Job, Skill, Block, Block Type, Org/Tenant, Subaccount/Client, Project, Knowledge, Memory Block. Relationship diagram. Linked from help icon in shell.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="glossary.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Page Disposition Table</div>
-        <div class="proto-card-file">page-disposition.html</div>
-      </div>
-      <div class="proto-card-desc">Canonical reference: all 117 source pages mapped to disposition (KEEP / MERGED / TO DRAWER / RENAMED / REMOVED / SYSTEM ONLY / AUTH). Sortable by any column. Filterable by disposition and category. Used by engineering and operators to track consolidation work.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="page-disposition.html">Open reference &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Onboarding (first-run setup)</div>
-        <div class="proto-card-file">onboarding.html</div>
-      </div>
-      <div class="proto-card-desc">5-step first-run flow: Welcome, Connect first integration, Create first agent (from template), Set up first automation (optional), Done. Each step shows what state the tenant ends up in. Skippable at each step.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="onboarding.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 3: Changing existing surfaces ────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#6366f1"></div>
-    Round 3, Changing existing surfaces (before + after)
-  </div>
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Agents (mode-aware unified list)</div>
-        <div class="proto-card-file">agents.html</div>
-      </div>
-      <div class="proto-card-desc">Single page that morphs between three views depending on demo profile or URL param. Workspace: 12 agents deployed to Acme Corp. Organisation: 7 org-level templates across 4 workspaces. System: 23 platform catalogue agents with adoption metrics. URL param wins over sidebar profile selector.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 6 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">AdminAgentsPage</span>
-          <span class="replace-pill strike">AgentsPage</span>
-          <span class="replace-pill strike">SubaccountAgentsPage</span>
-          <span class="replace-pill strike">AgentTriggersPage</span>
-          <span class="replace-pill strike">SubaccountBlueprintsPage</span>
-          <span class="replace-pill strike">OrgAgentConfigsPage</span>
-        </div>
-      </div>
-      <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:7px;padding:10px 14px;margin:10px 0;font-size:12px;color:#3730a3;">
-        Open all three in browser tabs to compare side-by-side. Each link sets the demo profile and renders the appropriate view.
-      </div>
-      <div class="proto-card-footer" style="flex-wrap:wrap;gap:6px;">
-        <a class="proto-card-link" href="agents.html?view=workspace">Workspace view &#8594;</a>
-        <a class="proto-card-link" href="agents.html?view=org" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">Organisation view &#8594;</a>
-        <a class="proto-card-link" href="agents.html?view=system" style="background:#ede9fe;color:#7c3aed;border-color:#ddd6fe;">System view &#8594;</a>
-        <a href="before-agents.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Workflows (kept separate)</div>
-        <div class="proto-card-file">workflows.html</div>
-      </div>
-      <div class="proto-card-desc">Workflows remain a separate primitive from Automations. WorkflowsLibraryPage stays. WorkflowStudioPage moved to system-admin only (server already enforces this). Recent runs shown inline. Decision: NOT merged into automations.html.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Changes</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">WorkflowsLibraryPage kept</span>
-          <span class="replace-pill strike">WorkflowStudioPage removed from operator nav</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="workflows.html">Open mockup &#8594;</a>
-        <a href="before-workflows.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 3: Skipped pages (no change) ─────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#94a3b8"></div>
-    Round 3, Skipped (not changing in this consolidation)
-  </div>
-  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;font-size:12.5px;color:#64748b;line-height:1.7;">
-    <strong style="color:#334155;">Client Pulse (4 pages):</strong> ClientPulseDashboardPage, ClientPulseClientsListPage, ClientPulseDrilldownPage, ClientPulseSettingsPage. Not in consolidation scope. Confirmed in Round 2 decisions box. No before/after needed.
-    <br>
-    <strong style="color:#334155;">Portal (4 pages):</strong> PortalPage, PortalLandingPage, PortalExecutionPage, PortalExecutionHistoryPage. Client-facing portal is a separate product surface, out of scope.
-    <br>
-    <strong style="color:#334155;">Reports (2 pages):</strong> ReportsListPage, ReportDetailPage. Part of Client Pulse product area. Unchanged.
-    <br>
-    <strong style="color:#334155;">Tasks primitive:</strong> OpenTaskView, WorkspaceBoardPage, BriefDetailPage. Tasks are KEPT as-is (not merging into Inbox). Inbox unifies HITL items only; workspace tasks remain separate.
-  </div>
-</div>
-
-<!-- ── Round 3: Pattern reference galleries ───────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#f59e0b"></div>
-    Round 3, Pattern reference galleries
-  </div>
-  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12px;color:#78350f;margin-bottom:12px;">
-    Pattern galleries are builder references, not real pages. They document the canonical patterns to use across all consolidated pages.
-  </div>
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Empty States</div>
-        <div class="proto-card-file">empty-states.html</div>
-      </div>
-      <div class="proto-card-desc">Gallery of empty state patterns: agents, inbox, knowledge (auto + authored), connections, runs, automations, calendar. Each has exactly one primary action. Rules embedded at top.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="empty-states.html">Open gallery &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Permission Patterns</div>
-        <div class="proto-card-file">permissions.html</div>
-      </div>
-      <div class="proto-card-desc">Gallery of permission states: admin-only sections (dashed amber), locked rows, gated action buttons, full-page no-access states, role badge in topbar. Rules embedded at top.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="permissions.html">Open gallery &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Lifecycle Error Patterns</div>
-        <div class="proto-card-file">lifecycle-errors.html</div>
-      </div>
-      <div class="proto-card-desc">Gallery of error and blocked states: failed run with retry, expired credential with reconnect, blocked agent with unblock, rate-limited integration, schema migration in progress. Each error has one recovery action.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="lifecycle-errors.html">Open gallery &#8594;</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 6: Interactive behavior polish ───────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#4f46e5"></div>
-    Round 6, Interactive behavior polish
-  </div>
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Run Trace (event panels)</div>
-        <div class="proto-card-file">run-trace.html</div>
-      </div>
-      <div class="proto-card-desc">All 8 events wired with type-specific right panel. Click any row: RUN_START shows trigger/payload/user; LLM_CALL shows model/tokens/latency/cost/previews; TOOL_CALL shows args; TOOL_RESULT shows status/payload; HITL_GATE shows gate type/who-can-approve/inbox link; DELEGATION shows sub-agent/reason. "View raw event JSON" modal on every event.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="run-trace.html">Open mockup &#8594;</a>
-        <a href="before-run-trace.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Calendar (view switching)</div>
-        <div class="proto-card-file">calendar.html</div>
-      </div>
-      <div class="proto-card-desc">7/14/30 day buttons now switch real DOM containers. 7-day: full-detail vertical stack. 14-day: 7x2 chip grid (abbreviated events, colored client dots). 30-day: month grid with colored dot indicators and click-to-expand day popover. All use same underlying event data.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="calendar.html">Open mockup &#8594;</a>
-        <a href="before-calendar.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Home (widget dashboard)</div>
-        <div class="proto-card-file">home.html</div>
-      </div>
-      <div class="proto-card-desc">Round 6 redesign. "Needs your attention" section dropped (was duplicating Inbox). Replaced with 2x2 widget grid: Today's runs (sparkline + metrics), Active agents (elapsed + current step), Today's schedule (next 5 runs), Recent successes (last 5 completed). Inbox preview retained as right sidebar. Primary action: New agent in topbar.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="home.html">Open mockup &#8594;</a>
-        <a href="before-home.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Before: DashboardPage</div>
-        <div class="proto-card-file">before-home.html</div>
-      </div>
-      <div class="proto-card-desc">Faithful depiction of the current DashboardPage.tsx component tree: greeting, 4 MetricCard KPI tiles, QueueHealthSummary (admin only), PendingApprovalCard list, OperationalMetricsPlaceholder (unimplemented gap), AgentRecommendationsList, WorkspaceFeatureCards (ClientPulse + Settings), UnifiedActivityFeed. Problems annotated.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-home.html">Open before &#8594;</a>
-        <a href="home.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 7a: Three-mode nav + Activity page ───────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#4f46e5"></div>
-    Round 7a: Three-mode nav and Activity page
-  </div>
-
-  <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#0c4a6e;line-height:1.55;">
-    <strong>Shared sidebar:</strong> All prototype pages now use _sidebar.js. Three modes: Workspace (subaccount context, 15 nav items + sections), Org (organisation admin, 13 items), System (platform admin, 11 items, left-nav only). Mode persists in localStorage. Clicking a stub link shows a 2-second toast instead of navigating. Before pages are intentionally untouched (they depict the old nav).
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Activity (NEW)</div>
-        <div class="proto-card-file">activity.html</div>
-      </div>
-      <div class="proto-card-desc">Activity feed page mirroring ActivityPage.tsx. Three scopes: Subaccount / Org / System (scope toggle in header, also driven by sidebar mode or ?scope= param). Filter bar: type (all 24 types), status, severity, sort, search. 28 mock rows covering full type set. Row click opens slide-in drawer with type-specific detail fields. Drawer footer links to run-trace.html (agent_run) or inbox.html (inbox_item, review_item).</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Mirrors production</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">ActivityPage.tsx</span>
-          <span class="replace-pill">ActivityFeedTable</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="activity.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Shared Sidebar JS (7a)</div>
-        <div class="proto-card-file">_sidebar.js</div>
-      </div>
-      <div class="proto-card-desc">Three-mode sidebar shared across all prototype pages. Round 7a: Workspace mode 15 items (flat list with stubs), Org mode 13 items, System mode 11 items. Updated in Round 7b-1 with section groupings and nav consolidation (see 7b-1 section below).</div>
-      <div class="proto-card-footer">
-        <span style="font-size:11.5px;color:var(--slate-400,#94a3b8);">No dedicated page, used by all pages</span>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 7b-1: Nav consolidation + mechanical fixes ─────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#6366f1"></div>
-    Round 7b-1: Nav consolidation and mechanical fixes
-  </div>
-
-  <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#78350f;line-height:1.55;">
-    <strong>Nav consolidation:</strong> _sidebar.js restructured across all three modes with labelled section groups. Workspace: Work / Build / Tasks / External / Setup. Org: Clients / Build / Operate / Setup. System: Inventory / Operate / Setup. Items removed: Workflows (into Automations), Goals (retired), Org Chart (into Team tab), Triggers (into Automations). Items renamed: Sites to Pages, LLM P&L to Financials. Items merged: Diagnostics+Job Queues to Queues, Spending Budgets+Spend Ledger to Spending, Team+Teams to Team.
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Sidebar JS (7b-1 consolidated)</div>
-        <div class="proto-card-file">_sidebar.js</div>
-      </div>
-      <div class="proto-card-desc">Nav consolidation applied. Workspace: 4 items in Work, 4 in Build, 1 in Tasks, 2 in External, 2 in Setup, 3 ClientPulse stubs. Org: 1 in Clients, 5 in Build, 2 in Operate, 3 in Setup, 3 ClientPulse stubs. System: 5 in Inventory, 3 in Operate, 2 in Setup. Section labels rendered at 10px uppercase slate-500. Profile Settings at bottom of every mode.</div>
-      <div class="proto-card-footer">
-        <span style="font-size:11.5px;color:var(--slate-400,#94a3b8);">Shared across all non-before pages</span>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Calendar: period navigation</div>
-        <div class="proto-card-file">calendar.html</div>
-      </div>
-      <div class="proto-card-desc">Back and forward arrows navigate through periods. Period type buttons renamed: Week / Fortnight / Month. Current period label updates between arrows (e.g. "May 6 - May 12, 2026"). Today button resets to current period. Navigation uses real date math anchored to prototype date May 6, 2026.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="calendar.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Connections: app logos</div>
-        <div class="proto-card-file">integrations.html</div>
-      </div>
-      <div class="proto-card-desc">Connection rows now show inline SVG monogram logos instead of generic text initials. Apps: Gmail (envelope + red), Salesforce (blue cloud), HubSpot (orange sprocket), Slack (4-color grid), AWS S3 (hex badge), Zapier (orange Z), Google Analytics (bar chart), and a generic document server icon for custom/MCP entries.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="integrations.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Inbox: button consistency</div>
-        <div class="proto-card-file">inbox.html</div>
-      </div>
-      <div class="proto-card-desc">All action buttons unified to padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px. Primary actions (Approve, Open task, Reply to agent, View run trace) solid indigo. Secondary actions (Reject, View draft, Re-authenticate, View task) white bg with slate border. Archive is now an outlined button (white bg, slate border, slate-500 text) not a plain text link. Keyboard hints unchanged.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="inbox.html">Open mockup &#8594;</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 7b-2: Team page ─────────────────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#8b5cf6"></div>
-    Round 7b-2: Team page (Members + Org Chart)
-  </div>
-
-  <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#4c1d95;line-height:1.55;">
-    <strong>Consolidation:</strong> SubaccountTeamPage and OrgChartPage merged into team.html with two tabs. Member detail drawer is shared between the Members table (row click) and the Org Chart (card click). The invite modal adds a pending row live. Org Chart uses CSS flexbox tree (read view; drag-and-drop deferred to production).
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
+    <a href="team.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
         <div class="proto-card-title">Team</div>
         <div class="proto-card-file">team.html</div>
       </div>
-      <div class="proto-card-desc">Members tab: 8 rows (7 active, 1 pending invite) with avatar circles, role badges, permission set badges, last-active, status dots, overflow menus. Row click opens 440px member detail drawer with role/permission dropdowns, joined/last-active, recent activity, send-password-reset and suspend/remove actions. Invite modal adds a pending row live. Org Chart tab: CSS flexbox tree for Acme Corp, CEO down to 3 levels, connector lines. Card hover: indigo highlight + elevation. Card click: opens same member detail drawer.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">SubaccountTeamPage</span>
-          <span class="replace-pill strike">OrgChartPage</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">Members and Org Chart tabs sharing one detail drawer. Replaces SubaccountTeamPage and standalone OrgChartPage.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="team.html">Open mockup &#8594;</a>
-        <a href="before-team.html" class="before-link">Before</a>
+        <a href="before-team.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Before: Team + Org Chart</div>
-        <div class="proto-card-file">before-team.html</div>
-      </div>
-      <div class="proto-card-desc">Side-by-side depiction of the two current pages: SubaccountTeamPage (utilitarian flat table, email-first columns, old-style "Add member" button) and OrgChartPage (sparse hierarchy, name+role only, no avatars, no click actions). Problems box lists 7 specific gaps in the current state.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-team.html">Open before &#8594;</a>
-        <a href="team.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 7b-3: Queues (system admin) ─────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#6366f1"></div>
-    Round 7b-3: Queues (system admin surface)
-  </div>
-
-  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
-    <strong>Consolidation:</strong> JobQueueDashboardPage (system/job-queues) and SystemTaskQueuePage (system/task-queue) merged into a single queues.html. Audience: SRE / on-call / engineer debugging a specific job. Two tabs: Queue health (KPI strip + 4 tier cards with per-queue tables and drill-in drawer) and Execution log (filter bar + live tail + execution table with detail drawer). Both source pages reached via System mode Queues nav item (was a stub).
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Queues</div>
-        <div class="proto-card-file">queues.html</div>
-      </div>
-      <div class="proto-card-desc">Queue health tab: 4 aggregate KPI tiles (total active, pending, DLQ depth in red, avg duration). 4 tier cards with colored swatches (agent execution indigo, financial blue, maintenance slate, memory emerald), each containing a per-queue table with 9 columns. Click any queue row to open a 520px drawer with: stats grid, sparkline (pending depth over 1h), last 5 errors with toggleable stack traces, DLQ jobs with Retry / Discard buttons, queue config panel, Pause / Resume toggle. Execution log tab: filter bar (status, engine type, time range, search, live tail toggle). 20-row execution table with status and engine badges, process name, org, started, duration, retry count, error preview. Row click opens detail drawer with timestamps, confirm-before-action banner, error panel, payload accordions (outbound, callback, process snapshot), return webhook URL, retry history table, action buttons (Retry now / Discard / Mark cancelled).</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">JobQueueDashboardPage</span>
-          <span class="replace-pill strike">SystemTaskQueuePage</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="queues.html">Open mockup &#8594;</a>
-        <a href="before-queues.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Before: Job Queues + Task Queue</div>
-        <div class="proto-card-file">before-queues.html</div>
-      </div>
-      <div class="proto-card-desc">Side-by-side depiction of the two current production pages. Left: JobQueueDashboardPage — flat table with implicit tier grouping via section rows, no visual tier cards, no drill-down, no DLQ retry UI, no queue pause/resume. Right: SystemTaskQueuePage — flat execution log, no live tail, no process name / org context, no action buttons (retry/discard require CLI). Problems box lists 6 specific gaps.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-queues.html">Open before &#8594;</a>
-        <a href="queues.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── Round 7b-4: Spending page ─────────────────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#059669"></div>
-    Round 7b-4: Spending (Caps + Ledger)
-  </div>
-
-  <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#065f46;line-height:1.55;">
-    <strong>Consolidation:</strong> SpendingBudgetsPage (/admin/spending-budgets) and SpendLedgerPage (/admin/subaccounts/:id/spend-ledger) merged into a single spending.html with two tabs. Audience: org admin / finance person. Org mode sidebar "Spending" link now resolves to spending.html (was a stub). Before companion shows the two-page split, cents-based cap fields without context, and ledger limitations.
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
+    <a href="spending.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
         <div class="proto-card-title">Spending</div>
         <div class="proto-card-file">spending.html</div>
       </div>
-      <div class="proto-card-desc">Two-tab page for org admins and finance users. Caps and budgets tab: org cap card with $5,000/month big number, progress bar + dotted pace line, "$1,283 used, on pace for $4,920" inline metric. Per-workspace caps table: 4 rows with inline-edit daily and monthly caps, mini progress bars, status badges (within cap, over-pace amber for TerraForm Partners, near cap red for Revel Group at 88%). Defaults panel for new workspaces. Ledger tab: filter bar (workspace, date range, type, group-by, search), KPI strip (total spend $1,283, avg per day $42.78, largest day $89.50, top spender Outreach Agent). Flat transaction table with 25 rows spanning 7 days and 4 workspaces. Group-by switching: None / Day / Subaccount / Agent. Row click opens 440px drawer with workspace, agent, type, model, token counts, cost breakdown (input, output, cache discount), run trace link and agent definition link. Edit org cap modal (monthly only) and per-workspace cap modal (daily + monthly) with field validation.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">SpendingBudgetsPage</span>
-          <span class="replace-pill strike">SpendLedgerPage</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">Caps and budgets + Ledger tabs. Org-level cap with month-to-date vs cap progress and pace projection. Per-workspace caps with inline-editable amounts. Group-by views in the ledger.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="spending.html">Open mockup &#8594;</a>
-        <a href="before-spending.html" class="before-link">Before</a>
+        <a href="before-spending.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
-    <div class="proto-card">
+    <a href="manage-org.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Before: Spending Budgets + Spend Ledger</div>
-        <div class="proto-card-file">before-spending.html</div>
+        <div class="proto-card-title">Manage org</div>
+        <div class="proto-card-file">manage-org.html</div>
       </div>
-      <div class="proto-card-desc">Side-by-side depiction of the two current production pages. Left: SpendingBudgetsPage: org cap form-field (cents), per-subaccount caps table (limits in cents, no spend context, no progress bars). Right: SpendLedgerPage: per-subaccount only (no org-wide view), requires deep navigation to reach, group-by limited to Day only, no row drill-down. Problems box lists 6 specific gaps: two pages for related data, no org-wide ledger, caps in cents without context, limited group-by, no row drill-down.</div>
+      <div class="proto-card-desc">Organisation settings. Removed Memory and Integrations tabs (those have dedicated nav items now). General, Categories, Engines, MCP servers, Permission sets.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-spending.html">Open before &#8594;</a>
-        <a href="spending.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+        <a href="before-manage-org.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
-  </div>
-</div>
-
-<!-- ── Round 7b-5: Pages surface ─────────────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#4f46e5"></div>
-    Round 7b-5: Pages (renamed from Sites)
-  </div>
-
-  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
-    <strong>Redesign:</strong> PageProjectsPage + PageProjectDetailPage consolidated into pages.html. "Sites" renamed to "Pages" in the workspace External nav section. Card grid with browser-frame thumbnails replaces the flat utilitarian table. Status badges and filter pills (All / Published / Draft / Archived) added. Theme primary color visible as a dot on each card. Detail opens in a 600px slide-in drawer (Settings, Content, SEO, Analytics tabs) rather than navigating to a separate route. New page modal with slug auto-generation and color picker. _sidebar.js External section Pages link updated from stub to pages.html.
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
+    <a href="pages.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
         <div class="proto-card-title">Pages</div>
         <div class="proto-card-file">pages.html</div>
       </div>
-      <div class="proto-card-desc">Card grid of 6 mock pages with browser-frame thumbnails, status badges, theme color dots, and URL slugs. Status filter pills. Detail opens in a 600px side drawer with Settings (name, slug, custom domain, color picker, status), Content (block list + edit stub), SEO (meta title, description, OG image, canonical URL), and Analytics (4 tiles: visits, conversion rate, avg time, bounce rate) tabs. New page modal with name, slug auto-gen, 5 color chips + custom input, status. "Page created" toast and live card append.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">PageProjectsPage</span>
-          <span class="replace-pill strike">PageProjectDetailPage (as separate route)</span>
-        </div>
-      </div>
+      <div class="proto-card-desc">Branded landing pages on a custom subdomain. Renamed from Sites. Card grid with theme thumbnails, status filtering, drawer with Settings / Content / SEO / Analytics tabs.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="pages.html">Open mockup &#8594;</a>
-        <a href="before-pages.html" class="before-link">Before</a>
+        <a href="before-pages.html" class="before-link">View before</a>
       </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Before: PageProjectsPage (Sites)</div>
-        <div class="proto-card-file">before-pages.html</div>
-      </div>
-      <div class="proto-card-desc">Current production state: flat table (Name, Slug/URL, Custom domain, Created, Updated, Actions). "Sites" label in old nav. No status column, no filter, no color preview. Edit navigates to a separate full-page route. Problems box lists 7 specific gaps in the current state.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-pages.html">Open before &#8594;</a>
-        <a href="pages.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
-      </div>
-    </div>
+    </a>
 
   </div>
 </div>
 
-<!-- ── Round 7b-8: Org Knowledge ─────────────────────────── -->
+<!-- ============================================================ -->
+<!-- ONBOARDING                                                   -->
+<!-- ============================================================ -->
 <div class="section">
   <div class="section-heading">
-    <div class="section-heading-dot" style="background:#4f46e5"></div>
-    Round 7b-8: Org-level Knowledge page
+    <span>Onboarding</span>
+    <span class="section-heading-desc">First-run setup wizard</span>
   </div>
-
-  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
-    <strong>New surface:</strong> org-knowledge.html is the editing surface for org-level memory and documents that subaccounts inherit from. Memory tab shows 7 blocks (Tier 1 brand/voice, Tier 2 offer/ICP, Tier 3 compliance/proof/escalation) and 5 authored entries. Documents tab shows 7 cards in a 2-column grid. Each item shows "Inherited by N of 4 workspaces" with per-subaccount inheritance toggles and "Override at workspace level" links in the drawer. Upload modal includes "Push to all workspaces" toggle. _sidebar.js org Build section Knowledge link promoted from stub to org-knowledge.html.
-  </div>
-
   <div class="card-grid">
 
-    <div class="proto-card">
+    <a href="onboarding.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Org Knowledge</div>
-        <div class="proto-card-file">org-knowledge.html</div>
+        <div class="proto-card-title">Onboarding wizard</div>
+        <div class="proto-card-file">onboarding.html</div>
       </div>
-      <div class="proto-card-desc">Round 7d: same three-tab structure as workspace Knowledge (Authored memory / Auto-memory / Documents). No inheritance chips here: this IS the source. "Used by N of 4 workspaces" on every item replaces the old Inheritance panel. 6 authored entries, 4 auto-memory entries (2 pending, 2 approved), 8 documents, 3 bundles. New entry drawer adds "Share with workspaces" selector.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">OrgMemoryPage (memory blocks only)</span>
-          <span class="replace-pill strike">Org-scope docs via subaccount filter</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="org-knowledge.html">Open mockup &#8594;</a>
-        <a href="before-org-knowledge.html" class="before-link">Before</a>
-      </div>
-    </div>
-
-    <div class="proto-card">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Before: OrgMemoryPage + scattered docs</div>
-        <div class="proto-card-file">before-org-knowledge.html</div>
-      </div>
-      <div class="proto-card-desc">Current production state: OrgMemoryPage (/org/memory) shows a flat list of memory blocks with no tier grouping, no "Used by" indicator, no inheritance visibility, and no authored entries. Org-scope documents have no dedicated UI; they are accessed via the subaccount Knowledge page with an "Organisation" scope filter toggle. Problems box lists 8 specific gaps: no unified view, no inheritance visibility, no per-workspace opt-out, documents second-class, no usage indicator, no rich-text authoring, no authored entries at org scope, no tier grouping.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-org-knowledge.html">Open before &#8594;</a>
-        <a href="org-knowledge.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
-      </div>
-    </div>
+      <div class="proto-card-desc">Multi-step setup: Welcome, Integration, First agent, First automation, Done. Multi-select pattern across all steps; background data pull begins on each connection.</div>
+      <div class="proto-card-footer"></div>
+    </a>
 
   </div>
 </div>
 
-<!-- ── Round 7b-11: Goals retirement + Project Objective ─── -->
-<div class="section">
+<!-- ============================================================ -->
+<!-- REFERENCE & PATTERNS — descriptive, not in-app               -->
+<!-- ============================================================ -->
+<div class="section reference-section">
   <div class="section-heading">
-    <div class="section-heading-dot" style="background:#4f46e5"></div>
-    Round 7b-11: Goals retirement, per-project Objective field (7b chain COMPLETE)
+    <span>Reference &amp; patterns</span>
+    <span class="section-heading-desc">Design references and pattern galleries — not in-app screens</span>
   </div>
-
-  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
-    <strong>Decision (a) — Goals retired, Objective added:</strong> The Goals subsystem (subaccount-level OKR tree: Mission / Objective / Key Result) had zero hits in <code style="font-family:monospace;font-size:11.5px;background:#e0e7ff;padding:1px 5px;border-radius:3px;">server/services/agent*/</code> — agents never received goal text as runtime context. Per-project <code style="font-family:monospace;font-size:11.5px;background:#e0e7ff;padding:1px 5px;border-radius:3px;">projects.objective</code> field IS read at runtime. Subaccount-level strategy continues to live in Memory blocks. Goals tree removed from sidebar (completed in 7b-1). project-edit.html is reached from a parent list (Tasks Kanban, Agents page, etc.), not top-level nav.
-  </div>
-
   <div class="card-grid">
 
-    <div class="proto-card" style="border-color:#c7d2fe;">
+    <a href="shell-nav.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Project Edit <span style="font-size:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7b-11</span></div>
-        <div class="proto-card-file">project-edit.html</div>
+        <div class="proto-card-title">Shell &amp; navigation reference</div>
+        <div class="proto-card-file">shell-nav.html</div>
       </div>
-      <div class="proto-card-desc">Single-page project edit form. Five sections: Identity (name, color swatch, description, status), Objective (NEW — large textarea, helper band explaining agent runtime injection, word count, 4 example objectives expandable), Project management (target date, budget with $ formatting, warning threshold slider), Linked resources (repo URL with GitHub picker, linked agent chips linking to agent-edit.html), Migration notice card (shown once for projects migrated from a goal_id). Save/Discard/Delete in sticky footer. Dirty-state indicator in topbar.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Adds field, retires subsystem</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">projects.objective field (NEW)</span>
-          <span class="replace-pill strike">GoalsPage (OKR tree)</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="project-edit.html">Open mockup &#8594;</a>
-        <a href="before-project-edit.html" class="before-link">Before</a>
-      </div>
-    </div>
+      <div class="proto-card-desc">Documents the three-mode sidebar pattern and full page mapping (every production page accounted for). Reference document.</div>
+    </a>
 
-    <div class="proto-card">
+    <a href="page-disposition.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Before: Project Edit + GoalsPage</div>
-        <div class="proto-card-file">before-project-edit.html</div>
+        <div class="proto-card-title">Page disposition</div>
+        <div class="proto-card-file">page-disposition.html</div>
       </div>
-      <div class="proto-card-desc">Split-panel before state. Left: project edit page with no Objective field — only a free-form description and a goalId dropdown that sets metadata but never pushes text into agent prompts. Right: GoalsPage OKR tree (Mission / Objective / Key Result hierarchy) with annotation that it has zero hits in agent execution services. Problems box lists 6 specific gaps in the current state.</div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="before-project-edit.html">Open before &#8594;</a>
-        <a href="project-edit.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
-      </div>
-    </div>
+      <div class="proto-card-desc">Disposition matrix — which production pages were kept, merged, renamed, or retired. Reference document.</div>
+    </a>
 
-  </div>
-</div>
-
-<!-- ── Round 7b-9: Capabilities inheritance ───────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#4f46e5"></div>
-    Round 7b-9: Agent Edit, Capabilities tab (inheritance-aware)
-  </div>
-
-  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
-    <strong>Updated surface:</strong> agent-edit.html Capabilities tab now reflects the three-tier skill inheritance model (System / Org / This client). Each skill row shows a tier chip. The three-dot overflow menu is context-aware: System skills show read-only options only, Org skills add an "Override locally" option and a link to edit at org level, This client skills show full edit/delete control. A breadcrumb context line above the list clarifies which workspace is being configured. The "+ Add custom skill" button opens a 4-tab creation drawer (Basic info / Parameters / Implementation / Test) with a scope toggle in the footer.
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card">
+    <a href="permissions.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Agent Edit, Capabilities tab (updated)</div>
-        <div class="proto-card-file">agent-edit.html</div>
+        <div class="proto-card-title">Permission patterns</div>
+        <div class="proto-card-file">permissions.html</div>
       </div>
-      <div class="proto-card-desc">Click the three-dot on any skill row: System skill shows "View source / Configure / Disable". Org skill shows those plus "Override locally" and "Edit at organisation level" link. This client skill shows "Edit skill / Configure / View parameters / Disable / Delete". Click "+ Add custom skill" to open the 4-tab creation drawer. The scope breadcrumb at top of tab reads "Showing skills available to: Outreach Agent in Acme Corp workspace".</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Updates</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">Capabilities tab in agent-edit.html</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="agent-edit.html#capabilities">Open mockup &#8594;</a>
-        <a href="before-agent-edit.html" class="before-link">Before</a>
-      </div>
-    </div>
+      <div class="proto-card-desc">Pattern reference for permission-gated views (mode switcher, skill scope, admin views). Reference document.</div>
+    </a>
 
-  </div>
-</div>
-
-<!-- ── Round 7c: Permission demos ─────────────────────────── -->
-<div class="section">
-  <div class="section-heading">
-    <div class="section-heading-dot" style="background:#0891b2"></div>
-    Round 7c: Permission demos (mode switcher + skill creator scope)
-  </div>
-
-  <div style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#0e7490;line-height:1.55;">
-    <strong>What these demos show:</strong> Production gates the sidebar mode pills and the skill creator scope option via real permission checks (<code style="font-family:monospace;font-size:11.5px;background:#cffafe;padding:1px 5px;border-radius:3px;">org.*</code> permission for Org mode, <code style="font-family:monospace;font-size:11.5px;background:#cffafe;padding:1px 5px;border-radius:3px;">user.isSystemAdmin</code> for System mode, and org-admin role for the Organisation scope option). These prototype demos simulate those states without wiring real auth, so reviewers can see the collapsed and restricted UI states.
-  </div>
-
-  <div class="card-grid">
-
-    <div class="proto-card" style="border-color:#a5f3fc;">
+    <a href="empty-states.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Sidebar: mode switcher permission demo <span style="font-size:10px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7c</span></div>
-        <div class="proto-card-file">_sidebar.js</div>
+        <div class="proto-card-title">Empty states</div>
+        <div class="proto-card-file">empty-states.html</div>
       </div>
-      <div class="proto-card-desc">The shared sidebar JS now includes a "Demo: viewing as" dropdown above the mode pill row. Three profiles: System admin (all three pills shown, default), Org admin (Workspace + Org pills only, System hidden), Workspace operator (pill row hidden entirely). Profile persists in localStorage under <code style="font-family:monospace;font-size:11px;">prototype.sidebar.demoProfile</code>. If the active mode is incompatible with the selected profile, the sidebar falls back to Workspace mode automatically. A muted note below the dropdown reads: "Production hides modes a user has no permission to access."</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Updates</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">_sidebar.js (shared, affects all pages)</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="home.html">Open any page (sidebar is shared) &#8594;</a>
-      </div>
-    </div>
+      <div class="proto-card-desc">Empty-state pattern library. Reference document.</div>
+    </a>
 
-    <div class="proto-card" style="border-color:#a5f3fc;">
+    <a href="lifecycle-errors.html" class="proto-card proto-card-link">
       <div class="proto-card-header">
-        <div class="proto-card-title">Skill creator scope permission demo <span style="font-size:10px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7c</span></div>
-        <div class="proto-card-file">agent-edit.html</div>
+        <div class="proto-card-title">Lifecycle errors</div>
+        <div class="proto-card-file">lifecycle-errors.html</div>
       </div>
-      <div class="proto-card-desc">Inside the skill creator drawer (Capabilities tab, "+ Add custom skill"), a collapsible "Demo controls" section above the footer has two radio states: Org admin (default, both scope options enabled) and Workspace user (Organisation scope disabled: greyed out, lock icon, tooltip "Requires org admin permission to save skills at the organisation level"; This client auto-selected; footer shows static "Saved to: This client" label instead of radio row). State is in-session only, not persisted.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Updates</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill">Skill creator drawer in agent-edit.html</span>
-        </div>
+      <div class="proto-card-desc">Lifecycle and error patterns. Reference document.</div>
+    </a>
+
+    <a href="glossary.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">System model</div>
+        <div class="proto-card-file">glossary.html</div>
       </div>
+      <div class="proto-card-desc">Domain glossary and system model. Reference document.</div>
+    </a>
+
+    <a href="workflows.html" class="proto-card proto-card-link">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Workflows (legacy)</div>
+        <div class="proto-card-file">workflows.html</div>
+      </div>
+      <div class="proto-card-desc">Standalone Workflows page from earlier rounds. Workflows now live as a tab inside Automations; this file is kept for historical reference only.</div>
       <div class="proto-card-footer">
-        <a class="proto-card-link" href="agent-edit.html">Open agent-edit (go to Capabilities tab) &#8594;</a>
+        <a href="before-workflows.html" class="before-link">View before</a>
       </div>
-    </div>
+    </a>
 
   </div>
 </div>
