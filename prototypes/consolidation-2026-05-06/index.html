@@ -480,10 +480,10 @@
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Agents (unified list)</div>
+        <div class="proto-card-title">Agents (mode-aware unified list)</div>
         <div class="proto-card-file">agents.html</div>
       </div>
-      <div class="proto-card-desc">Unified agents list consolidating AdminAgentsPage, AgentsPage, SubaccountAgentsPage. 4-column table (Agent, Status, Last run, Actions). Inline status dot + last run time. No duplicate pages by role. Tag filter, search, live count pill.</div>
+      <div class="proto-card-desc">Single page that morphs between three views depending on demo profile or URL param. Workspace: 12 agents deployed to Acme Corp. Organisation: 7 org-level templates across 4 workspaces. System: 23 platform catalogue agents with adoption metrics. URL param wins over sidebar profile selector.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Replaces 6 pages</div>
         <div class="proto-card-replaces-list">
@@ -495,8 +495,13 @@
           <span class="replace-pill strike">OrgAgentConfigsPage</span>
         </div>
       </div>
-      <div class="proto-card-footer">
-        <a class="proto-card-link" href="agents.html">Open mockup &#8594;</a>
+      <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:7px;padding:10px 14px;margin:10px 0;font-size:12px;color:#3730a3;">
+        Open all three in browser tabs to compare side-by-side. Each link sets the demo profile and renders the appropriate view.
+      </div>
+      <div class="proto-card-footer" style="flex-wrap:wrap;gap:6px;">
+        <a class="proto-card-link" href="agents.html?view=workspace">Workspace view &#8594;</a>
+        <a class="proto-card-link" href="agents.html?view=org" style="background:#ecfdf5;color:#059669;border-color:#a7f3d0;">Organisation view &#8594;</a>
+        <a class="proto-card-link" href="agents.html?view=system" style="background:#ede9fe;color:#7c3aed;border-color:#ddd6fe;">System view &#8594;</a>
         <a href="before-agents.html" class="before-link">Before</a>
       </div>
     </div>

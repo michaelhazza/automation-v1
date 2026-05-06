@@ -17,6 +17,14 @@
 }
 .replaces-banner strong { font-weight: 700; }
 
+.view-mode-banner {
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+  padding: 8px 14px; margin-bottom: 12px;
+  font-size: 12px; color: #4338ca;
+  display: flex; align-items: center; gap: 8px;
+}
+.view-mode-banner strong { font-weight: 700; }
+
 .toolbar {
   display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
 }
@@ -48,6 +56,14 @@
   font-size: 10.5px; font-weight: 600;
   background: var(--slate-100); color: var(--slate-500);
   border: 1px solid var(--slate-200);
+  margin-right: 3px;
+}
+.tag-chip-local {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 700;
+  background: #fef3c7; color: #92400e;
+  border: 1px solid #fde68a;
+  margin-right: 3px;
 }
 
 /* Org chart button */
@@ -78,16 +94,94 @@
 .act-edit:hover { background: var(--slate-200); }
 .act-run     { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
 .act-run:hover { background: var(--indigo-100); }
+.act-deploy  { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+.act-deploy:hover { background: #d1fae5; }
+.act-view    { background: var(--slate-100); color: var(--slate-700); }
+.act-view:hover { background: var(--slate-200); }
+.act-drill   { background: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe; }
+.act-drill:hover { background: #dbeafe; }
 .act-deact   { background: #fff7ed; color: #c2410c; }
 .act-act     { background: var(--emerald-50); color: var(--emerald-600); }
 .act-more    { background: transparent; color: var(--slate-400); font-size: 15px; padding: 4px 7px; }
 .act-more:hover { background: var(--slate-100); color: var(--slate-600); }
+
+/* Status badges for system view */
+.badge-published { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+.badge-beta      { background: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe; border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+.badge-draft-sm  { background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200); border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+.badge-deprecated { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+
+/* Adoption metric */
+.adoption-bar-wrap { width: 80px; height: 6px; background: var(--slate-200); border-radius: 3px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.adoption-bar-fill { height: 100%; border-radius: 3px; background: var(--indigo-500); }
+
+/* Deployment badge variants */
+.depl-full    { color: var(--emerald-600); font-weight: 700; }
+.depl-partial { color: var(--amber-600); font-weight: 700; }
+.depl-custom  { color: #7c3aed; font-weight: 700; }
+
+/* Manager/system tier indicators */
+.tier-chip {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; margin-left: 4px; vertical-align: middle;
+}
+.tier-manager { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+.tier-system  { background: #ede9fe; color: #7c3aed; border: 1px solid #ddd6fe; }
+
+/* Modal overlay */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(15,23,42,0.45); z-index: 9000;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: white; border-radius: 12px; width: 440px; max-width: 95vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18); overflow: hidden;
+}
+.modal-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--slate-200);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+.modal-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--slate-400); font-size: 18px; padding: 2px 6px;
+}
+.modal-close:hover { color: var(--slate-600); }
+.modal-body { padding: 18px 22px; }
+.modal-footer { padding: 14px 22px; border-top: 1px solid var(--slate-200); display: flex; gap: 8px; justify-content: flex-end; }
+
+.modal-option {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-radius: 8px; border: 2px solid var(--slate-200);
+  cursor: pointer; transition: all 0.12s; margin-bottom: 10px;
+}
+.modal-option:hover { border-color: var(--indigo-400); background: var(--indigo-50); }
+.modal-option.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+.modal-option-title { font-size: 13px; font-weight: 600; color: var(--slate-900); }
+.modal-option-desc  { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+
+/* View mode switcher strip */
+.view-switch-strip {
+  display: flex; gap: 4px; align-items: center;
+  padding: 3px; background: var(--slate-100); border-radius: 8px;
+  border: 1px solid var(--slate-200); width: fit-content; margin-bottom: 16px;
+}
+.view-switch-btn {
+  padding: 5px 12px; font-size: 12px; font-weight: 600; border-radius: 5px;
+  border: none; cursor: pointer; background: transparent; color: var(--slate-500);
+  transition: all 0.1s;
+}
+.view-switch-btn.active { background: white; color: var(--indigo-700); box-shadow: var(--shadow-sm); }
+.view-switch-btn:hover:not(.active) { color: var(--slate-700); background: rgba(255,255,255,0.6); }
 </style>
 </head>
 <body>
 <div class="app-shell">
 
-  <!-- Sidebar (three-mode shared) -->
+  <!-- Sidebar -->
   <div id="sidebar-mount"></div>
   <script src="_sidebar.js"></script>
   <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'agents.html');</script>
@@ -99,287 +193,956 @@
         <span class="topbar-breadcrumb-current">Agents</span>
       </div>
       <div class="topbar-spacer"></div>
-      <!-- Install from library button: admin only, not visually dominant -->
-      <button class="btn btn-secondary btn-sm" style="font-size:11.5px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
-        Install from library
-      </button>
+      <div id="topbar-actions"></div>
     </div>
 
-    <div class="page-body">
-
-      <div class="replaces-banner">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span><strong>Replaces:</strong> AdminAgentsPage, AgentsPage, SubaccountAgentsPage, AgentTriggersPage (Schedule tab), SubaccountBlueprintsPage (Team Templates tab), OrgAgentConfigsPage (Org Execution tab)</span>
-      </div>
-
-      <!-- Page header -->
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;">
-        <div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;">Agents</h1>
-            <div class="live-pill">
-              <div class="status-dot dot-blue dot-pulse"></div>
-              3 running
-            </div>
-          </div>
-          <p style="font-size:13.5px;color:var(--slate-500);margin-top:4px;">7 agents in this organisation</p>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button class="org-chart-btn">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="6"/><rect x="1" y="15" width="6" height="6"/><rect x="17" y="15" width="6" height="6"/><line x1="12" y1="8" x2="12" y2="15"/><line x1="4" y1="15" x2="4" y2="12"/><line x1="20" y1="15" x2="20" y2="12"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
-            Org chart
-          </button>
-          <button class="btn btn-primary">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New agent
-          </button>
-        </div>
-      </div>
-
-      <!-- Toolbar: search + filters -->
-      <div class="toolbar">
-        <div class="search-wrap" style="flex:1;max-width:320px;">
-          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input class="search-box" type="text" placeholder="Search agents...">
-        </div>
-        <div class="filter-pills">
-          <span class="filter-pill active">All (7)</span>
-          <span class="filter-pill">Active (5)</span>
-          <span class="filter-pill">Inactive (1)</span>
-          <span class="filter-pill">Draft (1)</span>
-        </div>
-      </div>
-
-      <!-- Agents table -->
-      <div class="card">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Agent</th>
-              <th>Status</th>
-              <th>Last run</th>
-              <th>Tags</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">Research Agent</div>
-                    <div class="agent-desc-text">Finds and verifies information from the web and internal docs</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Active</span></td>
-              <td>
-                <div class="inline-run-state">
-                  <span class="status-dot dot-green"></span>
-                  <span>Completed</span>
-                </div>
-                <div class="inline-run-time">8 minutes ago</div>
-              </td>
-              <td><span class="tag-chip">research</span> <span class="tag-chip">all-clients</span></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <button class="act-btn act-run">Run</button>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon" style="background:var(--emerald-50);border-color:#a7f3d0;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">Outreach Agent <span style="font-size:10px;background:#eff6ff;color:#3b82f6;padding:1px 6px;border-radius:10px;font-weight:700;vertical-align:middle;">Running</span></div>
-                    <div class="agent-desc-text">Composes and sends outreach emails and follow-ups</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Active</span></td>
-              <td>
-                <div class="inline-run-state">
-                  <span class="status-dot dot-blue dot-pulse"></span>
-                  <span style="color:#3b82f6;">Running now</span>
-                </div>
-                <div class="inline-run-time">Started 12 minutes ago</div>
-              </td>
-              <td><span class="tag-chip">outreach</span></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <a href="run-trace.html" class="act-btn act-run" style="text-decoration:none;">View run</a>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon" style="background:#fff7ed;border-color:#fed7aa;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">CRM Agent</div>
-                    <div class="agent-desc-text">Updates CRM records based on conversation context</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Active</span></td>
-              <td>
-                <div class="inline-run-state">
-                  <span class="status-dot dot-green"></span>
-                  <span>Completed</span>
-                </div>
-                <div class="inline-run-time">3 hours ago</div>
-              </td>
-              <td><span class="tag-chip">crm</span> <span class="tag-chip">maple-digital</span></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <button class="act-btn act-run">Run</button>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon" style="background:#fef2f2;border-color:#fecaca;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">Blocker Agent</div>
-                    <div class="agent-desc-text">Generates morning summary and daily brief reports</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-red"><span class="status-dot dot-red"></span>Failed</span></td>
-              <td>
-                <div class="inline-run-state" style="color:var(--red-600);">
-                  <span class="status-dot dot-red"></span>
-                  <span>Failed</span>
-                </div>
-                <div class="inline-run-time" style="color:var(--red-400);">2 hours ago - credential expired</div>
-              </td>
-              <td><span class="tag-chip">reporting</span></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <button class="act-btn" style="background:var(--red-50);color:var(--red-600);border:1px solid #fecaca;">Fix</button>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon" style="background:var(--violet-50);border-color:var(--violet-200);">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">Contract Agent</div>
-                    <div class="agent-desc-text">Reviews and drafts contracts and NDAs</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Active</span></td>
-              <td>
-                <div class="inline-run-state">
-                  <span class="status-dot dot-slate"></span>
-                  <span>Completed</span>
-                </div>
-                <div class="inline-run-time">Yesterday, 4:30 PM</div>
-              </td>
-              <td><span class="tag-chip">legal</span></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <button class="act-btn act-run">Run</button>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon" style="background:var(--sky-50);border-color:#bae6fd;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">Reporting Agent</div>
-                    <div class="agent-desc-text">Compiles weekly pipeline and performance reports</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Active</span></td>
-              <td>
-                <div class="inline-run-state">
-                  <span class="status-dot dot-green"></span>
-                  <span>Completed</span>
-                </div>
-                <div class="inline-run-time">1 hour ago</div>
-              </td>
-              <td><span class="tag-chip">reporting</span> <span class="tag-chip">maple-digital</span></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <button class="act-btn act-run">Run</button>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-            <tr>
-              <td>
-                <div class="agent-name-cell">
-                  <div class="agent-icon" style="background:var(--slate-100);border-color:var(--slate-300);">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                  </div>
-                  <div>
-                    <div class="agent-name-text">Compliance Agent <span style="font-size:10px;background:#ede9fe;color:#7c3aed;padding:1px 6px;border-radius:10px;font-weight:700;vertical-align:middle;">Draft</span></div>
-                    <div class="agent-desc-text">Not yet activated - monitors regulatory compliance items</div>
-                  </div>
-                </div>
-              </td>
-              <td><span class="badge badge-slate">Draft</span></td>
-              <td>
-                <div class="inline-run-state">
-                  <span class="status-dot dot-slate"></span>
-                  <span>Never run</span>
-                </div>
-              </td>
-              <td></td>
-              <td>
-                <div class="row-actions">
-                  <button class="act-btn act-edit">Edit</button>
-                  <button class="act-btn act-act">Activate</button>
-                  <button class="act-btn act-more">&#x2026;</button>
-                </div>
-              </td>
-            </tr>
-
-          </tbody>
-        </table>
-      </div>
-
+    <div class="page-body" id="page-body">
+      <!-- Rendered by renderAgentsForView() -->
     </div>
   </div>
 </div>
+
+<!-- New Agent Modal (workspace) -->
+<div class="modal-overlay" id="modal-new-agent-workspace">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title">Add agent to Acme Corp</div>
+      <button class="modal-close" onclick="closeModal('modal-new-agent-workspace')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-option selected" id="opt-org-lib" onclick="selectOption(this)">
+        <div>
+          <div class="modal-option-title">Deploy from organisation library</div>
+          <div class="modal-option-desc">Choose from 7 approved agent templates your org admin has published. The agent inherits org-level configuration and can be customised for this workspace.</div>
+        </div>
+      </div>
+      <div class="modal-option" id="opt-local" onclick="selectOption(this)">
+        <div>
+          <div class="modal-option-title">Create workspace-only agent</div>
+          <div class="modal-option-desc">Build an agent that exists only in Acme Corp. It will not be visible to other workspaces or org admins. Good for one-off or client-specific automation.</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-new-agent-workspace')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal('modal-new-agent-workspace')">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Deploy to Workspaces Modal (org) -->
+<div class="modal-overlay" id="modal-deploy-org">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title">Deploy to workspaces</div>
+      <button class="modal-close" onclick="closeModal('modal-deploy-org')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--slate-600);margin-bottom:14px;">Select workspaces to deploy this agent template to. Workspaces that already have this agent will be updated.</p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);cursor:pointer;">
+          <input type="checkbox" checked style="accent-color:#4f46e5;"> <span style="font-size:13px;font-weight:500;">Acme Corp</span> <span style="font-size:11px;color:var(--slate-400);margin-left:auto;">Already deployed</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);cursor:pointer;">
+          <input type="checkbox" checked style="accent-color:#4f46e5;"> <span style="font-size:13px;font-weight:500;">Maple Digital</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);cursor:pointer;">
+          <input type="checkbox" style="accent-color:#4f46e5;"> <span style="font-size:13px;font-weight:500;">Northbridge Media</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);cursor:pointer;">
+          <input type="checkbox" style="accent-color:#4f46e5;"> <span style="font-size:13px;font-weight:500;">Driftwood Labs</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-deploy-org')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal('modal-deploy-org')">Deploy to selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- Org Picker Modal (system "Drill into org") -->
+<div class="modal-overlay" id="modal-org-picker">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title">Choose an organisation</div>
+      <button class="modal-close" onclick="closeModal('modal-org-picker')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--slate-600);margin-bottom:14px;">Switch to org-admin view for the selected organisation to see how this agent is configured.</p>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button onclick="drillIntoOrg()" style="text-align:left;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);background:white;cursor:pointer;font-size:13px;font-weight:500;color:var(--slate-800);">Acme Corp Agency</button>
+        <button onclick="drillIntoOrg()" style="text-align:left;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);background:white;cursor:pointer;font-size:13px;font-weight:500;color:var(--slate-800);">Maple Digital Group</button>
+        <button onclick="drillIntoOrg()" style="text-align:left;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);background:white;cursor:pointer;font-size:13px;font-weight:500;color:var(--slate-800);">Northbridge Media</button>
+        <button onclick="drillIntoOrg()" style="text-align:left;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);background:white;cursor:pointer;font-size:13px;font-weight:500;color:var(--slate-800);">Driftwood Labs</button>
+        <button onclick="drillIntoOrg()" style="text-align:left;padding:10px 12px;border-radius:7px;border:1px solid var(--slate-200);background:white;cursor:pointer;font-size:13px;font-weight:500;color:var(--slate-800);">Sunstone Ventures</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-org-picker')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────
+   Mock data — three views
+   ───────────────────────────────────────────────────────────────────── */
+
+const AGENTS_BY_VIEW = {
+
+  /* ── Workspace view — 12 agents deployed to Acme Corp ──────────── */
+  workspace: {
+    subtitle: '12 agents in Acme Corp · 3 running',
+    banner: 'Replaces SubaccountAgentsPage, AgentTriggersPage (Schedule tab). Workspace deployment view.',
+    filterCounts: { all: 12, active: 9, inactive: 1, draft: 1 },
+    orgChartLabel: 'Workspace agent hierarchy',
+    newBtnLabel: 'New agent',
+    columns: ['Agent', 'Status', 'Last run', 'Tags', 'Actions'],
+    agents: [
+      {
+        id: 'outreach-agent',
+        name: 'Outreach Agent',
+        desc: 'Composes and sends outreach emails and follow-ups',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        statusBadge: 'active',
+        running: true,
+        lastRun: { state: 'running', label: 'Running now', time: 'Started 12 minutes ago', color: '#3b82f6', dotClass: 'dot-blue dot-pulse' },
+        tags: ['outreach', 'acme-hubspot'],
+        meta: '142 runs last 30d',
+        actions: ['edit', 'view-run', 'more'],
+      },
+      {
+        id: 'lead-qualifier',
+        name: 'Lead Qualifier',
+        desc: 'Scores and qualifies inbound leads from all sources',
+        iconColor: '#4f46e5', iconBg: 'var(--indigo-50)', iconBorder: 'var(--indigo-200)',
+        statusBadge: 'active',
+        lastRun: { state: 'ok', label: 'Completed', time: '5 minutes ago', dotClass: 'dot-green' },
+        tags: ['sales'],
+        meta: '87 runs last 30d',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'crm-sync-agent',
+        name: 'CRM Sync Agent',
+        desc: 'Updates CRM records based on conversation context',
+        iconColor: '#dc2626', iconBg: '#fef2f2', iconBorder: '#fecaca',
+        statusBadge: 'active',
+        lastRun: { state: 'failed', label: 'Failed', time: '2 hours ago · credential expired', color: '#dc2626', timeColor: '#f87171', dotClass: 'dot-red' },
+        tags: ['crm'],
+        meta: '',
+        actions: ['edit', 'fix', 'more'],
+      },
+      {
+        id: 'demo-scheduler',
+        name: 'Demo Scheduler',
+        desc: 'Books product demos and sends calendar invites',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        statusBadge: 'active',
+        lastRun: { state: 'ok', label: 'Completed', time: '1 hour ago', dotClass: 'dot-green' },
+        tags: ['sales'],
+        meta: '',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'account-health-monitor',
+        name: 'Account Health Monitor',
+        desc: 'Tracks client health signals and flags at-risk accounts',
+        iconColor: '#0ea5e9', iconBg: 'var(--sky-50)', iconBorder: '#bae6fd',
+        statusBadge: 'active',
+        lastRun: { state: 'ok', label: 'Completed', time: '30 minutes ago', dotClass: 'dot-green' },
+        tags: ['csm'],
+        meta: '',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'support-triage-agent',
+        name: 'Support Triage Agent',
+        desc: 'Categorises and routes incoming support requests',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        statusBadge: 'active',
+        lastRun: { state: 'ok', label: 'Completed', time: '8 minutes ago', dotClass: 'dot-green' },
+        tags: ['support'],
+        meta: '',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'outreach-manager',
+        name: 'Outreach Manager',
+        desc: 'Orchestrates the outreach agents across campaigns',
+        iconColor: '#b45309', iconBg: '#fffbeb', iconBorder: '#fde68a',
+        statusBadge: 'active',
+        tierChip: 'manager',
+        running: false,
+        lastRun: { state: 'idle', label: 'Idle', time: 'No recent run', dotClass: 'dot-slate' },
+        tags: [],
+        meta: '',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'csm-manager',
+        name: 'CSM Manager',
+        desc: 'Coordinates CSM and health monitoring agents',
+        iconColor: '#b45309', iconBg: '#fffbeb', iconBorder: '#fde68a',
+        statusBadge: 'active',
+        tierChip: 'manager',
+        lastRun: { state: 'idle', label: 'Idle', time: 'No recent run', dotClass: 'dot-slate' },
+        tags: [],
+        meta: '',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'orchestrator',
+        name: 'Orchestrator',
+        desc: 'Always-on system orchestrator for this workspace',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        statusBadge: 'active',
+        tierChip: 'system',
+        running: true,
+        lastRun: { state: 'running', label: 'Always on', time: 'Active since workspace created', color: '#3b82f6', dotClass: 'dot-blue dot-pulse' },
+        tags: [],
+        meta: '',
+        actions: ['edit', 'more'],
+      },
+      {
+        id: 'compliance-prefilter',
+        name: 'Compliance Prefilter',
+        desc: 'Pre-screens agent outputs for compliance issues',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        statusBadge: 'inactive',
+        lastRun: { state: 'idle', label: 'Paused by user', time: '', dotClass: 'dot-slate' },
+        tags: [],
+        meta: '',
+        actions: ['edit', 'activate', 'more'],
+      },
+      {
+        id: 'local-notes-agent',
+        name: 'Local Notes Agent',
+        desc: 'Summarises meeting notes and action items for Acme Corp',
+        iconColor: '#4f46e5', iconBg: 'var(--indigo-50)', iconBorder: 'var(--indigo-200)',
+        statusBadge: 'active',
+        local: true,
+        lastRun: { state: 'ok', label: 'Completed', time: '2 hours ago', dotClass: 'dot-green' },
+        tags: ['client:acme'],
+        meta: '',
+        actions: ['edit', 'run', 'more'],
+      },
+      {
+        id: 'vacation-coverage',
+        name: 'Vacation Coverage Agent',
+        desc: 'Not yet activated: handles coverage routing during absences',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        statusBadge: 'draft',
+        lastRun: { state: 'never', label: 'Never run', time: '', dotClass: 'dot-slate' },
+        tags: [],
+        meta: '',
+        actions: ['edit', 'activate', 'more'],
+      },
+    ],
+  },
+
+  /* ── Organisation view — 7 agent templates ─────────────────────── */
+  org: {
+    subtitle: '7 agent templates · deployed across 4 workspaces',
+    banner: 'Replaces AdminAgentsPage, OrgAgentConfigsPage (Org Execution tab), SubaccountBlueprintsPage (Team Templates tab). Organisation template view.',
+    filterCounts: { all: 7, active: 7, inactive: 0, draft: 0 },
+    orgChartLabel: 'Organisation agent hierarchy',
+    newBtnLabel: 'New template',
+    columns: ['Agent', 'Deployment status', 'Total runs (30d)', 'Tags', 'Actions'],
+    agents: [
+      {
+        id: 'outreach-agent',
+        name: 'Outreach Agent',
+        desc: 'Composes and sends outreach emails and follow-ups',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        deployment: { type: 'full', label: 'Active · 4 of 4 workspaces' },
+        totalRuns: '412 runs across 4 workspaces · last fired 5 min ago',
+        tags: ['outreach', 'email'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+      {
+        id: 'lead-qualifier',
+        name: 'Lead Qualifier',
+        desc: 'Scores and qualifies inbound leads from all sources',
+        iconColor: '#4f46e5', iconBg: 'var(--indigo-50)', iconBorder: 'var(--indigo-200)',
+        deployment: { type: 'full', label: 'Active · 4 of 4 workspaces' },
+        totalRuns: '287 runs across 4 workspaces · last fired 18 min ago',
+        tags: ['sales'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+      {
+        id: 'crm-sync-agent',
+        name: 'CRM Sync Agent',
+        desc: 'Updates CRM records based on conversation context',
+        iconColor: '#dc2626', iconBg: '#fef2f2', iconBorder: '#fecaca',
+        deployment: { type: 'full', label: 'Active · 4 of 4 workspaces' },
+        totalRuns: '156 runs across 4 workspaces · last fired 2 hr ago',
+        tags: ['crm'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+      {
+        id: 'demo-scheduler',
+        name: 'Demo Scheduler',
+        desc: 'Books product demos and sends calendar invites',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        deployment: { type: 'partial', label: 'Active · 3 of 4 workspaces' },
+        totalRuns: '98 runs across 3 workspaces · last fired 1 hr ago',
+        tags: ['sales'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+      {
+        id: 'account-health-monitor',
+        name: 'Account Health Monitor',
+        desc: 'Tracks client health signals and flags at-risk accounts',
+        iconColor: '#0ea5e9', iconBg: 'var(--sky-50)', iconBorder: '#bae6fd',
+        deployment: { type: 'full', label: 'Active · 4 of 4 workspaces' },
+        totalRuns: '213 runs across 4 workspaces · last fired 30 min ago',
+        tags: ['csm'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+      {
+        id: 'support-triage-agent',
+        name: 'Support Triage Agent',
+        desc: 'Categorises and routes incoming support requests',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        deployment: { type: 'partial', label: 'Active · 2 of 4 workspaces' },
+        totalRuns: '67 runs across 2 workspaces · last fired 45 min ago',
+        tags: ['support'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+      {
+        id: 'compliance-prefilter',
+        name: 'Compliance Prefilter',
+        desc: 'Pre-screens agent outputs for compliance issues',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        deployment: { type: 'custom', label: 'Customised · 1 of 4 workspaces (5 overrides)' },
+        totalRuns: '23 runs across 1 workspace · last fired 3 days ago',
+        tags: ['compliance'],
+        actions: ['edit', 'deploy', 'more'],
+      },
+    ],
+  },
+
+  /* ── System view — 23 system catalogue agents ───────────────────── */
+  system: {
+    subtitle: '23 agents in system catalogue · 18 in use across 12 organisations',
+    banner: 'Replaces AdminAgentsPage (system view). Platform catalogue view.',
+    filterCounts: { all: 23, published: 14, beta: 5, draft: 2, deprecated: 2 },
+    orgChartLabel: null,
+    newBtnLabel: 'New system agent',
+    columns: ['Agent', 'Status', 'Total platform runs', 'Adoption', 'Actions'],
+    agents: [
+      {
+        id: 'outreach-agent',
+        name: 'Outreach Agent',
+        desc: 'Composes and sends outreach emails and follow-ups',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        status: 'published',
+        totalRuns: '12,847',
+        adoptionOrgs: 12, adoptionPct: 100,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'lead-qualifier',
+        name: 'Lead Qualifier',
+        desc: 'Scores and qualifies inbound leads from all sources',
+        iconColor: '#4f46e5', iconBg: 'var(--indigo-50)', iconBorder: 'var(--indigo-200)',
+        status: 'published',
+        totalRuns: '9,234',
+        adoptionOrgs: 11, adoptionPct: 92,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'crm-sync-agent',
+        name: 'CRM Sync Agent',
+        desc: 'Updates CRM records based on conversation context',
+        iconColor: '#dc2626', iconBg: '#fef2f2', iconBorder: '#fecaca',
+        status: 'published',
+        totalRuns: '6,891',
+        adoptionOrgs: 10, adoptionPct: 83,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'demo-scheduler',
+        name: 'Demo Scheduler',
+        desc: 'Books product demos and sends calendar invites',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        status: 'published',
+        totalRuns: '4,567',
+        adoptionOrgs: 9, adoptionPct: 75,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'account-health-monitor',
+        name: 'Account Health Monitor',
+        desc: 'Tracks client health signals and flags at-risk accounts',
+        iconColor: '#0ea5e9', iconBg: 'var(--sky-50)', iconBorder: '#bae6fd',
+        status: 'published',
+        totalRuns: '3,412',
+        adoptionOrgs: 8, adoptionPct: 67,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'support-triage',
+        name: 'Support Triage',
+        desc: 'Categorises and routes incoming support requests',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        status: 'published',
+        totalRuns: '2,891',
+        adoptionOrgs: 7, adoptionPct: 58,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'outreach-manager',
+        name: 'Outreach Manager',
+        desc: 'Orchestrates the outreach agents across campaigns',
+        iconColor: '#b45309', iconBg: '#fffbeb', iconBorder: '#fde68a',
+        status: 'published',
+        tierChip: 'manager',
+        totalRuns: '1,234',
+        adoptionOrgs: 11, adoptionPct: 92,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'csm-manager',
+        name: 'CSM Manager',
+        desc: 'Coordinates CSM and health monitoring agents',
+        iconColor: '#b45309', iconBg: '#fffbeb', iconBorder: '#fde68a',
+        status: 'published',
+        tierChip: 'manager',
+        totalRuns: '678',
+        adoptionOrgs: 8, adoptionPct: 67,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'sales-manager',
+        name: 'Sales Manager',
+        desc: 'Oversees lead qualification and demo scheduling agents',
+        iconColor: '#b45309', iconBg: '#fffbeb', iconBorder: '#fde68a',
+        status: 'published',
+        tierChip: 'manager',
+        totalRuns: '445',
+        adoptionOrgs: 6, adoptionPct: 50,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'orchestrator',
+        name: 'Orchestrator',
+        desc: 'Always-on system orchestrator, one per workspace',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        status: 'published',
+        tierChip: 'system',
+        totalRuns: '–',
+        adoptionOrgs: 12, adoptionPct: 100,
+        tags: [],
+        actions: ['view', 'more'],
+      },
+      {
+        id: 'onboarding-wizard',
+        name: 'Onboarding Wizard',
+        desc: 'Guides new workspace setup through a structured flow',
+        iconColor: '#4f46e5', iconBg: 'var(--indigo-50)', iconBorder: 'var(--indigo-200)',
+        status: 'published',
+        tierChip: 'system',
+        totalRuns: '234',
+        adoptionOrgs: 12, adoptionPct: 100,
+        tags: [],
+        actions: ['view', 'more'],
+      },
+      {
+        id: 'sentiment-analyser',
+        name: 'Sentiment Analyser',
+        desc: 'Analyses tone and sentiment from communications',
+        iconColor: '#0ea5e9', iconBg: 'var(--sky-50)', iconBorder: '#bae6fd',
+        status: 'published',
+        totalRuns: '1,234',
+        adoptionOrgs: 5, adoptionPct: 42,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'compliance-prefilter',
+        name: 'Compliance Prefilter',
+        desc: 'Pre-screens agent outputs for compliance issues',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        status: 'published',
+        totalRuns: '567',
+        adoptionOrgs: 4, adoptionPct: 33,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'internal-escalation',
+        name: 'Internal Escalation',
+        desc: 'Routes unresolved issues to human agents',
+        iconColor: '#c2410c', iconBg: '#fff7ed', iconBorder: '#fed7aa',
+        status: 'published',
+        totalRuns: '234',
+        adoptionOrgs: 3, adoptionPct: 25,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'content-generator',
+        name: 'Content Generator',
+        desc: 'Creates marketing content from briefs and brand guidelines',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        status: 'beta',
+        totalRuns: '234',
+        adoptionOrgs: 3, adoptionPct: 25,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'voice-cloner',
+        name: 'Voice Cloner',
+        desc: 'Creates brand-voice-consistent audio from text',
+        iconColor: '#0ea5e9', iconBg: 'var(--sky-50)', iconBorder: '#bae6fd',
+        status: 'beta',
+        totalRuns: '89',
+        adoptionOrgs: 2, adoptionPct: 17,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'document-reviewer',
+        name: 'Document Reviewer',
+        desc: 'Reviews contracts and documents for key clauses',
+        iconColor: '#7c3aed', iconBg: '#f5f3ff', iconBorder: '#ddd6fe',
+        status: 'beta',
+        totalRuns: '156',
+        adoptionOrgs: 2, adoptionPct: 17,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'translation-agent',
+        name: 'Translation Agent',
+        desc: 'Translates content across 40+ languages with context awareness',
+        iconColor: '#059669', iconBg: 'var(--emerald-50)', iconBorder: '#a7f3d0',
+        status: 'beta',
+        totalRuns: '67',
+        adoptionOrgs: 1, adoptionPct: 8,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'predictive-forecaster',
+        name: 'Predictive Forecaster',
+        desc: 'Generates revenue and churn forecasts from CRM signals',
+        iconColor: '#0ea5e9', iconBg: 'var(--sky-50)', iconBorder: '#bae6fd',
+        status: 'beta',
+        totalRuns: '34',
+        adoptionOrgs: 1, adoptionPct: 8,
+        tags: [],
+        actions: ['view', 'drill', 'more'],
+      },
+      {
+        id: 'meeting-note-taker',
+        name: 'Meeting Note Taker',
+        desc: 'Joins calls, transcribes and produces structured summaries',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        status: 'draft',
+        totalRuns: '0',
+        adoptionOrgs: 0, adoptionPct: 0,
+        tags: [],
+        actions: ['view', 'more'],
+      },
+      {
+        id: 'test-agent',
+        name: 'Test Agent',
+        desc: 'Internal agent used to validate platform capability',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        status: 'draft',
+        tierChip: 'system',
+        totalRuns: '12',
+        adoptionOrgs: 0, adoptionPct: 0,
+        tags: [],
+        actions: ['view', 'more'],
+      },
+      {
+        id: 'sales-coach',
+        name: 'Sales Coach',
+        desc: 'Coaches sales reps in real-time using call transcripts',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        status: 'deprecated',
+        totalRuns: '1,234',
+        adoptionOrgs: 0, adoptionPct: 0,
+        tags: [],
+        actions: ['view', 'more'],
+      },
+      {
+        id: 'customer-survey-bot',
+        name: 'Customer Survey Bot',
+        desc: 'Sends and analyses NPS and CSAT surveys',
+        iconColor: '#64748b', iconBg: 'var(--slate-100)', iconBorder: 'var(--slate-300)',
+        status: 'deprecated',
+        totalRuns: '567',
+        adoptionOrgs: 0, adoptionPct: 0,
+        tags: [],
+        actions: ['view', 'more'],
+      },
+    ],
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────────────
+   View resolution — URL param wins over localStorage
+   ───────────────────────────────────────────────────────────────────── */
+
+function getActiveView() {
+  const params = new URLSearchParams(window.location.search);
+  const urlView = params.get('view');
+  if (urlView === 'workspace' || urlView === 'org' || urlView === 'system') {
+    const profileMap = { workspace: 'workspace-operator', org: 'org-admin', system: 'system-admin' };
+    localStorage.setItem('prototype.sidebar.demoProfile', profileMap[urlView]);
+    return urlView;
+  }
+  const profile = localStorage.getItem('prototype.sidebar.demoProfile') || 'workspace-operator';
+  if (profile === 'org-admin') return 'org';
+  if (profile === 'system-admin') return 'system';
+  return 'workspace';
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Helpers — badge/chip HTML generators
+   ───────────────────────────────────────────────────────────────────── */
+
+function statusBadgeHtml(badge) {
+  if (badge === 'active')   return '<span class="badge badge-green"><span class="status-dot dot-green"></span>Active</span>';
+  if (badge === 'inactive') return '<span class="badge badge-slate"><span class="status-dot dot-slate"></span>Inactive</span>';
+  if (badge === 'draft')    return '<span class="badge badge-slate">Draft</span>';
+  return '';
+}
+
+function systemStatusBadgeHtml(status) {
+  if (status === 'published')  return '<span class="badge-published">Published</span>';
+  if (status === 'beta')       return '<span class="badge-beta">Beta</span>';
+  if (status === 'draft')      return '<span class="badge-draft-sm">Draft</span>';
+  if (status === 'deprecated') return '<span class="badge-deprecated">Deprecated</span>';
+  return '';
+}
+
+function deploymentHtml(depl) {
+  const cls = depl.type === 'full' ? 'depl-full' : depl.type === 'partial' ? 'depl-partial' : 'depl-custom';
+  return `<span class="${cls}" style="font-size:12px;">${depl.label}</span>`;
+}
+
+function adoptionHtml(a) {
+  const pct = a.adoptionPct;
+  return `
+    <span class="adoption-bar-wrap"><span class="adoption-bar-fill" style="width:${pct}%"></span></span>
+    <span style="font-size:12px;color:var(--slate-600);">${a.adoptionOrgs} org${a.adoptionOrgs !== 1 ? 's' : ''} · ${pct}% in use</span>`;
+}
+
+function tierChipHtml(tier) {
+  if (!tier) return '';
+  if (tier === 'manager') return '<span class="tier-chip tier-manager">Manager</span>';
+  if (tier === 'system')  return '<span class="tier-chip tier-system">System</span>';
+  return '';
+}
+
+function lastRunHtml(lr) {
+  const textColor = lr.color ? `color:${lr.color};` : '';
+  const timeColor = lr.timeColor ? `color:${lr.timeColor};` : '';
+  return `
+    <div class="inline-run-state" style="${textColor}">
+      <span class="status-dot ${lr.dotClass}"></span>
+      <span>${lr.label}</span>
+    </div>
+    ${lr.time ? `<div class="inline-run-time" style="${timeColor}">${lr.time}</div>` : ''}`;
+}
+
+function agentIconHtml(a) {
+  const bg = a.iconBg || 'var(--indigo-50)';
+  const border = a.iconBorder || 'var(--indigo-200)';
+  const color = a.iconColor || '#4f46e5';
+  return `<div class="agent-icon" style="background:${bg};border-color:${border};">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  </div>`;
+}
+
+function tagsHtml(tags, isLocal) {
+  let out = tags.map(t => `<span class="tag-chip">${t}</span>`).join('');
+  if (isLocal) out += `<span class="tag-chip-local">Local</span>`;
+  return out || '<span style="color:var(--slate-300);font-size:11px;">—</span>';
+}
+
+function actionsHtml(actions, view, agentId) {
+  const btns = [];
+  actions.forEach(a => {
+    if (a === 'edit')     btns.push(`<button class="act-btn act-edit" onclick="showToast('Opening agent edit...')">Edit</button>`);
+    if (a === 'run')      btns.push(`<button class="act-btn act-run" onclick="showToast('Triggering run for this workspace...')">Run</button>`);
+    if (a === 'view-run') btns.push(`<a href="run-trace.html" class="act-btn act-run" style="text-decoration:none;">View run</a>`);
+    if (a === 'fix')      btns.push(`<button class="act-btn" style="background:var(--red-50);color:var(--red-600);border:1px solid #fecaca;" onclick="showToast('Opening credential fix flow...')">Fix</button>`);
+    if (a === 'activate') btns.push(`<button class="act-btn act-act" onclick="showToast('Activating agent...')">Activate</button>`);
+    if (a === 'deploy')   btns.push(`<button class="act-btn act-deploy" onclick="openModal('modal-deploy-org')">Deploy</button>`);
+    if (a === 'view')     btns.push(`<button class="act-btn act-view" onclick="showToast('Opening agent definition...')">View</button>`);
+    if (a === 'drill')    btns.push(`<button class="act-btn act-drill" onclick="openModal('modal-org-picker')">Drill into org</button>`);
+    if (a === 'more')     btns.push(`<button class="act-btn act-more" onclick="showToast('More options...')">&#x2026;</button>`);
+  });
+  return `<div class="row-actions">${btns.join('')}</div>`;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Main render function
+   ───────────────────────────────────────────────────────────────────── */
+
+function renderAgentsForView(view) {
+  const data = AGENTS_BY_VIEW[view];
+
+  // Update document title
+  const viewLabels = { workspace: 'Workspace', org: 'Organisation', system: 'System' };
+  document.title = `Agents (${viewLabels[view]}) | Automation OS`;
+
+  // Topbar actions
+  const topbarEl = document.getElementById('topbar-actions');
+  if (view === 'workspace') {
+    topbarEl.innerHTML = `<button class="btn btn-secondary btn-sm" style="font-size:11.5px;" onclick="showToast('Install from library...')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+      Install from library
+    </button>`;
+  } else {
+    topbarEl.innerHTML = '';
+  }
+
+  // Running count for live pill
+  const runningCount = view === 'workspace'
+    ? data.agents.filter(a => a.running).length
+    : null;
+
+  // Filter pills HTML
+  let filterHtml = '';
+  if (view === 'workspace') {
+    const fc = data.filterCounts;
+    filterHtml = `
+      <span class="filter-pill active">All (${fc.all})</span>
+      <span class="filter-pill">Active (${fc.active})</span>
+      <span class="filter-pill">Inactive (${fc.inactive})</span>
+      <span class="filter-pill">Draft (${fc.draft})</span>`;
+  } else if (view === 'org') {
+    const fc = data.filterCounts;
+    filterHtml = `
+      <span class="filter-pill active">All (${fc.all})</span>
+      <span class="filter-pill">Full deployment (4)</span>
+      <span class="filter-pill">Partial (2)</span>
+      <span class="filter-pill">Customised (1)</span>`;
+  } else if (view === 'system') {
+    const fc = data.filterCounts;
+    filterHtml = `
+      <span class="filter-pill active">All (${fc.all})</span>
+      <span class="filter-pill">Published (${fc.published})</span>
+      <span class="filter-pill">Beta (${fc.beta})</span>
+      <span class="filter-pill">Draft (${fc.draft})</span>
+      <span class="filter-pill">Deprecated (${fc.deprecated})</span>`;
+  }
+
+  // Table header
+  const thCells = data.columns.map(c => `<th>${c}</th>`).join('');
+
+  // Table rows
+  let rows = '';
+  data.agents.forEach(agent => {
+    let col2 = '';
+    let col3 = '';
+    let col4 = '';
+
+    if (view === 'workspace') {
+      col2 = statusBadgeHtml(agent.statusBadge);
+      col3 = lastRunHtml(agent.lastRun);
+      col4 = tagsHtml(agent.tags || [], agent.local);
+    } else if (view === 'org') {
+      col2 = deploymentHtml(agent.deployment);
+      col3 = `<div style="font-size:12px;color:var(--slate-600);line-height:1.5;">${agent.totalRuns}</div>`;
+      col4 = tagsHtml(agent.tags || [], false);
+    } else if (view === 'system') {
+      col2 = systemStatusBadgeHtml(agent.status);
+      col3 = `<span style="font-size:13px;font-weight:600;color:var(--slate-700);">${agent.totalRuns}</span>`;
+      col4 = adoptionHtml(agent);
+    }
+
+    const runningBadge = (view === 'workspace' && agent.running && agent.id !== 'orchestrator')
+      ? `<span style="font-size:10px;background:#eff6ff;color:#3b82f6;padding:1px 6px;border-radius:10px;font-weight:700;vertical-align:middle;margin-left:4px;">Running</span>`
+      : '';
+    const draftBadge = (agent.statusBadge === 'draft')
+      ? `<span style="font-size:10px;background:#ede9fe;color:#7c3aed;padding:1px 6px;border-radius:10px;font-weight:700;vertical-align:middle;margin-left:4px;">Draft</span>`
+      : '';
+
+    rows += `
+      <tr>
+        <td>
+          <div class="agent-name-cell">
+            ${agentIconHtml(agent)}
+            <div>
+              <div class="agent-name-text">${agent.name}${runningBadge}${draftBadge}${tierChipHtml(agent.tierChip)}</div>
+              <div class="agent-desc-text">${agent.desc}</div>
+            </div>
+          </div>
+        </td>
+        <td>${col2}</td>
+        <td>${col3}</td>
+        <td>${col4}</td>
+        <td>${actionsHtml(agent.actions, view, agent.id)}</td>
+      </tr>`;
+  });
+
+  // Org chart button (hidden in system view)
+  const orgChartBtn = data.orgChartLabel
+    ? `<button class="org-chart-btn" onclick="showToast('Opening ${data.orgChartLabel}...')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="6"/><rect x="1" y="15" width="6" height="6"/><rect x="17" y="15" width="6" height="6"/><line x1="12" y1="8" x2="12" y2="15"/><line x1="4" y1="15" x2="4" y2="12"/><line x1="20" y1="15" x2="20" y2="12"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+        ${data.orgChartLabel}
+      </button>`
+    : '';
+
+  // Live pill (workspace only — 3 running)
+  const livePillHtml = (view === 'workspace')
+    ? `<div class="live-pill"><div class="status-dot dot-blue dot-pulse"></div>3 running</div>`
+    : '';
+
+  // New agent button label and action
+  const newBtnOnclick = view === 'workspace'
+    ? `onclick="openModal('modal-new-agent-workspace')"`
+    : view === 'org'
+    ? `onclick="showToast('Creating new org-level agent template...')"`
+    : `onclick="showToast('Creating new system agent...')"`;
+
+  // View mode indicator note
+  const viewNote = view === 'workspace'
+    ? 'Viewing as workspace operator · Acme Corp'
+    : view === 'org'
+    ? 'Viewing as org admin · Acme Corp Agency'
+    : 'Viewing as system admin · Platform catalogue';
+
+  document.getElementById('page-body').innerHTML = `
+    <div class="view-mode-banner">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      <strong>${viewNote}</strong>
+      &nbsp;&middot;&nbsp;
+      <a href="agents.html?view=workspace" style="color:#4338ca;text-decoration:none;font-weight:600;">Workspace</a>
+      <span style="color:#a5b4fc;margin:0 2px;">/</span>
+      <a href="agents.html?view=org" style="color:#4338ca;text-decoration:none;font-weight:600;">Organisation</a>
+      <span style="color:#a5b4fc;margin:0 2px;">/</span>
+      <a href="agents.html?view=system" style="color:#4338ca;text-decoration:none;font-weight:600;">System</a>
+    </div>
+
+    <div class="replaces-banner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span><strong>Replaces:</strong> ${data.banner}</span>
+    </div>
+
+    <!-- Page header -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;">Agents</h1>
+          ${livePillHtml}
+        </div>
+        <p style="font-size:13.5px;color:var(--slate-500);margin-top:4px;">${data.subtitle}</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        ${orgChartBtn}
+        <button class="btn btn-primary" ${newBtnOnclick}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          ${data.newBtnLabel}
+        </button>
+      </div>
+    </div>
+
+    <!-- Toolbar: search + filters -->
+    <div class="toolbar">
+      <div class="search-wrap" style="flex:1;max-width:320px;">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input class="search-box" type="text" placeholder="Search agents...">
+      </div>
+      <div class="filter-pills">${filterHtml}</div>
+    </div>
+
+    <!-- Agents table -->
+    <div class="card">
+      <table class="data-table">
+        <thead><tr>${thCells}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  // Wire filter pill clicks
+  document.querySelectorAll('.filter-pill').forEach(pill => {
+    pill.addEventListener('click', function() {
+      document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Modal helpers
+   ───────────────────────────────────────────────────────────────────── */
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function selectOption(el) {
+  el.closest('.modal-body').querySelectorAll('.modal-option').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+/* Org drill-in: switch demo profile to org-admin and reload */
+function drillIntoOrg() {
+  localStorage.setItem('prototype.sidebar.demoProfile', 'org-admin');
+  window.location.href = 'agents.html?view=org';
+}
+
+/* Close modal on overlay click */
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────
+   Toast notification
+   ───────────────────────────────────────────────────────────────────── */
+
+let toastTimer;
+function showToast(msg) {
+  let t = document.getElementById('proto-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'proto-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--slate-900);color:white;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.18);pointer-events:none;transition:opacity 0.2s;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.opacity = '0'; }, 2200);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Storage event listener — re-render when sidebar demo profile changes
+   ───────────────────────────────────────────────────────────────────── */
+
+window.addEventListener('storage', function(e) {
+  if (e.key === 'prototype.sidebar.demoProfile') {
+    renderAgentsForView(getActiveView());
+    renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'agents.html');
+  }
+});
+
+/* ─────────────────────────────────────────────────────────────────────
+   Init
+   ───────────────────────────────────────────────────────────────────── */
+
+renderAgentsForView(getActiveView());
+</script>
 </body>
 </html>

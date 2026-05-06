@@ -1148,3 +1148,31 @@ index.html:
 - `prototypes/consolidation-2026-05-06/before-org-agent-edit.html` (banner augmented with Capabilities IA gap paragraph, skills annotation updated, problems list expanded)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead Round 7e-1c, description updated, meta-row, agent-edit card desc, org-agent-edit card desc, decisions box Round 7e-1 bullet)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7e-1d — 2026-05-06
+
+**Operator feedback:** Make agents.html mode-aware so it morphs between Workspace / Organisation / System views. Three explicit preview URLs in index.html for side-by-side review.
+
+**Changes made:**
+- `agents.html` fully rewritten with mode-aware rendering. `getActiveView()` reads `?view=` URL param first (wins), then falls back to `prototype.sidebar.demoProfile` in localStorage. URL param also writes localStorage to keep sidebar profile in sync. `renderAgentsForView(view)` re-renders the entire page body including subtitle, banner, table columns, mock data, filter pills, action handlers, and topbar buttons.
+- Workspace view: 12 agents for Acme Corp. Columns: Agent / Status / Last run / Tags / Actions. Live pill (3 running). Local Notes Agent has a "Local" amber chip. Outreach Manager, CSM Manager, Orchestrator have tier chips. CRM Sync shows Failed state with Fix button. Vacation Coverage Agent is Draft. New agent modal offers "Deploy from library" (default) or "Create workspace-only". Org chart link visible.
+- Organisation view: 7 org-level templates. Columns: Agent / Deployment status / Total runs (30d) / Tags / Actions. Deployment status shows full/partial/customised variants with colour coding. Deploy button opens workspace picker modal. Org chart link visible.
+- System view: 23 system catalogue agents. Columns: Agent / Status / Total platform runs / Adoption / Actions. Status uses Published/Beta/Draft/Deprecated badges. Adoption shows inline bar + "N orgs / pct in use" text. "Drill into org" opens org picker modal which sets demo profile to org-admin and reloads. Org chart link hidden (not applicable at system level).
+- `AGENTS_BY_VIEW` data object contains all three keyed data sets with realistic mock values.
+- Storage event listener re-renders when sidebar demo profile selector changes in another tab.
+- View mode indicator strip at top of page body shows current view context and quick-switch links to the other two views.
+- `index.html` Agents card updated: description rewritten to explain mode-aware single file, three colour-coded preview links (workspace/org/system), side-by-side note, "Before" link retained.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- each view opens on the user's primary task. Workspace operator: see and act on deployed agents. Org admin: see deployment coverage and manage templates. System admin: see catalogue status and adoption.
+- Default to hidden: yes -- no KPI tiles, no run history panels, no aggregated cost views. Adoption bar in system view is load-bearing (system admin's primary task includes understanding usage). Filter counts are inline, not a dashboard row.
+- One primary action: yes -- each view has one primary action: Workspace "New agent" (opens modal), Org "New template", System "New system agent". Deploy and Drill are secondary row-level actions.
+- Inline state: yes -- running state is a dot + time inline on each row. Deployment coverage is a single text string per row. Adoption is an inline bar + number, not a separate panel.
+- Re-check passed: yes -- workspace operator can see agent health and trigger a run in one click. Org admin can see which templates need wider deployment at a glance. System admin can identify low-adoption or beta agents and drill into context.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/agents.html` (full rewrite)
+- `prototypes/consolidation-2026-05-06/index.html` (Agents card updated with three preview links)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
