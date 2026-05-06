@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-9
+    Prototype Round 7b-10
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-9: agent-edit.html Capabilities tab is now inheritance-aware. Each skill row shows a tier chip (System / Org / This client). Three-dot overflow menu renders different menu items per tier. Custom skill creator drawer added with 4-tab flow (Basic info, Parameters, Implementation, Test). Scope breadcrumb above the skill list clarifies multi-tier context. Round 7b-8: org-knowledge.html added. Round 7b-7: Knowledge restructured into Memory / Notes / Documents tabs.</p>
+  <p>Round 7b-10: org-agent-edit.html added. Org-level agent definition editor with 6 tabs (Configure, Behaviour, Capabilities, Schedule, Budget, Deployments). Two-tier skill view (System + Org-custom). Deployments tab shows all 4 workspaces with override count, custom skill count, and row-click drawer with side-by-side override comparison. before-org-agent-edit.html companion added. _sidebar.js Agents link in Org Build section promoted to org-agent-edit.html. Round 7b-9: agent-edit.html Capabilities tab is inheritance-aware.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-9</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-10</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 50+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 52+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -134,6 +134,7 @@
     <li>Round 7b-7: Knowledge page restructured: Memory / Notes / Documents tabs replace Summary / Auto-memory / Authored. Memory tab combines authored entries and memory blocks with org-inheritance chips, tier badges, and 640px rich-text drawer (contentEditable + execCommand toolbar). Notes tab is renamed Auto-memory with promote-to-memory action. Documents tab is new: 2-column card grid, org-inherited section, upload modal, Drive connect, version history collapsible in doc drawer.</li>
     <li>Round 7b-8: Org Knowledge page (org-knowledge.html): unified org-level Knowledge with Memory and Documents tabs. Memory tab shows 7 blocks (3 tiers) and 5 authored entries with "Inherited by N of 4 workspaces" usage indicators. Documents tab shows 7-card 2-column grid. Drawer includes per-subaccount inheritance toggles and "Override at workspace level" links. Upload modal includes "Push to all workspaces" toggle. _sidebar.js org Build section Knowledge link promoted from stub to org-knowledge.html.</li>
     <li>Round 7b-9: Capabilities tab is inheritance-aware. Skills assigned realistic tiers (System / Org / This client). Tier chip on every skill row. Three-dot overflow menu builds dynamically per tier: System (View source, Configure, Disable only), Org (adds Override locally and Edit at org level link), This client (full: Edit, Configure, View parameters, Disable, Delete). Skill creator drawer with 4 tabs (Basic info, Parameters, Implementation, Test). Scope breadcrumb above skill list. Scope toggle in footer (This client / Organisation). Save and enable adds skill row live.</li>
+    <li>Round 7b-10: org-agent-edit.html added as the org-level agent definition editor. Two-tier Capabilities view (System skills read-only, Org-custom skills full edit). Deployments tab new: table of 4 workspaces with status badge, override count, custom skill count, last run, 30-day run count. Row click opens 520px drawer with side-by-side org vs workspace override comparison, custom skills list, recent runs, and force re-sync action. "Deploy to additional workspaces" modal with workspace checklist. Skill creator drawer scope locked to Organisation. _sidebar.js Agents link in Org/Build section promoted from stub to org-agent-edit.html. before-org-agent-edit.html added with simulated production flat editor and 8-item problems list.</li>
   </ul>
 </div>
 
@@ -206,6 +207,24 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="agent-edit.html">Open mockup &#8594;</a>
         <a href="before-agent-edit.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Org Agent Edit <span style="font-size:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7b-10</span></div>
+        <div class="proto-card-file">org-agent-edit.html</div>
+      </div>
+      <div class="proto-card-desc">Org-level agent definition editor. 6 tabs: Configure, Behaviour, Capabilities (System + Org-custom skill tiers), Schedule, Budget, Deployments (NEW). Deployments tab shows all 4 workspaces with override count, custom skills, run stats. Row-click drawer with side-by-side field comparison, force re-sync, workspace agent link. Deploy-to-workspaces modal.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces / improves</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">AdminAgentEditPage (org context)</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="org-agent-edit.html">Open mockup &#8594;</a>
+        <a href="before-org-agent-edit.html" class="before-link">Before</a>
       </div>
     </div>
 

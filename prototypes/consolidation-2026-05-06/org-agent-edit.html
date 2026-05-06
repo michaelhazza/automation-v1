@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<!--
+  Org-level Agent Definition Editor (Round 7b-10)
+  Represents: AdminAgentEditPage at the org level — the parent template that subaccounts inherit.
+
+  Tabs: Configure | Behaviour | Capabilities | Schedule | Budget | Deployments (NEW)
+
+  Capabilities:
+    - System skills (8): locked, view/configure/disable only
+    - Org-custom skills (3): full edit/delete/configure; amber icon
+    - NO "This client" tier — that level only exists at subaccount
+
+  Deployments tab: table of 4 subaccounts with override/custom-skill counts.
+    Row click opens a 520px drawer with side-by-side override view.
+    Bottom: "Deploy to additional workspaces" button (placeholder modal).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outreach Agent (Org definition) | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .agent-layout { display: flex; gap: 0; height: calc(100vh - 88px); overflow: hidden; }
+  .agent-content { flex: 1; overflow-y: auto; padding: 24px 28px; }
+
+  .section-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 14px; overflow: hidden;
+  }
+  .section-card-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .section-card-header h3 { font-size: 13px; font-weight: 600; color: var(--slate-700); }
+  .section-card-body { padding: 16px; }
+
+  .mode-card {
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    padding: 9px 12px; cursor: pointer; transition: all 0.12s;
+    margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px;
+  }
+  .mode-card.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .mode-card input[type=radio] { margin-top: 2px; flex-shrink: 0; }
+  .mode-card-label { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .mode-card-desc { font-size: 11.5px; color: var(--slate-500); margin-top: 1px; }
+
+  .conn-chip {
+    padding: 4px 13px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--slate-200); background: white; cursor: pointer;
+    color: var(--slate-600); transition: all 0.1s;
+  }
+  .conn-chip:hover { background: var(--slate-50); }
+  .conn-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* Skill toggle rows */
+  .skill-toggle-list {
+    background: white; border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  .skill-group-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-100); cursor: pointer;
+    user-select: none;
+  }
+  .skill-group-label {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--slate-400); display: flex; align-items: center; gap: 6px;
+  }
+  .skill-group-caret { font-size: 10px; color: var(--slate-400); transition: transform 0.15s; }
+  .skill-group-caret.collapsed { transform: rotate(-90deg); }
+  .skill-toggle-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    min-height: 52px; transition: background 0.1s;
+  }
+  .skill-toggle-row:last-child { border-bottom: none; }
+  .skill-toggle-row:hover { background: var(--slate-50); }
+  .skill-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 12px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-100);
+    color: var(--indigo-600);
+  }
+  .skill-icon.org-custom { background: var(--amber-50); border-color: #fde68a; color: var(--amber-700); }
+  .skill-name { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .skill-desc { font-size: 11.5px; color: var(--slate-400); margin-top: 1px; }
+
+  /* Toggle switch */
+  .toggle-wrap { flex-shrink: 0; display: flex; align-items: center; }
+  .toggle-input { display: none; }
+  .toggle-track {
+    width: 34px; height: 20px; border-radius: 10px;
+    background: var(--slate-200); cursor: pointer;
+    position: relative; transition: background 0.15s;
+  }
+  .toggle-input:checked + .toggle-track { background: var(--indigo-600); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: white;
+    transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-input:checked + .toggle-track::after { left: 16px; }
+
+  .overflow-dot-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--slate-400); font-size: 18px; line-height: 1;
+    padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
+  }
+  .overflow-dot-btn:hover { background: var(--slate-100); color: var(--slate-600); }
+
+  /* Tier chips */
+  .tier-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    white-space: nowrap; flex-shrink: 0; letter-spacing: 0.02em;
+  }
+  .tier-system { background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200); }
+  .tier-org    { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+  /* Context menus */
+  .skill-ctx-menu {
+    position: fixed; z-index: 9999; background: white;
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    min-width: 240px; padding: 4px 0; display: none;
+  }
+  .skill-ctx-menu.open { display: block; }
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--slate-700);
+    cursor: pointer; transition: background 0.1s; border: none;
+    background: transparent; width: 100%; text-align: left;
+  }
+  .ctx-item:hover { background: var(--slate-50); }
+  .ctx-item.ctx-danger { color: var(--red-500); }
+  .ctx-item.ctx-danger:hover { background: #fef2f2; }
+  .ctx-separator { border: none; border-top: 1px solid var(--slate-100); margin: 3px 0; }
+
+  /* Skill scope bar */
+  .skill-scope-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px; background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 8px; font-size: 11.5px; color: #1e3a5f; margin-bottom: 10px;
+  }
+
+  /* Prompt history */
+  .prompt-history-panel {
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 10px; margin-top: 14px; overflow: hidden;
+  }
+  .prompt-history-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 500;
+    color: var(--slate-700); border: none; background: transparent; width: 100%;
+    text-align: left;
+  }
+
+  /* Org banner */
+  .org-banner {
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 16px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .org-banner-icon { flex-shrink: 0; color: #1d4ed8; margin-top: 1px; }
+  .org-banner-text { font-size: 13px; color: #1e3a5f; line-height: 1.5; }
+  .org-banner-text strong { font-weight: 600; }
+
+  /* Deployments table + drawer */
+  .deployments-drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+    z-index: 400; display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .deployments-drawer-overlay.open { display: flex; }
+  .deployments-drawer {
+    width: 520px; background: white; display: flex; flex-direction: column;
+    height: 100%; overflow: hidden;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  }
+  .deployments-drawer-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .deployments-drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+
+  /* Deploy modal */
+  .deploy-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+    z-index: 500; display: none; align-items: center; justify-content: center;
+  }
+  .deploy-modal-overlay.open { display: flex; }
+  .deploy-modal {
+    background: white; border-radius: 14px; width: 480px;
+    padding: 24px; box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  }
+
+  /* Skill creator drawer (for org scope) */
+  .creator-drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+    z-index: 400; display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .creator-drawer-overlay.open { display: flex; }
+  .creator-drawer {
+    width: 560px; background: white; display: flex; flex-direction: column;
+    height: 100%; overflow: hidden; box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  }
+  .creator-drawer-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .creator-drawer-body { flex: 1; overflow-y: auto; padding: 0; }
+  .creator-drawer-footer {
+    padding: 12px 20px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+  .creator-tab-panel { padding: 20px; }
+  .creator-tab-panel.hidden { display: none; }
+
+  /* Override comparison */
+  .override-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    border-bottom: 1px solid var(--slate-100); padding: 10px 0;
+  }
+  .override-row:last-child { border-bottom: none; }
+  .override-field { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 3px; }
+  .override-val { font-size: 13px; color: var(--slate-800); line-height: 1.4; }
+  .override-val.changed { color: #1d4ed8; font-weight: 500; }
+
+  /* Deployment status badges */
+  .dep-status-active    { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .dep-status-paused    { background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .dep-status-custom    { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+
+  /* Workspace color dot */
+  .ws-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; margin-right: 6px; vertical-align: middle; }
+
+  /* Schedule note */
+  .field-note {
+    font-size: 11.5px; color: var(--slate-400); background: var(--slate-50);
+    border: 1px solid var(--slate-200); border-radius: 6px; padding: 7px 10px; margin-top: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (org mode) -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar('org', 'org-agent-edit.html');</script>
+
+  <div class="main" style="overflow:hidden;">
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="#" style="color:var(--slate-400);text-decoration:none;">Agents</a>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Outreach Agent</span>
+        <span class="badge badge-green" style="font-size:10px;margin-left:6px;">Active</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <!-- Dirty state: Save/Discard (shown when dirty) -->
+      <div id="dirty-actions" style="display:flex;gap:8px;align-items:center;">
+        <span style="font-size:12px;color:var(--amber-600);background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:3px 8px;">Unsaved changes</span>
+        <button class="btn btn-sm btn-secondary" onclick="discardChanges()">Discard</button>
+        <button class="btn btn-sm btn-primary">Save changes</button>
+      </div>
+      <a href="index.html" class="btn btn-sm btn-secondary" style="margin-left:8px;">&#8592; All prototypes</a>
+    </div>
+
+    <!-- Replaces callout -->
+    <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:7px 28px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      NEW: Org-level agent definition editor. Companion to subaccount agent-edit.html. Adds Deployments tab showing all workspaces.
+      <a href="before-org-agent-edit.html" style="color:var(--indigo-700);font-weight:600;">View before state</a>
+    </div>
+
+    <div class="agent-layout">
+      <div class="agent-content">
+
+        <!-- Page title block -->
+        <div style="margin-bottom:18px;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+            <div>
+              <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;margin-bottom:4px;">Outreach Agent</h1>
+              <div style="font-size:13px;color:var(--slate-500);">
+                Org-level definition
+                <span style="color:var(--slate-300);margin:0 6px;">·</span>
+                Deployed to <strong style="color:var(--slate-700);">4 of 4</strong> workspaces
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Org propagation banner -->
+        <div class="org-banner">
+          <div class="org-banner-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="org-banner-text">
+            <strong>Organisation-level definition.</strong> Changes here propagate to all 4 workspaces inheriting this agent unless they have local overrides. Review the Deployments tab to see per-workspace override status before saving.
+          </div>
+        </div>
+
+        <!-- Tab bar -->
+        <div class="tabs" id="agent-tabs" style="margin-bottom:18px;">
+          <button class="tab-btn active" onclick="switchAgentTab('configure',this)" id="tab-btn-configure">Configure</button>
+          <button class="tab-btn" onclick="switchAgentTab('behaviour',this)" id="tab-btn-behaviour">Behaviour</button>
+          <button class="tab-btn" onclick="switchAgentTab('capabilities',this)" id="tab-btn-capabilities">Capabilities</button>
+          <button class="tab-btn" onclick="switchAgentTab('schedule',this)" id="tab-btn-schedule">Schedule</button>
+          <button class="tab-btn" onclick="switchAgentTab('budget',this)" id="tab-btn-budget">Budget</button>
+          <button class="tab-btn" onclick="switchAgentTab('deployments',this)" id="tab-btn-deployments">Deployments <span class="tab-count">4</span></button>
+        </div>
+
+        <!-- ── CONFIGURE TAB ──────────────────────────────────────── -->
+        <div class="tab-panel active" id="tab-configure">
+          <div class="section-card">
+            <div class="section-card-header"><h3>Identity</h3></div>
+            <div class="section-card-body">
+              <div style="display:flex;gap:14px;align-items:flex-start;">
+                <div style="width:48px;height:48px;border-radius:10px;background:var(--indigo-50);border:1px solid var(--indigo-200);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;cursor:pointer;" title="Click to change icon">&#128270;</div>
+                <div style="flex:1;">
+                  <div class="form-field" style="margin-bottom:12px;">
+                    <label class="form-label">Agent name</label>
+                    <input class="form-input" value="Outreach Agent" oninput="markDirty()">
+                  </div>
+                  <div class="form-field" style="margin-bottom:0;">
+                    <label class="form-label">Slug</label>
+                    <input class="form-input" value="outreach-agent" style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--slate-50);color:var(--slate-500);" readonly>
+                    <div class="form-hint">Read-only after creation. Used internally and in API calls.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="form-field" style="margin-top:12px;margin-bottom:0;">
+                <label class="form-label">Description</label>
+                <textarea class="form-textarea" style="min-height:60px;" oninput="markDirty()">Handles prospecting and sales outreach. Sends emails, monitors responses, updates CRM.</textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-card-header"><h3>Model settings</h3></div>
+            <div class="section-card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Default model</label>
+                  <select class="form-select" style="width:100%;" onchange="markDirty()">
+                    <option selected>Claude Sonnet 4.6</option>
+                    <option>Claude Opus 4.6</option>
+                    <option>Claude Haiku 4.5</option>
+                    <option>Claude Opus 4</option>
+                    <option>Claude Sonnet 4</option>
+                  </select>
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Maximum context window</label>
+                  <select class="form-select" style="width:100%;" onchange="markDirty()">
+                    <option selected>Standard (200k tokens)</option>
+                    <option>Extended (500k tokens)</option>
+                    <option>Maximum</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="model-override" checked style="cursor:pointer;">
+                <label for="model-override" style="font-size:13px;color:var(--slate-600);cursor:pointer;">Allow workspaces to override the model for this agent</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-card-header"><h3>Communication templates</h3></div>
+            <div class="section-card-body">
+              <div class="form-field" style="margin-bottom:12px;">
+                <label class="form-label">Greeting template</label>
+                <textarea class="form-textarea" style="min-height:60px;font-family:'JetBrains Mono',monospace;font-size:12px;" oninput="markDirty()">Hi {{first_name}}, I'm reaching out on behalf of {{company_name}} regarding {{topic}}.</textarea>
+                <div class="form-hint">Workspaces can override this template at deployment time.</div>
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Closing template</label>
+                <textarea class="form-textarea" style="min-height:60px;font-family:'JetBrains Mono',monospace;font-size:12px;" oninput="markDirty()">Looking forward to connecting,
+{{agent_name}}</textarea>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-configure -->
+
+        <!-- ── BEHAVIOUR TAB ─────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-behaviour">
+          <div class="section-card">
+            <div class="section-card-header"><h3>System role</h3></div>
+            <div class="section-card-body">
+              <textarea class="form-textarea" style="min-height:200px;font-family:'JetBrains Mono',monospace;font-size:12px;" oninput="markDirty()">You are a skilled sales development representative working on behalf of a boutique B2B agency. Your role is to handle outbound prospecting and relationship nurturing.
+
+You have access to the client CRM, communication history, and knowledge base. Always review context before drafting any communication.
+
+Tone: Professional but warm. Never use jargon. Lead with outcomes. Max 3 paragraphs per email. Sign off with first name only.
+
+Constraints: Escalate to human review for deals over $20k before sending proposals. Never make pricing commitments without approval.
+
+Note: Workspaces may append workspace-specific instructions to this system role. Always defer to workspace-level instructions where they conflict.</textarea>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                <span style="font-size:11.5px;color:var(--slate-400);">2,028 characters</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-sm btn-secondary">Prompt library</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Additional instructions</h3>
+              <span style="font-size:12px;color:var(--slate-400);">Appended after memory, before user message</span>
+            </div>
+            <div class="section-card-body">
+              <textarea class="form-textarea" style="min-height:80px;font-family:'JetBrains Mono',monospace;font-size:12px;" oninput="markDirty()">If no CRM record exists for a prospect, create one before sending any outreach.</textarea>
+            </div>
+          </div>
+
+          <!-- Prompt history -->
+          <div class="prompt-history-panel">
+            <button class="prompt-history-toggle" onclick="togglePromptHistory()">
+              <span>Prompt history</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:12px;color:var(--slate-400);">v8 · edited May 3</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="prompt-history-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            </button>
+            <div id="prompt-history-body" style="display:none;padding:0 14px 14px;">
+              <table class="data-table" style="font-size:12px;">
+                <thead><tr><th>Version</th><th>Changed by</th><th>Date</th><th>Note</th><th></th></tr></thead>
+                <tbody>
+                  <tr><td><strong>v8</strong> <span class="badge badge-green" style="font-size:9px;">Current</span></td><td>Jordan K.</td><td>May 3</td><td>Added $20k escalation rule</td><td><button class="btn btn-xs btn-ghost" disabled>Current</button></td></tr>
+                  <tr><td>v7</td><td>Sarah L.</td><td>Apr 28</td><td>Tightened tone rules</td><td><button class="btn btn-xs btn-secondary">Roll back</button></td></tr>
+                  <tr><td>v6</td><td>Jordan K.</td><td>Apr 15</td><td>Added competitor context</td><td><button class="btn btn-xs btn-secondary">Roll back</button></td></tr>
+                  <tr><td>v5</td><td>Jordan K.</td><td>Mar 20</td><td>Initial outreach instructions</td><td><button class="btn btn-xs btn-secondary">Roll back</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div><!-- /tab-behaviour -->
+
+        <!-- ── CAPABILITIES TAB ──────────────────────────────────── -->
+        <div class="tab-panel" id="tab-capabilities">
+
+          <div class="skill-scope-bar">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Org-level skills. System skills are always inherited. Org-custom skills are available to all workspaces using this agent.
+            There is no workspace-specific tier here; workspace-scoped custom skills are managed at the workspace level.
+          </div>
+
+          <!-- Toolbar -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;">
+            <div style="display:flex;gap:6px;" id="skill-filter-chips">
+              <button class="conn-chip active" onclick="setSkillFilter('all',this)">All <span style="opacity:0.65;">11</span></button>
+              <button class="conn-chip" onclick="setSkillFilter('system',this)">System <span style="opacity:0.65;">8</span></button>
+              <button class="conn-chip" onclick="setSkillFilter('org-custom',this)">Org-custom <span style="opacity:0.65;">3</span></button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <div class="search-wrap" style="width:190px;">
+                <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input class="search-box" style="padding-left:28px;font-size:12px;" type="search" placeholder="Search skills...">
+              </div>
+              <button class="btn btn-sm btn-secondary" onclick="openSkillCreator()">+ Add custom skill</button>
+            </div>
+          </div>
+
+          <div class="skill-toggle-list">
+
+            <!-- System skills group -->
+            <div class="skill-group-header" onclick="toggleSkillGroup('grp-system',this)">
+              <span class="skill-group-label">
+                <span class="skill-group-caret" id="caret-grp-system">&#9660;</span>
+                <span class="tier-chip tier-system" style="margin-right:4px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System skills</span>
+                <span style="font-weight:500;color:var(--slate-500);">8 skills · always inherited</span>
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">Platform-managed</span>
+            </div>
+            <div id="grp-system" data-filter-group="system">
+
+              <!-- Send email -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Send email <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Gmail · Send outreach, follow-ups, and proposal emails</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-email" checked>
+                  <label class="toggle-track" for="tog-email"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- Read email inbox -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Read email inbox <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Gmail · Monitor and analyse incoming messages</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-read-email" checked>
+                  <label class="toggle-track" for="tog-read-email"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- SMS -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">SMS: send message <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Twilio · Send SMS to contacts</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-sms">
+                  <label class="toggle-track" for="tog-sms"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- HubSpot read -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">HubSpot: read contacts <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">HubSpot · Query contact records from CRM</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-hubspot-r" checked>
+                  <label class="toggle-track" for="tog-hubspot-r"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- HubSpot create -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">HubSpot: create contact <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">HubSpot · Create or update CRM contact records</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-hubspot-c" checked>
+                  <label class="toggle-track" for="tog-hubspot-c"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- Summarise content -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Summarise content <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Built-in · Condense long documents into key points</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-summarise" checked>
+                  <label class="toggle-track" for="tog-summarise"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- Extract entities -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Extract entities <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Built-in · Pull names, emails, and dates from text</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-extract" checked>
+                  <label class="toggle-track" for="tog-extract"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- Schedule follow-up -->
+              <div class="skill-toggle-row" data-filter="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Schedule follow-up <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Calendar · Create reminder and follow-up tasks</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-schedule" checked>
+                  <label class="toggle-track" for="tog-schedule"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+            </div><!-- /grp-system -->
+
+            <!-- Org-custom skills group -->
+            <div class="skill-group-header" onclick="toggleSkillGroup('grp-org-custom',this)">
+              <span class="skill-group-label">
+                <span class="skill-group-caret" id="caret-grp-org-custom">&#9660;</span>
+                <span class="tier-chip tier-org" style="margin-right:4px;">Org-custom skills</span>
+                <span style="font-weight:500;color:var(--slate-500);">3 of 3 enabled</span>
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">Managed by your organisation</span>
+            </div>
+            <div id="grp-org-custom" data-filter-group="org-custom">
+
+              <!-- Acme: Approval channel routing -->
+              <div class="skill-toggle-row" data-filter="org-custom">
+                <div class="skill-icon org-custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: Approval channel routing <span class="tier-chip tier-org">Org</span></div>
+                  <div class="skill-desc">Custom · Routes approval requests to the correct Slack channel based on deal size</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-org-1" checked>
+                  <label class="toggle-track" for="tog-org-1"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'org-custom')">&#8942;</button>
+              </div>
+
+              <!-- Acme: Internal escalation -->
+              <div class="skill-toggle-row" data-filter="org-custom">
+                <div class="skill-icon org-custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 11 21 7 17 3"/><line x1="21" y1="7" x2="9" y2="7"/><polyline points="7 21 3 17 7 13"/><line x1="15" y1="17" x2="3" y2="17"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: Internal escalation <span class="tier-chip tier-org">Org</span></div>
+                  <div class="skill-desc">Custom · Escalates stalled deals to a senior rep with context summary</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-org-2" checked>
+                  <label class="toggle-track" for="tog-org-2"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'org-custom')">&#8942;</button>
+              </div>
+
+              <!-- Acme: Compliance prefilter -->
+              <div class="skill-toggle-row" data-filter="org-custom">
+                <div class="skill-icon org-custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: Compliance prefilter <span class="tier-chip tier-org">Org</span></div>
+                  <div class="skill-desc">Custom · Checks outbound messages against GDPR and CAN-SPAM rules before sending</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-org-3" checked>
+                  <label class="toggle-track" for="tog-org-3"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="openCtxMenu(event,'org-custom')">&#8942;</button>
+              </div>
+
+            </div><!-- /grp-org-custom -->
+
+          </div><!-- /skill-toggle-list -->
+
+        </div><!-- /tab-capabilities -->
+
+        <!-- ── SCHEDULE TAB ───────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-schedule">
+          <div class="section-card">
+            <div class="section-card-header"><h3>Default schedule</h3></div>
+            <div class="section-card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Default CRON expression</label>
+                  <input class="form-input" value="0 9 * * 1-5" style="font-family:'JetBrains Mono',monospace;font-size:12px;" oninput="markDirty()">
+                  <div class="form-hint">Runs at 09:00, Mon to Fri. Workspaces can override.</div>
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Default timezone</label>
+                  <select class="form-select" style="width:100%;" onchange="markDirty()">
+                    <option selected>UTC</option>
+                    <option>America/New_York</option>
+                    <option>America/Los_Angeles</option>
+                    <option>Europe/London</option>
+                    <option>Europe/Berlin</option>
+                    <option>Asia/Tokyo</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Default activation window</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <input class="form-input" value="07:00" type="time" style="flex:1;" oninput="markDirty()">
+                    <span style="font-size:13px;color:var(--slate-400);">to</span>
+                    <input class="form-input" value="19:00" type="time" style="flex:1;" oninput="markDirty()">
+                  </div>
+                </div>
+              </div>
+              <div class="field-note">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Workspaces can override the schedule and timezone at deployment time.
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-card-header"><h3>Concurrency defaults</h3></div>
+            <div class="section-card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Concurrency policy</label><select class="form-select" style="width:100%;"><option selected>Skip if active</option><option>Coalesce if active</option><option>Always enqueue</option></select></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Max concurrent runs</label><input class="form-input" value="1" type="number"></div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-schedule -->
+
+        <!-- ── BUDGET TAB ─────────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-budget">
+          <div class="section-card">
+            <div class="section-card-header"><h3>Default budget per workspace</h3></div>
+            <div class="section-card-body">
+              <p style="font-size:13px;color:var(--slate-500);margin-bottom:14px;">These defaults apply to new deployments. Workspaces can set their own caps after deployment.</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Default daily budget (USD)</label>
+                  <input class="form-input" value="5.00" type="number" step="0.01" oninput="markDirty()">
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Default monthly budget (USD)</label>
+                  <input class="form-input" value="100.00" type="number" step="0.01" oninput="markDirty()">
+                </div>
+              </div>
+              <div class="field-note">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                These are defaults only. Workspaces can set their own caps; the org-level cap in the Spending page overrides all of them.
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-budget -->
+
+        <!-- ── DEPLOYMENTS TAB ────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-deployments">
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <div>
+              <div style="font-size:14px;font-weight:600;color:var(--slate-800);">4 workspaces</div>
+              <div style="font-size:12px;color:var(--slate-400);">All workspaces are inheriting this org-level definition.</div>
+            </div>
+            <button class="btn btn-sm btn-secondary" onclick="openDeployModal()">Deploy to additional workspaces</button>
+          </div>
+
+          <div class="card" style="overflow:hidden;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Workspace</th>
+                  <th>Status</th>
+                  <th>Overrides</th>
+                  <th>Custom skills</th>
+                  <th>Last run</th>
+                  <th>Runs (30d)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Acme Corp -->
+                <tr class="dep-row" onclick="openDeploymentsDrawer('acme')" style="cursor:pointer;" title="Click to view deployment details">
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span class="ws-dot" style="background:#6366f1;"></span>
+                      <div>
+                        <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Acme Corp</div>
+                        <div style="font-size:11px;color:var(--slate-400);">acme-corp</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="dep-status-active">Active</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">2</span> <span style="font-size:11.5px;color:var(--slate-400);">fields</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">3</span> <span style="font-size:11.5px;color:var(--slate-400);">added</span></td>
+                  <td style="font-size:12px;color:var(--slate-400);">May 5, 9:00am</td>
+                  <td style="font-size:13px;font-weight:600;color:var(--slate-700);">142</td>
+                  <td onclick="event.stopPropagation()">
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn btn-xs btn-secondary" onclick="openDeploymentsDrawer('acme')">Details</button>
+                      <button class="overflow-dot-btn" onclick="openRowCtxMenu(event,'acme')">&#8942;</button>
+                    </div>
+                  </td>
+                </tr>
+                <!-- TerraForm Partners -->
+                <tr class="dep-row" onclick="openDeploymentsDrawer('terraform')" style="cursor:pointer;" title="Click to view deployment details">
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span class="ws-dot" style="background:#10b981;"></span>
+                      <div>
+                        <div style="font-size:13px;font-weight:500;color:var(--slate-800);">TerraForm Partners</div>
+                        <div style="font-size:11px;color:var(--slate-400);">terraform-partners</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="dep-status-active">Active</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">0</span> <span style="font-size:11.5px;color:var(--slate-400);">fields</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">0</span> <span style="font-size:11.5px;color:var(--slate-400);">added</span></td>
+                  <td style="font-size:12px;color:var(--slate-400);">May 5, 9:02am</td>
+                  <td style="font-size:13px;font-weight:600;color:var(--slate-700);">89</td>
+                  <td onclick="event.stopPropagation()">
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn btn-xs btn-secondary" onclick="openDeploymentsDrawer('terraform')">Details</button>
+                      <button class="overflow-dot-btn" onclick="openRowCtxMenu(event,'terraform')">&#8942;</button>
+                    </div>
+                  </td>
+                </tr>
+                <!-- Revel Group -->
+                <tr class="dep-row" onclick="openDeploymentsDrawer('revel')" style="cursor:pointer;" title="Click to view deployment details">
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span class="ws-dot" style="background:#f59e0b;"></span>
+                      <div>
+                        <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Revel Group</div>
+                        <div style="font-size:11px;color:var(--slate-400);">revel-group</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="dep-status-custom">Customised</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:#1d4ed8;">5</span> <span style="font-size:11.5px;color:var(--slate-400);">fields</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">1</span> <span style="font-size:11.5px;color:var(--slate-400);">added</span></td>
+                  <td style="font-size:12px;color:var(--slate-400);">May 4, 9:00am</td>
+                  <td style="font-size:13px;font-weight:600;color:var(--slate-700);">67</td>
+                  <td onclick="event.stopPropagation()">
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn btn-xs btn-secondary" onclick="openDeploymentsDrawer('revel')">Details</button>
+                      <button class="overflow-dot-btn" onclick="openRowCtxMenu(event,'revel')">&#8942;</button>
+                    </div>
+                  </td>
+                </tr>
+                <!-- Globex Industries -->
+                <tr class="dep-row" onclick="openDeploymentsDrawer('globex')" style="cursor:pointer;" title="Click to view deployment details">
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span class="ws-dot" style="background:var(--slate-300);"></span>
+                      <div>
+                        <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Globex Industries</div>
+                        <div style="font-size:11px;color:var(--slate-400);">globex-industries</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="dep-status-paused">Paused</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">1</span> <span style="font-size:11.5px;color:var(--slate-400);">field</span></td>
+                  <td><span style="font-size:13px;font-weight:500;color:var(--slate-800);">0</span> <span style="font-size:11.5px;color:var(--slate-400);">added</span></td>
+                  <td style="font-size:12px;color:var(--slate-400);">Apr 29, 9:00am</td>
+                  <td style="font-size:13px;font-weight:600;color:var(--slate-700);">12</td>
+                  <td onclick="event.stopPropagation()">
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn btn-xs btn-secondary" onclick="openDeploymentsDrawer('globex')">Details</button>
+                      <button class="overflow-dot-btn" onclick="openRowCtxMenu(event,'globex')">&#8942;</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="margin-top:12px;font-size:12px;color:var(--slate-400);">
+            Rows with <span class="dep-status-custom" style="font-size:11px;">Customised</span> status have local overrides that will not be overwritten by org-level saves.
+            <a href="#" style="color:var(--indigo-600);font-weight:500;margin-left:6px;">Learn about override inheritance</a>
+          </div>
+        </div><!-- /tab-deployments -->
+
+      </div><!-- /agent-content -->
+    </div><!-- /agent-layout -->
+  </div>
+</div>
+
+<!-- ── SKILL CONTEXT MENU ─────────────────────────────────────────── -->
+<div id="skill-ctx-menu" class="skill-ctx-menu" role="menu"></div>
+
+<!-- ── ROW OVERFLOW MENU ──────────────────────────────────────────── -->
+<div id="row-ctx-menu" class="skill-ctx-menu" role="menu"></div>
+
+<!-- ── DEPLOYMENTS DRAWER ─────────────────────────────────────────── -->
+<div id="deployments-drawer-overlay" class="deployments-drawer-overlay" onclick="if(event.target===this)closeDeploymentsDrawer()">
+  <div class="deployments-drawer">
+    <div class="deployments-drawer-header">
+      <div>
+        <h2 id="dd-title" style="font-size:16px;font-weight:700;color:var(--slate-800);">Workspace deployment</h2>
+        <div id="dd-subtitle" style="font-size:12px;color:var(--slate-400);margin-top:2px;"></div>
+      </div>
+      <button class="drawer-close" onclick="closeDeploymentsDrawer()">&times;</button>
+    </div>
+    <div class="deployments-drawer-body" id="dd-body">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ── DEPLOY MODAL ───────────────────────────────────────────────── -->
+<div id="deploy-modal-overlay" class="deploy-modal-overlay" onclick="if(event.target===this)closeDeployModal()">
+  <div class="deploy-modal">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h2 style="font-size:16px;font-weight:700;color:var(--slate-800);">Deploy to workspaces</h2>
+      <button class="drawer-close" onclick="closeDeployModal()">&times;</button>
+    </div>
+    <p style="font-size:13px;color:var(--slate-500);margin-bottom:16px;">Select workspaces to deploy this agent definition to. Default schedule and budget caps will be applied.</p>
+    <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px;">
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--slate-100);cursor:pointer;font-size:13px;color:var(--slate-500);font-style:italic;">
+        <input type="checkbox" disabled checked> Acme Corp (already deployed)
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--slate-100);cursor:pointer;font-size:13px;color:var(--slate-500);font-style:italic;">
+        <input type="checkbox" disabled checked> TerraForm Partners (already deployed)
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--slate-100);cursor:pointer;font-size:13px;color:var(--slate-500);font-style:italic;">
+        <input type="checkbox" disabled checked> Revel Group (already deployed)
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--slate-100);cursor:pointer;font-size:13px;color:var(--slate-500);font-style:italic;">
+        <input type="checkbox" disabled checked> Globex Industries (already deployed)
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--slate-100);cursor:pointer;font-size:13px;color:var(--slate-800);">
+        <input type="checkbox" id="deploy-pioneer"> Pioneer Analytics
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;font-size:13px;color:var(--slate-800);">
+        <input type="checkbox" id="deploy-meridian"> Meridian Health
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-sm btn-secondary" onclick="closeDeployModal()">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="closeDeployModal()">Deploy selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SKILL CREATOR DRAWER (scope locked to Org) ────────────────── -->
+<div id="skill-creator-overlay" class="creator-drawer-overlay" onclick="if(event.target===this)closeSkillCreator()">
+  <div class="creator-drawer">
+    <div class="creator-drawer-header">
+      <div>
+        <h2 style="font-size:16px;font-weight:700;color:var(--slate-800);">Add org-custom skill</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">
+          Save to: <span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:1px 7px;font-size:11.5px;font-weight:600;">Organisation</span>
+          <span style="color:var(--slate-300);margin:0 6px;">·</span>
+          <span style="color:var(--slate-400);font-size:11.5px;">Scope is fixed at the org level on this page</span>
+        </div>
+      </div>
+      <button class="drawer-close" onclick="closeSkillCreator()">&times;</button>
+    </div>
+    <div class="tabs" style="margin:0 20px;padding-top:12px;border-bottom:1px solid var(--slate-100);">
+      <button class="tab-btn active" onclick="switchCreatorTab('basic',this)">Basic info</button>
+      <button class="tab-btn" onclick="switchCreatorTab('parameters',this)">Parameters</button>
+      <button class="tab-btn" onclick="switchCreatorTab('implementation',this)">Implementation</button>
+      <button class="tab-btn" onclick="switchCreatorTab('test',this)">Test</button>
+    </div>
+    <div class="creator-drawer-body">
+      <div id="creator-tab-basic" class="creator-tab-panel">
+        <div class="form-field">
+          <label class="form-label">Skill name <span style="color:var(--red-500);">*</span></label>
+          <input class="form-input" id="creator-name" placeholder="e.g. Acme: sentiment routing" oninput="autoSlug()">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Slug (auto-generated)</label>
+          <input class="form-input" id="creator-slug" placeholder="acme-sentiment-routing" style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--slate-50);color:var(--slate-500);" readonly>
+          <div class="form-hint">Used internally. Letters, numbers, hyphens only.</div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Description</label>
+          <textarea class="form-textarea" style="min-height:64px;" placeholder="What does this skill do?"></textarea>
+        </div>
+        <div class="form-field" style="margin-bottom:0;">
+          <label class="form-label">Category</label>
+          <select class="form-select" style="width:100%;">
+            <option>Communication</option>
+            <option>Data</option>
+            <option>Analysis</option>
+            <option selected>Custom</option>
+          </select>
+        </div>
+      </div>
+      <div id="creator-tab-parameters" class="creator-tab-panel hidden">
+        <p style="font-size:13px;color:var(--slate-500);margin-bottom:14px;">Define the inputs this skill accepts from the agent.</p>
+        <div style="border:1px solid var(--slate-200);border-radius:8px;padding:12px;background:var(--slate-50);font-size:13px;color:var(--slate-500);">No parameters yet. Click "Add parameter" to define inputs.</div>
+        <button class="btn btn-sm btn-secondary" style="margin-top:10px;">+ Add parameter</button>
+      </div>
+      <div id="creator-tab-implementation" class="creator-tab-panel hidden">
+        <p style="font-size:13px;color:var(--slate-500);margin-bottom:14px;">Choose how this skill executes.</p>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label class="mode-card selected"><input type="radio" name="impl-type" checked> <div><div class="mode-card-label">Built-in template</div><div class="mode-card-desc">Start from a pre-built template</div></div></label>
+          <label class="mode-card"><input type="radio" name="impl-type"> <div><div class="mode-card-label">Custom code</div><div class="mode-card-desc">JavaScript or Python handler</div></div></label>
+          <label class="mode-card"><input type="radio" name="impl-type"> <div><div class="mode-card-label">External webhook</div><div class="mode-card-desc">POST to an external URL</div></div></label>
+        </div>
+      </div>
+      <div id="creator-tab-test" class="creator-tab-panel hidden">
+        <p style="font-size:13px;color:var(--slate-500);">Save the skill first, then test it with sample inputs.</p>
+      </div>
+    </div>
+    <div class="creator-drawer-footer">
+      <button class="btn btn-primary" onclick="closeSkillCreator()">Save org skill</button>
+      <button class="btn btn-secondary" onclick="closeSkillCreator()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Tab switching ────────────────────────────────────────────────── */
+function switchAgentTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#agent-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+/* ── Dirty state ─────────────────────────────────────────────────── */
+function markDirty() {
+  document.getElementById('dirty-actions').style.display = 'flex';
+}
+function discardChanges() {
+  document.getElementById('dirty-actions').style.display = 'none';
+}
+
+/* ── Skill group collapse ─────────────────────────────────────────── */
+function toggleSkillGroup(groupId, headerEl) {
+  const body = document.getElementById(groupId);
+  const caret = document.getElementById('caret-' + groupId);
+  if (!body) return;
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  if (caret) caret.classList.toggle('collapsed', !hidden);
+}
+
+/* ── Skill filter chips ───────────────────────────────────────────── */
+function setSkillFilter(filter, btn) {
+  document.querySelectorAll('#skill-filter-chips .conn-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.skill-toggle-row').forEach(row => {
+    if (filter === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.dataset.filter === filter) ? '' : 'none';
+    }
+  });
+}
+
+/* ── Skill context menus ──────────────────────────────────────────── */
+function openCtxMenu(event, tier) {
+  event.stopPropagation();
+  const menu = document.getElementById('skill-ctx-menu');
+  menu.innerHTML = '';
+
+  let items = [];
+  if (tier === 'system') {
+    items = [
+      { label: 'View source', icon: '&#128196;' },
+      { label: 'Configure for this agent', icon: '&#9881;' },
+      { label: 'Disable for this agent', icon: '&#128683;', cls: '' },
+    ];
+  } else if (tier === 'org-custom') {
+    items = [
+      { label: 'Edit skill', icon: '&#9998;' },
+      { label: 'Configure parameters', icon: '&#9881;' },
+      { label: 'View', icon: '&#128196;' },
+      { sep: true },
+      { label: 'Disable for this agent', icon: '&#128683;' },
+      { label: 'Delete skill', icon: '&#128465;', cls: 'ctx-danger',
+        note: 'Inheriting workspaces will lose this skill' },
+    ];
+  }
+
+  items.forEach(item => {
+    if (item.sep) {
+      const sep = document.createElement('hr');
+      sep.className = 'ctx-separator';
+      menu.appendChild(sep);
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.className = 'ctx-item' + (item.cls ? ' ' + item.cls : '');
+    btn.innerHTML = `<span style="font-size:14px;width:18px;text-align:center;">${item.icon}</span><span>${item.label}</span>`;
+    if (item.note) {
+      btn.innerHTML += `<span style="font-size:10.5px;color:var(--amber-600);margin-left:auto;white-space:nowrap;">${item.note}</span>`;
+    }
+    btn.onclick = () => { menu.classList.remove('open'); };
+    menu.appendChild(btn);
+  });
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  menu.style.top = rect.bottom + 4 + 'px';
+  menu.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
+  menu.classList.add('open');
+}
+
+/* ── Row overflow menu (deployments table) ───────────────────────── */
+function openRowCtxMenu(event, ws) {
+  event.stopPropagation();
+  const menu = document.getElementById('row-ctx-menu');
+  menu.innerHTML = '';
+  const items = [
+    { label: 'View workspace agent edit', icon: '&#8594;' },
+    { label: 'Force re-sync from org', icon: '&#8635;' },
+    { sep: true },
+    { label: ws === 'globex' ? 'Resume agent' : 'Pause agent', icon: ws === 'globex' ? '&#9654;' : '&#9646;&#9646;' },
+  ];
+  items.forEach(item => {
+    if (item.sep) { const s = document.createElement('hr'); s.className = 'ctx-separator'; menu.appendChild(s); return; }
+    const btn = document.createElement('button');
+    btn.className = 'ctx-item';
+    btn.innerHTML = `<span style="font-size:14px;width:18px;text-align:center;">${item.icon}</span><span>${item.label}</span>`;
+    btn.onclick = () => { menu.classList.remove('open'); };
+    menu.appendChild(btn);
+  });
+  const rect = event.currentTarget.getBoundingClientRect();
+  menu.style.top = rect.bottom + 4 + 'px';
+  menu.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
+  menu.classList.add('open');
+}
+
+document.addEventListener('click', () => {
+  document.getElementById('skill-ctx-menu').classList.remove('open');
+  document.getElementById('row-ctx-menu').classList.remove('open');
+});
+
+/* ── Deployments drawer ───────────────────────────────────────────── */
+const WORKSPACE_DATA = {
+  acme: {
+    name: 'Acme Corp',
+    slug: 'acme-corp',
+    color: '#6366f1',
+    status: 'Active',
+    overrides: [
+      { field: 'Agent name', org: 'Outreach Agent', ws: 'Acme Outreach Bot', changed: true },
+      { field: 'Default model', org: 'Claude Sonnet 4.6', ws: 'Claude Opus 4.6', changed: true },
+      { field: 'System role', org: '(org default)', ws: 'Unchanged', changed: false },
+      { field: 'Monthly budget', org: '$100.00', ws: '$150.00 (increased)', changed: true },
+    ],
+    customSkills: ['Acme: Outreach scoring rubric', 'Acme: Lead qualification', 'Acme: Deal stage mapping'],
+    runs: [
+      { type: 'heartbeat', status: 'completed', time: 'May 5, 9:00am', duration: '2m 14s' },
+      { type: 'heartbeat', status: 'completed', time: 'May 4, 9:00am', duration: '1m 49s' },
+      { type: 'manual trigger', status: 'timeout', time: 'May 3, 2:15pm', duration: '10m 01s' },
+    ],
+  },
+  terraform: {
+    name: 'TerraForm Partners',
+    slug: 'terraform-partners',
+    color: '#10b981',
+    status: 'Active',
+    overrides: [],
+    customSkills: [],
+    runs: [
+      { type: 'heartbeat', status: 'completed', time: 'May 5, 9:02am', duration: '1m 55s' },
+      { type: 'heartbeat', status: 'completed', time: 'May 4, 9:01am', duration: '2m 02s' },
+    ],
+  },
+  revel: {
+    name: 'Revel Group',
+    slug: 'revel-group',
+    color: '#f59e0b',
+    status: 'Customised',
+    overrides: [
+      { field: 'Agent name', org: 'Outreach Agent', ws: 'Revel Outreach', changed: true },
+      { field: 'Default model', org: 'Claude Sonnet 4.6', ws: 'Claude Haiku 4.5', changed: true },
+      { field: 'CRON schedule', org: '0 9 * * 1-5', ws: '0 8 * * 1-5 (earlier start)', changed: true },
+      { field: 'Timezone', org: 'UTC', ws: 'America/New_York', changed: true },
+      { field: 'Monthly budget', org: '$100.00', ws: '$60.00 (reduced)', changed: true },
+    ],
+    customSkills: ['Revel: VIP account flag'],
+    runs: [
+      { type: 'heartbeat', status: 'completed', time: 'May 4, 9:00am', duration: '3m 11s' },
+      { type: 'heartbeat', status: 'failed', time: 'May 3, 9:00am', duration: '0m 42s' },
+    ],
+  },
+  globex: {
+    name: 'Globex Industries',
+    slug: 'globex-industries',
+    color: '#94a3b8',
+    status: 'Paused',
+    overrides: [
+      { field: 'Monthly budget', org: '$100.00', ws: '$25.00 (reduced)', changed: true },
+    ],
+    customSkills: [],
+    runs: [
+      { type: 'heartbeat', status: 'completed', time: 'Apr 29, 9:00am', duration: '1m 28s' },
+    ],
+  },
+};
+
+function openDeploymentsDrawer(wsKey) {
+  const ws = WORKSPACE_DATA[wsKey];
+  if (!ws) return;
+
+  document.getElementById('dd-title').textContent = ws.name + ' — Deployment details';
+  document.getElementById('dd-subtitle').textContent = ws.slug + ' · ' + ws.status;
+
+  const statusCls = ws.status === 'Active' ? 'dep-status-active'
+    : ws.status === 'Paused' ? 'dep-status-paused' : 'dep-status-custom';
+
+  const overridesHtml = ws.overrides.length === 0
+    ? '<div style="font-size:13px;color:var(--slate-400);padding:12px 0;">No overrides. This workspace uses all org-level defaults.</div>'
+    : ws.overrides.map(o => `
+        <div class="override-row">
+          <div>
+            <div class="override-field">Org value</div>
+            <div class="override-val">${o.field}: ${o.org}</div>
+          </div>
+          <div>
+            <div class="override-field">Workspace override</div>
+            <div class="override-val ${o.changed ? 'changed' : ''}">${o.ws}</div>
+          </div>
+        </div>`).join('');
+
+  const customSkillsHtml = ws.customSkills.length === 0
+    ? '<div style="font-size:13px;color:var(--slate-400);">No workspace-scoped custom skills added.</div>'
+    : ws.customSkills.map(s => `<div style="padding:6px 0;border-bottom:1px solid var(--slate-100);font-size:13px;display:flex;align-items:center;gap:8px;"><span class="tier-chip" style="background:var(--indigo-50);color:var(--indigo-700);border:1px solid var(--indigo-200);">This client</span>${s}</div>`).join('');
+
+  const runsHtml = ws.runs.map(r => `
+    <tr>
+      <td style="font-size:12.5px;">${r.type}</td>
+      <td><span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'failed' ? 'badge-red' : 'badge-amber'}" style="font-size:10px;">${r.status}</span></td>
+      <td style="font-size:12px;color:var(--slate-400);">${r.time}</td>
+      <td style="font-size:12px;color:var(--slate-400);">${r.duration}</td>
+      <td><a href="run-trace.html" class="btn btn-xs btn-secondary">Trace</a></td>
+    </tr>`).join('');
+
+  document.getElementById('dd-body').innerHTML = `
+    <div style="margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span class="ws-dot" style="background:${ws.color};width:10px;height:10px;"></span>
+        <span style="font-size:15px;font-weight:700;color:var(--slate-800);">${ws.name}</span>
+        <span class="${statusCls}">${ws.status}</span>
+      </div>
+      <a href="agent-edit.html" style="font-size:12.5px;color:var(--indigo-600);font-weight:600;display:inline-flex;align-items:center;gap:4px;">
+        View workspace agent edit &#8594;
+      </a>
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:10px;">
+        Field overrides (${ws.overrides.length})
+      </div>
+      ${overridesHtml}
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:10px;">
+        Workspace custom skills (${ws.customSkills.length})
+      </div>
+      ${customSkillsHtml}
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:10px;">
+        Recent runs
+      </div>
+      <table class="data-table" style="font-size:12px;">
+        <thead><tr><th>Type</th><th>Status</th><th>Started</th><th>Duration</th><th></th></tr></thead>
+        <tbody>${runsHtml}</tbody>
+      </table>
+    </div>
+
+    <div style="padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-secondary" onclick="closeDeploymentsDrawer()">Force re-sync from org</button>
+      <button class="btn btn-sm btn-ghost" style="color:var(--red-500);" onclick="closeDeploymentsDrawer()">${ws.status === 'Paused' ? 'Resume agent' : 'Pause agent'}</button>
+    </div>
+
+    <div style="margin-top:8px;font-size:11.5px;color:var(--slate-400);">
+      Force re-sync will overwrite all local overrides except custom skills. This action cannot be undone.
+    </div>
+  `;
+
+  document.getElementById('deployments-drawer-overlay').classList.add('open');
+}
+
+function closeDeploymentsDrawer() {
+  document.getElementById('deployments-drawer-overlay').classList.remove('open');
+}
+
+/* ── Deploy modal ─────────────────────────────────────────────────── */
+function openDeployModal() {
+  document.getElementById('deploy-modal-overlay').classList.add('open');
+}
+function closeDeployModal() {
+  document.getElementById('deploy-modal-overlay').classList.remove('open');
+}
+
+/* ── Skill creator ────────────────────────────────────────────────── */
+function openSkillCreator() {
+  document.getElementById('skill-creator-overlay').classList.add('open');
+}
+function closeSkillCreator() {
+  document.getElementById('skill-creator-overlay').classList.remove('open');
+}
+function autoSlug() {
+  const name = document.getElementById('creator-name').value;
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('creator-slug').value = slug;
+}
+function switchCreatorTab(name, btn) {
+  document.querySelectorAll('.creator-tab-panel').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.creator-drawer .tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('creator-tab-' + name).classList.remove('hidden');
+  btn.classList.add('active');
+}
+
+/* ── Prompt history ───────────────────────────────────────────────── */
+function togglePromptHistory() {
+  const body = document.getElementById('prompt-history-body');
+  const chevron = document.getElementById('prompt-history-chevron');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  chevron.style.transform = open ? '' : 'rotate(180deg)';
+}
+</script>
+</body>
+</html>

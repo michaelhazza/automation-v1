@@ -882,3 +882,29 @@ Index and log updates:
 - `prototypes/consolidation-2026-05-06/agent-edit.html` (tier CSS, tier chips on 14 skill rows, scope breadcrumb, openCtxMenu/closeCtxMenu JS, skill creator drawer HTML + switchCreatorTab/autoSlug/selectIcon/addCreatorParam/switchImplType/openSkillCreator/closeSkillCreator/saveAndEnableSkill/saveSkillDraft/addNewSkillRow/showToast JS, Escape key handler extended)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead 7b-9, meta round, description, decisions bullet, Round 7b-9 section + card)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-10 — 2026-05-06 15:00
+**Operator feedback:** Build org-agent-edit.html (org-level agent definition editor) and before-org-agent-edit.html companion. Requirements: 6 tabs (Configure, Behaviour, Capabilities, Schedule, Budget, Deployments), two-tier skill view (System + Org-custom only, no This client tier), Deployments tab with 4-workspace table and row-click drawer, deploy-to-workspaces modal, skill creator locked to Org scope. before state depicts flat AdminAgentEditPage with annotations and problems list.
+
+**Changes made:**
+- Created `prototypes/consolidation-2026-05-06/org-agent-edit.html`: Org-level agent definition editor with 6 tabs. Configure tab: name, slug (read-only), description, default model, max context window, greeting/closing templates. Behaviour tab: system role textarea with prompt history (collapsible). Capabilities tab: skill-scope-bar explains org context; two-group toggle list (System skills x8, Org-custom skills x3 with amber icon); filter chips (All 11 / System 8 / Org-custom 3); three-dot menus differ per tier (System: View source, Configure, Disable; Org-custom: Edit, Configure, View, Disable, Delete with inheritance warning). Skill creator drawer scope locked to Organisation with blue chip indicator. Schedule tab: default CRON, timezone, activation window with workspace-override note. Budget tab: default daily and monthly per workspace with org-cap note. Deployments tab: 4-workspace table (Acme Corp Active 2 overrides 3 custom 142 runs, TerraForm Active 0 overrides 89 runs, Revel Customised 5 overrides 1 custom 67 runs, Globex Paused 1 override 12 runs); row-click opens 520px drawer with workspace summary, side-by-side override comparison (Org value vs Workspace override with blue changed highlight), custom skills list, recent runs table, view workspace agent edit link, force re-sync and pause/resume buttons. Deploy to additional workspaces modal with workspace checklist (4 already-deployed grayed out, 2 new options). Page header: h1 + status badge + "Org-level definition - Deployed to 4 of 4 workspaces" subtitle. Org propagation banner in blue. Sidebar mode = org, activeHref = org-agent-edit.html.
+- Created `prototypes/consolidation-2026-05-06/before-org-agent-edit.html`: Simulated flat production AdminAgentEditPage. Includes: amber BEFORE banner with route reference, simulated production sidebar (11 flat items, no section grouping, no org-level indicator), breadcrumb, flat form (name, slug, description, model, status, system role all on one card), skills picker with no tier chips (5 rows, no source indicator), schedule inline (no default/override framing), budget inline (no per-workspace context), submit buttons. Annotations on 4 sections. Problems box with 8 items covering: no org-level identity, no workspace visibility, no override visibility, no skill tiers, no deployments view, mixed schedule/budget framing, no deploy action on page, no shared state between org and workspace editing.
+- Updated `prototypes/consolidation-2026-05-06/_sidebar.js`: Org mode Build section Agents link changed from stub to `org-agent-edit.html`.
+- Updated `prototypes/consolidation-2026-05-06/index.html`: masthead updated to Round 7b-10, description updated, files count updated, new decisions bullet added, new Org Agent Edit card added in Primitive consolidation section (between Agent Edit and Run Trace).
+- Appended this entry to `tasks/builds/consolidation-2026-05-06/mockup-log.md`.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Primary task is "configure the org-level agent definition". Page opens on Configure tab. Deployments tab is secondary and requires a click to reach.
+- Default to hidden: yes -- No KPI tiles. Override counts shown inline as numbers, not a separate dashboard. Drawer hides detail until the admin deliberately clicks a workspace row.
+- One primary action: yes -- Save changes is the sole primary action (dirty state only). Deployments tab has "Deploy to additional workspaces" as its one action.
+- Inline state: yes -- Status badge inline in breadcrumb. "Deployed to 4 of 4 workspaces" subtitle is inline on the page. Workspace status (Active/Paused/Customised) shown as inline badge in the table, not a separate status page.
+- Re-check passed: yes -- An org admin landing on this page knows immediately: (a) this is the org-level definition, (b) 4 workspaces use it, (c) they can edit and save or go to Deployments to review overrides first.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/org-agent-edit.html` (created)
+- `prototypes/consolidation-2026-05-06/before-org-agent-edit.html` (created)
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (Org Build Agents link updated)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions, card added)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

@@ -138,7 +138,7 @@ const NAV = {
       {
         label: 'Build',
         items: [
-          { label: 'Agents',      href: '#',                           icon: 'agents',     stub: true },
+          { label: 'Agents',      href: 'org-agent-edit.html',         icon: 'agents' },
           { label: 'Automations', href: '#',                           icon: 'automations', stub: true },
           { label: 'Skills',      href: '#',                           icon: 'skills',     stub: true },
           { label: 'Knowledge',   href: 'org-knowledge.html',          icon: 'knowledge' },
