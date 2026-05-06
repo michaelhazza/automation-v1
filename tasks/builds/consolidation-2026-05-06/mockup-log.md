@@ -821,3 +821,64 @@ index.html:
 - `prototypes/consolidation-2026-05-06/_sidebar.js` (org mode Knowledge link: stub removed, href set to org-knowledge.html)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead 7b-8, meta round, description, decisions bullet, Round 7b-8 section + 2 cards)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-9 — 2026-05-06
+**Operator feedback:** Update agent-edit.html Capabilities tab to be inheritance-aware. Three-dot overflow menu must vary by skill tier (System / Org / This client). Add tier chips to each skill row. Wire "+ Add custom skill" to a creation drawer. Add scope breadcrumb above skill list.
+
+**Changes made:**
+
+CSS additions (agent-edit.html inline style block):
+- `.tier-chip`, `.tier-system` (slate, lock SVG), `.tier-org` (blue), `.tier-subaccount` (indigo) badge styles
+- `.skill-ctx-menu` fixed-position contextual menu with `.ctx-item`, `.ctx-danger`, `.ctx-link`, `.ctx-separator`
+- `.skill-scope-bar` breadcrumb/context line at top of Capabilities tab
+- `.creator-drawer-overlay` / `.creator-drawer` / `.creator-drawer-header` / `.creator-drawer-body` / `.creator-drawer-footer` 560px skill creation drawer
+- `.param-row` / `.param-row-header` / `.param-drag` / `.param-name-input` / `.param-type-select` / `.param-required-toggle` / `.param-delete-btn` / `.param-desc-input` for parameter list
+- `.scope-radio-row` / `.scope-label` / `.scope-option` for footer save-scope toggle
+- `.icon-picker-grid` / `.icon-option` for icon selection grid in Basic info tab
+- `.creator-tab-panel` / `.creator-tab-panel.hidden` for tab switching
+
+Skill tier assignment (14 skills realistically tiered):
+- Communication: Send email (System), Read email inbox (System), LinkedIn: post message (Org), SMS: send message (System)
+- Data: HubSpot: read contacts (System), HubSpot: create contact (System), Salesforce: read records (Org), Stripe: read payments (System, rate-limited)
+- Analysis: Summarise content (System), Extract entities (System), Sentiment analysis (Org, available not enabled)
+- Custom: Acme: Outreach scoring rubric (This client), Acme: Lead qualification (This client), Acme: Deal stage mapping (This client)
+
+Scope breadcrumb bar added above toolbar: "Showing skills available to: Outreach Agent in Acme Corp workspace."
+
+Three-dot overflow menu (openCtxMenu(event, tier)):
+- System skill menu: View source, Configure for this agent, separator, Disable for this agent, read-only note
+- Org skill menu: View source, Configure for this agent, Override locally for this client, separator, Disable for this agent, separator, "Edit at organisation level" link
+- This client menu: Edit skill (opens skill-edit-drawer), Configure for this agent, View parameters, separator, Disable for this agent, separator, Delete skill (confirm())
+- openCtxMenu() builds menu HTML dynamically, positions fixed below the clicked button using getBoundingClientRect
+- closeCtxMenu() on outside click via document click listener + Escape key
+- confirmDeleteSkill() fires a confirm() dialog and shows a toast on confirm
+
+Skill creator drawer (openSkillCreator / closeSkillCreator / addCustomSkillDrawer):
+- openSkillCreator() / closeSkillCreator() toggle .open class; Escape and overlay-click close
+- 4 tabs wired via switchCreatorTab(): Basic info (default), Parameters, Implementation, Test
+- Basic info: Name (required), Slug (auto-generated with autoSlug(), edit/lock toggle), Description textarea, Category dropdown, 8-cell icon picker
+- Parameters tab: 2 pre-populated example params (prospect_id, context_notes); "+ Add parameter" button appends new param-row; each row has drag handle, name input, type select, required toggle, delete button, description input
+- Implementation tab: 3 radio cards (Built-in template, Custom code, External webhook); switchImplType() shows/hides panels; Built-in: template dropdown + showTemplateConfig() config description; Custom code: dark-theme code editor textarea + runtime select; External webhook: URL + auth header + response schema textarea
+- Test tab: parameter inputs pre-rendered; "Run test" shows mock JSON result panel
+- Footer: scope toggle (This client / Organisation both enabled as mock), Cancel, Save as draft, Save and enable
+- saveAndEnableSkill() calls addNewSkillRow(name) which prepends a live row to grp-custom with This client tier badge and checked toggle, then fires showToast()
+- showToast() creates a positioned toast div, auto-removes after 2.5s
+
+Index and log updates:
+- index.html masthead: eyebrow "Prototype Round 7b-9", description paragraph updated, meta-row round updated to 7b-9
+- index.html decisions box: Round 7b-9 bullet added
+- index.html: new "Round 7b-9: Capabilities inheritance" section with 1 card linking to agent-edit.html
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Capabilities tab opens on the skill list (toggle on/off is the primary task). Tier chips and context menu are secondary signals that only matter when the operator wants to do more than toggle. Breadcrumb context clarifies the scope without blocking the primary flow.
+- Default to hidden: yes -- contextual menu is hidden until three-dot click. Creator drawer is hidden until button click. Test result in creator hidden until "Run test". No dashboards or KPI tiles added.
+- One primary action: yes -- Capabilities tab primary action remains toggling a skill. Creator drawer primary action is "Save and enable". Context menus are secondary controls.
+- Inline state: yes -- tier shown as a chip inline on the skill name (3-5px overhead per row). No separate tier legend panel or aside needed.
+- Re-check passed: yes -- a non-technical operator can still toggle any skill on/off without needing to understand tiers. The tier chips and overflow menu are progressive disclosure for when they need more control. The context menu labels are plain English ("View source", "Override locally", "Edit skill", "Delete skill").
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (tier CSS, tier chips on 14 skill rows, scope breadcrumb, openCtxMenu/closeCtxMenu JS, skill creator drawer HTML + switchCreatorTab/autoSlug/selectIcon/addCreatorParam/switchImplType/openSkillCreator/closeSkillCreator/saveAndEnableSkill/saveSkillDraft/addNewSkillRow/showToast JS, Escape key handler extended)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead 7b-9, meta round, description, decisions bullet, Round 7b-9 section + card)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

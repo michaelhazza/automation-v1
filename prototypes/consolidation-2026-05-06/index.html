@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-8
+    Prototype Round 7b-9
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-8: Org-level Knowledge page (org-knowledge.html) plus before-org-knowledge.html. Memory and Documents tabs at org scope. "Used by N workspaces" indicators. Per-subaccount inheritance toggles in drawer. Rich-text authoring. _sidebar.js org-mode Knowledge link updated from stub to org-knowledge.html. Round 7b-7: Knowledge page restructured into Memory / Notes / Documents tabs.</p>
+  <p>Round 7b-9: agent-edit.html Capabilities tab is now inheritance-aware. Each skill row shows a tier chip (System / Org / This client). Three-dot overflow menu renders different menu items per tier. Custom skill creator drawer added with 4-tab flow (Basic info, Parameters, Implementation, Test). Scope breadcrumb above the skill list clarifies multi-tier context. Round 7b-8: org-knowledge.html added. Round 7b-7: Knowledge restructured into Memory / Notes / Documents tabs.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-8</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-9</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 50+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -133,6 +133,7 @@
     <li>Round 7b-6: Automations page restructured: three tabs (Workflows / Automations / Triggers) replace four separate routes. Context-aware primary CTA. Cross-tab navigation via trig-chip clicks. before-automations.html updated to 3-column before-state showing all three production pages with annotated problems.</li>
     <li>Round 7b-7: Knowledge page restructured: Memory / Notes / Documents tabs replace Summary / Auto-memory / Authored. Memory tab combines authored entries and memory blocks with org-inheritance chips, tier badges, and 640px rich-text drawer (contentEditable + execCommand toolbar). Notes tab is renamed Auto-memory with promote-to-memory action. Documents tab is new: 2-column card grid, org-inherited section, upload modal, Drive connect, version history collapsible in doc drawer.</li>
     <li>Round 7b-8: Org Knowledge page (org-knowledge.html): unified org-level Knowledge with Memory and Documents tabs. Memory tab shows 7 blocks (3 tiers) and 5 authored entries with "Inherited by N of 4 workspaces" usage indicators. Documents tab shows 7-card 2-column grid. Drawer includes per-subaccount inheritance toggles and "Override at workspace level" links. Upload modal includes "Push to all workspaces" toggle. _sidebar.js org Build section Knowledge link promoted from stub to org-knowledge.html.</li>
+    <li>Round 7b-9: Capabilities tab is inheritance-aware. Skills assigned realistic tiers (System / Org / This client). Tier chip on every skill row. Three-dot overflow menu builds dynamically per tier: System (View source, Configure, Disable only), Org (adds Override locally and Edit at org level link), This client (full: Edit, Configure, View parameters, Disable, Delete). Skill creator drawer with 4 tabs (Basic info, Parameters, Implementation, Test). Scope breadcrumb above skill list. Scope toggle in footer (This client / Organisation). Save and enable adds skill row live.</li>
   </ul>
 </div>
 
@@ -953,6 +954,40 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="before-org-knowledge.html">Open before &#8594;</a>
         <a href="org-knowledge.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-9: Capabilities inheritance ───────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#4f46e5"></div>
+    Round 7b-9: Agent Edit, Capabilities tab (inheritance-aware)
+  </div>
+
+  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
+    <strong>Updated surface:</strong> agent-edit.html Capabilities tab now reflects the three-tier skill inheritance model (System / Org / This client). Each skill row shows a tier chip. The three-dot overflow menu is context-aware: System skills show read-only options only, Org skills add an "Override locally" option and a link to edit at org level, This client skills show full edit/delete control. A breadcrumb context line above the list clarifies which workspace is being configured. The "+ Add custom skill" button opens a 4-tab creation drawer (Basic info / Parameters / Implementation / Test) with a scope toggle in the footer.
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Agent Edit, Capabilities tab (updated)</div>
+        <div class="proto-card-file">agent-edit.html</div>
+      </div>
+      <div class="proto-card-desc">Click the three-dot on any skill row: System skill shows "View source / Configure / Disable". Org skill shows those plus "Override locally" and "Edit at organisation level" link. This client skill shows "Edit skill / Configure / View parameters / Disable / Delete". Click "+ Add custom skill" to open the 4-tab creation drawer. The scope breadcrumb at top of tab reads "Showing skills available to: Outreach Agent in Acme Corp workspace".</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Updates</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill">Capabilities tab in agent-edit.html</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="agent-edit.html#capabilities">Open mockup &#8594;</a>
+        <a href="before-agent-edit.html" class="before-link">Before</a>
       </div>
     </div>
 

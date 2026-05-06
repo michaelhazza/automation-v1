@@ -151,6 +151,142 @@
   .chip-enabled { background: var(--emerald-50); color: var(--emerald-700); border: 1px solid #a7f3d0; }
   .chip-unavail { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-200); }
 
+  /* Tier chips per skill row */
+  .tier-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    white-space: nowrap; flex-shrink: 0; letter-spacing: 0.02em;
+  }
+  .tier-system {
+    background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200);
+  }
+  .tier-org {
+    background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+  }
+  .tier-subaccount {
+    background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200);
+  }
+
+  /* Overflow contextual menu */
+  .skill-ctx-menu {
+    position: fixed; z-index: 9999; background: white;
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    min-width: 220px; padding: 4px 0; display: none;
+  }
+  .skill-ctx-menu.open { display: block; }
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--slate-700);
+    cursor: pointer; transition: background 0.1s; border: none;
+    background: transparent; width: 100%; text-align: left;
+  }
+  .ctx-item:hover { background: var(--slate-50); }
+  .ctx-item.ctx-danger { color: var(--red-500); }
+  .ctx-item.ctx-danger:hover { background: #fef2f2; }
+  .ctx-item.ctx-link { color: var(--indigo-600); font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
+  .ctx-separator { border: none; border-top: 1px solid var(--slate-100); margin: 3px 0; }
+
+  /* Skill context line (breadcrumb) */
+  .skill-scope-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px; background: var(--slate-50); border-bottom: 1px solid var(--slate-100);
+    font-size: 11.5px; color: var(--slate-500);
+  }
+  .skill-scope-bar strong { color: var(--slate-700); font-weight: 500; }
+
+  /* Skill creation drawer */
+  .creator-drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+    z-index: 400; display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .creator-drawer-overlay.open { display: flex; }
+  .creator-drawer {
+    width: 560px; background: white; display: flex; flex-direction: column;
+    height: 100%; overflow: hidden;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  }
+  .creator-drawer-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .creator-drawer-body {
+    flex: 1; overflow-y: auto; padding: 0;
+  }
+  .creator-drawer-footer {
+    padding: 12px 20px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; flex-wrap: wrap;
+  }
+
+  /* Parameter list (creator drawer) */
+  .param-row {
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    margin-bottom: 8px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--slate-50);
+  }
+  .param-row-header {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .param-drag { cursor: grab; color: var(--slate-300); font-size: 14px; flex-shrink: 0; }
+  .param-name-input {
+    flex: 1; font-size: 13px; font-weight: 500;
+    border: none; background: transparent; outline: none;
+    color: var(--slate-800);
+  }
+  .param-type-select {
+    font-size: 11.5px; padding: 2px 6px; border-radius: 5px;
+    border: 1px solid var(--slate-200); background: white; color: var(--slate-600);
+  }
+  .param-required-toggle {
+    font-size: 11px; color: var(--slate-500); white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .param-delete-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--slate-300); font-size: 15px; padding: 0 2px;
+    line-height: 1; border-radius: 3px;
+  }
+  .param-delete-btn:hover { color: var(--red-500); background: #fef2f2; }
+  .param-desc-input {
+    font-size: 12px; color: var(--slate-500); width: 100%;
+    border: none; background: transparent; outline: none;
+    font-style: italic;
+  }
+
+  /* Scope toggle (save scope) */
+  .scope-radio-row {
+    display: flex; gap: 8px; align-items: center; margin-left: auto;
+  }
+  .scope-label {
+    font-size: 12px; color: var(--slate-500);
+  }
+  .scope-option {
+    display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer;
+    color: var(--slate-700);
+  }
+  .scope-option input { margin: 0; }
+
+  /* Icon picker */
+  .icon-picker-grid {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+  }
+  .icon-option {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; cursor: pointer;
+    border: 2px solid transparent; transition: all 0.12s;
+    background: var(--slate-100); color: var(--slate-600);
+  }
+  .icon-option:hover { border-color: var(--indigo-300); }
+  .icon-option.selected { border-color: var(--indigo-500); background: var(--indigo-50); color: var(--indigo-700); }
+
+  /* Creator drawer tab content padding */
+  .creator-tab-panel { padding: 20px; }
+  .creator-tab-panel.hidden { display: none; }
+
   .prompt-history-panel {
     background: var(--slate-50); border: 1px solid var(--slate-200);
     border-radius: 10px; margin-top: 14px; overflow: hidden;
@@ -334,25 +470,32 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
         <!-- ── CAPABILITIES TAB ──────────────────────────────────── -->
         <div class="tab-panel" id="tab-capabilities">
 
+          <!-- Scope breadcrumb context -->
+          <div class="skill-scope-bar" style="border-radius:10px 10px 0 0;margin-bottom:0;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Showing skills available to: <strong>Outreach Agent</strong> in <strong>Acme Corp</strong> workspace.
+            Skills inherited from the platform or organisation are shown with their source tier.
+          </div>
+
           <!-- Toolbar -->
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;margin-top:10px;gap:10px;">
             <div style="display:flex;gap:6px;" id="skill-filter-chips">
               <button class="conn-chip active" onclick="setSkillFilter('all',this)">All <span style="opacity:0.65;">14</span></button>
-              <button class="conn-chip" onclick="setSkillFilter('enabled',this)">Enabled <span style="opacity:0.65;">7</span></button>
-              <button class="conn-chip" onclick="setSkillFilter('available',this)">Available <span style="opacity:0.65;">5</span></button>
-              <button class="conn-chip" onclick="setSkillFilter('custom',this)">Custom <span style="opacity:0.65;">2</span></button>
+              <button class="conn-chip" onclick="setSkillFilter('enabled',this)">Enabled <span style="opacity:0.65;">9</span></button>
+              <button class="conn-chip" onclick="setSkillFilter('available',this)">Available <span style="opacity:0.65;">2</span></button>
+              <button class="conn-chip" onclick="setSkillFilter('custom',this)">Custom <span style="opacity:0.65;">3</span></button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               <div class="search-wrap" style="width:190px;">
                 <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input class="search-box" style="padding-left:28px;font-size:12px;" type="search" placeholder="Search skills...">
               </div>
-              <button class="btn btn-sm btn-secondary">+ Add custom skill</button>
+              <button class="btn btn-sm btn-secondary" onclick="openSkillCreator()">+ Add custom skill</button>
             </div>
           </div>
 
           <!-- Toggle list -->
-          <div class="skill-toggle-list">
+          <div class="skill-toggle-list" style="margin-top:10px;">
 
             <!-- Communication group -->
             <div class="skill-group-header" onclick="toggleSkillGroup('grp-comm',this)">
@@ -364,53 +507,57 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
               <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
             </div>
             <div id="grp-comm">
-              <div class="skill-toggle-row" data-filter="enabled">
+              <!-- Send email: System tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Send email</div>
+                  <div class="skill-name">Send email <span class="tier-chip tier-system" title="Built into the platform"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
                   <div class="skill-desc">Gmail · Send outreach, follow-ups, and proposal emails</div>
                 </div>
                 <div class="toggle-wrap">
                   <input type="checkbox" class="toggle-input" id="tog-email" checked>
                   <label class="toggle-track" for="tog-email"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="enabled">
+              <!-- Read email inbox: System tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07"/><path d="M2 6.92v3a2 2 0 002.18 2 19.79 19.79 0 008.63 3.07"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Read email inbox</div>
+                  <div class="skill-name">Read email inbox <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
                   <div class="skill-desc">Gmail · Monitor and analyse incoming messages</div>
                 </div>
                 <div class="toggle-wrap">
                   <input type="checkbox" class="toggle-input" id="tog-read-email" checked>
                   <label class="toggle-track" for="tog-read-email"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="enabled">
+              <!-- LinkedIn: post message: Org tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="org">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">LinkedIn: post message</div>
+                  <div class="skill-name">LinkedIn: post message <span class="tier-chip tier-org">Org</span></div>
                   <div class="skill-desc">LinkedIn · Post connection requests and messages</div>
                 </div>
                 <div class="toggle-wrap">
                   <input type="checkbox" class="toggle-input" id="tog-li" checked>
                   <label class="toggle-track" for="tog-li"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'org')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="available">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2"/><path d="M15 3H9a2 2 0 00-2 2v14a2 2 0 002 2h6"/></svg></div>
+              <!-- SMS: send message: System tier -->
+              <div class="skill-toggle-row" data-filter="available" data-tier="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">SMS: send message</div>
+                  <div class="skill-name">SMS: send message <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
                   <div class="skill-desc">Twilio · Send SMS to contacts</div>
                 </div>
                 <div class="toggle-wrap">
                   <input type="checkbox" class="toggle-input" id="tog-sms">
                   <label class="toggle-track" for="tog-sms"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
               </div>
             </div>
 
@@ -419,57 +566,61 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
               <span class="skill-group-label">
                 <span class="skill-group-caret" id="caret-grp-data">&#9660;</span>
                 Data
-                <span style="font-weight:500;color:var(--slate-500);">2 of 4 enabled</span>
+                <span style="font-weight:500;color:var(--slate-500);">3 of 4 enabled</span>
               </span>
               <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
             </div>
             <div id="grp-data">
-              <div class="skill-toggle-row" data-filter="enabled">
+              <!-- HubSpot: read contacts: System tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">HubSpot: update contact</div>
+                  <div class="skill-name">HubSpot: read contacts <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">HubSpot · Query contact records from CRM</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-hubspot-r" checked>
+                  <label class="toggle-track" for="tog-hubspot-r"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+              <!-- HubSpot: create contact: System tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">HubSpot: create contact <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
                   <div class="skill-desc">HubSpot · Create or update CRM contact records</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-hubspot" checked>
-                  <label class="toggle-track" for="tog-hubspot"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-hubspot-c" checked>
+                  <label class="toggle-track" for="tog-hubspot-c"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="enabled">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Google Sheets: append row</div>
-                  <div class="skill-desc">Built-in · Append rows to a spreadsheet</div>
-                </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-sheets" checked>
-                  <label class="toggle-track" for="tog-sheets"></label>
-                </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
-              </div>
-              <div class="skill-toggle-row" data-filter="available">
+              <!-- Salesforce: read records: Org tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="org">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Salesforce: create opportunity</div>
-                  <div class="skill-desc">Built-in · Create pipeline opportunities from conversation</div>
+                  <div class="skill-name">Salesforce: read records <span class="tier-chip tier-org">Org</span></div>
+                  <div class="skill-desc">Salesforce · Read opportunity and account records</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-sf">
-                  <label class="toggle-track" for="tog-sf"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-sf-r" checked>
+                  <label class="toggle-track" for="tog-sf-r"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'org')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="available" style="opacity:0.6;">
-                <div class="skill-icon" style="background:var(--slate-100);border-color:var(--slate-200);color:var(--slate-400);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z"/></svg></div>
+              <!-- Stripe: read payments: System tier (rate limited) -->
+              <div class="skill-toggle-row" data-filter="available" data-tier="system" style="opacity:0.6;">
+                <div class="skill-icon" style="background:var(--slate-100);border-color:var(--slate-200);color:var(--slate-400);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name" style="color:var(--slate-400);">LinkedIn: get profile data</div>
+                  <div class="skill-name" style="color:var(--slate-400);">Stripe: read payments <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
                   <div class="skill-desc">Rate limited · 87% of monthly quota used</div>
                 </div>
                 <span class="skill-state-chip chip-unavail">Rate limited</span>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-li-data" disabled>
-                  <label class="toggle-track" for="tog-li-data" style="opacity:0.5;cursor:not-allowed;"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-stripe" disabled>
+                  <label class="toggle-track" for="tog-stripe" style="opacity:0.5;cursor:not-allowed;"></label>
                 </div>
                 <button class="overflow-dot-btn" style="opacity:0.4;" disabled>&#8942;</button>
               </div>
@@ -485,77 +636,95 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
               <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
             </div>
             <div id="grp-analysis">
-              <div class="skill-toggle-row" data-filter="enabled">
+              <!-- Summarise content: System tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Web scraper</div>
-                  <div class="skill-desc">Built-in · Extract structured data from web pages</div>
+                  <div class="skill-name">Summarise content <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Built-in · Condense long documents into key points</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-scraper" checked>
-                  <label class="toggle-track" for="tog-scraper"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-summarise" checked>
+                  <label class="toggle-track" for="tog-summarise"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="enabled">
+              <!-- Extract entities: System tier -->
+              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Apollo.io: find emails</div>
-                  <div class="skill-desc">Third-party · Lookup verified email addresses</div>
+                  <div class="skill-name">Extract entities <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-desc">Built-in · Pull names, emails, and dates from text</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-apollo" checked>
-                  <label class="toggle-track" for="tog-apollo"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-extract" checked>
+                  <label class="toggle-track" for="tog-extract"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="available">
+              <!-- Sentiment analysis: Org tier -->
+              <div class="skill-toggle-row" data-filter="available" data-tier="org">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Create task</div>
-                  <div class="skill-desc">Built-in · Create tasks and follow-up items</div>
+                  <div class="skill-name">Sentiment analysis <span class="tier-chip tier-org">Org</span></div>
+                  <div class="skill-desc">Classifies email and message tone as positive, neutral, or negative</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-task">
-                  <label class="toggle-track" for="tog-task"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-sentiment">
+                  <label class="toggle-track" for="tog-sentiment"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'org')">&#8942;</button>
               </div>
             </div>
 
-            <!-- Custom group -->
+            <!-- Custom group (This client tier) -->
             <div class="skill-group-header" onclick="toggleSkillGroup('grp-custom',this)">
               <span class="skill-group-label">
                 <span class="skill-group-caret" id="caret-grp-custom">&#9660;</span>
                 Custom
-                <span style="font-weight:500;color:var(--slate-500);">0 of 2 enabled</span>
+                <span style="font-weight:500;color:var(--slate-500);">3 of 3 enabled</span>
               </span>
               <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
             </div>
             <div id="grp-custom">
-              <div class="skill-toggle-row" data-filter="custom">
+              <!-- Acme: Outreach scoring rubric: This client tier -->
+              <div class="skill-toggle-row" data-filter="custom" data-tier="this-client">
                 <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Send Slack notification</div>
-                  <div class="skill-desc">Custom · Internal team alert via Slack webhook</div>
+                  <div class="skill-name">Acme: Outreach scoring rubric <span class="tier-chip tier-subaccount">This client</span></div>
+                  <div class="skill-desc">Custom · Score lead quality using Acme's proprietary rubric</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-slack">
-                  <label class="toggle-track" for="tog-slack"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-rubric" checked>
+                  <label class="toggle-track" for="tog-rubric"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
-              <div class="skill-toggle-row" data-filter="custom">
+              <!-- Acme: Lead qualification: This client tier -->
+              <div class="skill-toggle-row" data-filter="custom" data-tier="this-client">
                 <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Zapier: trigger webhook</div>
-                  <div class="skill-desc">Custom · Fire a Zapier webhook for downstream automation</div>
+                  <div class="skill-name">Acme: Lead qualification <span class="tier-chip tier-subaccount">This client</span></div>
+                  <div class="skill-desc">Custom · Qualify inbound leads against Acme ICP criteria</div>
                 </div>
                 <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-zapier">
-                  <label class="toggle-track" for="tog-zapier"></label>
+                  <input type="checkbox" class="toggle-input" id="tog-leadq" checked>
+                  <label class="toggle-track" for="tog-leadq"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openSkillDrawer()">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'this-client')">&#8942;</button>
+              </div>
+              <!-- Acme: Deal stage mapping: This client tier -->
+              <div class="skill-toggle-row" data-filter="custom" data-tier="this-client">
+                <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: Deal stage mapping <span class="tier-chip tier-subaccount">This client</span></div>
+                  <div class="skill-desc">Custom · Map deal stages to Acme's internal pipeline phases</div>
+                </div>
+                <div class="toggle-wrap">
+                  <input type="checkbox" class="toggle-input" id="tog-dealmap" checked>
+                  <label class="toggle-track" for="tog-dealmap"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
             </div>
 
@@ -699,6 +868,208 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
   </div>
 </div>
 
+<!-- ── SKILL CONTEXT MENU ─────────────────────────────────────────── -->
+<div id="skill-ctx-menu" class="skill-ctx-menu" role="menu"></div>
+
+<!-- ── SKILL CREATOR DRAWER ──────────────────────────────────────── -->
+<div id="skill-creator-overlay" class="creator-drawer-overlay" onclick="if(event.target===this)closeSkillCreator()">
+  <div class="creator-drawer">
+    <div class="creator-drawer-header">
+      <div>
+        <h2 style="font-size:16px;font-weight:700;color:var(--slate-800);">Create custom skill</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">New skill will be saved to: <strong id="creator-scope-label">Acme Corp workspace</strong></div>
+      </div>
+      <button class="drawer-close" onclick="closeSkillCreator()">&times;</button>
+    </div>
+    <!-- Creator tabs -->
+    <div class="tabs" id="creator-tabs" style="margin:0 20px;padding-top:12px;border-bottom:1px solid var(--slate-100);">
+      <button class="tab-btn active" onclick="switchCreatorTab('basic',this)">Basic info</button>
+      <button class="tab-btn" onclick="switchCreatorTab('parameters',this)">Parameters</button>
+      <button class="tab-btn" onclick="switchCreatorTab('implementation',this)">Implementation</button>
+      <button class="tab-btn" onclick="switchCreatorTab('test',this)">Test</button>
+    </div>
+    <div class="creator-drawer-body">
+
+      <!-- Basic info tab -->
+      <div id="creator-tab-basic" class="creator-tab-panel">
+        <div class="form-field">
+          <label class="form-label">Skill name <span style="color:var(--red-500);">*</span></label>
+          <input class="form-input" id="creator-name" placeholder="e.g. Acme: score prospect" oninput="autoSlug()">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Slug (auto-generated)</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input class="form-input" id="creator-slug" placeholder="acme-score-prospect" style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--slate-50);color:var(--slate-500);" readonly>
+            <button class="btn btn-xs btn-secondary" onclick="toggleSlugEdit()" id="slug-edit-btn">Edit</button>
+          </div>
+          <div class="form-hint">Used internally. Letters, numbers, hyphens only.</div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Description</label>
+          <textarea class="form-textarea" style="min-height:64px;" placeholder="What does this skill do? This description is shown to the agent."></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-field" style="margin-bottom:0;">
+            <label class="form-label">Category</label>
+            <select class="form-select" style="width:100%;">
+              <option value="communication">Communication</option>
+              <option value="data">Data</option>
+              <option value="analysis">Analysis</option>
+              <option value="custom" selected>Custom</option>
+            </select>
+          </div>
+          <div class="form-field" style="margin-bottom:0;">
+            <label class="form-label">Icon</label>
+            <div class="icon-picker-grid">
+              <div class="icon-option selected" onclick="selectIcon(this)" title="Pencil">A</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Data">D</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Send">S</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Link">L</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Search">Q</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Chart">C</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Filter">F</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Tag">T</div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /creator-tab-basic -->
+
+      <!-- Parameters tab -->
+      <div id="creator-tab-parameters" class="creator-tab-panel hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="font-size:13px;color:var(--slate-600);">Define the inputs this skill accepts from the agent.</div>
+          <button class="btn btn-sm btn-secondary" onclick="addCreatorParam()">+ Add parameter</button>
+        </div>
+        <div id="creator-param-list">
+          <!-- Pre-populated example parameter 1 -->
+          <div class="param-row">
+            <div class="param-row-header">
+              <span class="param-drag" title="Drag to reorder">&#9776;</span>
+              <input class="param-name-input" value="prospect_id" placeholder="parameter_name">
+              <select class="param-type-select">
+                <option value="string" selected>string</option>
+                <option value="number">number</option>
+                <option value="boolean">boolean</option>
+                <option value="enum">enum</option>
+                <option value="object">object</option>
+                <option value="array">array</option>
+              </select>
+              <label class="param-required-toggle"><input type="checkbox" checked style="margin:0;"> Required</label>
+              <button class="param-delete-btn" onclick="this.closest('.param-row').remove()" title="Remove">&times;</button>
+            </div>
+            <input class="param-desc-input form-input" style="font-size:12px;color:var(--slate-500);font-style:italic;" value="The CRM identifier of the prospect to score." placeholder="Description (optional)">
+          </div>
+          <!-- Pre-populated example parameter 2 -->
+          <div class="param-row">
+            <div class="param-row-header">
+              <span class="param-drag" title="Drag to reorder">&#9776;</span>
+              <input class="param-name-input" value="context_notes" placeholder="parameter_name">
+              <select class="param-type-select">
+                <option value="string" selected>string</option>
+                <option value="number">number</option>
+                <option value="boolean">boolean</option>
+                <option value="enum">enum</option>
+                <option value="object">object</option>
+                <option value="array">array</option>
+              </select>
+              <label class="param-required-toggle"><input type="checkbox" style="margin:0;"> Required</label>
+              <button class="param-delete-btn" onclick="this.closest('.param-row').remove()" title="Remove">&times;</button>
+            </div>
+            <input class="param-desc-input form-input" style="font-size:12px;color:var(--slate-500);font-style:italic;" value="Optional background notes for the scoring model." placeholder="Description (optional)">
+          </div>
+        </div>
+        <div style="font-size:11.5px;color:var(--slate-400);margin-top:10px;">Drag rows to reorder. Parameters render as inputs on the Test tab.</div>
+      </div><!-- /creator-tab-parameters -->
+
+      <!-- Implementation tab -->
+      <div id="creator-tab-implementation" class="creator-tab-panel hidden">
+        <div class="form-label" style="margin-bottom:8px;">Skill type</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px;">
+          <label class="mode-card selected" id="impl-builtin-card" onclick="switchImplType('builtin',this)" style="border-color:var(--indigo-500);background:var(--indigo-50);">
+            <input type="radio" name="impl-type" value="builtin" checked style="margin-top:2px;flex-shrink:0;">
+            <div><div class="mode-card-label">Built-in template</div><div class="mode-card-desc">Start from a pre-built skill template and configure parameters</div></div>
+          </label>
+          <label class="mode-card" id="impl-code-card" onclick="switchImplType('code',this)">
+            <input type="radio" name="impl-type" value="code" style="margin-top:2px;flex-shrink:0;">
+            <div><div class="mode-card-label">Custom code</div><div class="mode-card-desc">Write a JavaScript or Python handler executed server-side</div></div>
+          </label>
+          <label class="mode-card" id="impl-webhook-card" onclick="switchImplType('webhook',this)">
+            <input type="radio" name="impl-type" value="webhook" style="margin-top:2px;flex-shrink:0;">
+            <div><div class="mode-card-label">External webhook</div><div class="mode-card-desc">POST to an external URL and parse the response</div></div>
+          </label>
+        </div>
+        <!-- Built-in panel -->
+        <div id="impl-panel-builtin">
+          <div class="form-field"><label class="form-label">Template</label>
+            <select class="form-select" style="width:100%;" onchange="showTemplateConfig(this)">
+              <option value="">Select a template...</option>
+              <option value="http-get">HTTP GET request</option>
+              <option value="db-query">Database query (read-only)</option>
+              <option value="transform">Data transform / mapping</option>
+              <option value="score">Scoring model (rule-based)</option>
+            </select>
+          </div>
+          <div id="template-config" style="font-size:13px;color:var(--slate-400);padding:12px;background:var(--slate-50);border-radius:8px;border:1px solid var(--slate-200);">Select a template to see its configuration options.</div>
+        </div>
+        <!-- Code panel (hidden by default) -->
+        <div id="impl-panel-code" style="display:none;">
+          <div class="form-field">
+            <label class="form-label">Handler code</label>
+            <div style="border:1px solid var(--slate-200);border-radius:8px;background:var(--slate-800);padding:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#94a3b8;min-height:160px;position:relative;">
+              <div style="color:#6ee7b7;">// Code editor uses CodeMirror in production</div>
+              <textarea style="width:100%;background:transparent;border:none;outline:none;color:#e2e8f0;font-family:'JetBrains Mono',monospace;font-size:12px;min-height:120px;resize:vertical;margin-top:8px;" placeholder="async function handler({ prospect_id, context_notes }) {&#10;  // your logic here&#10;  return { score: 0.87, label: 'hot' };&#10;}"></textarea>
+            </div>
+          </div>
+          <div class="form-field"><label class="form-label">Runtime</label>
+            <select class="form-select" style="width:200px;"><option>Node.js 20 (default)</option><option>Python 3.11</option></select>
+          </div>
+        </div>
+        <!-- Webhook panel (hidden by default) -->
+        <div id="impl-panel-webhook" style="display:none;">
+          <div class="form-field"><label class="form-label">Endpoint URL <span style="color:var(--red-500);">*</span></label><input class="form-input" placeholder="https://hooks.example.com/skill-handler"></div>
+          <div class="form-field">
+            <label class="form-label">Auth header</label>
+            <div style="display:grid;grid-template-columns:140px 1fr;gap:8px;">
+              <input class="form-input" placeholder="Header name" value="Authorization">
+              <input class="form-input" placeholder="Bearer sk-..." type="password">
+            </div>
+          </div>
+          <div class="form-field"><label class="form-label">Expected response schema</label>
+            <textarea class="form-textarea" style="font-family:'JetBrains Mono',monospace;font-size:12px;min-height:80px;" placeholder='{ "score": number, "label": string }'></textarea>
+            <div class="form-hint">JSON schema snippet. Used to validate and parse the response.</div>
+          </div>
+        </div>
+      </div><!-- /creator-tab-implementation -->
+
+      <!-- Test tab -->
+      <div id="creator-tab-test" class="creator-tab-panel hidden">
+        <div style="font-size:13px;color:var(--slate-500);margin-bottom:14px;">Run a test call with sample parameter values to verify the skill works correctly.</div>
+        <div id="creator-test-inputs">
+          <div class="form-field"><label class="form-label">prospect_id</label><input class="form-input" value="cid_8842" placeholder="string"></div>
+          <div class="form-field"><label class="form-label">context_notes</label><textarea class="form-textarea" style="min-height:52px;" placeholder="Optional (not required)"></textarea></div>
+        </div>
+        <button class="btn btn-primary" style="margin-bottom:14px;" onclick="runCreatorTest()">Run test</button>
+        <div id="creator-test-result" style="display:none;background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:12px;font-size:12px;color:var(--slate-700);">
+          <div style="font-weight:600;color:var(--emerald-700);margin-bottom:6px;">Success in 0.6s</div>
+          <pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{ "score": 0.87, "label": "hot", "confidence": 0.91 }</pre>
+        </div>
+      </div><!-- /creator-tab-test -->
+
+    </div><!-- /creator-drawer-body -->
+    <div class="creator-drawer-footer">
+      <!-- Scope toggle -->
+      <div style="display:flex;align-items:center;gap:6px;margin-right:auto;font-size:12px;color:var(--slate-500);">
+        <span>Save to:</span>
+        <label class="scope-option"><input type="radio" name="creator-scope" value="client" checked> This client</label>
+        <label class="scope-option"><input type="radio" name="creator-scope" value="org"> Organisation</label>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="closeSkillCreator()">Cancel</button>
+      <button class="btn btn-secondary btn-sm" onclick="saveSkillDraft()">Save as draft</button>
+      <button class="btn btn-primary btn-sm" onclick="saveAndEnableSkill()">Save and enable</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── SKILL EDIT DRAWER ──────────────────────────────────────────── -->
 <div id="skill-edit-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
   <div class="drawer" style="width:500px;">
@@ -838,6 +1209,181 @@ function openSkillDrawer() {
   var drawer = document.getElementById('skill-edit-drawer');
   drawer.style.display = 'flex';
 }
+
+/* ── Inheritance-aware context menu ── */
+var ctxMenuOpen = false;
+function openCtxMenu(evt, tier) {
+  evt.stopPropagation();
+  var menu = document.getElementById('skill-ctx-menu');
+  var items = '';
+  if (tier === 'system') {
+    items = [
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> View source</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg> Configure for this agent</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Disable for this agent</button>',
+      '<div style="padding:5px 14px 3px;font-size:10.5px;color:var(--slate-400);">System skills cannot be edited or deleted.</div>'
+    ].join('');
+  } else if (tier === 'org') {
+    items = [
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> View source</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg> Configure for this agent</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Override locally for this client</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Disable for this agent</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item ctx-link" onclick="closeCtxMenu()"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Edit at organisation level</button>'
+    ].join('');
+  } else if (tier === 'this-client') {
+    items = [
+      '<button class="ctx-item" onclick="openSkillDrawer();closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit skill</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg> Configure for this agent</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> View parameters</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Disable for this agent</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item ctx-danger" onclick="confirmDeleteSkill();closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg> Delete skill</button>'
+    ].join('');
+  }
+  menu.innerHTML = items;
+  var rect = evt.currentTarget.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.right = (window.innerWidth - rect.right) + 'px';
+  menu.style.left = 'auto';
+  menu.classList.add('open');
+  ctxMenuOpen = true;
+}
+function closeCtxMenu() {
+  var menu = document.getElementById('skill-ctx-menu');
+  menu.classList.remove('open');
+  ctxMenuOpen = false;
+}
+document.addEventListener('click', function(e) {
+  if (ctxMenuOpen && !e.target.closest('#skill-ctx-menu') && !e.target.closest('.overflow-dot-btn')) {
+    closeCtxMenu();
+  }
+});
+function confirmDeleteSkill() {
+  if (confirm('Delete this skill? This cannot be undone.')) {
+    showToast('Skill deleted');
+  }
+}
+
+/* ── Skill creator drawer ── */
+function openSkillCreator() {
+  document.getElementById('skill-creator-overlay').classList.add('open');
+}
+function closeSkillCreator() {
+  document.getElementById('skill-creator-overlay').classList.remove('open');
+}
+function switchCreatorTab(id, btn) {
+  document.querySelectorAll('#creator-tabs .tab-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  ['basic','parameters','implementation','test'].forEach(function(name) {
+    var el = document.getElementById('creator-tab-' + name);
+    if (el) el.classList.toggle('hidden', name !== id);
+  });
+}
+function autoSlug() {
+  var name = document.getElementById('creator-name').value;
+  var slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('creator-slug').value = slug;
+}
+function toggleSlugEdit() {
+  var input = document.getElementById('creator-slug');
+  var btn = document.getElementById('slug-edit-btn');
+  input.readOnly = !input.readOnly;
+  input.style.background = input.readOnly ? 'var(--slate-50)' : '';
+  input.style.color = input.readOnly ? 'var(--slate-500)' : '';
+  btn.textContent = input.readOnly ? 'Edit' : 'Lock';
+  if (!input.readOnly) input.focus();
+}
+function selectIcon(el) {
+  document.querySelectorAll('.icon-option').forEach(function(o){ o.classList.remove('selected'); });
+  el.classList.add('selected');
+}
+function addCreatorParam() {
+  var list = document.getElementById('creator-param-list');
+  var row = document.createElement('div');
+  row.className = 'param-row';
+  row.innerHTML = '<div class="param-row-header"><span class="param-drag" title="Drag to reorder">&#9776;</span><input class="param-name-input" placeholder="parameter_name"><select class="param-type-select"><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option><option value="enum">enum</option><option value="object">object</option><option value="array">array</option></select><label class="param-required-toggle"><input type="checkbox" style="margin:0;"> Required</label><button class="param-delete-btn" onclick="this.closest(\'.param-row\').remove()" title="Remove">&times;</button></div><input class="param-desc-input form-input" style="font-size:12px;color:var(--slate-500);font-style:italic;" placeholder="Description (optional)">';
+  list.appendChild(row);
+  row.querySelector('.param-name-input').focus();
+}
+function switchImplType(type, labelEl) {
+  document.querySelectorAll('[name="impl-type"]').forEach(function(r) {
+    var card = r.closest('label');
+    if (r.value === type) {
+      r.checked = true;
+      card.style.borderColor = 'var(--indigo-500)';
+      card.style.background = 'var(--indigo-50)';
+    } else {
+      card.style.borderColor = 'var(--slate-200)';
+      card.style.background = 'white';
+    }
+  });
+  ['builtin','code','webhook'].forEach(function(t) {
+    var panel = document.getElementById('impl-panel-' + t);
+    if (panel) panel.style.display = (t === type) ? '' : 'none';
+  });
+}
+function showTemplateConfig(sel) {
+  var cfg = document.getElementById('template-config');
+  var configs = {
+    'http-get': 'Configure: Base URL, path template, query params, response JSONPath.',
+    'db-query': 'Configure: Connection (uses Connections tab), SQL template with named params, result limit.',
+    'transform': 'Configure: Input mapping rules, output schema, transformation logic (JSONata or simple JS).',
+    'score': 'Configure: Scoring criteria (key/weight pairs), threshold for each label (hot/warm/cold).'
+  };
+  cfg.textContent = configs[sel.value] || 'Select a template to see its configuration options.';
+  cfg.style.color = sel.value ? 'var(--slate-600)' : 'var(--slate-400)';
+}
+function runCreatorTest() {
+  var result = document.getElementById('creator-test-result');
+  result.style.display = 'block';
+  result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function saveAndEnableSkill() {
+  var name = document.getElementById('creator-name').value.trim() || 'New custom skill';
+  closeSkillCreator();
+  addNewSkillRow(name);
+  showToast('Skill created and enabled: ' + name);
+}
+function saveSkillDraft() {
+  var name = document.getElementById('creator-name').value.trim() || 'New custom skill';
+  closeSkillCreator();
+  showToast('Skill saved as draft: ' + name);
+}
+function addNewSkillRow(name) {
+  var grpBody = document.getElementById('grp-custom');
+  var row = document.createElement('div');
+  row.className = 'skill-toggle-row';
+  row.setAttribute('data-filter','custom');
+  row.setAttribute('data-tier','this-client');
+  row.innerHTML = '<div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>'
+    + '<div style="flex:1;min-width:0;">'
+    + '<div class="skill-name">' + name + ' <span class="tier-chip tier-subaccount">This client</span></div>'
+    + '<div class="skill-desc">Custom · Just created</div>'
+    + '</div>'
+    + '<div class="toggle-wrap"><input type="checkbox" class="toggle-input" id="tog-new-' + Date.now() + '" checked><label class="toggle-track" for="tog-new-' + Date.now() + '"></label></div>'
+    + '<button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,\'this-client\')">&#8942;</button>';
+  grpBody.insertBefore(row, grpBody.firstChild);
+}
+function showToast(msg) {
+  var t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--slate-800);color:white;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500;z-index:9999;pointer-events:none;opacity:1;transition:opacity 0.3s;';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 300); }, 2500);
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeCtxMenu();
+    closeSkillCreator();
+    document.getElementById('skill-edit-drawer').style.display = 'none';
+  }
+});
+
 function selectVisCard(radio) {
   var hidden = document.querySelector('label[for="vis-hidden-card"]');
   var visible = document.getElementById('vis-visible-card');
