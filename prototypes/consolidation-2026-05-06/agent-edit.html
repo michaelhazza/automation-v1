@@ -1,27 +1,18 @@
 <!DOCTYPE html>
 <!--
-  FIELD AUDIT, Agent Edit (Round 2 full rebuild)
+  FIELD AUDIT, Agent Edit (Round 7e-1a update)
   Source pages: AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage, SkillAnalyzerPage
 
-  AdminAgentEditPage tabs: Configuration, Behaviour, Capabilities, Scheduling, Runs, Budget
+  Tab strip (7e-1a): Configure | Behaviour | Skills | Data sources | Schedule | Budget | Runs
+  Previous tab strip (rounds 1-7d): Configure | Behaviour | Capabilities | Schedule | Budget | Runs
 
-  Capabilities tab breakdown:
-    Skills section: SkillPickerSection component (selectedSlugs, availableSkills, onChange)
-      These ARE Skills: actions the agent can take (invoke tools / call APIs / trigger workflows)
-    Data Sources section: separate primitive, things the agent can READ (knowledge corpora, docs)
-      NOT the same as Skills. Different lifecycle: lazy/proactive sync, token budgets, fetch status.
-    Decision: Keep as "Skills" + "Data Sources" as two sub-sections within single "Capabilities" tab.
-    They share a tab because both control what the agent has ACCESS to, but conceptually distinct.
-
-  Skills sub-section design (Round 2):
-    Left pane 40%: "This agent's kit", enabled skills, configure/remove, drag-reorder
-    Right pane 60%: "Skill library", search + facets (Category, Source, Requires), virtualised,
-      Recommended group, Copy from agent, Recently used group, All skills A-Z
-    Visual states: Default / Enabled / Configured / Unavailable (reason chip)
-    Bulk select + Add selected / Remove selected
+  Round 7e-1a IA change:
+    Replaced single "Capabilities" tab with two top-level tabs:
+    - Skills (tab-skills): Enabled skills section + Add skills search library (247 skills)
+    - Data sources (tab-datasources): Enabled data sources + Add data sources search library
 
   AdminSkillsPage / AdminSkillEditPage / SkillStudioPage / SkillAnalyzerPage:
-    KEEP: All fields folded into Skills sub-section and skill edit drawer
+    KEEP: All fields folded into Skills tab and skill edit drawer
     DROP: Top-level Skills nav item (folded into agent edit)
     DROP: Separate SkillStudioPage / SkillAnalyzerPage routes (folded into drawer tabs)
 
@@ -349,7 +340,8 @@
         <div class="tabs" id="agent-tabs" style="margin-bottom:18px;">
           <button class="tab-btn active" onclick="switchAgentTab('configure',this)">Configure</button>
           <button class="tab-btn" onclick="switchAgentTab('behaviour',this)">Behaviour</button>
-          <button class="tab-btn" onclick="switchAgentTab('capabilities',this)">Capabilities</button>
+          <button class="tab-btn" onclick="switchAgentTab('skills',this)">Skills <span class="tab-count">7</span></button>
+          <button class="tab-btn" onclick="switchAgentTab('datasources',this)">Data sources <span class="tab-count">6</span></button>
           <button class="tab-btn" onclick="switchAgentTab('schedule',this)">Schedule</button>
           <button class="tab-btn" onclick="switchAgentTab('budget',this)">Budget</button>
           <button class="tab-btn" onclick="switchAgentTab('runs',this)">Runs <span class="tab-count">142</span></button>
@@ -478,313 +470,775 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
           </div>
         </div><!-- /tab-behaviour -->
 
-        <!-- ── CAPABILITIES TAB ──────────────────────────────────── -->
-        <div class="tab-panel" id="tab-capabilities">
+        <!-- ── SKILLS TAB ────────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-skills">
 
-          <!-- Scope breadcrumb context -->
-          <div class="skill-scope-bar" style="border-radius:10px 10px 0 0;margin-bottom:0;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            Showing skills available to: <strong>Outreach Agent</strong> in <strong>Acme Corp</strong> workspace.
-            Skills inherited from the platform or organisation are shown with their source tier.
-          </div>
-
-          <!-- Toolbar -->
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;margin-top:10px;gap:10px;">
-            <div style="display:flex;gap:6px;" id="skill-filter-chips">
-              <button class="conn-chip active" onclick="setSkillFilter('all',this)">All <span style="opacity:0.65;">14</span></button>
-              <button class="conn-chip" onclick="setSkillFilter('enabled',this)">Enabled <span style="opacity:0.65;">9</span></button>
-              <button class="conn-chip" onclick="setSkillFilter('available',this)">Available <span style="opacity:0.65;">2</span></button>
-              <button class="conn-chip" onclick="setSkillFilter('custom',this)">Custom <span style="opacity:0.65;">3</span></button>
+          <!-- Section 1: Enabled skills -->
+          <div class="section-card" style="margin-bottom:18px;">
+            <div class="section-card-header" style="justify-content:space-between;">
+              <h3>Enabled skills <span style="font-weight:400;color:var(--slate-400);font-size:12px;">7</span></h3>
+              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong> in <strong style="color:var(--slate-600);">Acme Corp</strong></span>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <div class="search-wrap" style="width:190px;">
-                <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input class="search-box" style="padding-left:28px;font-size:12px;" type="search" placeholder="Search skills...">
-              </div>
-              <button class="btn btn-sm btn-secondary" onclick="openSkillCreator()">+ Add custom skill</button>
-            </div>
-          </div>
+            <div class="skill-toggle-list" style="border:none;border-radius:0;">
 
-          <!-- Toggle list -->
-          <div class="skill-toggle-list" style="margin-top:10px;">
-
-            <!-- Communication group -->
-            <div class="skill-group-header" onclick="toggleSkillGroup('grp-comm',this)">
-              <span class="skill-group-label">
-                <span class="skill-group-caret" id="caret-grp-comm">&#9660;</span>
-                Communication
-                <span style="font-weight:500;color:var(--slate-500);">3 of 4 enabled</span>
-              </span>
-              <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
-            </div>
-            <div id="grp-comm">
-              <!-- Send email: System tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
+              <!-- Send email: System -->
+              <div class="skill-toggle-row" id="enabled-row-send-email" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Send email <span class="tier-chip tier-system" title="Built into the platform"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-name">Send email</div>
                   <div class="skill-desc">Gmail · Send outreach, follow-ups, and proposal emails</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-email" checked>
-                  <label class="toggle-track" for="tog-email"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-email" checked>
+                  <label class="toggle-track" for="tog-en-email"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <!-- Read email inbox: System tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07"/><path d="M2 6.92v3a2 2 0 002.18 2 19.79 19.79 0 008.63 3.07"/></svg></div>
+
+              <!-- Read email inbox: System -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07"/><path d="M2 6.92v3a2 2 0 002.18 2 19.79 19.79 0 008.63 3.07"/><path d="M22 6.92L12 13.92 2 6.92"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Read email inbox <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-name">Read email inbox</div>
                   <div class="skill-desc">Gmail · Monitor and analyse incoming messages</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-read-email" checked>
-                  <label class="toggle-track" for="tog-read-email"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-read-email" checked>
+                  <label class="toggle-track" for="tog-en-read-email"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <!-- LinkedIn: post message: Org tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="org">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name">LinkedIn: post message <span class="tier-chip tier-org">Org</span></div>
-                  <div class="skill-desc">LinkedIn · Post connection requests and messages</div>
-                </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-li" checked>
-                  <label class="toggle-track" for="tog-li"></label>
-                </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'org')">&#8942;</button>
-              </div>
-              <!-- SMS: send message: System tier -->
-              <div class="skill-toggle-row" data-filter="available" data-tier="system">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name">SMS: send message <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
-                  <div class="skill-desc">Twilio · Send SMS to contacts</div>
-                </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-sms">
-                  <label class="toggle-track" for="tog-sms"></label>
-                </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
-              </div>
-            </div>
 
-            <!-- Data group -->
-            <div class="skill-group-header" onclick="toggleSkillGroup('grp-data',this)">
-              <span class="skill-group-label">
-                <span class="skill-group-caret" id="caret-grp-data">&#9660;</span>
-                Data
-                <span style="font-weight:500;color:var(--slate-500);">3 of 4 enabled</span>
-              </span>
-              <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
-            </div>
-            <div id="grp-data">
-              <!-- HubSpot: read contacts: System tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
+              <!-- HubSpot: read contacts: System -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">HubSpot: read contacts <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
+                  <div class="skill-name">HubSpot: read contacts</div>
                   <div class="skill-desc">HubSpot · Query contact records from CRM</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-hubspot-r" checked>
-                  <label class="toggle-track" for="tog-hubspot-r"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-hubspot-r" checked>
+                  <label class="toggle-track" for="tog-en-hubspot-r"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
               </div>
-              <!-- HubSpot: create contact: System tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name">HubSpot: create contact <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
-                  <div class="skill-desc">HubSpot · Create or update CRM contact records</div>
-                </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-hubspot-c" checked>
-                  <label class="toggle-track" for="tog-hubspot-c"></label>
-                </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
-              </div>
-              <!-- Salesforce: read records: Org tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="org">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Salesforce: read records <span class="tier-chip tier-org">Org</span></div>
-                  <div class="skill-desc">Salesforce · Read opportunity and account records</div>
-                </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-sf-r" checked>
-                  <label class="toggle-track" for="tog-sf-r"></label>
-                </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'org')">&#8942;</button>
-              </div>
-              <!-- Stripe: read payments: System tier (rate limited) -->
-              <div class="skill-toggle-row" data-filter="available" data-tier="system" style="opacity:0.6;">
-                <div class="skill-icon" style="background:var(--slate-100);border-color:var(--slate-200);color:var(--slate-400);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name" style="color:var(--slate-400);">Stripe: read payments <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
-                  <div class="skill-desc">Rate limited · 87% of monthly quota used</div>
-                </div>
-                <span class="skill-state-chip chip-unavail">Rate limited</span>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-stripe" disabled>
-                  <label class="toggle-track" for="tog-stripe" style="opacity:0.5;cursor:not-allowed;"></label>
-                </div>
-                <button class="overflow-dot-btn" style="opacity:0.4;" disabled>&#8942;</button>
-              </div>
-            </div>
 
-            <!-- Analysis group -->
-            <div class="skill-group-header" onclick="toggleSkillGroup('grp-analysis',this)">
-              <span class="skill-group-label">
-                <span class="skill-group-caret" id="caret-grp-analysis">&#9660;</span>
-                Analysis
-                <span style="font-weight:500;color:var(--slate-500);">2 of 3 enabled</span>
-              </span>
-              <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
-            </div>
-            <div id="grp-analysis">
-              <!-- Summarise content: System tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/></svg></div>
+              <!-- LinkedIn: post message: Org-custom -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Summarise content <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
-                  <div class="skill-desc">Built-in · Condense long documents into key points</div>
+                  <div class="skill-name">LinkedIn: post message</div>
+                  <div class="skill-desc">LinkedIn · Post connection requests and messages</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-summarise" checked>
-                  <label class="toggle-track" for="tog-summarise"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-li" checked>
+                  <label class="toggle-track" for="tog-en-li"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'org')">&#8942;</button>
               </div>
-              <!-- Extract entities: System tier -->
-              <div class="skill-toggle-row" data-filter="enabled" data-tier="system">
-                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Extract entities <span class="tier-chip tier-system"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span></div>
-                  <div class="skill-desc">Built-in · Pull names, emails, and dates from text</div>
-                </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-extract" checked>
-                  <label class="toggle-track" for="tog-extract"></label>
-                </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'system')">&#8942;</button>
-              </div>
-              <!-- Sentiment analysis: Org tier -->
-              <div class="skill-toggle-row" data-filter="available" data-tier="org">
+
+              <!-- Sentiment analysis: Org-custom -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Sentiment analysis <span class="tier-chip tier-org">Org</span></div>
+                  <div class="skill-name">Sentiment analysis</div>
                   <div class="skill-desc">Classifies email and message tone as positive, neutral, or negative</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-sentiment">
-                  <label class="toggle-track" for="tog-sentiment"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-sentiment" checked>
+                  <label class="toggle-track" for="tog-en-sentiment"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'org')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'org')">&#8942;</button>
               </div>
-            </div>
 
-            <!-- Custom group (This client tier) -->
-            <div class="skill-group-header" onclick="toggleSkillGroup('grp-custom',this)">
-              <span class="skill-group-label">
-                <span class="skill-group-caret" id="caret-grp-custom">&#9660;</span>
-                Custom
-                <span style="font-weight:500;color:var(--slate-500);">3 of 3 enabled</span>
-              </span>
-              <button class="overflow-dot-btn" title="Group actions" onclick="event.stopPropagation()">&#8942;</button>
-            </div>
-            <div id="grp-custom">
-              <!-- Acme: Outreach scoring rubric: This client tier -->
-              <div class="skill-toggle-row" data-filter="custom" data-tier="this-client">
+              <!-- Acme: Outreach scoring rubric: This client -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
                 <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Acme: Outreach scoring rubric <span class="tier-chip tier-subaccount">This client</span></div>
+                  <div class="skill-name">Acme: Outreach scoring rubric</div>
                   <div class="skill-desc">Custom · Score lead quality using Acme's proprietary rubric</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-rubric" checked>
-                  <label class="toggle-track" for="tog-rubric"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-rubric" checked>
+                  <label class="toggle-track" for="tog-en-rubric"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'this-client')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
-              <!-- Acme: Lead qualification: This client tier -->
-              <div class="skill-toggle-row" data-filter="custom" data-tier="this-client">
+
+              <!-- Acme: Lead qualification: This client -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
                 <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Acme: Lead qualification <span class="tier-chip tier-subaccount">This client</span></div>
+                  <div class="skill-name">Acme: Lead qualification</div>
                   <div class="skill-desc">Custom · Qualify inbound leads against Acme ICP criteria</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-leadq" checked>
-                  <label class="toggle-track" for="tog-leadq"></label>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-leadq" checked>
+                  <label class="toggle-track" for="tog-en-leadq"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'this-client')">&#8942;</button>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
-              <!-- Acme: Deal stage mapping: This client tier -->
-              <div class="skill-toggle-row" data-filter="custom" data-tier="this-client">
-                <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+
+            </div>
+          </div><!-- /enabled skills -->
+
+          <!-- Section 2: Add skills -->
+          <div class="section-card">
+            <div class="section-card-header">
+              <div>
+                <h3>Add skills</h3>
+                <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Search across all 247 available skills</div>
+              </div>
+              <button class="btn btn-sm btn-primary" onclick="openSkillCreator()">+ Add custom skill</button>
+            </div>
+            <div class="section-card-body" style="padding-bottom:8px;">
+              <!-- Search + filter row -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+                <div class="search-wrap" style="flex:1;min-width:220px;">
+                  <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="search-box" id="skill-library-search" style="padding-left:28px;font-size:13px;" type="search" placeholder="Search skills by name, action, or category..." oninput="filterSkillLibrary(this.value)">
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;" id="skill-lib-filter-chips">
+                <button class="conn-chip active" onclick="setSkillLibFilter('all',this)">All <span style="opacity:0.65;">247</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('system',this)">System <span style="opacity:0.65;">180</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('org',this)">Organisation <span style="opacity:0.65;">15</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('client',this)">This client <span style="opacity:0.65;">3</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('custom',this)">Custom only <span style="opacity:0.65;">18</span></button>
+              </div>
+
+              <!-- System skills group -->
+              <div class="skill-group-header" id="lib-grp-system-header" onclick="toggleSkillGroup('lib-grp-system',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;margin-top:0;">
+                <span class="skill-group-label">
+                  <span class="skill-group-caret" id="caret-lib-grp-system">&#9660;</span>
+                  System <span style="font-weight:500;color:var(--slate-500);">180 skills</span>
+                </span>
+                <span class="tier-chip tier-system">Built-in</span>
+              </div>
+              <div id="lib-grp-system" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:10px;">
+
+                <!-- Twilio: send SMS -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="twilio send sms">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Twilio: send SMS</div>
+                    <div class="skill-desc">Twilio · Send text messages to contacts</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Twilio: send SMS','system')">Add</button>
+                </div>
+
+                <!-- Zoom: create meeting -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="zoom create meeting">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Zoom: create meeting</div>
+                    <div class="skill-desc">Zoom · Schedule and create video meetings</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Zoom: create meeting','system')">Add</button>
+                </div>
+
+                <!-- Calendly: list events -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="calendly list events">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Calendly: list events</div>
+                    <div class="skill-desc">Calendly · Retrieve scheduled events and availability</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Calendly: list events','system')">Add</button>
+                </div>
+
+                <!-- Airtable: append row -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="airtable append row">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Airtable: append row</div>
+                    <div class="skill-desc">Airtable · Add new records to a base table</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Airtable: append row','system')">Add</button>
+                </div>
+
+                <!-- Notion: append page -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="notion append page">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Notion: append page</div>
+                    <div class="skill-desc">Notion · Add content blocks to an existing page</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Notion: append page','system')">Add</button>
+                </div>
+
+                <!-- Stripe: create payment -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="stripe create payment">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Stripe: create payment</div>
+                    <div class="skill-desc">Stripe · Initiate payment intents and charge customers</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Stripe: create payment','system')">Add</button>
+                </div>
+
+                <!-- Stripe: list customers -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="stripe list customers">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Stripe: list customers</div>
+                    <div class="skill-desc">Stripe · Query customer records and subscription status</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Stripe: list customers','system')">Add</button>
+                </div>
+
+                <!-- Google Calendar: list events -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="google calendar list events">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Google Calendar: list events</div>
+                    <div class="skill-desc">Google · Read upcoming events from a calendar</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Google Calendar: list events','system')">Add</button>
+                </div>
+
+                <!-- Google Sheets: append row -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="google sheets append row">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Google Sheets: append row</div>
+                    <div class="skill-desc">Google · Add data rows to a spreadsheet</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Google Sheets: append row','system')">Add</button>
+                </div>
+
+                <!-- Asana: create task -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="asana create task">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Asana: create task</div>
+                    <div class="skill-desc">Asana · Create and assign tasks in a project</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Asana: create task','system')">Add</button>
+                </div>
+
+                <!-- Linear: create issue -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="linear create issue">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Linear: create issue</div>
+                    <div class="skill-desc">Linear · Log issues and feature requests in a team's backlog</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Linear: create issue','system')">Add</button>
+                </div>
+
+                <!-- GitHub: create PR -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="github create pull request pr">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">GitHub: create PR</div>
+                    <div class="skill-desc">GitHub · Open pull requests on repositories</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'GitHub: create PR','system')">Add</button>
+                </div>
+
+                <!-- Discord: send message -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="discord send message">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Discord: send message</div>
+                    <div class="skill-desc">Discord · Post messages and notifications to channels</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Discord: send message','system')">Add</button>
+                </div>
+
+                <!-- Webhook: POST -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="webhook post http request">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Webhook: POST</div>
+                    <div class="skill-desc">HTTP · Send data payloads to any external endpoint</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Webhook: POST','system')">Add</button>
+                </div>
+
+                <!-- Database: query -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="database query sql read">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Database: query</div>
+                    <div class="skill-desc">SQL · Read-only queries against connected databases</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Database: query','system')">Add</button>
+                </div>
+
+                <!-- Show all link -->
+                <div style="padding:10px 14px;text-align:center;">
+                  <a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Show all 180 system skills</a>
+                </div>
+              </div><!-- /lib-grp-system -->
+
+              <!-- Organisation skills group -->
+              <div class="skill-group-header" id="lib-grp-org-header" onclick="toggleSkillGroup('lib-grp-org',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;">
+                <span class="skill-group-label">
+                  <span class="skill-group-caret" id="caret-lib-grp-org">&#9660;</span>
+                  Organisation <span style="font-weight:500;color:var(--slate-500);">15 skills</span>
+                </span>
+                <span class="tier-chip tier-org">Org-custom</span>
+              </div>
+              <div id="lib-grp-org" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:10px;">
+
+                <!-- Acme: Compliance prefilter -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme compliance prefilter">
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Compliance prefilter</div>
+                    <div class="skill-desc">Custom · Screen content against Acme's compliance requirements</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Compliance prefilter','org')">Add</button>
+                </div>
+
+                <!-- Acme: Internal escalation -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme internal escalation">
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 11 21 7 17 3"/><line x1="21" y1="7" x2="9" y2="7"/><polyline points="7 21 3 17 7 13"/><line x1="15" y1="17" x2="3" y2="17"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Internal escalation</div>
+                    <div class="skill-desc">Custom · Route issues to the correct internal team</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Internal escalation','org')">Add</button>
+                </div>
+
+                <!-- Acme: Approval channel routing -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme approval channel routing">
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Approval channel routing</div>
+                    <div class="skill-desc">Custom · Send approval requests to the right Slack channel</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Approval channel routing','org')">Add</button>
+                </div>
+
+                <!-- Acme: Vendor lookup -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme vendor lookup">
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Vendor lookup</div>
+                    <div class="skill-desc">Custom · Query the Acme approved vendor registry</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Vendor lookup','org')">Add</button>
+                </div>
+
+                <!-- Acme: Document signing -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme document signing">
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Document signing</div>
+                    <div class="skill-desc">Custom · Trigger e-signature workflows via DocuSign</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Document signing','org')">Add</button>
+                </div>
+
+              </div><!-- /lib-grp-org -->
+
+              <!-- This client skills group -->
+              <div class="skill-group-header" id="lib-grp-client-header" onclick="toggleSkillGroup('lib-grp-client',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;">
+                <span class="skill-group-label">
+                  <span class="skill-group-caret" id="caret-lib-grp-client">&#9660;</span>
+                  This client <span style="font-weight:500;color:var(--slate-500);">2 available (3 already enabled)</span>
+                </span>
+                <span class="tier-chip tier-subaccount">Acme Corp</span>
+              </div>
+              <div id="lib-grp-client" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:4px;">
+
+                <!-- Acme: Pricing approval logic -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="client" data-name="acme pricing approval logic">
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Pricing approval logic</div>
+                    <div class="skill-desc">Custom · Validate deal pricing against Acme's approval matrix</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Pricing approval logic','client')">Add</button>
+                </div>
+
+                <!-- Acme: Demo scheduler -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="client" data-name="acme demo scheduler">
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme: Demo scheduler</div>
+                    <div class="skill-desc">Custom · Book product demos using Acme's scheduling rules</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Demo scheduler','client')">Add</button>
+                </div>
+
+              </div><!-- /lib-grp-client -->
+
+            </div><!-- /section-card-body -->
+          </div><!-- /add skills section -->
+
+        </div><!-- /tab-skills -->
+
+        <!-- ── DATA SOURCES TAB ──────────────────────────────────── -->
+        <div class="tab-panel" id="tab-datasources">
+
+          <!-- Section 1: Enabled data sources -->
+          <div class="section-card" style="margin-bottom:18px;">
+            <div class="section-card-header" style="justify-content:space-between;">
+              <h3>Enabled data sources <span style="font-weight:400;color:var(--slate-400);font-size:12px;">6</span></h3>
+              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong> in <strong style="color:var(--slate-600);">Acme Corp</strong></span>
+            </div>
+            <div class="skill-toggle-list" style="border:none;border-radius:0;">
+
+              <!-- Acme Inc Brand Guide: Document, Org-inherited -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('doc')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Acme: Deal stage mapping <span class="tier-chip tier-subaccount">This client</span></div>
-                  <div class="skill-desc">Custom · Map deal stages to Acme's internal pipeline phases</div>
+                  <div class="skill-name">Acme Inc Brand Guide</div>
+                  <div class="skill-desc">Document · Org-inherited · Auto-attached · Updated 2 weeks ago</div>
                 </div>
-                <div class="toggle-wrap">
-                  <input type="checkbox" class="toggle-input" id="tog-dealmap" checked>
-                  <label class="toggle-track" for="tog-dealmap"></label>
+                <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-brand" checked>
+                  <label class="toggle-track" for="tog-ds-brand"></label>
                 </div>
-                <button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,'this-client')">&#8942;</button>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Voice and Tone Standards: Memory block, Org tier-1, auto-attached -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('memory')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Voice and Tone Standards</div>
+                  <div class="skill-desc">Memory block · Org tier-1 · Auto-attached always in context</div>
+                </div>
+                <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-1</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-tone" checked>
+                  <label class="toggle-track" for="tog-ds-tone"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Demo collateral Q1 2026: Bundle -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('bundle')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Demo collateral Q1 2026</div>
+                  <div class="skill-desc">Bundle · 3 documents · 92% utilization · On-demand</div>
+                </div>
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-demo" checked>
+                  <label class="toggle-track" for="tog-ds-demo"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Acme HubSpot CRM: Live integration -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('live')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme HubSpot CRM</div>
+                  <div class="skill-desc">Live integration · Synced 5 min ago · On-demand lookup</div>
+                </div>
+                <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-crm" checked>
+                  <label class="toggle-track" for="tog-ds-crm"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Acme: Outreach scoring rubric: Memory block, This client, tier-3 -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('memory')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: Outreach scoring rubric</div>
+                  <div class="skill-desc">Memory block · This client tier-3 · On-demand</div>
+                </div>
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-rubric" checked>
+                  <label class="toggle-track" for="tog-ds-rubric"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Acme: ICP profile: Memory block, This client, tier-2 -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('memory')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: ICP profile</div>
+                  <div class="skill-desc">Memory block · This client tier-2 · Auto-attached</div>
+                </div>
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-icp" checked>
+                  <label class="toggle-track" for="tog-ds-icp"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+            </div>
+          </div><!-- /enabled data sources -->
+
+          <!-- Section 2: Add data sources -->
+          <div class="section-card">
+            <div class="section-card-header" style="justify-content:space-between;">
+              <div>
+                <h3>Add data sources</h3>
+                <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Search memory blocks, documents, bundles, and live integrations</div>
+              </div>
+              <div style="position:relative;" id="ds-add-btn-wrap">
+                <button class="btn btn-sm btn-primary" onclick="toggleDsAddMenu()">+ Add source</button>
+                <div id="ds-add-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:white;border:1px solid var(--slate-200);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);min-width:200px;padding:4px 0;z-index:200;">
+                  <button class="ctx-item" onclick="closeDsAddMenu()">New memory block</button>
+                  <button class="ctx-item" onclick="closeDsAddMenu()">Upload document</button>
+                  <button class="ctx-item" onclick="closeDsAddMenu()">Connect data source</button>
+                </div>
               </div>
             </div>
+            <div class="section-card-body" style="padding-bottom:8px;">
+              <!-- Search + filters -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                <div class="search-wrap" style="flex:1;">
+                  <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="search-box" id="ds-search" style="padding-left:28px;font-size:13px;" type="search" placeholder="Search data sources..." oninput="filterDsSources(this.value)">
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;" id="ds-filter-chips">
+                <button class="conn-chip active" onclick="setDsFilter('all',this)">All</button>
+                <button class="conn-chip" onclick="setDsFilter('memory',this)">Memory</button>
+                <button class="conn-chip" onclick="setDsFilter('document',this)">Documents</button>
+                <button class="conn-chip" onclick="setDsFilter('bundle',this)">Bundles</button>
+                <button class="conn-chip" onclick="setDsFilter('live',this)">Live integrations</button>
+              </div>
 
-          </div><!-- /skill-toggle-list -->
+              <!-- Available data source rows -->
+              <div class="skill-toggle-list" id="ds-available-list">
 
-          <!-- Data Sources (preserved, now secondary) -->
-          <div style="margin-top:20px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-              <div style="font-size:12.5px;font-weight:600;color:var(--slate-700);">Data sources <span style="font-weight:400;color:var(--slate-400);">4</span></div>
-              <button class="btn btn-sm btn-secondary">+ Add data source</button>
-            </div>
-            <div class="card">
-              <table class="data-table">
-                <thead><tr><th>Name</th><th>Type</th><th>Sync</th><th>Last fetch</th><th></th></tr></thead>
-                <tbody>
-                  <tr>
-                    <td><div style="font-weight:500;">Acme CRM export</div><div style="font-size:11px;color:var(--slate-400);">Weekly CRM snapshot</div></td>
-                    <td><span class="badge badge-blue" style="font-size:10px;">AWS S3</span></td>
-                    <td><span style="font-size:11px;font-weight:500;background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;">Proactive 60m</span></td>
-                    <td><span class="badge badge-green" style="font-size:10px;">ok · 2h ago</span></td>
-                    <td><div style="display:flex;gap:4px;"><button class="btn btn-xs btn-secondary">Edit</button><button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button></div></td>
-                  </tr>
-                  <tr>
-                    <td><div style="font-weight:500;">Sales playbook</div><div style="font-size:11px;color:var(--slate-400);">Q1 2026 methodology</div></td>
-                    <td><span style="font-size:10px;background:#fefce8;color:#854d0e;border:1px solid #fde68a;border-radius:20px;padding:2px 7px;font-weight:500;">Google Docs</span></td>
-                    <td><span style="font-size:11px;background:var(--slate-100);color:var(--slate-500);padding:1px 6px;border-radius:4px;">Lazy 120m</span></td>
-                    <td><span class="badge badge-green" style="font-size:10px;">ok · 4h ago</span></td>
-                    <td><div style="display:flex;gap:4px;"><button class="btn btn-xs btn-secondary">Edit</button><button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button></div></td>
-                  </tr>
-                  <tr>
-                    <td><div style="font-weight:500;">Competitor intel</div><div style="font-size:11px;color:var(--slate-400);">FieldEdge research</div></td>
-                    <td><span class="badge badge-violet" style="font-size:10px;">HTTP URL</span></td>
-                    <td><span style="font-size:11px;background:var(--slate-100);color:var(--slate-500);padding:1px 6px;border-radius:4px;">Lazy 480m</span></td>
-                    <td><span class="badge badge-amber" style="font-size:10px;">stale</span></td>
-                    <td><div style="display:flex;gap:4px;"><button class="btn btn-xs btn-secondary">Edit</button><button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button></div></td>
-                  </tr>
-                  <tr>
-                    <td><div style="font-weight:500;">Pricing sheet 2026</div><div style="font-size:11px;color:var(--slate-400);">Static uploaded file</div></td>
-                    <td><span style="font-size:10px;background:#fdf2f8;color:#9d174d;border:1px solid #fbcfe8;border-radius:20px;padding:2px 7px;font-weight:500;">File upload</span></td>
-                    <td><span style="font-size:11px;color:var(--slate-400);">Static</span></td>
-                    <td><span class="badge badge-green" style="font-size:10px;">ok</span></td>
-                    <td><div style="display:flex;gap:4px;"><button class="btn btn-xs btn-secondary">Replace</button><button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button></div></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+                <!-- Sales playbook: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="sales playbook">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Sales playbook Q1 2026</div>
+                    <div class="skill-desc">Document · Org-inherited · Updated 3 weeks ago</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Sales playbook Q1 2026')">Add</button>
+                </div>
 
-        </div><!-- /tab-capabilities -->
+                <!-- Competitor intel: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="competitor intel">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Competitor intel Q2 2026</div>
+                    <div class="skill-desc">Document · This client · Stale 6 days ago</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Competitor intel Q2 2026')">Add</button>
+                </div>
+
+                <!-- Agency best practices: Memory block, Org -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="agency best practices">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Agency best practices</div>
+                    <div class="skill-desc">Memory block · Org tier-2 · On-demand</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-2</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Agency best practices')">Add</button>
+                </div>
+
+                <!-- Pricing sheet 2026: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="pricing sheet 2026">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Pricing sheet 2026</div>
+                    <div class="skill-desc">Document · This client · Uploaded May 1</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Pricing sheet 2026')">Add</button>
+                </div>
+
+                <!-- Outreach content bundle: Bundle -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="bundle" data-dsname="outreach content bundle">
+                  <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Outreach content bundle</div>
+                    <div class="skill-desc">Bundle · 6 documents · On-demand</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Outreach content bundle')">Add</button>
+                </div>
+
+                <!-- Acme CRM export: Live integration -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="live" data-dsname="acme crm export salesforce">
+                  <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme Salesforce export</div>
+                    <div class="skill-desc">Live integration · Synced hourly · S3 bucket</div>
+                  </div>
+                  <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Acme Salesforce export')">Add</button>
+                </div>
+
+                <!-- Email corpus: Memory block -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="email corpus outreach">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Outreach email corpus</div>
+                    <div class="skill-desc">Memory block · Org tier-3 · High-performing email examples</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-3</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Outreach email corpus')">Add</button>
+                </div>
+
+                <!-- Partner pricing tiers: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="partner pricing tiers">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Partner pricing tiers</div>
+                    <div class="skill-desc">Document · This client · Shared by Acme finance team</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Partner pricing tiers')">Add</button>
+                </div>
+
+                <!-- Legal clause library: Bundle -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="bundle" data-dsname="legal clause library">
+                  <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Legal clause library</div>
+                    <div class="skill-desc">Bundle · 12 documents · Org-inherited · NDA and contract templates</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Legal clause library')">Add</button>
+                </div>
+
+                <!-- Slack channel: Live integration -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="live" data-dsname="slack channel integration">
+                  <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme Slack workspace</div>
+                    <div class="skill-desc">Live integration · #outreach-alerts channel · Synced real-time</div>
+                  </div>
+                  <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Acme Slack workspace')">Add</button>
+                </div>
+
+                <!-- Agency onboarding: Memory block -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="agency onboarding playbook">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Agency onboarding playbook</div>
+                    <div class="skill-desc">Memory block · Org tier-1 · Client onboarding procedures</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-1</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Agency onboarding playbook')">Add</button>
+                </div>
+
+                <!-- Case studies bundle: Bundle -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="bundle" data-dsname="case studies proof points">
+                  <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Case studies and proof points</div>
+                    <div class="skill-desc">Bundle · 8 documents · On-demand · Sales evidence library</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Case studies and proof points')">Add</button>
+                </div>
+
+                <!-- Google Drive: Live integration -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="live" data-dsname="google drive integration">
+                  <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme Google Drive</div>
+                    <div class="skill-desc">Live integration · Shared drive · Synced every 30 min</div>
+                  </div>
+                  <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Acme Google Drive')">Add</button>
+                </div>
+
+                <!-- Objection handling: Memory block -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="objection handling responses">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Objection handling guide</div>
+                    <div class="skill-desc">Memory block · This client tier-4 · Sales objection responses</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Objection handling guide')">Add</button>
+                </div>
+
+              </div><!-- /ds-available-list -->
+            </div><!-- /section-card-body -->
+          </div><!-- /add data sources section -->
+
+        </div><!-- /tab-datasources -->
 
         <!-- ── SCHEDULE TAB ───────────────────────────────────────── -->
         <div class="tab-panel" id="tab-schedule">
@@ -876,6 +1330,27 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
       </div>
 
     </div><!-- /agent-layout -->
+  </div>
+</div>
+
+<!-- ── DATA SOURCE DRAWER ─────────────────────────────────────────── -->
+<div id="ds-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:480px;">
+    <div class="drawer-header" id="ds-drawer-header">
+      <div>
+        <h2 id="ds-drawer-title">Acme Inc Brand Guide</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;" id="ds-drawer-subtitle">Document · Org-inherited</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('ds-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body" id="ds-drawer-body">
+      <!-- Content set by openDsDrawer() -->
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" style="color:var(--red-500);margin-right:auto;" onclick="document.getElementById('ds-drawer').style.display='none'">Remove from agent</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('ds-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="document.getElementById('ds-drawer').style.display='none'">Save</button>
+    </div>
   </div>
 </div>
 
@@ -1257,6 +1732,173 @@ function openSkillDrawer() {
   drawer.style.display = 'flex';
 }
 
+/* ── Skills tab: library search + filter ── */
+function filterSkillLibrary(query) {
+  var q = query.toLowerCase().trim();
+  document.querySelectorAll('.lib-skill-row').forEach(function(row) {
+    var name = (row.getAttribute('data-name') || '').toLowerCase();
+    row.style.display = (!q || name.indexOf(q) > -1) ? '' : 'none';
+  });
+}
+function setSkillLibFilter(tier, el) {
+  document.querySelectorAll('#skill-lib-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.lib-skill-row').forEach(function(row) {
+    if (tier === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.getAttribute('data-tier') === tier) ? '' : 'none';
+    }
+  });
+  // Show/hide group headers based on filter
+  ['system','org','client'].forEach(function(g) {
+    var hdr = document.getElementById('lib-grp-' + g + '-header');
+    var body = document.getElementById('lib-grp-' + g);
+    var show = (tier === 'all' || tier === g || tier === 'custom');
+    if (hdr) hdr.style.display = show ? '' : 'none';
+    if (body) body.style.display = show ? '' : 'none';
+  });
+}
+function addSkillToEnabled(btn, name, tier) {
+  // Mark as enabled in library
+  btn.textContent = 'Enabled';
+  btn.disabled = true;
+  btn.className = 'btn btn-xs btn-ghost';
+  btn.style.color = 'var(--slate-400)';
+  // Add row to enabled section
+  var enabledList = document.querySelector('#tab-skills .skill-toggle-list');
+  var row = document.createElement('div');
+  row.className = 'skill-toggle-row';
+  var tierClass = tier === 'system' ? 'tier-system' : (tier === 'org' ? 'tier-org' : 'tier-subaccount');
+  var tierLabel = tier === 'system' ? 'System' : (tier === 'org' ? 'Org' : 'This client');
+  var togId = 'tog-new-' + Date.now();
+  row.innerHTML = '<span class="tier-chip ' + tierClass + '" style="flex-shrink:0;">' + tierLabel + '</span>'
+    + '<div class="skill-icon' + (tier === 'client' ? ' custom' : '') + '"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>'
+    + '<div style="flex:1;min-width:0;"><div class="skill-name">' + name + '</div><div class="skill-desc">Just added</div></div>'
+    + '<div class="toggle-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="toggle-input" id="' + togId + '" checked><label class="toggle-track" for="' + togId + '"></label></div>'
+    + '<button class="overflow-dot-btn" onclick="event.stopPropagation();openCtxMenu(event,\'' + tier + '\')">&#8942;</button>';
+  row.style.animation = 'fadeIn 0.2s';
+  enabledList.insertBefore(row, enabledList.firstChild);
+  showToast('Added: ' + name);
+}
+
+/* ── Data sources tab ── */
+var dsDrawerContents = {
+  'doc': {
+    title: 'Acme Inc Brand Guide',
+    subtitle: 'Document · Org-inherited · Auto-attached',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Document</div></div>'
+      + '<div><div class="form-label">Scope</div><div style="font-size:13px;"><span class="tier-chip tier-org">Org-inherited</span></div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">Auto-attached</div></div>'
+      + '<div><div class="form-label">Last updated</div><div style="font-size:13px;">Apr 22, 2026</div></div>'
+      + '<div><div class="form-label">Version</div><div style="font-size:13px;">v3</div></div>'
+      + '<div><div class="form-label">File size</div><div style="font-size:13px;">84 KB</div></div>'
+      + '</div>'
+      + '<div style="margin-bottom:14px;"><div class="form-label" style="margin-bottom:6px;">Preview</div>'
+      + '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">'
+      + 'Acme Inc Brand Guide v3. Our brand voice is direct, confident, and approachable. We lead with outcomes, avoid jargon, and never use passive voice. Primary colour: #4F46E5...'
+      + '</div></div>'
+      + '<a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">View full document in Knowledge</a>'
+  },
+  'memory': {
+    title: 'Voice and Tone Standards',
+    subtitle: 'Memory block · Org tier-1 · Auto-attached',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Memory block</div></div>'
+      + '<div><div class="form-label">Tier</div><div style="font-size:13px;">Org tier-1</div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">Auto-attached</div></div>'
+      + '<div><div class="form-label">Last edited</div><div style="font-size:13px;">Apr 18, 2026</div></div>'
+      + '<div><div class="form-label">Tokens</div><div style="font-size:13px;">~620 tokens</div></div>'
+      + '<div><div class="form-label">Usage</div><div style="font-size:13px;">142 runs this month</div></div>'
+      + '</div>'
+      + '<div style="margin-bottom:14px;"><div class="form-label" style="margin-bottom:6px;">Content preview</div>'
+      + '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">'
+      + 'Tone: Professional but warm. Lead with outcomes. Max 3 paragraphs per email. Avoid jargon. Sign off with first name only. Never use passive voice...'
+      + '</div></div>'
+      + '<a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Edit in Knowledge</a>'
+  },
+  'bundle': {
+    title: 'Demo collateral Q1 2026',
+    subtitle: 'Bundle · 3 documents · This client',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Bundle</div></div>'
+      + '<div><div class="form-label">Scope</div><div style="font-size:13px;"><span class="tier-chip tier-subaccount">This client</span></div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">On-demand</div></div>'
+      + '<div><div class="form-label">Utilization</div><div style="font-size:13px;">92% (Sonnet)</div></div>'
+      + '</div>'
+      + '<div style="margin-bottom:14px;"><div class="form-label" style="margin-bottom:6px;">Documents in bundle</div>'
+      + '<div class="skill-toggle-list" style="font-size:12.5px;">'
+      + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Acme Demo Script Q1.pdf</span><span style="margin-left:auto;color:var(--slate-400);">48 KB</span></div>'
+      + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Product Overview Slides.pdf</span><span style="margin-left:auto;color:var(--slate-400);">210 KB</span></div>'
+      + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;border-bottom:none;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Pricing One-Pager.pdf</span><span style="margin-left:auto;color:var(--slate-400);">22 KB</span></div>'
+      + '</div></div>'
+      + '<a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Edit bundle in Knowledge</a>'
+  },
+  'live': {
+    title: 'Acme HubSpot CRM',
+    subtitle: 'Live integration · Synced 5 min ago',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Live integration</div></div>'
+      + '<div><div class="form-label">Sync status</div><div style="font-size:13px;"><span class="badge badge-green" style="font-size:10px;">ok · 5 min ago</span></div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">On-demand lookup</div></div>'
+      + '<div><div class="form-label">Sync interval</div><div style="font-size:13px;">Every 15 min</div></div>'
+      + '<div><div class="form-label">Records cached</div><div style="font-size:13px;">4,218 contacts</div></div>'
+      + '<div><div class="form-label">Credential</div><div style="font-size:13px;">HubSpot API key (valid)</div></div>'
+      + '</div>'
+      + '<div style="background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--slate-600);">'
+      + 'Connection healthy. Last sync completed in 1.2s. No errors in last 48 hours.'
+      + '</div>'
+      + '<a href="integrations.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">Configure connection in Integrations</a>'
+  }
+};
+function openDsDrawer(type) {
+  var c = dsDrawerContents[type] || dsDrawerContents['doc'];
+  document.getElementById('ds-drawer-title').textContent = c.title;
+  document.getElementById('ds-drawer-subtitle').textContent = c.subtitle;
+  document.getElementById('ds-drawer-body').innerHTML = c.body;
+  document.getElementById('ds-drawer').style.display = 'flex';
+}
+function filterDsSources(query) {
+  var q = query.toLowerCase().trim();
+  document.querySelectorAll('.ds-avail-row').forEach(function(row) {
+    var name = (row.getAttribute('data-dsname') || '').toLowerCase();
+    row.style.display = (!q || name.indexOf(q) > -1) ? '' : 'none';
+  });
+}
+function setDsFilter(type, el) {
+  document.querySelectorAll('#ds-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.ds-avail-row').forEach(function(row) {
+    if (type === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.getAttribute('data-dstype') === type) ? '' : 'none';
+    }
+  });
+}
+function addDsToEnabled(btn, name) {
+  btn.textContent = 'Added';
+  btn.disabled = true;
+  btn.className = 'btn btn-xs btn-ghost';
+  btn.style.color = 'var(--slate-400)';
+  showToast('Added: ' + name);
+}
+function toggleDsAddMenu() {
+  var m = document.getElementById('ds-add-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function closeDsAddMenu() {
+  document.getElementById('ds-add-menu').style.display = 'none';
+}
+document.addEventListener('click', function(e) {
+  var wrap = document.getElementById('ds-add-btn-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    var m = document.getElementById('ds-add-menu');
+    if (m) m.style.display = 'none';
+  }
+});
+
 /* ── Inheritance-aware context menu ── */
 var ctxMenuOpen = false;
 function openCtxMenu(evt, tier) {
@@ -1444,19 +2086,19 @@ function saveSkillDraft() {
   showToast('Skill saved as draft: ' + name);
 }
 function addNewSkillRow(name) {
-  var grpBody = document.getElementById('grp-custom');
+  var enabledList = document.querySelector('#tab-skills .skill-toggle-list');
   var row = document.createElement('div');
   row.className = 'skill-toggle-row';
-  row.setAttribute('data-filter','custom');
-  row.setAttribute('data-tier','this-client');
-  row.innerHTML = '<div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>'
+  var togId = 'tog-new-' + Date.now();
+  row.innerHTML = '<span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>'
+    + '<div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>'
     + '<div style="flex:1;min-width:0;">'
-    + '<div class="skill-name">' + name + ' <span class="tier-chip tier-subaccount">This client</span></div>'
+    + '<div class="skill-name">' + name + '</div>'
     + '<div class="skill-desc">Custom · Just created</div>'
     + '</div>'
-    + '<div class="toggle-wrap"><input type="checkbox" class="toggle-input" id="tog-new-' + Date.now() + '" checked><label class="toggle-track" for="tog-new-' + Date.now() + '"></label></div>'
-    + '<button class="overflow-dot-btn" title="Options" onclick="openCtxMenu(event,\'this-client\')">&#8942;</button>';
-  grpBody.insertBefore(row, grpBody.firstChild);
+    + '<div class="toggle-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="toggle-input" id="' + togId + '" checked><label class="toggle-track" for="' + togId + '"></label></div>'
+    + '<button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,\'this-client\')">&#8942;</button>';
+  if (enabledList) enabledList.insertBefore(row, enabledList.firstChild);
 }
 function showToast(msg) {
   var t = document.createElement('div');
@@ -1470,6 +2112,8 @@ document.addEventListener('keydown', function(e) {
     closeCtxMenu();
     closeSkillCreator();
     document.getElementById('skill-edit-drawer').style.display = 'none';
+    document.getElementById('ds-drawer').style.display = 'none';
+    closeDsAddMenu();
   }
 });
 
