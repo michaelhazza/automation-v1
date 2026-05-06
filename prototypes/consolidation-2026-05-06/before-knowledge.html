@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<!--
+  BEFORE state — Knowledge consolidation
+  Shows the 4 source pages being merged into knowledge.html
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Knowledge (4 pages) — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .before-header {
+    background: #fef3c7; border: 1px solid #fde68a; border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 28px;
+  }
+  .before-header h2 { font-size: 15px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
+  .before-header p { font-size: 13px; color: #78350f; }
+  .before-header a { color: #92400e; font-weight: 600; }
+
+  .page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+  .page-mockup {
+    border: 1px solid var(--border); border-radius: 12px;
+    background: white; overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .page-mockup-header {
+    background: var(--slate-900); padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .page-mockup-title { font-size: 12px; font-weight: 600; color: white; }
+  .page-mockup-url { font-size: 10px; color: rgba(255,255,255,0.4); font-family: monospace; }
+  .page-mockup-body { padding: 16px; }
+
+  .mock-tab-row { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 12px; }
+  .mock-tab { font-size: 11px; font-weight: 500; padding: 6px 10px; color: var(--slate-400); border-bottom: 2px solid transparent; }
+  .mock-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); font-weight: 600; }
+
+  .mock-row { padding: 8px 0; border-bottom: 1px solid var(--slate-100); font-size: 12px; color: var(--slate-700); display: flex; align-items: center; gap: 8px; }
+  .mock-row:last-child { border-bottom: none; }
+  .mock-h { font-size: 15px; font-weight: 700; color: var(--slate-900); margin-bottom: 6px; }
+  .mock-sub { font-size: 11.5px; color: var(--slate-500); margin-bottom: 10px; }
+  .mock-btn { font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; }
+  .mock-btn-primary { background: var(--indigo-600); color: white; }
+  .mock-btn-secondary { background: white; border: 1px solid var(--slate-300); color: var(--slate-700); }
+
+  .kpi-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .kpi-tile { flex: 1; background: var(--slate-50); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .kpi-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate-400); margin-bottom: 2px; }
+  .kpi-value { font-size: 16px; font-weight: 700; color: var(--slate-800); }
+
+  .diff-block { background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+  .diff-add { color: #166534; font-size: 11.5px; font-family: monospace; }
+  .diff-rem { color: #991b1b; font-size: 11.5px; font-family: monospace; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb"><span class="topbar-breadcrumb-current">Before: Knowledge (4 pages)</span></div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+    <div class="page-body">
+
+      <div class="before-header">
+        <h2>Current state — 4 pages merged into <a href="knowledge.html">Knowledge</a></h2>
+        <p>These are the pages being replaced. Shown as faithful approximations, not exact pixel copies. The goal is to make the delta visible.</p>
+      </div>
+
+      <div class="page-grid">
+
+        <!-- SubaccountKnowledgePage -->
+        <div class="page-mockup">
+          <div class="page-mockup-header">
+            <span class="page-mockup-title">SubaccountKnowledgePage</span>
+            <span class="page-mockup-url">/admin/subaccounts/:id/knowledge</span>
+          </div>
+          <div class="page-mockup-body">
+            <div class="mock-h">Knowledge</div>
+            <div class="mock-tab-row">
+              <div class="mock-tab active">References</div>
+              <div class="mock-tab">Insights</div>
+              <div class="mock-tab">Memory Blocks</div>
+              <div class="mock-tab">Baseline</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <input style="font-size:12px;border:1px solid var(--slate-300);border-radius:6px;padding:5px 8px;width:180px;" placeholder="Search references...">
+              <button class="mock-btn mock-btn-primary">+ New reference</button>
+            </div>
+            <div class="mock-row">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+              <span style="flex:1;font-weight:500;">Acme onboarding SOPs</span>
+              <span style="font-size:10px;color:var(--slate-400);">reference</span>
+              <span style="font-size:10px;color:var(--slate-400);">May 1</span>
+              <button class="mock-btn mock-btn-secondary" style="font-size:10px;padding:2px 6px;">Promote</button>
+            </div>
+            <div class="mock-row">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+              <span style="flex:1;font-weight:500;">Email tone guidelines</span>
+              <span style="font-size:10px;color:var(--slate-400);">reference</span>
+              <span style="font-size:10px;color:var(--slate-400);">Apr 28</span>
+              <button class="mock-btn mock-btn-secondary" style="font-size:10px;padding:2px 6px;">Promote</button>
+            </div>
+            <div class="mock-row">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+              <span style="flex:1;font-weight:500;">Deal history notes</span>
+              <span style="font-size:10px;color:var(--slate-400);">reference</span>
+              <span style="font-size:10px;color:var(--slate-400);">Apr 15</span>
+              <button class="mock-btn mock-btn-secondary" style="font-size:10px;padding:2px 6px;">Promote</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- WorkspaceMemoryPage -->
+        <div class="page-mockup">
+          <div class="page-mockup-header">
+            <span class="page-mockup-title">WorkspaceMemoryPage</span>
+            <span class="page-mockup-url">/admin/subaccounts/:id/memory</span>
+          </div>
+          <div class="page-mockup-body">
+            <div class="mock-h">Workspace Memory</div>
+            <!-- KPI tiles (WorkspaceMemoryPage had these — deferred in after state) -->
+            <div class="kpi-row">
+              <div class="kpi-tile"><div class="kpi-label">Version</div><div class="kpi-value">v12</div></div>
+              <div class="kpi-tile"><div class="kpi-label">Entries</div><div class="kpi-value">38</div></div>
+              <div class="kpi-tile"><div class="kpi-label">New since regen</div><div class="kpi-value">4</div></div>
+              <div class="kpi-tile"><div class="kpi-label">Last regen</div><div class="kpi-value" style="font-size:12px;">2h ago</div></div>
+            </div>
+            <div class="mock-tab-row">
+              <div class="mock-tab active">Summary</div>
+              <div class="mock-tab">Entries (38)</div>
+              <div class="mock-tab">Board Summary</div>
+              <div class="mock-tab">Search Diagnostics</div>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:10px 12px;line-height:1.5;">Acme Corp is a mid-market B2B SaaS company in the facilities management space...</div>
+            <div style="display:flex;gap:6px;margin-top:10px;">
+              <button class="mock-btn mock-btn-primary" style="font-size:11px;">Regenerate</button>
+              <button class="mock-btn mock-btn-secondary" style="font-size:11px;">Edit</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MemoryBlockDetailPage -->
+        <div class="page-mockup">
+          <div class="page-mockup-header">
+            <span class="page-mockup-title">MemoryBlockDetailPage</span>
+            <span class="page-mockup-url">/admin/memory-blocks/:blockId</span>
+          </div>
+          <div class="page-mockup-body">
+            <div class="mock-h">Memory Block</div>
+            <div class="mock-sub">ID: <code style="font-family:monospace;font-size:10px;background:var(--slate-100);padding:1px 4px;border-radius:3px;">blk_9f3aK2x...</code></div>
+            <div style="font-size:12px;font-weight:500;margin-bottom:6px;">Brand voice</div>
+            <div style="font-size:12px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:7px;padding:8px 10px;margin-bottom:10px;">Professional but warm. Avoid jargon...</div>
+            <div class="mock-tab-row">
+              <div class="mock-tab active">Version history</div>
+              <div class="mock-tab">Diff vs canonical</div>
+            </div>
+            <div class="mock-row" style="font-size:11px;">
+              <input type="checkbox"> <strong>v3</strong> <span style="color:var(--slate-400);">manual_edit · May 1</span>
+            </div>
+            <div class="mock-row" style="font-size:11px;">
+              <input type="checkbox" checked> <strong>v2</strong> <span style="color:var(--slate-400);">agent_update · Apr 28</span>
+            </div>
+            <div class="diff-block">
+              <div class="diff-rem">- Professional, concise.</div>
+              <div class="diff-add">+ Professional but warm. Avoid jargon.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MemoryReviewQueuePage -->
+        <div class="page-mockup">
+          <div class="page-mockup-header">
+            <span class="page-mockup-title">MemoryReviewQueuePage</span>
+            <span class="page-mockup-url">/admin/subaccounts/:id/memory-review-queue</span>
+          </div>
+          <div class="page-mockup-body">
+            <div class="mock-h">Memory Review Queue</div>
+            <div style="display:flex;gap:6px;margin-bottom:12px;">
+              <select style="font-size:11px;border:1px solid var(--slate-300);border-radius:6px;padding:4px 6px;"><option>Status: Pending</option></select>
+              <select style="font-size:11px;border:1px solid var(--slate-300);border-radius:6px;padding:4px 6px;"><option>Type: All</option></select>
+            </div>
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:8px;">
+              <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--slate-100);background:var(--amber-50);">
+                <span style="font-size:10px;font-weight:700;background:var(--amber-100);color:var(--amber-700);border-radius:4px;padding:1px 5px;">BELIEF CONFLICT</span>
+                <span style="font-size:11.5px;font-weight:500;">procurement_lead</span>
+                <span style="margin-left:auto;font-size:10px;color:var(--slate-400);">conf 0.74</span>
+              </div>
+              <div style="padding:8px 10px;font-size:11.5px;color:var(--slate-600);">Marcus Hill (Finance) vs. "unknown" (manual)</div>
+              <div style="padding:6px 10px;display:flex;gap:6px;">
+                <button class="mock-btn mock-btn-secondary" style="font-size:10px;padding:2px 7px;">Accept new</button>
+                <button class="mock-btn mock-btn-secondary" style="font-size:10px;padding:2px 7px;">Keep existing</button>
+              </div>
+            </div>
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+              <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;background:var(--emerald-50);">
+                <span style="font-size:10px;font-weight:700;background:#bbf7d0;color:var(--emerald-700);border-radius:4px;padding:1px 5px;">BLOCK PROPOSAL</span>
+                <span style="font-size:11.5px;font-weight:500;">Competitive response playbook</span>
+              </div>
+              <div style="padding:6px 10px;display:flex;gap:6px;">
+                <button class="mock-btn mock-btn-primary" style="font-size:10px;padding:2px 7px;">Approve</button>
+                <button class="mock-btn mock-btn-secondary" style="font-size:10px;padding:2px 7px;">Reject</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /page-grid -->
+
+      <div style="margin-top:28px;padding:16px 20px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:10px;">
+        <div style="font-size:13px;font-weight:600;color:var(--slate-700);margin-bottom:8px;">Navigation impact</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          <div style="font-size:12.5px;color:var(--slate-600);">Before: 4 separate routes, each with its own breadcrumb and navigation state</div>
+          <div style="font-size:12.5px;color:var(--emerald-700);font-weight:500;">After: 1 route, Knowledge, with tabs and a drawer for block detail</div>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--slate-500);">KPI tiles from WorkspaceMemoryPage replaced with inline meta row (version, last regen, counts). Search Diagnostics tab deferred to admin-only advanced section. Block ID no longer exposed per design principles.</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

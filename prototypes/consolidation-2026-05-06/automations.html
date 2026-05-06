@@ -47,7 +47,8 @@
   }
   .auto-row:last-child { border-bottom: none; }
   .auto-row:hover { background: var(--slate-50); }
-  .auto-name { font-size: 13.5px; font-weight: 600; color: var(--slate-900); margin-bottom: 2px; }
+  .auto-name { font-size: 13.5px; font-weight: 600; color: var(--indigo-700); margin-bottom: 2px; }
+  a.auto-row:hover .auto-name { text-decoration: underline; }
   .auto-desc { font-size: 12px; color: var(--slate-500); }
   .auto-actions { display: flex; gap: 5px; align-items: center; justify-content: flex-end; }
 
@@ -110,11 +111,17 @@
       <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
     </div>
 
+    <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+      Replaces 2 pages:
+      <a href="before-automations.html" style="color:var(--indigo-600);font-weight:600;">AutomationsPage + AdminAutomationsPage (before)</a>
+      <span style="color:var(--slate-400);font-size:11px;margin-left:8px;">Click any automation name to open its detail (Definition / Run sandbox / History).</span>
+    </div>
+
     <div class="page-body">
       <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
         <div>
           <h1>Automations</h1>
-          <p>External tools your Workflows can call. Automations wrap n8n and other engines.</p>
+          <p>External tools your workflows can call. Wrap n8n, Make, and other engines.</p>
         </div>
         <!-- Primary CTA — permission-gated (admin only) -->
         <button class="btn btn-primary" onclick="document.getElementById('new-auto-drawer').style.display='flex'">

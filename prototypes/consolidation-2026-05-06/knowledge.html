@@ -1,41 +1,34 @@
 <!DOCTYPE html>
 <!--
-  FIELD AUDIT — Knowledge page consolidation
+  FIELD AUDIT — Knowledge page consolidation (Round 2)
   Source pages: SubaccountKnowledgePage, WorkspaceMemoryPage, MemoryBlockDetailPage, MemoryReviewQueuePage
 
   SubaccountKnowledgePage fields/actions:
-    KEEP: References tab (title, preview, type, added, promote/edit/rename/archive actions) -> Authored tab
-    KEEP: Insights tab (content, type, domain/topic, source agent, quality score, captured date, promote action) -> Auto-memory tab, Insights sub-section
-    KEEP: Memory Blocks tab (label, content, source, updated, edit/demote actions) -> Auto-memory tab, Memory Blocks sub-section
-    KEEP: Baseline artefacts section (per-slug status badge, edit button) -> Auto-memory tab, Baseline section
+    KEEP: References tab -> Authored tab (title, preview, type, added, promote/edit/rename/archive)
+    KEEP: Insights tab -> Auto-memory > Entries/Insights sub-section
+    KEEP: Memory Blocks tab -> Auto-memory > Memory Blocks sub-section
+    KEEP: Baseline artefacts section -> Auto-memory > Baseline
     KEEP: Search across all tabs
-    KEEP: Promote modal (label, condensed content, confirm) -> stays as modal
-    KEEP: Create/edit Reference modal (rich text editor) -> becomes "New entry" button
-    KEEP: Rename modal -> inline on row
-    KEEP: Archive confirmation
-    KEEP: Demote confirmation
-    KEEP: EditArtefactDrawer (per slug, open/close)
+    KEEP: Promote modal, Create/edit Reference modal, Rename, Archive, Demote
 
   WorkspaceMemoryPage fields/actions:
-    KEEP: Summary tab (compiled memory text, edit, save, regenerate) -> Auto-memory > Summary sub-tab
-    KEEP: Entries tab (content, type badge, timestamp, includedInSummary, delete) -> Auto-memory > Entries sub-tab
-    KEEP: Board Summary tab -> Auto-memory > Board Summary sub-tab
-    DEFER: Search Diagnostics tab -> collapsed "Advanced" within Auto-memory (admin only)
-    KEEP: Version / RunsSinceSummary / LastGenerated / Entries KPIs -> shown as inline meta (not KPI tiles)
+    KEEP: Summary tab -> Auto-memory > Summary
+    KEEP: Entries tab -> Auto-memory > Entries
+    KEEP: Board Summary tab -> Auto-memory > Board Summary
+    DEFER: Search Diagnostics tab -> admin-only advanced (not shown by default)
+    KEEP: Version / RunsSinceSummary / LastGenerated -> inline meta row (not KPI tiles)
 
   MemoryBlockDetailPage fields/actions:
-    KEEP: Version History tab (version, changeSource, timestamp, select two to compare, diff output) -> Drawer from Memory Block row
-    KEEP: Diff vs Canonical tab (diverges warning, reset-to-canonical, unified diff) -> same drawer
-    DROP: Exposed blockId (internal ID, per design principles rule)
+    KEEP: Version History tab, Diff vs Canonical tab -> drawer from block row
+    DROP: Exposed blockId (internal ID, per design principles)
 
-  MemoryReviewQueuePage fields/actions:
-    KEEP: Status filter (pending/approved/rejected/all) -> Review Queue tab
-    KEEP: Type filter (all/belief_conflict/block_proposal/clarification_pending) -> Review Queue tab
-    KEEP: Belief conflict card (entity key, new vs existing belief side-by-side, accept new/existing/reject) -> Review Queue tab
-    KEEP: Block proposal card (block name, content preview, approve/reject) -> Review Queue tab
-    KEEP: Clarification pending card (question text, read-only note) -> Review Queue tab
-    KEEP: Confidence score per item
-    KEEP: Created timestamp per item
+  MemoryReviewQueuePage:
+    MOVED to inbox.html (Round 2 per operator feedback): belief_conflict, block_proposal, clarification_pending
+    NOTE: "Review queue" tab REMOVED from Knowledge page. Link to Inbox shown inline instead.
+
+  Tab naming: tabs left unnamed per operator instruction (Round 2). Operator will name after
+  seeing examples. Current placeholder names: "Auto-memory" / "Authored knowledge".
+  Sub-sections within Auto-memory: Summary, Entries, Memory Blocks, Insights, Baseline, Board summary.
 -->
 <html lang="en">
 <head>
@@ -47,7 +40,7 @@
 <link rel="stylesheet" href="_shared.css">
 <style>
   .knowledge-meta {
-    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+    display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;
   }
   .k-meta-item {
     display: flex; align-items: center; gap: 5px;
@@ -59,33 +52,15 @@
 
   .baseline-row {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    padding: 11px 16px; border-bottom: 1px solid var(--slate-100);
   }
   .baseline-row:last-child { border-bottom: none; }
-  .baseline-tier { font-size: 10px; color: var(--slate-400); margin-left: 6px; }
-
-  .review-card {
-    border: 1px solid var(--border); border-radius: 10px;
-    background: white; margin-bottom: 10px;
-    box-shadow: var(--shadow-sm);
-  }
-  .review-card-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
-  }
-  .review-card-body { padding: 12px 14px; }
-  .belief-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
-  .belief-side {
-    padding: 10px 12px; background: var(--slate-50);
-    border: 1px solid var(--slate-200); border-radius: 8px;
-  }
-  .belief-side-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 4px; }
-  .belief-value { font-size: 13px; color: var(--slate-800); margin-bottom: 4px; }
-  .belief-conf { font-size: 11px; color: var(--slate-400); }
+  .baseline-tier { font-size: 10px; color: var(--slate-400); margin-left: 6px; background: var(--slate-100); border-radius: 4px; padding: 1px 5px; }
+  .baseline-excerpt { font-size: 12px; color: var(--slate-500); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   .authored-row {
     display: flex; align-items: flex-start; gap: 12px;
-    padding: 11px 14px; border-bottom: 1px solid var(--slate-100);
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
     transition: background 0.1s;
   }
   .authored-row:last-child { border-bottom: none; }
@@ -99,49 +74,60 @@
   }
   .authored-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 3px; }
   .authored-preview { font-size: 12px; color: var(--slate-500); line-height: 1.45; }
-  .authored-meta { font-size: 11px; color: var(--slate-400); margin-top: 4px; display: flex; gap: 10px; }
+  .authored-meta { font-size: 11px; color: var(--slate-400); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
   .authored-actions { margin-left: auto; display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
 
   .memory-block-row {
     display: flex; align-items: flex-start; gap: 10px;
-    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
     transition: background 0.1s;
   }
   .memory-block-row:last-child { border-bottom: none; }
   .memory-block-row:hover { background: var(--slate-50); }
-  .block-label { font-size: 13px; font-weight: 600; color: var(--slate-800); min-width: 160px; }
-  .block-content { font-size: 12px; color: var(--slate-500); flex: 1; line-height: 1.4; }
-  .block-source { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
-  .block-actions { margin-left: 10px; display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+  .block-label {
+    font-size: 12.5px; font-weight: 600; color: var(--slate-800);
+    font-family: 'JetBrains Mono', monospace; min-width: 0;
+    white-space: nowrap;
+  }
+  .block-content { font-size: 12px; color: var(--slate-500); flex: 1; line-height: 1.4; margin-top: 2px; }
+  .block-meta { font-size: 11px; color: var(--slate-400); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .block-actions { margin-left: 10px; display: flex; gap: 5px; align-items: flex-start; flex-shrink: 0; }
 
-  .insight-row {
+  .entry-row {
     display: flex; align-items: flex-start; gap: 10px;
     padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    transition: background 0.1s;
   }
-  .insight-row:last-child { border-bottom: none; }
-  .insight-row:hover { background: var(--slate-50); }
-  .insight-type { min-width: 80px; }
-  .insight-text { flex: 1; font-size: 12.5px; color: var(--slate-700); line-height: 1.45; }
-  .insight-agent { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
-  .insight-quality { font-size: 11px; font-family: monospace; color: var(--slate-400); white-space: nowrap; min-width: 42px; text-align: right; }
+  .entry-row:last-child { border-bottom: none; }
+  .entry-row:hover { background: var(--slate-50); }
+  .entry-type { min-width: 90px; flex-shrink: 0; }
+  .entry-text { flex: 1; font-size: 12.5px; color: var(--slate-700); line-height: 1.45; }
+  .entry-domain { font-size: 11px; color: var(--slate-400); white-space: nowrap; min-width: 70px; }
+  .entry-agent { font-size: 11px; color: var(--slate-400); white-space: nowrap; min-width: 110px; }
+  .entry-quality { font-size: 11px; font-family: monospace; color: var(--slate-400); white-space: nowrap; min-width: 42px; text-align: right; }
+  .entry-date { font-size: 11px; color: var(--slate-400); white-space: nowrap; min-width: 44px; text-align: right; }
 
   .memory-summary-text {
     font-size: 13.5px; line-height: 1.7; color: var(--slate-700);
     background: var(--slate-50); border: 1px solid var(--slate-200);
-    border-radius: 10px; padding: 16px 18px;
-    min-height: 120px;
-    white-space: pre-wrap;
+    border-radius: 10px; padding: 18px 20px;
+    min-height: 120px; white-space: pre-wrap;
   }
 
-  /* Drawer override for this page */
   .block-drawer { width: 560px; }
-
   .diff-line { font-size: 11.5px; font-family: monospace; line-height: 1.6; }
   .diff-add { background: #f0fdf4; color: #166534; }
   .diff-rem { background: #fef2f2; color: #991b1b; }
   .diff-ctx { color: var(--slate-500); }
 
   .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+
+  .review-note {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--amber-50); border: 1px solid #fde68a;
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 14px;
+    font-size: 13px; color: var(--amber-700);
+  }
 </style>
 </head>
 <body>
@@ -167,6 +153,9 @@
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Home</a>
       <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        Inbox <span class="sidebar-badge amber">7</span></a>
+      <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>Tasks</a>
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Calendar</a>
@@ -174,24 +163,20 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 012-2h6a2 2 0 012 2v1.662"/></svg>Agents</a>
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
-      <a class="sidebar-link" href="#">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>Workflows</a>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-label">Knowledge</div>
       <a class="sidebar-link active" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-        Knowledge <span class="sidebar-badge amber">3</span></a>
+        Knowledge</a>
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/></svg>Documents</a>
-      <a class="sidebar-link" href="#">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Sites</a>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-label">Platform</div>
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg>
-        Integrations</a>
+        Connections</a>
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>Connectors</a>
     </div>
@@ -216,6 +201,14 @@
     </div>
 
     <div class="page-body">
+
+      <!-- Replaces callout -->
+      <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:8px 14px;margin-bottom:18px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Replaces 4 pages: SubaccountKnowledgePage, WorkspaceMemoryPage, MemoryBlockDetailPage, MemoryReviewQueuePage.
+        <a href="before-knowledge.html" style="color:var(--indigo-700);font-weight:600;margin-left:2px;">View before state</a>
+      </div>
+
       <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
         <div>
           <h1>Knowledge</h1>
@@ -227,122 +220,228 @@
         </button>
       </div>
 
-      <!-- Memory inline meta (replaces KPI tiles from WorkspaceMemoryPage) -->
+      <!-- Memory inline meta -->
       <div class="knowledge-meta">
-        <div class="k-meta-item"><strong>Memory v7</strong></div>
-        <div class="k-meta-item">Regenerated <strong>3h ago</strong></div>
-        <div class="k-meta-item">Entries since summary: <strong>2 / 5</strong></div>
-        <div class="k-meta-item"><strong>24</strong> memory entries</div>
-        <div class="k-meta-item"><strong>8</strong> memory blocks</div>
+        <div class="k-meta-item"><strong>Memory v12</strong></div>
+        <div class="k-meta-item">Regenerated <strong>2h ago</strong></div>
+        <div class="k-meta-item">New entries since summary: <strong>4 / 5</strong></div>
+        <div class="k-meta-item"><strong>38</strong> entries</div>
+        <div class="k-meta-item"><strong>10</strong> memory blocks</div>
+        <div class="k-meta-item"><strong>9</strong> authored references</div>
       </div>
 
-      <!-- Tabs -->
-      <div class="tabs" id="k-tabs">
-        <button class="tab-btn active" onclick="switchKTab('auto',this)">
-          Auto-memory <span class="tab-count">32</span>
-        </button>
-        <button class="tab-btn" onclick="switchKTab('authored',this)">
-          Authored knowledge <span class="tab-count">6</span>
-        </button>
-        <button class="tab-btn" onclick="switchKTab('review',this)">
-          Review queue <span class="tab-count" style="background:#fef3c7;color:#b45309;">3</span>
-        </button>
+      <!-- Top-level tabs (names left blank per operator — will be named after review) -->
+      <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--slate-200);margin-bottom:20px;">
+        <div class="tabs" id="k-tabs" style="border:none;margin-bottom:0;">
+          <button class="tab-btn active" onclick="switchKTab('auto',this)">
+            Auto-memory <span class="tab-count">48</span>
+          </button>
+          <button class="tab-btn" onclick="switchKTab('authored',this)">
+            Authored knowledge <span class="tab-count">9</span>
+          </button>
+        </div>
+        <a href="inbox.html" style="font-size:12px;color:var(--amber-700);text-decoration:none;font-weight:500;padding:4px 10px;border:1px solid #fde68a;border-radius:6px;background:var(--amber-50);">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;margin-right:4px;"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+          5 items need review in Inbox
+        </a>
       </div>
 
-      <!-- ── AUTO-MEMORY TAB ─────────────────────────────────────────── -->
+      <!-- ── AUTO-MEMORY TAB ───────────────────────────────────────────── -->
       <div class="tab-panel active" id="tab-auto">
-
         <!-- Sub-tabs within Auto-memory -->
         <div style="display:flex;gap:0;border-bottom:1px solid var(--slate-100);margin-bottom:16px;">
-          <button class="tab-btn active" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('summary',this)">Summary</button>
-          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('entries',this)">Entries (24)</button>
-          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('blocks',this)">Memory Blocks (8)</button>
-          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('insights',this)">Insights (18)</button>
-          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('baseline',this)">Baseline artefacts</button>
-          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('board',this)">Board summary</button>
+          <button class="tab-btn active" style="font-size:12.5px;padding:7px 13px;" onclick="switchAutoSub('summary',this)">Summary</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:7px 13px;" onclick="switchAutoSub('entries',this)">Entries (38)</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:7px 13px;" onclick="switchAutoSub('blocks',this)">Memory Blocks (10)</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:7px 13px;" onclick="switchAutoSub('baseline',this)">Baseline (8)</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:7px 13px;" onclick="switchAutoSub('board',this)">Board summary</button>
         </div>
 
-        <!-- Summary sub-panel -->
+        <!-- ── SUMMARY ── -->
         <div id="auto-summary" class="auto-sub-panel" style="display:block;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <div style="font-size:13px;font-weight:600;color:var(--slate-700);">Compiled memory</div>
+            <div style="font-size:13px;font-weight:600;color:var(--slate-700);">Compiled memory summary</div>
             <div style="display:flex;gap:6px;">
               <button class="btn btn-sm btn-secondary">Regenerate</button>
               <button class="btn btn-sm btn-primary">Edit</button>
             </div>
           </div>
-          <div class="memory-summary-text">Acme Corp is a mid-market B2B SaaS company in the facilities management space. Key decision-makers are Sarah Chen (VP Operations) and James Watt (CTO). Their primary pain point is manual compliance reporting which currently consumes ~12 hours/week.
+          <div class="memory-summary-text">Acme Corp is a mid-market B2B SaaS company in the facilities management space with approximately 180 employees across three Australian state offices (Sydney HQ, Melbourne, Brisbane). Their primary product is compliance tracking and maintenance scheduling software for property management firms and commercial landlords. They have been a target account since January 2026.
 
-Preferred communication: email on Tuesdays/Thursdays, 9am-12pm AEST. Sarah responds quickly on LinkedIn. James prefers technical detail in all correspondence.
+Key stakeholders identified: Sarah Chen (VP Operations, primary champion — responds well to ROI framing, LinkedIn outreach preferred for informal touchpoints), James Watt (CTO, technical approver — requires architectural specificity, do not send executive summaries), Marcus Hill (Finance Manager, identified as likely procurement lead on May 5 by Outreach Agent — unconfirmed, flagged for belief review), and Jennifer Park (Executive Assistant — useful for scheduling, cc on all calendar invites).
 
-Current status: Q2 proposal submitted 2026-04-28. Awaiting sign-off from procurement (Est. 2-3 weeks). Champion is Sarah Chen. Budget approved at $48k ARR.
+Commercial status: Q2 proposal submitted 2026-04-28 at $48,000 ARR. Procurement approval in progress, estimated 2-3 weeks. Internal budget approval confirmed by Sarah. No new objections since the April 22 technical call. Priority follow-up: send Kubernetes deployment architecture doc to James Watt before procurement committee meeting (date TBD).
 
-Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proactively in follow-up. Price sensitivity noted for add-ons — bundle preferred.</div>
+Communication intelligence: Email outreach on Tuesday/Thursday 9am-12pm AEST achieves best response rate (confirmed across 6 interactions, 83% open rate). LinkedIn DMs to Sarah Chen have 100% read rate within 4 hours. James Watt's preference: detailed technical content, no executive summaries, CC him on all platform threads.
+
+Competitive context: Primary incumbent is FieldEdge. Client pain points with FieldEdge: slow support SLAs (avg 72h response), no REST API for custom reporting integrations, and absence of a real-time compliance dashboard. Our primary differentiation angles: real-time compliance dashboard, native Zapier integration, and average 3-week onboarding (vs FieldEdge 8-10 weeks). Acme is price-sensitive on add-ons — present pricing as bundles, not line items. Avoid mentioning per-seat pricing models until budget context is clear.
+
+Next actions: (1) Deliver Kubernetes architecture doc by May 9. (2) Trigger procurement follow-up if no response by May 12. (3) Prepare competitor comparison sheet refresh (Q1-2026 version is stale). (4) Resolve belief conflict on Marcus Hill procurement lead status.</div>
         </div>
 
-        <!-- Entries sub-panel -->
+        <!-- ── ENTRIES ── -->
         <div id="auto-entries" class="auto-sub-panel" style="display:none;">
+          <div class="filter-row">
+            <div class="search-wrap" style="width:260px;">
+              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input class="search-box" type="search" placeholder="Filter entries...">
+            </div>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Type: All</option>
+              <option>preference</option>
+              <option>fact</option>
+              <option>belief</option>
+              <option>decision</option>
+              <option>observation</option>
+            </select>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Domain: All</option>
+              <option>sales</option>
+              <option>marketing</option>
+              <option>operations</option>
+              <option>brand</option>
+              <option>product</option>
+            </select>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Agent: All</option>
+              <option>Outreach Agent</option>
+              <option>CRM Agent</option>
+              <option>Content Agent</option>
+            </select>
+          </div>
           <div class="card">
-            <div class="card-header" style="padding:10px 14px;">
-              <div style="font-size:12.5px;color:var(--slate-500);">24 memory entries extracted from agent runs</div>
+            <div class="card-header" style="padding:10px 16px;">
+              <div style="font-size:12.5px;color:var(--slate-500);">38 entries extracted from agent runs</div>
               <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Clear all</button>
             </div>
             <div>
-              <div class="insight-row">
-                <div class="insight-type"><span class="badge badge-blue" style="font-size:10px;">observation</span></div>
-                <div class="insight-text">Sarah Chen responded positively to the ROI framing in the 2026-04-22 call. Mentioned 12h/week figure unprompted.</div>
-                <div class="insight-agent">Outreach Agent</div>
-                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">May 1</div>
-                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              <!-- Entry 1 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-amber" style="font-size:10px;">preference</span></div>
+                <div class="entry-text">Sarah Chen responds best to ROI-first framing. Mentioned "12 hours per week saved" figure unprompted in April 22 call — use in all decks.</div>
+                <div class="entry-domain"><span class="badge badge-indigo" style="font-size:10px;">sales</span></div>
+                <div class="entry-agent">Outreach Agent</div>
+                <div class="entry-quality">0.91</div>
+                <div class="entry-date">May 1</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
               </div>
-              <div class="insight-row">
-                <div class="insight-type"><span class="badge badge-green" style="font-size:10px;">decision</span></div>
-                <div class="insight-text">Agreed to send technical architecture doc before procurement review. James Watt requested Kubernetes deployment details specifically.</div>
-                <div class="insight-agent">Outreach Agent</div>
-                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 28</div>
-                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              <!-- Entry 2 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-green" style="font-size:10px;">decision</span></div>
+                <div class="entry-text">Agreed to deliver Kubernetes deployment architecture doc before procurement review. James Watt specifically requested container orchestration detail and multi-region failover design.</div>
+                <div class="entry-domain"><span class="badge badge-indigo" style="font-size:10px;">sales</span></div>
+                <div class="entry-agent">Outreach Agent</div>
+                <div class="entry-quality">0.88</div>
+                <div class="entry-date">Apr 28</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
               </div>
-              <div class="insight-row">
-                <div class="insight-type"><span class="badge badge-amber" style="font-size:10px;">preference</span></div>
-                <div class="insight-text">Prefers bundle pricing over line-item invoicing. Mentioned FieldEdge as current vendor — price-sensitive on add-ons.</div>
-                <div class="insight-agent">CRM Agent</div>
-                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 22</div>
-                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              <!-- Entry 3 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-blue" style="font-size:10px;">fact</span></div>
+                <div class="entry-text">Acme has approximately 180 employees across Sydney (HQ, ~110), Melbourne (~45), and Brisbane (~25). All offices use a shared Active Directory tenant.</div>
+                <div class="entry-domain"><span class="badge badge-slate" style="font-size:10px;">operations</span></div>
+                <div class="entry-agent">CRM Agent</div>
+                <div class="entry-quality">0.97</div>
+                <div class="entry-date">Apr 15</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
               </div>
-              <div class="insight-row">
-                <div class="insight-type"><span class="badge badge-red" style="font-size:10px;">issue</span></div>
-                <div class="insight-text">Procurement cycle longer than expected (2-3 weeks). Flag for follow-up if no response by May 12.</div>
-                <div class="insight-agent">CRM Agent</div>
-                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 28</div>
-                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              <!-- Entry 4 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-amber" style="font-size:10px;">preference</span></div>
+                <div class="entry-text">Acme strongly prefers bundle pricing over line-item invoicing. Procurement team flagged per-seat models as a blocker in a previous vendor evaluation.</div>
+                <div class="entry-domain"><span class="badge badge-indigo" style="font-size:10px;">sales</span></div>
+                <div class="entry-agent">CRM Agent</div>
+                <div class="entry-quality">0.84</div>
+                <div class="entry-date">Apr 22</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
               </div>
-              <div class="insight-row">
-                <div class="insight-type"><span class="badge badge-violet" style="font-size:10px;">pattern</span></div>
-                <div class="insight-text">C-suite at Acme consistently responds within 2 business days when contacted on Tuesdays or Thursdays, 9am-12pm AEST.</div>
-                <div class="insight-agent">Outreach Agent</div>
-                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 15</div>
-                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              <!-- Entry 5 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-violet" style="font-size:10px;">observation</span></div>
+                <div class="entry-text">Email outreach on Tuesdays and Thursdays 9am-12pm AEST consistently produces fastest response. Pattern confirmed across 6 separate interactions since Jan 2026.</div>
+                <div class="entry-domain"><span class="badge badge-blue" style="font-size:10px;">marketing</span></div>
+                <div class="entry-agent">Outreach Agent</div>
+                <div class="entry-quality">0.93</div>
+                <div class="entry-date">Apr 10</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
+              </div>
+              <!-- Entry 6 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-sky" style="font-size:10px;">belief</span></div>
+                <div class="entry-text">Marcus Hill (Finance Manager) is likely the procurement sign-off authority based on his involvement in the April 28 budget approval conversation. Confidence 0.74 — not yet confirmed.</div>
+                <div class="entry-domain"><span class="badge badge-indigo" style="font-size:10px;">sales</span></div>
+                <div class="entry-agent">Outreach Agent</div>
+                <div class="entry-quality">0.74</div>
+                <div class="entry-date">May 5</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
+              </div>
+              <!-- Entry 7 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-red" style="font-size:10px;">issue</span></div>
+                <div class="entry-text">Procurement cycle is longer than initial estimate (2-3 weeks vs 1 week). Flag for follow-up email if no procurement committee response by May 12.</div>
+                <div class="entry-domain"><span class="badge badge-indigo" style="font-size:10px;">sales</span></div>
+                <div class="entry-agent">CRM Agent</div>
+                <div class="entry-quality">0.96</div>
+                <div class="entry-date">Apr 28</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
+              </div>
+              <!-- Entry 8 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-blue" style="font-size:10px;">fact</span></div>
+                <div class="entry-text">Current vendor is FieldEdge. Acme has been a FieldEdge customer for approximately 4 years. Contract renewal is likely H2 2026 — timing opportunity for competitive displacement.</div>
+                <div class="entry-domain"><span class="badge badge-indigo" style="font-size:10px;">sales</span></div>
+                <div class="entry-agent">CRM Agent</div>
+                <div class="entry-quality">0.81</div>
+                <div class="entry-date">Mar 20</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
+              </div>
+              <!-- Entry 9 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-green" style="font-size:10px;">decision</span></div>
+                <div class="entry-text">Content Agent approved to use a formal-professional tone for all Acme client-facing deliverables. Casual or conversational tone is not appropriate for this account.</div>
+                <div class="entry-domain"><span class="badge badge-sky" style="font-size:10px;">brand</span></div>
+                <div class="entry-agent">Content Agent</div>
+                <div class="entry-quality">0.99</div>
+                <div class="entry-date">Feb 18</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
+              </div>
+              <!-- Entry 10 -->
+              <div class="entry-row">
+                <div class="entry-type"><span class="badge badge-violet" style="font-size:10px;">observation</span></div>
+                <div class="entry-text">James Watt engages with LinkedIn posts on cloud infrastructure topics (Kubernetes, AWS, platform engineering). Consider using shared content as a warm touchpoint pre-proposal.</div>
+                <div class="entry-domain"><span class="badge badge-blue" style="font-size:10px;">marketing</span></div>
+                <div class="entry-agent">Outreach Agent</div>
+                <div class="entry-quality">0.67</div>
+                <div class="entry-date">Mar 5</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Memory Blocks sub-panel -->
+        <!-- ── MEMORY BLOCKS ── -->
         <div id="auto-blocks" class="auto-sub-panel" style="display:none;">
           <div class="card">
-            <div class="card-header">
-              <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Memory Blocks — loaded into every agent run</span>
+            <div class="card-header" style="padding:12px 16px;">
+              <div>
+                <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Memory Blocks</span>
+                <span style="font-size:12px;color:var(--slate-400);margin-left:8px;">Loaded into every agent run as stable context</span>
+              </div>
               <button class="btn btn-xs btn-secondary" onclick="document.getElementById('new-block-drawer').style.display='flex'">+ New block</button>
             </div>
             <div>
+              <!-- Block 1 -->
               <div class="memory-block-row">
-                <div style="flex:1;">
-                  <div class="block-label">Brand voice</div>
-                  <div class="block-content">Professional but warm. Avoid jargon. Use "we" when referring to the agency. Lead with outcomes, not features. Max 3 paragraphs per email.</div>
-                  <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Manual &middot; Updated Apr 30</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">client.tone.voice</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">Professional but warm. Avoid jargon and sports metaphors. Use "we" when referring to the agency. Lead with outcomes before features. Max 3 paragraphs per outbound email. Always sign off with first name only.</div>
+                  <div class="block-meta"><span>Manual</span><span>Updated May 1</span><span>Scope: org</span></div>
                 </div>
                 <div class="block-actions">
-                  <span class="badge badge-slate" style="font-size:10px;">Manual</span>
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
                   <button class="btn btn-xs btn-secondary">Edit</button>
                   <button class="btn btn-xs btn-ghost" onclick="document.getElementById('block-detail-drawer').style.display='flex'" title="Version history">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -350,33 +449,156 @@ Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proac
                   <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
                 </div>
               </div>
+              <!-- Block 2 -->
               <div class="memory-block-row">
-                <div style="flex:1;">
-                  <div class="block-label">Key stakeholders</div>
-                  <div class="block-content">Sarah Chen (VP Ops) — decision-maker. James Watt (CTO) — technical approver. Procurement lead unknown. Budget: $48k ARR approved.</div>
-                  <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">From Reference &middot; Updated May 1</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">team.q4.priorities</div>
+                    <span class="badge badge-indigo" style="font-size:10px;">subaccount</span>
+                  </div>
+                  <div class="block-content">Q2 2026 focus: close Acme Corp deal by end of May. Secondary: upsell TerraForm Partners on analytics add-on. No new outreach campaigns until June — bandwidth constraint from onboarding Revel Group.</div>
+                  <div class="block-meta"><span>Manual</span><span>Updated May 3</span><span>Scope: subaccount</span></div>
                 </div>
                 <div class="block-actions">
-                  <span class="badge badge-indigo" style="font-size:10px;">From reference</span>
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
                   <button class="btn btn-xs btn-secondary">Edit</button>
-                  <button class="btn btn-xs btn-ghost">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  </button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
                   <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
                 </div>
               </div>
+              <!-- Block 3 -->
               <div class="memory-block-row">
-                <div style="flex:1;">
-                  <div class="block-label">Competitor context</div>
-                  <div class="block-content">Currently using FieldEdge. Pain points: slow support, no API for custom reporting. Our differentiators: real-time compliance dashboard, Zapier integration.</div>
-                  <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Manual &middot; Updated Apr 22</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">pricing.tiers</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">Current pricing: Starter $12k ARR (1 agent), Growth $28k ARR (3 agents + integrations), Enterprise $48k+ ARR (unlimited agents, dedicated support, SLA). Always present as annual bundles. No monthly billing for new accounts in 2026.</div>
+                  <div class="block-meta"><span>Promoted from authored reference</span><span>Updated Apr 15</span><span>Scope: org</span></div>
                 </div>
                 <div class="block-actions">
-                  <span class="badge badge-slate" style="font-size:10px;">Manual</span>
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
                   <button class="btn btn-xs btn-secondary">Edit</button>
-                  <button class="btn btn-xs btn-ghost">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  </button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 4 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">audience.icp</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">ICP: Agency operators managing 5-50 SMB/mid-market clients. Typically non-technical. Primary pain: manual reporting, repetitive client comms, inconsistent delivery. Not enterprise IT buyers — avoid technical depth in primary messaging.</div>
+                  <div class="block-meta"><span>Auto-synthesised</span><span>Updated Apr 20</span><span>Scope: org</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 5 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">escalation.policy</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">Escalate to human review if: (a) deal value over $50k, (b) prospect mentions legal/compliance concern, (c) prospect is a journalist or analyst, (d) any request to modify contract terms. Do not self-approve these cases.</div>
+                  <div class="block-meta"><span>Manual</span><span>Updated Mar 10</span><span>Scope: org</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 6 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">client.acme.stakeholders</div>
+                    <span class="badge badge-indigo" style="font-size:10px;">subaccount</span>
+                  </div>
+                  <div class="block-content">Sarah Chen (VP Ops, champion), James Watt (CTO, technical approver), Marcus Hill (Finance, likely procurement lead — unconfirmed), Jennifer Park (EA, scheduling). Budget approved $48k ARR. Do not discuss pricing with James — route to Sarah or Marcus.</div>
+                  <div class="block-meta"><span>Promoted from insight</span><span>Updated May 2</span><span>Scope: subaccount</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 7 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">brand.positioning</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">We are "consumer-simple on enterprise-grade infrastructure". Not an AI chatbot. Not an automation platform. A managed AI team that handles real business processes. Lead with outcomes (time saved, errors reduced, consistency gained), not technology.</div>
+                  <div class="block-meta"><span>Manual</span><span>Updated Apr 1</span><span>Scope: org</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 8 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">ops.data-handling</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">All client data is stored in AU-East region. SOC 2 Type II certified. GDPR compliant for EU prospects. No data shared with third-party AI providers except Anthropic under DPA. Do not make data residency guarantees for US-West without checking with ops.</div>
+                  <div class="block-meta"><span>Manual</span><span>Updated Mar 22</span><span>Scope: org</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 9 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">client.acme.competitor</div>
+                    <span class="badge badge-indigo" style="font-size:10px;">subaccount</span>
+                  </div>
+                  <div class="block-content">Incumbent: FieldEdge (4 years). Pain points: 72h support SLAs, no REST API, no real-time compliance dashboard. Our counter: real-time compliance, Zapier integration, 3-week onboarding. Present side-by-side on request — use Q1-2026 comparison sheet. Do not lead with price discounting.</div>
+                  <div class="block-meta"><span>Promoted from insight</span><span>Updated Apr 22</span><span>Scope: subaccount</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <!-- Block 10 -->
+              <div class="memory-block-row">
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                    <div class="block-label">ops.tools.approved</div>
+                    <span class="badge badge-slate" style="font-size:10px;">org</span>
+                  </div>
+                  <div class="block-content">Approved tools for agent use: Gmail (primary), Outlook (secondary), HubSpot CRM, Notion (internal docs), Loom (async video), Slack (internal only — no client Slack channels). Do not use Calendly unless explicitly approved per client.</div>
+                  <div class="block-meta"><span>Manual</span><span>Updated Apr 5</span><span>Scope: org</span></div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-green" style="font-size:10px;">Active</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
                   <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
                 </div>
               </div>
@@ -384,82 +606,21 @@ Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proac
           </div>
         </div>
 
-        <!-- Insights sub-panel -->
-        <div id="auto-insights" class="auto-sub-panel" style="display:none;">
-          <div class="filter-row">
-            <select class="form-select" style="font-size:12px;padding:5px 10px;">
-              <option>Domain: All</option>
-              <option>sales</option>
-              <option>operations</option>
-            </select>
-            <select class="form-select" style="font-size:12px;padding:5px 10px;">
-              <option>Topic: All</option>
-              <option>stakeholders</option>
-              <option>pricing</option>
-              <option>timeline</option>
-            </select>
-            <select class="form-select" style="font-size:12px;padding:5px 10px;">
-              <option>Type: All</option>
-              <option>observation</option>
-              <option>decision</option>
-              <option>preference</option>
-              <option>issue</option>
-              <option>pattern</option>
-            </select>
-            <select class="form-select" style="font-size:12px;padding:5px 10px;">
-              <option>Task: All</option>
-              <option>outreach</option>
-              <option>crm-sync</option>
-            </select>
-          </div>
-          <div class="card">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Insight</th>
-                  <th>Type</th>
-                  <th>Domain / Topic</th>
-                  <th>Source</th>
-                  <th>Quality</th>
-                  <th>Captured</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td style="max-width:360px;"><div style="font-size:12.5px;line-height:1.45;color:var(--slate-700);">Acme prefers detailed technical architecture docs before procurement sign-off</div></td>
-                  <td><span class="badge badge-green" style="font-size:10px;">decision</span></td>
-                  <td><div style="display:flex;gap:4px;flex-wrap:wrap;"><span class="badge badge-indigo" style="font-size:10px;">sales</span><span class="badge badge-slate" style="font-size:10px;">procurement</span></div></td>
-                  <td style="font-size:12px;color:var(--slate-500);">Outreach Agent</td>
-                  <td style="font-family:monospace;font-size:12px;color:var(--slate-500);">0.91</td>
-                  <td style="font-size:12px;color:var(--slate-400);">Apr 28</td>
-                  <td><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></td>
-                </tr>
-                <tr>
-                  <td style="max-width:360px;"><div style="font-size:12.5px;line-height:1.45;color:var(--slate-700);">Contact response rate peaks Tuesday/Thursday 9am-12pm AEST</div></td>
-                  <td><span class="badge badge-violet" style="font-size:10px;">pattern</span></td>
-                  <td><div style="display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">operations</span></div></td>
-                  <td style="font-size:12px;color:var(--slate-500);">Outreach Agent</td>
-                  <td style="font-family:monospace;font-size:12px;color:var(--slate-500);">0.87</td>
-                  <td style="font-size:12px;color:var(--slate-400);">Apr 15</td>
-                  <td><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Baseline artefacts sub-panel -->
+        <!-- ── BASELINE ── -->
         <div id="auto-baseline" class="auto-sub-panel" style="display:none;">
           <div class="card">
-            <div class="card-header">
-              <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Baseline artefacts — structured client profile</span>
+            <div class="card-header" style="padding:12px 16px;">
+              <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Baseline artefacts</span>
+              <span style="font-size:12px;color:var(--slate-400);margin-left:8px;">Structured client profile filled progressively by the Config Assistant</span>
             </div>
             <div>
               <div class="baseline-row">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Company overview</span>
-                  <span class="baseline-tier">Tier 1</span>
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Company overview</span>
+                    <span class="baseline-tier">Tier 1</span>
+                  </div>
+                  <div class="baseline-excerpt">Mid-market B2B SaaS, facilities management, ~180 employees, 3 AU state offices</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="badge badge-green" style="font-size:10px;">Completed</span>
@@ -467,9 +628,12 @@ Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proac
                 </div>
               </div>
               <div class="baseline-row">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Key contacts</span>
-                  <span class="baseline-tier">Tier 1</span>
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Key contacts</span>
+                    <span class="baseline-tier">Tier 1</span>
+                  </div>
+                  <div class="baseline-excerpt">Sarah Chen (VP Ops), James Watt (CTO), Marcus Hill (Finance), Jennifer Park (EA)</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="badge badge-green" style="font-size:10px;">Completed</span>
@@ -477,9 +641,12 @@ Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proac
                 </div>
               </div>
               <div class="baseline-row">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Goals and objectives</span>
-                  <span class="baseline-tier">Tier 1</span>
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Goals and objectives</span>
+                    <span class="baseline-tier">Tier 1</span>
+                  </div>
+                  <div class="baseline-excerpt">Reduce manual reporting by 60%, standardise client comms, improve compliance tracking SLA</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="badge badge-green" style="font-size:10px;">Completed</span>
@@ -487,70 +654,123 @@ Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proac
                 </div>
               </div>
               <div class="baseline-row">
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Voice and tone</span>
+                    <span class="baseline-tier">Tier 1</span>
+                  </div>
+                  <div class="baseline-excerpt">Formal-professional, outcomes-first, no jargon, max 3 paragraphs per email</div>
+                </div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Brand guidelines</span>
-                  <span class="baseline-tier">Tier 2</span>
+                  <span class="badge badge-green" style="font-size:10px;">Completed</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Brand guidelines</span>
+                    <span class="baseline-tier">Tier 2</span>
+                  </div>
+                  <div class="baseline-excerpt">Partial — logo rules and colour palette uploaded, typography spec pending</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="badge badge-amber" style="font-size:10px;">In progress</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
                 </div>
               </div>
               <div class="baseline-row">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Competitive landscape</span>
-                  <span class="baseline-tier">Tier 2</span>
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Competitive positioning</span>
+                    <span class="baseline-tier">Tier 2</span>
+                  </div>
+                  <div class="baseline-excerpt">FieldEdge incumbent — competitor analysis partially complete, refresh scheduled</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span class="badge badge-slate" style="font-size:10px;">Not started</span>
+                  <span class="badge badge-amber" style="font-size:10px;">In progress</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
                 </div>
               </div>
               <div class="baseline-row">
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Constraints and restrictions</span>
+                    <span class="baseline-tier">Tier 2</span>
+                  </div>
+                  <div class="baseline-excerpt">No cold calls. No mention of pricing before discovery call. Escalate all legal/compliance questions.</div>
+                </div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Onboarding playbook</span>
-                  <span class="baseline-tier">Tier 3</span>
+                  <span class="badge badge-green" style="font-size:10px;">Completed</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Onboarding playbook</span>
+                    <span class="baseline-tier">Tier 3</span>
+                  </div>
+                  <div class="baseline-excerpt">Not started — required before full agent deployment on this account</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="badge badge-slate" style="font-size:10px;">Not started</span>
+                  <button class="btn btn-xs btn-secondary">Start</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Board summary sub-panel -->
+        <!-- ── BOARD SUMMARY ── -->
         <div id="auto-board" class="auto-sub-panel" style="display:none;">
-          <div style="font-size:13px;font-weight:600;color:var(--slate-700);margin-bottom:8px;">Board summary</div>
-          <p style="font-size:12.5px;color:var(--slate-500);margin-bottom:12px;">A compressed snapshot of the board state, injected into agent context instead of raw task listings. Regenerated alongside the main memory summary.</p>
-          <div class="memory-summary-text">Active tasks: 3 in progress, 2 blocked, 5 completed this week.
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div style="font-size:13px;font-weight:600;color:var(--slate-700);">Board summary</div>
+            <button class="btn btn-sm btn-secondary">Regenerate</button>
+          </div>
+          <p style="font-size:12.5px;color:var(--slate-500);margin-bottom:12px;">A compressed snapshot of the board state, injected into agent context instead of raw task listings.</p>
+          <div class="memory-summary-text">Active: 4 tasks in progress, 2 blocked, 7 completed this week.
 
-Blocked: "Send technical architecture doc" waiting on Engineering review. "Procurement follow-up" scheduled for May 12.
+Blocked: "Send Kubernetes architecture doc" — waiting on Engineering review (owner: Sarah L., ETA May 8). "Q2 proposal follow-up" — procurement committee response pending, follow-up scheduled May 12.
 
-In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "Competitor analysis update".</div>
+In progress: "Draft competitive comparison refresh", "LinkedIn touchpoint with James Watt re infrastructure post", "Onboarding playbook first draft", "Brand guidelines — typography spec".
+
+Completed this week: Discovery call debrief notes, CRM contact enrichment (Acme team), proposal PDF export and send, stakeholder mapping update, deal stage moved to Proposal Sent.</div>
         </div>
 
       </div><!-- /tab-auto -->
 
-      <!-- ── AUTHORED KNOWLEDGE TAB ─────────────────────────────────── -->
+      <!-- ── AUTHORED KNOWLEDGE TAB ───────────────────────────────────── -->
       <div class="tab-panel" id="tab-authored">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-          <div class="search-wrap" style="width:300px;">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input class="search-box" type="search" placeholder="Search authored entries...">
+          <div style="display:flex;gap:8px;">
+            <div class="search-wrap" style="width:280px;">
+              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input class="search-box" type="search" placeholder="Search authored entries...">
+            </div>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Type: All</option>
+              <option>note</option>
+              <option>playbook</option>
+              <option>cheat sheet</option>
+              <option>decision</option>
+            </select>
           </div>
-          <button class="btn btn-primary btn-sm">+ New entry</button>
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-entry-drawer').style.display='flex'">+ New entry</button>
         </div>
 
         <div class="card">
+          <!-- Authored 1 -->
           <div class="authored-row">
             <div class="authored-icon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             </div>
             <div style="flex:1;min-width:0;">
-              <div class="authored-title">Acme onboarding SOPs</div>
-              <div class="authored-preview">Step-by-step process for onboarding Acme to the platform. Covers CRM sync, agent config, data sources, and first-run checklist.</div>
+              <div class="authored-title">How we onboard new SaaS clients</div>
+              <div class="authored-preview">Step-by-step process for onboarding any new SaaS client. Covers CRM sync, agent configuration, data source setup, first-run checklist, and 30-day review cadence.</div>
               <div class="authored-meta">
-                <span>reference</span>
-                <span>Added May 1</span>
+                <span class="badge badge-indigo" style="font-size:10px;">playbook</span>
+                <span>Added by Jordan K.</span><span>Mar 15, 2026</span>
               </div>
             </div>
             <div class="authored-actions">
@@ -559,16 +779,17 @@ In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "C
               <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
             </div>
           </div>
+          <!-- Authored 2 -->
           <div class="authored-row">
             <div class="authored-icon">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             </div>
             <div style="flex:1;min-width:0;">
-              <div class="authored-title">Email tone guidelines</div>
-              <div class="authored-preview">Specific tone rules for correspondence with Acme stakeholders. Professional, concise, avoid sports metaphors, always CC James on technical threads.</div>
+              <div class="authored-title">Brand voice cheat sheet</div>
+              <div class="authored-preview">Quick reference for tone across channels: email (formal), LinkedIn (professional-warm), Slack (concise), proposals (structured). With before/after examples for common mistakes.</div>
               <div class="authored-meta">
-                <span>reference</span>
-                <span>Added Apr 28</span>
+                <span class="badge badge-sky" style="font-size:10px;">cheat sheet</span>
+                <span>Added by Sarah L.</span><span>Apr 1, 2026</span>
               </div>
             </div>
             <div class="authored-actions">
@@ -577,16 +798,131 @@ In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "C
               <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
             </div>
           </div>
+          <!-- Authored 3 -->
           <div class="authored-row">
             <div class="authored-icon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
             </div>
             <div style="flex:1;min-width:0;">
-              <div class="authored-title">Deal history notes</div>
-              <div class="authored-preview">Chronological log of all significant interactions since first contact in Jan 2026. Includes proposal versions, key objections, and decisions.</div>
+              <div class="authored-title">Q3 2025 retro notes</div>
+              <div class="authored-preview">Team retrospective from Q3 2025. Key lessons: proposal turnaround time was too slow (7 days avg, target 3), competitive intel was out-of-date on 2 lost deals. Actions now baked into processes.</div>
               <div class="authored-meta">
-                <span>reference</span>
-                <span>Added Apr 15</span>
+                <span class="badge badge-slate" style="font-size:10px;">note</span>
+                <span>Added by Marcus D.</span><span>Oct 5, 2025</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <!-- Authored 4 -->
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Pricing rationale 2026</div>
+              <div class="authored-preview">Internal document explaining why we moved to bundle-only pricing in January 2026. Key reasoning: reduces negotiation friction, improves NRR, prevents add-on fatigue. Reference before any pricing conversation.</div>
+              <div class="authored-meta">
+                <span class="badge badge-amber" style="font-size:10px;">decision</span>
+                <span>Added by Marcus D.</span><span>Jan 10, 2026</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <!-- Authored 5 -->
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Objection handling playbook</div>
+              <div class="authored-preview">Responses to the 12 most common sales objections. Organised by category: price, trust, vendor lock-in, compliance, and competitor comparison. Validated by deals closed in Q4 2025.</div>
+              <div class="authored-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">playbook</span>
+                <span>Added by Jordan K.</span><span>Feb 1, 2026</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <!-- Authored 6 -->
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Data handling and compliance FAQ</div>
+              <div class="authored-preview">Answers to common prospect questions about data residency, SOC 2 status, GDPR, AI model data policies, and subprocessor disclosure. Updated March 2026.</div>
+              <div class="authored-meta">
+                <span class="badge badge-slate" style="font-size:10px;">note</span>
+                <span>Added by Sarah L.</span><span>Mar 12, 2026</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <!-- Authored 7 -->
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Acme Corp deal history</div>
+              <div class="authored-preview">Chronological log of all significant interactions since first contact January 2026. Includes proposal versions, key objections raised, decisions made, and outstanding commitments.</div>
+              <div class="authored-meta">
+                <span class="badge badge-slate" style="font-size:10px;">note</span>
+                <span>Added by Jordan K.</span><span>Apr 15, 2026</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <!-- Authored 8 -->
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Competitor intelligence: FieldEdge 2026</div>
+              <div class="authored-preview">Research on FieldEdge positioning, pricing (estimated $55k-80k ARR for comparable tier), support model, known weaknesses, and recent customer reviews. Last updated April 2026.</div>
+              <div class="authored-meta">
+                <span class="badge badge-slate" style="font-size:10px;">note</span>
+                <span>Added by Marcus D.</span><span>Apr 3, 2026</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <!-- Authored 9 -->
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Agent prompt templates library</div>
+              <div class="authored-preview">Curated prompt templates for common agent tasks: weekly summary email, deal stage transition notification, CRM enrichment request, stakeholder research brief. 14 templates total.</div>
+              <div class="authored-meta">
+                <span class="badge badge-sky" style="font-size:10px;">cheat sheet</span>
+                <span>Added by Sarah L.</span><span>Apr 28, 2026</span>
               </div>
             </div>
             <div class="authored-actions">
@@ -599,112 +935,21 @@ In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "C
 
       </div><!-- /tab-authored -->
 
-      <!-- ── REVIEW QUEUE TAB ───────────────────────────────────────── -->
-      <div class="tab-panel" id="tab-review">
-        <div class="filter-row">
-          <select class="form-select" style="font-size:12px;padding:5px 10px;">
-            <option>Status: Pending</option>
-            <option>Approved</option>
-            <option>Rejected</option>
-            <option>All statuses</option>
-          </select>
-          <select class="form-select" style="font-size:12px;padding:5px 10px;">
-            <option>Type: All</option>
-            <option>Belief conflicts</option>
-            <option>Block proposals</option>
-            <option>Clarifications</option>
-          </select>
-          <span style="font-size:12px;color:var(--slate-500);margin-left:4px;">3 items pending your review</span>
-        </div>
-
-        <!-- Belief conflict -->
-        <div class="review-card">
-          <div class="review-card-header">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span class="badge badge-amber" style="font-size:10px;text-transform:uppercase;">Belief conflict</span>
-              <span style="font-size:12px;color:var(--slate-700);">Entity: <strong>procurement_lead</strong></span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.83 &middot; May 5, 2:14pm</span>
-              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
-            </div>
-          </div>
-          <div class="review-card-body">
-            <div class="belief-grid">
-              <div class="belief-side">
-                <div class="belief-side-label">New belief</div>
-                <div class="belief-value">Procurement lead is Marcus Hill, Finance Manager</div>
-                <div class="belief-conf">confidence 0.83</div>
-              </div>
-              <div class="belief-side">
-                <div class="belief-side-label">Existing belief</div>
-                <div class="belief-value">Procurement lead unknown</div>
-                <div class="belief-conf">confidence 1.00 (manual entry)</div>
-              </div>
-            </div>
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-sm btn-secondary" style="color:var(--indigo-700);border-color:var(--indigo-200);background:var(--indigo-50);">Accept new belief</button>
-              <button class="btn btn-sm btn-secondary" style="color:var(--indigo-700);border-color:var(--indigo-200);background:var(--indigo-50);">Keep existing</button>
-              <button class="btn btn-sm btn-ghost" style="margin-left:auto;">Reject both</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Block proposal -->
-        <div class="review-card">
-          <div class="review-card-header">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span class="badge badge-green" style="font-size:10px;text-transform:uppercase;">Block proposal</span>
-              <span style="font-size:12px;color:var(--slate-700);font-weight:600;">Competitive response playbook</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.77 &middot; May 4, 10:02am</span>
-              <span style="font-size:11px;color:var(--slate-400);">CRM Agent</span>
-            </div>
-          </div>
-          <div class="review-card-body">
-            <pre style="font-size:12px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:140px;overflow-y:auto;white-space:pre-wrap;font-family:inherit;line-height:1.5;">When FieldEdge is mentioned: acknowledge their current investment, then pivot to our real-time compliance dashboard differentiator and our Zapier integration (which they lack). Do not lead with price. Offer a side-by-side comparison if they request it — use the Q1-2026 comparison sheet (link in docs).</pre>
-            <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="btn btn-sm btn-primary">Approve and activate</button>
-              <button class="btn btn-sm btn-ghost" style="margin-left:auto;">Reject</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Clarification pending -->
-        <div class="review-card">
-          <div class="review-card-header">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span class="badge badge-sky" style="font-size:10px;text-transform:uppercase;">Clarification pending</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.61 &middot; May 3, 4:30pm</span>
-              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
-            </div>
-          </div>
-          <div class="review-card-body">
-            <div style="font-size:13px;color:var(--slate-800);margin-bottom:8px;">"In the April 22 call, Sarah mentioned a 'sister company' that might also benefit from the platform. Is this a separate opportunity or is she referring to Acme's parent group?"</div>
-            <div style="font-size:12px;color:var(--slate-500);font-style:italic;">Read-only: clarifications resolve via the agent run inbox, not this queue.</div>
-          </div>
-        </div>
-
-      </div><!-- /tab-review -->
-
     </div><!-- /page-body -->
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
-<!-- ── BLOCK DETAIL DRAWER ──────────────────────────────────────── -->
+<!-- ── BLOCK DETAIL DRAWER ────────────────────────────────────────── -->
 <div id="block-detail-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
   <div class="drawer block-drawer">
     <div class="drawer-header">
-      <h2>Memory block: Brand voice</h2>
+      <h2>Block: client.tone.voice</h2>
       <button class="drawer-close" onclick="document.getElementById('block-detail-drawer').style.display='none'">&times;</button>
     </div>
     <div class="drawer-body">
       <div style="margin-bottom:16px;">
         <div style="font-size:12px;color:var(--slate-500);margin-bottom:6px;">Current content</div>
-        <div style="font-size:12.5px;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;line-height:1.55;">Professional but warm. Avoid jargon. Use "we" when referring to the agency. Lead with outcomes, not features. Max 3 paragraphs per email.</div>
+        <div style="font-size:12.5px;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;line-height:1.55;font-family:'JetBrains Mono',monospace;font-size:12px;">Professional but warm. Avoid jargon and sports metaphors. Use "we" when referring to the agency. Lead with outcomes before features. Max 3 paragraphs per outbound email.</div>
       </div>
       <div class="tabs" style="margin-bottom:16px;">
         <button class="tab-btn active">Version history</button>
@@ -713,20 +958,24 @@ In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "C
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:8px;">Select two versions to compare</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
         <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--slate-200);border-radius:7px;cursor:pointer;font-size:12.5px;">
-          <input type="checkbox"> <span style="font-weight:600;color:var(--slate-700);">v3</span> <span style="color:var(--slate-500);">manual_edit</span> <span style="margin-left:auto;color:var(--slate-400);">May 1, 9:22am</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--slate-200);border-radius:7px;cursor:pointer;font-size:12.5px;">
-          <input type="checkbox" checked> <span style="font-weight:600;color:var(--slate-700);">v2</span> <span style="color:var(--slate-500);">agent_update</span> <span style="margin-left:auto;color:var(--slate-400);">Apr 28, 3:45pm</span>
+          <input type="checkbox"> <span style="font-weight:600;color:var(--slate-700);">v4</span> <span style="color:var(--slate-500);">manual_edit</span> <span style="margin-left:auto;color:var(--slate-400);">May 1, 9:22am</span>
         </label>
         <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--indigo-200);border-radius:7px;cursor:pointer;font-size:12.5px;background:var(--indigo-50);">
-          <input type="checkbox" checked> <span style="font-weight:600;color:var(--indigo-700);">v1</span> <span style="color:var(--indigo-500);">initial_create</span> <span style="margin-left:auto;color:var(--slate-400);">Apr 15, 11:00am</span>
+          <input type="checkbox" checked> <span style="font-weight:600;color:var(--indigo-700);">v3</span> <span style="color:var(--indigo-500);">agent_update</span> <span style="margin-left:auto;color:var(--slate-400);">Apr 28, 3:45pm</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--indigo-200);border-radius:7px;cursor:pointer;font-size:12.5px;background:var(--indigo-50);">
+          <input type="checkbox" checked> <span style="font-weight:600;color:var(--indigo-700);">v2</span> <span style="color:var(--indigo-500);">agent_update</span> <span style="margin-left:auto;color:var(--slate-400);">Apr 15, 11:00am</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--slate-200);border-radius:7px;cursor:pointer;font-size:12.5px;">
+          <input type="checkbox"> <span style="font-weight:600;color:var(--slate-700);">v1</span> <span style="color:var(--slate-500);">initial_create</span> <span style="margin-left:auto;color:var(--slate-400);">Mar 2, 2:00pm</span>
         </label>
       </div>
-      <button class="btn btn-sm btn-primary" style="margin-bottom:14px;">Compare v2 vs v1</button>
+      <button class="btn btn-sm btn-primary" style="margin-bottom:14px;">Compare v3 vs v2</button>
       <pre style="font-size:11px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;white-space:pre-wrap;"><span class="diff-rem">- Professional, concise, minimal.</span>
-<span class="diff-add">+ Professional but warm. Avoid jargon. Use "we" when referring to the agency.</span>
-<span class="diff-ctx">  Lead with outcomes, not features.</span>
-<span class="diff-add">+ Max 3 paragraphs per email.</span></pre>
+<span class="diff-add">+ Professional but warm. Avoid jargon and sports metaphors.</span>
+<span class="diff-ctx">  Use "we" when referring to the agency.</span>
+<span class="diff-add">+ Lead with outcomes before features.</span>
+<span class="diff-add">+ Max 3 paragraphs per outbound email.</span></pre>
     </div>
     <div class="drawer-footer">
       <button class="btn btn-secondary" onclick="document.getElementById('block-detail-drawer').style.display='none'">Close</button>
@@ -743,8 +992,17 @@ In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "C
     </div>
     <div class="drawer-body">
       <div class="form-field">
-        <label class="form-label">Title (first line of content)</label>
-        <input class="form-input" placeholder="e.g. Email tone guidelines">
+        <label class="form-label">Title</label>
+        <input class="form-input" placeholder="e.g. Brand voice cheat sheet">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Type</label>
+        <select class="form-select" style="width:100%;">
+          <option>note</option>
+          <option>playbook</option>
+          <option>cheat sheet</option>
+          <option>decision</option>
+        </select>
       </div>
       <div class="form-field">
         <label class="form-label">Content</label>
@@ -776,13 +1034,20 @@ In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "C
     </div>
     <div class="drawer-body">
       <div class="form-field">
-        <label class="form-label">Label</label>
-        <input class="form-input" placeholder="e.g. Brand voice">
-        <div class="form-hint">Loaded into every agent run as stable context (max 80 chars)</div>
+        <label class="form-label">Label (used as a key)</label>
+        <input class="form-input" placeholder="e.g. client.acme.tone" style="font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <div class="form-hint">Dot-separated identifier, max 80 chars. Loaded into every run.</div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Scope</label>
+        <select class="form-select" style="width:100%;">
+          <option>org (visible to all agents)</option>
+          <option>subaccount (this client only)</option>
+        </select>
       </div>
       <div class="form-field">
         <label class="form-label">Content</label>
-        <textarea class="form-textarea" style="font-family:monospace;font-size:12px;min-height:160px;" placeholder="Plain text, max 2000 characters..."></textarea>
+        <textarea class="form-textarea" style="font-family:'JetBrains Mono',monospace;font-size:12px;min-height:160px;" placeholder="Plain text, max 2000 characters..."></textarea>
       </div>
     </div>
     <div class="drawer-footer">

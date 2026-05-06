@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Automations (2 pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 24px; max-width: 1200px; margin: 0 auto;
+}
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 10px; min-width: 70px; }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.mini-btn-danger { background: white; border: 1px solid var(--red-300); color: var(--red-600); }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.mini-table th { background: var(--slate-50); padding: 5px 8px; font-weight: 600; font-size: 10px; text-align: left; border-bottom: 1px solid var(--border); color: var(--slate-600); }
+.mini-table td { padding: 5px 8px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); }
+.mini-table tr:last-child td { border-bottom: none; }
+.admin-notice {
+  background: var(--amber-50); border: 1px solid var(--amber-200); border-radius: 4px;
+  padding: 6px 10px; font-size: 10px; color: var(--amber-800); margin-bottom: 8px;
+}
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.impact-item { text-align: center; }
+.impact-item .big { font-size: 28px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 20px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 24px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>CURRENT STATE</span>
+  <span style="font-weight:400;">2 separate pages replaced by Automations</span>
+  <a href="automations.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- AutomationsPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AutomationsPage
+      <span class="route">/automations</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Automations</h3>
+        <span class="mini-btn mini-btn-primary">New automation</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+        <input style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:10px;flex:1;min-width:80px;" placeholder="Search..." readonly>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Status</option></select>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Tag</option></select>
+      </div>
+      <table class="mini-table">
+        <thead>
+          <tr><th>Name</th><th>Engine</th><th>Status</th><th>Last run</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Welcome sequence</td>
+            <td><span class="badge badge-indigo" style="font-size:9px">n8n</span></td>
+            <td><span class="badge badge-green" style="font-size:9px">Active</span></td>
+            <td style="color:var(--slate-400)">2h ago</td>
+          </tr>
+          <tr>
+            <td>Invoice reminder</td>
+            <td><span class="badge badge-violet" style="font-size:9px">Make</span></td>
+            <td><span class="badge badge-green" style="font-size:9px">Active</span></td>
+            <td style="color:var(--slate-400)">1d ago</td>
+          </tr>
+          <tr>
+            <td>Lead score update</td>
+            <td><span class="badge badge-sky" style="font-size:9px">Zapier</span></td>
+            <td><span class="badge badge-slate" style="font-size:9px">Paused</span></td>
+            <td style="color:var(--slate-400)">3d ago</td>
+          </tr>
+          <tr>
+            <td>Client onboarding</td>
+            <td><span class="badge badge-indigo" style="font-size:9px">n8n</span></td>
+            <td><span class="badge badge-green" style="font-size:9px">Active</span></td>
+            <td style="color:var(--slate-400)">4h ago</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Operator view: no ability to activate/deactivate or delete automations. Admin features not visible.
+      </div>
+    </div>
+  </div>
+
+  <!-- AdminAutomationsPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminAutomationsPage
+      <span class="route">/admin/automations</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Automations (Admin)</h3>
+        <span class="mini-btn mini-btn-primary">New automation</span>
+      </div>
+      <div class="admin-notice">
+        Admin view: activate, deactivate, and delete controls visible to all operators.
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+        <input style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:10px;flex:1;min-width:80px;" placeholder="Search..." readonly>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Status</option></select>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Tag</option></select>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Engine</option></select>
+      </div>
+      <table class="mini-table">
+        <thead>
+          <tr><th>Name</th><th>Engine</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Welcome sequence</td>
+            <td><span class="badge badge-indigo" style="font-size:9px">n8n</span></td>
+            <td><span class="badge badge-green" style="font-size:9px">Active</span></td>
+            <td style="display:flex;gap:3px;">
+              <span class="mini-btn mini-btn-secondary" style="font-size:9px">Pause</span>
+              <span class="mini-btn mini-btn-danger" style="font-size:9px">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td>Invoice reminder</td>
+            <td><span class="badge badge-violet" style="font-size:9px">Make</span></td>
+            <td><span class="badge badge-slate" style="font-size:9px">Paused</span></td>
+            <td style="display:flex;gap:3px;">
+              <span class="mini-btn mini-btn-secondary" style="font-size:9px">Activate</span>
+              <span class="mini-btn mini-btn-danger" style="font-size:9px">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td>Lead score update</td>
+            <td><span class="badge badge-sky" style="font-size:9px">Zapier</span></td>
+            <td><span class="badge badge-red" style="font-size:9px">Error</span></td>
+            <td style="display:flex;gap:3px;">
+              <span class="mini-btn mini-btn-secondary" style="font-size:9px">Retry</span>
+              <span class="mini-btn mini-btn-danger" style="font-size:9px">Delete</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Admin view is a near-duplicate of operator AutomationsPage with extra columns and row actions. Different URL, different access control, same data.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav-impact">
+  <h3>Navigation impact before consolidation</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">2</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Pages (2 near-duplicate routes)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">2</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Nav items (Automations + Admin/Automations)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">Separate</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Inline</div>
+      <div class="lbl">Admin controls surfacing model</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">2x</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1x</div>
+      <div class="lbl">Code paths / data fetching</div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
+    AutomationsPage and AdminAutomationsPage show the same list. The admin version adds activate/deactivate/delete actions. In the consolidated view, these actions are permission-gated and visible inline to authorised users only, via a single route.
+  </p>
+</div>
+
+</body>
+</html>

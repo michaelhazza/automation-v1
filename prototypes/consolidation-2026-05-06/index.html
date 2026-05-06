@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Synthetos Consolidation 2026-05-06 — Prototype Navigator</title>
+<title>Automation OS Consolidation 2026-05-06 — Prototype Navigator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; -webkit-font-smoothing: antialiased; }
-  body { padding: 40px 48px; max-width: 1100px; margin: 0 auto; }
+  body { padding: 40px 48px; max-width: 1160px; margin: 0 auto; }
 
-  .masthead { margin-bottom: 48px; }
+  .masthead { margin-bottom: 40px; }
   .masthead-eyebrow {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
@@ -21,11 +21,7 @@
   }
   .masthead h1 { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 8px; }
   .masthead p { font-size: 14px; color: #64748b; max-width: 680px; line-height: 1.6; }
-
-  .meta-row {
-    margin-top: 16px;
-    display: flex; gap: 24px; flex-wrap: wrap;
-  }
+  .meta-row { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
   .meta-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #64748b; }
   .meta-item strong { color: #334155; font-weight: 600; }
 
@@ -36,9 +32,7 @@
     color: #94a3b8; margin-bottom: 14px; padding-bottom: 10px;
     border-bottom: 1px solid #e2e8f0;
   }
-  .section-heading-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-  }
+  .section-heading-dot { width: 8px; height: 8px; border-radius: 50%; }
 
   .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
 
@@ -46,20 +40,14 @@
     background: white; border: 1px solid #e8ecf0; border-radius: 12px;
     padding: 18px 20px; text-decoration: none; color: inherit;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    transition: all 0.15s;
-    display: block;
+    transition: all 0.15s; display: block;
   }
-  .proto-card:hover {
-    border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12);
-    transform: translateY(-1px);
-  }
+  .proto-card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
 
   .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
   .proto-card-title { font-size: 14px; font-weight: 700; color: #0f172a; }
   .proto-card-file { font-size: 11px; font-family: monospace; color: #94a3b8; background: #f1f5f9; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
-
   .proto-card-desc { font-size: 12.5px; color: #64748b; line-height: 1.55; margin-bottom: 10px; }
-
   .proto-card-replaces { margin-bottom: 8px; }
   .proto-card-replaces-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
   .proto-card-replaces-list { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -70,12 +58,9 @@
     padding: 2px 7px;
   }
   .replace-pill.strike { text-decoration: line-through; color: #94a3b8; }
-
   .proto-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; }
-  .proto-card-link {
-    font-size: 12px; font-weight: 600; color: #4f46e5;
-    display: inline-flex; align-items: center; gap: 4px;
-  }
+  .proto-card-link { font-size: 12px; font-weight: 600; color: #4f46e5; display: inline-flex; align-items: center; gap: 4px; }
+  .before-link { font-size: 11px; color: #f59e0b; font-weight: 600; background: #fef9c3; border: 1px solid #fde68a; border-radius: 4px; padding: 2px 7px; }
 
   .decisions-box {
     background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
@@ -88,35 +73,41 @@
     font-size: 12.5px; color: #78350f; line-height: 1.45;
   }
   .decisions-box li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #f59e0b; margin-top: 6px; flex-shrink: 0; }
+
+  .sub-screens-note {
+    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;
+    padding: 8px 12px; font-size: 12px; color: #166534; margin-bottom: 12px;
+  }
 </style>
 </head>
 <body>
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
-    Prototype Round 1
+    Prototype Round 2
   </div>
-  <h1>Synthetos UI Consolidation</h1>
-  <p>A major UX consolidation pass reducing ~99 pages and ~45 left-nav items into a coherent, task-first navigation structure. Each mockup is rooted in the existing source pages to guarantee no fields are silently dropped.</p>
+  <h1>Automation OS UI Consolidation</h1>
+  <p>~92 pages and ~45+ left-nav items consolidated into ~16 nav items. Every before page maps each source page. Every after page has a Replaces callout. Click Before links to see what is being replaced.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 1 of N</div>
+    <div class="meta-item"><strong>Round:</strong> 2</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 10 screens</div>
+    <div class="meta-item"><strong>Files:</strong> 20 screens (10 consolidated + 9 before pages + nav)</div>
   </div>
 </div>
 
 <div class="decisions-box">
   <h3>Confirmed decisions (not up for re-debate)</h3>
   <ul>
-    <li>Knowledge = Memory (auto) + Authored knowledge. Documents stay separate.</li>
-    <li>Skills drop from main nav. Surfaced inside Agent edit only.</li>
-    <li>Workflows and Automations stay separate. Workflow steps can call automations.</li>
-    <li>Briefs removed entirely (handled in a separate cleanup PR).</li>
+    <li>Knowledge = Memory (auto) + Authored knowledge. Review Queue moved to Inbox.</li>
+    <li>Skills drop from main nav. Surfaced inside Agent Edit (Capabilities tab) as kit+library pattern.</li>
+    <li>Inbox unifies all HITL surfaces: tasks, approvals, belief conflicts, block proposals, clarifications, failed runs.</li>
+    <li>Automation Detail is NOT a top-level nav item. Opens from automation name row click.</li>
+    <li>Connections organises by service (one row per service), not by credential type.</li>
     <li>Categories renamed to Tags in all UI copy.</li>
-    <li>Health Findings renamed to Issues. Moved into Integrations as an Issues tab.</li>
-    <li>Connectors (ClientPulse data ingestion) and Integrations (MCP/agent tools) stay separate. Only Integrations gets consolidation.</li>
+    <li>OrgSettingsPage Memory and Integrations tabs removed from Manage Org. Both have dedicated nav items.</li>
+    <li>Workflows and Automations stay separate. Workflow steps can call automations.</li>
+    <li>Client Pulse deferred. Not in this consolidation.</li>
   </ul>
 </div>
 
@@ -133,9 +124,9 @@
         <div class="proto-card-title">Knowledge</div>
         <div class="proto-card-file">knowledge.html</div>
       </div>
-      <div class="proto-card-desc">Unified Knowledge page combining auto-memory (system-extracted facts, beliefs, baseline artefacts) and user-authored knowledge. Review queue for HITL approvals. Memory block detail opens as a side drawer.</div>
+      <div class="proto-card-desc">Unified Knowledge page. Auto-memory tab (Summary, Entries, Memory Blocks, Baseline, Board summary) with 40-50 realistic examples. Authored knowledge tab with 9 items. Review Queue moved to Inbox. Amber link shows pending count.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-label">Replaces 4 pages</div>
         <div class="proto-card-replaces-list">
           <span class="replace-pill strike">SubaccountKnowledgePage</span>
           <span class="replace-pill strike">WorkspaceMemoryPage</span>
@@ -145,37 +136,61 @@
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-knowledge.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+      </div>
+    </a>
+
+    <a class="proto-card" href="inbox.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Inbox (NEW)</div>
+        <div class="proto-card-file">inbox.html</div>
+      </div>
+      <div class="proto-card-desc">Unified HITL feed: 15-20 mixed items across tasks, approvals, belief conflicts, block proposals, clarifications, failed runs. Inline approve/reject for simple items. Drawer with diff view for complex items. Filters: status/type/client/age/sort.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 4 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">InboxPage</span>
+          <span class="replace-pill strike">AgentMailboxPage</span>
+          <span class="replace-pill strike">MemoryReviewQueuePage</span>
+          <span class="replace-pill strike">ReviewQueuePage (admin)</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-inbox.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 
     <a class="proto-card" href="agent-edit.html">
       <div class="proto-card-header">
-        <div class="proto-card-title">Agent Edit (Skills embedded)</div>
+        <div class="proto-card-title">Agent Edit</div>
         <div class="proto-card-file">agent-edit.html</div>
       </div>
-      <div class="proto-card-desc">Agent configuration with Skills embedded as a tab. Skill picker, per-skill config, and test-skill action all live within agent edit. A skill edit/create opens as a side drawer, not a separate page.</div>
+      <div class="proto-card-desc">6-tab agent detail: Configure, Behaviour (with Prompt History), Capabilities (Skills kit+library 40/60 + Data Sources table), Schedule, Budget, Runs. 180+ skill library with facets. Skill edit drawer. Data Sources separate sub-section.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-label">Replaces 5 pages</div>
         <div class="proto-card-replaces-list">
           <span class="replace-pill strike">AdminAgentEditPage</span>
-          <span class="replace-pill strike">AdminSkillsPage (top-level nav)</span>
+          <span class="replace-pill strike">AdminSkillsPage</span>
           <span class="replace-pill strike">AdminSkillEditPage</span>
           <span class="replace-pill strike">SkillStudioPage</span>
+          <span class="replace-pill strike">SkillAnalyzerPage</span>
         </div>
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-agent-edit.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 
     <a class="proto-card" href="run-trace.html">
       <div class="proto-card-header">
-        <div class="proto-card-title">Run Trace (Unified)</div>
+        <div class="proto-card-title">Run Trace</div>
         <div class="proto-card-file">run-trace.html</div>
       </div>
-      <div class="proto-card-desc">Auto-detects state: live runs show streaming events (WebSocket); historical runs show static trace. Same layout, different state badge and toolbar. Chain sidebar, delegation graph, event detail drawer all preserved.</div>
+      <div class="proto-card-desc">Auto-detects state: live runs show streaming events; historical runs show static trace. Same layout, different state badge and toolbar. Chain sidebar, delegation graph, event detail panel preserved.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
         <div class="proto-card-replaces-list">
           <span class="replace-pill strike">AgentRunLivePage</span>
           <span class="replace-pill strike">RunTraceViewerPage</span>
@@ -183,6 +198,7 @@
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-run-trace.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 
@@ -202,9 +218,9 @@
         <div class="proto-card-title">Automations</div>
         <div class="proto-card-file">automations.html</div>
       </div>
-      <div class="proto-card-desc">Single automations list replacing the user-facing and admin variants. Admin actions (create, edit, delete, activate/deactivate, link system process) are permission-gated within the same page.</div>
+      <div class="proto-card-desc">Single automations list. Admin actions (create, activate/deactivate, delete) are permission-gated inline. Automation name is a clickable link opening Automation Detail. Annotation on page explains click behaviour.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
         <div class="proto-card-replaces-list">
           <span class="replace-pill strike">AutomationsPage</span>
           <span class="replace-pill strike">AdminAutomationsPage</span>
@@ -212,25 +228,7 @@
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
-      </div>
-    </a>
-
-    <a class="proto-card" href="automation-detail.html">
-      <div class="proto-card-header">
-        <div class="proto-card-title">Automation Detail</div>
-        <div class="proto-card-file">automation-detail.html</div>
-      </div>
-      <div class="proto-card-desc">Tabs: Definition (name, description, schema, webhook, category), Run (sandbox with file upload, live status), History (past executions with status, duration, output). Edit mode inline, not a separate edit page.</div>
-      <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
-        <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">AutomationExecutionPage</span>
-          <span class="replace-pill strike">ExecutionDetailPage</span>
-          <span class="replace-pill strike">AdminAutomationEditPage</span>
-        </div>
-      </div>
-      <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-automations.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 
@@ -239,9 +237,9 @@
         <div class="proto-card-title">Calendar</div>
         <div class="proto-card-file">calendar.html</div>
       </div>
-      <div class="proto-card-desc">Context-aware calendar. Scope filter at top (All clients / specific client) replaces the two separate org-level and subaccount-level calendar pages. Window selector (7/14/30 days) preserved.</div>
+      <div class="proto-card-desc">Context-aware calendar. Scope filter pills (All clients / per-client) replace dual routes. Per-client colored dot indicators, 7/14/30 day window selector, legend row.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
         <div class="proto-card-replaces-list">
           <span class="replace-pill strike">ScheduleCalendarPage</span>
           <span class="replace-pill strike">SubaccountScheduleCalendarPage</span>
@@ -249,17 +247,18 @@
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-calendar.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 
     <a class="proto-card" href="integrations.html">
       <div class="proto-card-header">
-        <div class="proto-card-title">Integrations</div>
+        <div class="proto-card-title">Connections</div>
         <div class="proto-card-file">integrations.html</div>
       </div>
-      <div class="proto-card-desc">Tabs: Connections (existing Credentials + MCP servers), Issues (was Health Findings, per confirmed decision). Health audit run button preserved. Per-row "Mark resolved" permission-gated.</div>
+      <div class="proto-card-desc">Service-first connections list (one row per service). Multiple credential types: API key, OAuth, Web login (URL+user+pass+TOTP), Cookie session, Certificate. Per-connection drawer: Credentials, Agent access, Data sync, Issues, Audit log.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
         <div class="proto-card-replaces-list">
           <span class="replace-pill strike">IntegrationsAndCredentialsPage</span>
           <span class="replace-pill strike">AdminHealthFindingsPage</span>
@@ -267,6 +266,41 @@
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-integrations.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- ── Sub-screens (opened from list, not top-level nav) ─────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#7c3aed"></div>
+    Sub-screens (not top-level nav)
+  </div>
+  <div class="sub-screens-note">
+    These pages open from a parent list row click, not from sidebar navigation.
+  </div>
+  <div class="card-grid">
+
+    <a class="proto-card" href="automation-detail.html">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Automation Detail</div>
+        <div class="proto-card-file">automation-detail.html</div>
+      </div>
+      <div class="proto-card-desc">Opens when clicking an automation name in the Automations list. Tabs: Definition (schema, webhook, tags), Run sandbox (JSON input + file upload + live console), History (past executions with detail drawer). Edit mode is an inline toggle.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 3 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">AutomationExecutionPage</span>
+          <span class="replace-pill strike">ExecutionDetailPage</span>
+          <span class="replace-pill strike">AdminAutomationEditPage</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-automation-detail.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 
@@ -286,12 +320,12 @@
         <div class="proto-card-title">Left Nav (Before / After)</div>
         <div class="proto-card-file">shell-nav.html</div>
       </div>
-      <div class="proto-card-desc">Side-by-side comparison of the current ~45-item nav vs the proposed consolidated structure. Annotated with what each new section contains and what was removed or folded.</div>
+      <div class="proto-card-desc">Before: all ~92 pages with disposition tags (MERGED/INTO/DRAWER/KEPT/SYSTEM). After: 16-item nav with plain-language descriptions. Full mapping table: every page with its route, destination, and method.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Represents</div>
         <div class="proto-card-replaces-list">
-          <span class="replace-pill">~45 nav items</span>
-          <span class="replace-pill">Proposed: ~16 items</span>
+          <span class="replace-pill">~92 pages mapped</span>
+          <span class="replace-pill">16 nav items proposed</span>
         </div>
       </div>
       <div class="proto-card-footer">
@@ -301,18 +335,19 @@
 
     <a class="proto-card" href="manage-org.html">
       <div class="proto-card-header">
-        <div class="proto-card-title">Manage Org (Settings)</div>
+        <div class="proto-card-title">Manage Org</div>
         <div class="proto-card-file">manage-org.html</div>
       </div>
-      <div class="proto-card-desc">Consolidated org settings behind one nav entry. Tabs: General, Tags (was Categories), Engines, Board Templates, Permission Sets, Spending thresholds, Health Audit. No fields dropped.</div>
+      <div class="proto-card-desc">Consolidated org settings. Tabs: General, Tags (was Categories), Engines, Board Templates, Permission Sets, Spending, Health Audit. Memory and Integrations tabs removed (both have dedicated nav items). No fields dropped.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Consolidates</div>
         <div class="proto-card-replaces-list">
-          <span class="replace-pill strike">OrgSettingsPage (board+categories+engines+memory+integrations+general+permissions)</span>
+          <span class="replace-pill strike">OrgSettingsPage (7 tabs, 5 embedded sub-pages)</span>
         </div>
       </div>
       <div class="proto-card-footer">
         <div class="proto-card-link">Open mockup &#8594;</div>
+        <a href="before-manage-org.html" class="before-link" onclick="event.stopPropagation()">Before</a>
       </div>
     </a>
 

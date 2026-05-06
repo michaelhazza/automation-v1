@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Run Trace (2 pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 24px; max-width: 1200px; margin: 0 auto;
+}
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.mini-tab {
+  padding: 5px 10px; font-size: 11px; color: var(--slate-500); cursor: default;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mini-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 10px; min-width: 80px; }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.timeline-dot {
+  width: 10px; height: 10px; border-radius: 50%; border: 2px solid;
+  flex-shrink: 0;
+}
+.timeline-dot.green { background: var(--emerald-500); border-color: var(--emerald-600); }
+.timeline-dot.amber { background: var(--amber-400); border-color: var(--amber-500); }
+.timeline-dot.blue { background: var(--indigo-500); border-color: var(--indigo-600); }
+.timeline-dot.red { background: var(--red-500); border-color: var(--red-600); }
+.timeline-line {
+  width: 1px; height: 16px; background: var(--slate-200); margin: 1px 0 1px 4px;
+}
+.live-pulse {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--emerald-500); margin-right: 6px;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.two-panel { display: grid; grid-template-columns: 140px 1fr; gap: 8px; }
+.sidebar-list { border-right: 1px solid var(--border); padding-right: 8px; }
+.sidebar-item {
+  padding: 5px 8px; border-radius: 4px; font-size: 10px; cursor: default;
+  display: flex; align-items: center; gap: 5px; margin-bottom: 2px;
+}
+.sidebar-item.active { background: var(--indigo-50); color: var(--indigo-700); font-weight: 600; }
+.sidebar-item .ti { font-size: 9px; color: var(--slate-400); }
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.impact-item { text-align: center; }
+.impact-item .big { font-size: 28px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 20px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 24px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>CURRENT STATE</span>
+  <span style="font-weight:400;">2 separate pages replaced by Run Trace</span>
+  <a href="run-trace.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- AgentRunLivePage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AgentRunLivePage
+      <span class="route">/agents/:id/runs/:runId/live</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <span class="live-pulse"></span>
+        <h3>Run in progress</h3>
+        <span class="badge badge-amber">Live</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Interrupt</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Agent</span>
+        <span>Outreach Agent</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Started</span>
+        <span>Today 14:32:07</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Client</span>
+        <span>Acme Corp</span>
+      </div>
+      <div class="mini-section-hdr">Live event stream</div>
+      <div class="two-panel">
+        <div class="sidebar-list">
+          <div class="sidebar-item active">
+            <div class="timeline-dot green"></div>
+            <div><div>system_init</div><div class="ti">14:32:07</div></div>
+          </div>
+          <div class="sidebar-item">
+            <div class="timeline-dot green"></div>
+            <div><div>tool_call</div><div class="ti">14:32:09</div></div>
+          </div>
+          <div class="sidebar-item">
+            <div class="timeline-dot amber"></div>
+            <div><div>tool_call</div><div class="ti">14:32:11</div></div>
+          </div>
+          <div class="sidebar-item">
+            <div class="timeline-dot blue"></div>
+            <div style="opacity:0.5"><div>...</div><div class="ti">running</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="mini-section-hdr">Event detail</div>
+          <div class="mini-row"><span class="label">Type</span><span>system_init</span></div>
+          <div class="mini-row"><span class="label">Duration</span><span>12ms</span></div>
+          <div class="mini-row"><span class="label">Status</span><span class="badge badge-green" style="font-size:9px">OK</span></div>
+          <div style="margin-top:6px;font-size:9px;font-family:monospace;background:var(--slate-800);color:#94a3b8;padding:6px;border-radius:4px;height:50px;overflow:hidden;">
+            {<br>&nbsp;"model": "gpt-4o",<br>&nbsp;"prompt_tokens": 1240
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Page auto-updates in real-time. No historical views — live runs only. Separate page for completed runs.
+      </div>
+    </div>
+  </div>
+
+  <!-- RunTraceViewerPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      RunTraceViewerPage
+      <span class="route">/agents/:id/runs/:runId/trace</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Run trace</h3>
+        <span class="badge badge-green">Completed</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">Timeline</div>
+        <div class="mini-tab">Delegation graph</div>
+        <div class="mini-tab">Raw events</div>
+      </div>
+      <div class="mini-row">
+        <span class="label">Run ID</span>
+        <span style="font-family:monospace;font-size:10px">run_8f2kL9x...</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Duration</span>
+        <span>47.3s</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Total tokens</span>
+        <span>6,840</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Cost</span>
+        <span>$0.041</span>
+      </div>
+      <div class="mini-section-hdr">Timeline</div>
+      <div style="display:flex;flex-direction:column;gap:0;padding-left:4px;">
+        <div style="display:flex;align-items:center;gap:6px;font-size:10px;">
+          <div class="timeline-dot green"></div>
+          <span style="flex:1">system_init</span>
+          <span style="color:var(--slate-400)">12ms</span>
+        </div>
+        <div class="timeline-line"></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:10px;">
+          <div class="timeline-dot blue"></div>
+          <span style="flex:1">llm_call (gpt-4o)</span>
+          <span style="color:var(--slate-400)">3.2s</span>
+        </div>
+        <div class="timeline-line"></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:10px;">
+          <div class="timeline-dot green"></div>
+          <span style="flex:1">tool_call: send_email</span>
+          <span style="color:var(--slate-400)">420ms</span>
+        </div>
+        <div class="timeline-line"></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:10px;">
+          <div class="timeline-dot green"></div>
+          <span style="flex:1">tool_call: crm_update</span>
+          <span style="color:var(--slate-400)">280ms</span>
+        </div>
+        <div class="timeline-line"></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:10px;">
+          <div class="timeline-dot green"></div>
+          <span style="flex:1">run_complete</span>
+          <span style="color:var(--slate-400)">8ms</span>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Historical runs only. No live streaming. Different URL pattern from AgentRunLivePage.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav-impact">
+  <h3>Navigation impact before consolidation</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">2</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Pages (2 URL patterns)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">Live/hist</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Toggle</div>
+      <div class="lbl">Different page per mode</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">No</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Yes</div>
+      <div class="lbl">Can view both modes in context</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">2</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Code paths to maintain</div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
+    A live run automatically transitions to completed. With two pages, the browser navigates from /live to /trace on completion, causing a context break. The consolidated page detects the run state and shows the appropriate view without navigation.
+  </p>
+</div>
+
+</body>
+</html>
