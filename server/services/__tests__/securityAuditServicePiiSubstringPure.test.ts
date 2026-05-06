@@ -4,6 +4,7 @@
  */
 
 import { strict as assert } from 'assert';
+import { test } from 'vitest';
 import { normaliseSecurityEventV2 } from '../securityAuditServicePure.js';
 import { auditEvent } from '../../../shared/types/securityAuditEvents.js';
 
@@ -18,42 +19,34 @@ function sanitiseViaV2(meta: Record<string, unknown>): Record<string, unknown> {
   return result.meta;
 }
 
-// exact-match (existing PII_BLACKLIST)
-{
+test('exact key "password" must be redacted', () => {
   const out = sanitiseViaV2({ password: 'hunter2' });
-  assert.equal(out['password'], '[redacted]', 'exact key "password" must be redacted');
-}
+  assert.equal(out['password'], '[redacted]');
+});
 
-// substring match — user_password
-{
+test('key containing "password" substring must be redacted', () => {
   const out = sanitiseViaV2({ user_password: 'hunter2' });
-  assert.equal(out['user_password'], '[redacted]', 'key containing "password" substring must be redacted');
-}
+  assert.equal(out['user_password'], '[redacted]');
+});
 
-// non-PII key — must NOT be redacted
-{
+test('non-PII key "name" must not be redacted', () => {
   const out = sanitiseViaV2({ name: 'John' });
-  assert.equal(out['name'], 'John', 'non-PII key "name" must not be redacted');
-}
+  assert.equal(out['name'], 'John');
+});
 
-// case-insensitive substring match — AUTH_TOKEN
-{
+test('AUTH_TOKEN must be redacted (case-insensitive substring match on "token")', () => {
   const out = sanitiseViaV2({ AUTH_TOKEN: 'abc123' });
-  assert.equal(out['AUTH_TOKEN'], '[redacted]', 'AUTH_TOKEN must be redacted (case-insensitive substring match on "token")');
-}
+  assert.equal(out['AUTH_TOKEN'], '[redacted]');
+});
 
-// credential substring
-{
+test('key containing "credential" must be redacted', () => {
   const out = sanitiseViaV2({ client_credential: 'xyz' });
-  assert.equal(out['client_credential'], '[redacted]', 'key containing "credential" must be redacted');
-}
+  assert.equal(out['client_credential'], '[redacted]');
+});
 
-// mixed bag — redacted and non-redacted in same object
-{
+test('mixed bag — redacted and non-redacted in same object', () => {
   const out = sanitiseViaV2({ name: 'John', client_secret: 'abc', email: 'john@example.com' });
-  assert.equal(out['name'], 'John', 'non-PII name preserved');
-  assert.equal(out['client_secret'], '[redacted]', 'client_secret redacted via substring');
-  assert.equal(out['email'], 'john@example.com', 'email preserved');
-}
-
-console.log('securityAuditServicePiiSubstringPure: all assertions passed');
+  assert.equal(out['name'], 'John');
+  assert.equal(out['client_secret'], '[redacted]');
+  assert.equal(out['email'], 'john@example.com');
+});
