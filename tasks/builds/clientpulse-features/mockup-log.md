@@ -1,6 +1,23 @@
+## Round 5 revert — 2026-05-06
+
+**Operator feedback:** Revert connections-related work from this branch. Connections redesign is being handled on a separate branch. Skills surfaces work stays.
+
+**Files removed (deleted from branch):**
+- `prototypes/clientpulse-features/current-connections.html`
+- `prototypes/clientpulse-features/connections-proposed.html`
+- `prototypes/clientpulse-features/connection-edit-modal.html`
+
+**Files updated:**
+- `index.html` — Section F connections sub-section removed; intro and footer updated to note connections redesign moved to another branch.
+- `mockup-log.md` — this revert entry appended.
+
+---
+
 ## Round 5 — 2026-05-06 17:30
 
 **Operator feedback:** Initial draft — Skills surfaces and Connections page redesign. Two related IA cleanups. Skills pages need to be reachable from main nav. Sub-account skills page needs three-scope grouping. Org skills page needs cascade visibility toggle per skill. Agent Capabilities page should use link/unlink toggles (no inline CRUD). Connections page redesign: unified "Connections" page, single compact table (~44px rows), category filter chips, custom MCP servers blend into "Other" filter.
+
+**Note (added 2026-05-06 revert):** The Connections redesign portion of this round was moved to a separate branch and the three connection HTML files were deleted from this branch. The original round-5 entry below is preserved for context only — connection mockups no longer exist in this tree.
 
 **Changes made:**
 
