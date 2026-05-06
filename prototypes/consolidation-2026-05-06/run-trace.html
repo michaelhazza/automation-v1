@@ -30,6 +30,8 @@
     Main area: tabs: Trace | Delegation graph
     Event detail: right-side slide-in on click
     Cancel button only shown for live/running state.
+
+  Round 6: All 8 events wired with type-specific right panel content.
 -->
 <html lang="en">
 <head>
@@ -133,17 +135,52 @@
 
   /* Event detail panel */
   .event-detail {
-    width: 340px; flex-shrink: 0;
+    width: 360px; flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: white; display: flex; flex-direction: column;
     overflow-y: auto;
   }
-  .event-detail-header { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .event-detail-header {
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50);
+  }
+  .event-detail-title { font-size: 12.5px; font-weight: 700; color: var(--slate-800); }
+  .event-detail-sub { font-size: 11px; color: var(--slate-400); margin-top: 2px; }
   .event-detail-body { padding: 14px; flex: 1; }
   .detail-field { margin-bottom: 14px; }
   .detail-field-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 4px; }
   .detail-field-value { font-size: 12.5px; color: var(--slate-700); line-height: 1.5; }
-  .detail-field-pre { font-size: 11px; font-family: monospace; color: var(--slate-700); background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 6px; padding: 10px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; }
+  .detail-field-pre {
+    font-size: 11px; font-family: monospace; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 6px; padding: 10px; max-height: 160px;
+    overflow-y: auto; white-space: pre-wrap; line-height: 1.5;
+  }
+  .detail-field-pre.expandable { max-height: 80px; }
+
+  .expand-link {
+    font-size: 11px; color: var(--indigo-600); font-weight: 600;
+    cursor: pointer; text-decoration: none; margin-top: 3px; display: block;
+  }
+  .expand-link:hover { text-decoration: underline; }
+
+  .detail-footer {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--slate-50);
+  }
+  .raw-json-link {
+    font-size: 11.5px; color: var(--indigo-600); font-weight: 600;
+    text-decoration: none; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .raw-json-link:hover { text-decoration: underline; }
+
+  .detail-placeholder {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; padding: 32px 20px; text-align: center;
+    color: var(--slate-400);
+  }
 
   /* State toggle */
   .state-toggle { display: flex; gap: 8px; margin-bottom: 0; }
@@ -156,6 +193,40 @@
   }
   .state-toggle-btn.selected {
     border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700);
+  }
+
+  /* Raw JSON modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9000;
+  }
+  .modal-box {
+    background: white; border-radius: 10px; width: 600px; max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .modal-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .modal-head-title { font-size: 13px; font-weight: 700; color: var(--slate-800); }
+  .modal-close {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: var(--slate-100); color: var(--slate-600);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 300; line-height: 1;
+  }
+  .modal-close:hover { background: var(--slate-200); }
+  .modal-body {
+    padding: 16px; overflow-y: auto; flex: 1;
+  }
+  .modal-json {
+    font-size: 11.5px; font-family: monospace; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 6px; padding: 12px; white-space: pre; line-height: 1.6;
+    overflow-x: auto;
   }
 </style>
 </head>
@@ -217,7 +288,7 @@
         <span class="topbar-breadcrumb-current">Run details</span>
       </div>
       <div class="topbar-spacer"></div>
-      <!-- State mode toggle — for demo only -->
+      <!-- State mode toggle for demo only -->
       <div class="state-toggle" style="margin-right:8px;">
         <button class="state-toggle-btn selected" onclick="setMode('live',this)">Live run</button>
         <button class="state-toggle-btn" onclick="setMode('historical',this)">Historical</button>
@@ -293,7 +364,8 @@
           <div id="tab-trace" style="display:flex;flex:1;overflow:hidden;">
             <div class="trace-scroll" id="event-list">
 
-              <div class="event-row" onclick="selectEvent(this)">
+              <!-- Event 1: RUN_START -->
+              <div class="event-row" onclick="selectEvent(1)">
                 <div class="event-seq">1</div>
                 <div class="event-type-dot dot-meta"></div>
                 <div class="event-body">
@@ -303,7 +375,8 @@
                 <div class="event-time">0:00</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)">
+              <!-- Event 2: LLM_CALL -->
+              <div class="event-row" onclick="selectEvent(2)">
                 <div class="event-seq">2</div>
                 <div class="event-type-dot dot-llm"></div>
                 <div class="event-body">
@@ -313,7 +386,8 @@
                 <div class="event-time">0:03</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)">
+              <!-- Event 3: TOOL_CALL -->
+              <div class="event-row" onclick="selectEvent(3)">
                 <div class="event-seq">3</div>
                 <div class="event-type-dot dot-tool"></div>
                 <div class="event-body">
@@ -323,7 +397,8 @@
                 <div class="event-time">0:04</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)">
+              <!-- Event 4: TOOL_RESULT -->
+              <div class="event-row" onclick="selectEvent(4)">
                 <div class="event-seq">4</div>
                 <div class="event-type-dot dot-result"></div>
                 <div class="event-body">
@@ -333,7 +408,8 @@
                 <div class="event-time">0:06</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)">
+              <!-- Event 5: LLM_CALL (second) -->
+              <div class="event-row" onclick="selectEvent(5)">
                 <div class="event-seq">5</div>
                 <div class="event-type-dot dot-llm"></div>
                 <div class="event-body">
@@ -343,7 +419,8 @@
                 <div class="event-time">0:09</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)">
+              <!-- Event 6: TOOL_CALL (send_email) -->
+              <div class="event-row" onclick="selectEvent(6)">
                 <div class="event-seq">6</div>
                 <div class="event-type-dot dot-tool"></div>
                 <div class="event-body">
@@ -353,7 +430,8 @@
                 <div class="event-time">0:18</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)" style="border-left:3px solid var(--amber-400);">
+              <!-- Event 7: HITL_GATE -->
+              <div class="event-row" onclick="selectEvent(7)" style="border-left:3px solid var(--amber-400);">
                 <div class="event-seq">7</div>
                 <div class="event-type-dot dot-meta" style="background:var(--amber-400);"></div>
                 <div class="event-body">
@@ -363,8 +441,24 @@
                 <div class="event-time">0:19</div>
               </div>
 
-              <div class="event-row" onclick="selectEvent(this)" id="streaming-event" style="opacity:0.6;">
+              <!-- Event 8: DELEGATION -->
+              <div class="event-row" onclick="selectEvent(8)" style="border-left:3px solid var(--violet-400);">
                 <div class="event-seq">8</div>
+                <div class="event-type-dot dot-deleg"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-delegation">delegation: crm-enrichment-agent</div>
+                  <div class="event-content">Delegating contact enrichment to CRM sub-agent. Awaiting completion.</div>
+                </div>
+                <div class="event-time">0:28</div>
+              </div>
+
+              <!-- Events 9-47 placeholder rows -->
+              <div style="padding:10px 16px;font-size:11.5px;color:var(--slate-400);font-style:italic;border-bottom:1px solid var(--slate-100);">
+                Events 9 through 46 (38 additional events) ...
+              </div>
+
+              <div class="event-row" id="streaming-event" onclick="selectEvent(47)" style="opacity:0.6;">
+                <div class="event-seq">47</div>
                 <div class="event-type-dot dot-llm" style="animation:pulse-dot 1s infinite;"></div>
                 <div class="event-body">
                   <div class="event-type-label etype-llm_call">llm_call</div>
@@ -378,30 +472,21 @@
             <!-- Event detail panel -->
             <div class="event-detail" id="event-detail-panel">
               <div class="event-detail-header">
-                <div style="font-size:12px;font-weight:700;color:var(--slate-700);">Event #3, tool_call: search_crm</div>
-                <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">0:04 into run</div>
+                <div class="event-detail-title" id="detail-title">Select an event</div>
+                <div class="event-detail-sub" id="detail-sub">Click any row in the timeline to inspect it</div>
               </div>
-              <div class="event-detail-body">
-                <div class="detail-field">
-                  <div class="detail-field-label">Event type</div>
-                  <div class="detail-field-value"><span class="badge badge-sky" style="font-size:10px;">tool_call</span></div>
+              <div class="event-detail-body" id="detail-body">
+                <div class="detail-placeholder">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.25;margin-bottom:10px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <div style="font-size:13px;font-weight:600;color:var(--slate-500);margin-bottom:4px;">No event selected</div>
+                  <div style="font-size:12px;color:var(--slate-400);">Click any event row to see its details here.</div>
                 </div>
-                <div class="detail-field">
-                  <div class="detail-field-label">Tool name</div>
-                  <div class="detail-field-value" style="font-family:monospace;">search_crm</div>
-                </div>
-                <div class="detail-field">
-                  <div class="detail-field-label">Input</div>
-                  <div class="detail-field-pre">{"query": "Sarah Chen Acme Corp","limit": 5,"fields": ["email","title","last_contact","deal_stage"]}</div>
-                </div>
-                <div class="detail-field">
-                  <div class="detail-field-label">Sequence</div>
-                  <div class="detail-field-value">3 of 47</div>
-                </div>
-                <div class="detail-field">
-                  <div class="detail-field-label">Timestamp</div>
-                  <div class="detail-field-value">2026-05-06 09:00:04 UTC</div>
-                </div>
+              </div>
+              <div class="detail-footer" id="detail-footer" style="display:none;">
+                <a class="raw-json-link" onclick="openRawJson()" href="#">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                  View raw event JSON
+                </a>
               </div>
             </div>
           </div>
@@ -422,7 +507,317 @@
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
+<!-- Raw JSON modal -->
+<div class="modal-backdrop" id="raw-json-modal" style="display:none;" onclick="closeRawJson(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <span class="modal-head-title" id="raw-modal-title">Raw event JSON</span>
+      <button class="modal-close" onclick="closeRawJson()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre class="modal-json" id="raw-json-content"></pre>
+    </div>
+  </div>
+</div>
+
 <script>
+// ── Mock event data (8 representative events covering all 6 types) ──────────
+const EVENTS = {
+  1: {
+    type: 'RUN_START',
+    label: 'run_start',
+    seq: 1, total: 47,
+    timeIntoRun: '0:00',
+    iso: '2026-05-06T09:00:00.000Z',
+    fields: {
+      trigger_source: 'manual',
+      started_by: 'sarah@agency.io',
+      agent_version: 'outreach-agent@v2.4.1',
+      parent_run: null,
+      input_payload: '{\n  "task": "Draft follow-up email to Sarah Chen at Acme Corp",\n  "context": "Last meeting was Apr 28, discussed Q2 renewal proposal",\n  "tone": "warm-professional"\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ123",\n  "type": "run_start",\n  "seq": 1,\n  "run_id": "run_01HXYZ000",\n  "agent_id": "agt_outreach_v2",\n  "triggered_by": "manual",\n  "started_by_user_id": "usr_sarah",\n  "agent_version": "outreach-agent@v2.4.1",\n  "parent_run_id": null,\n  "input": {\n    "task": "Draft follow-up email to Sarah Chen at Acme Corp",\n    "context": "Last meeting was Apr 28, discussed Q2 renewal proposal",\n    "tone": "warm-professional"\n  },\n  "timestamp": "2026-05-06T09:00:00.000Z"\n}'
+  },
+  2: {
+    type: 'LLM_CALL',
+    label: 'llm_call',
+    seq: 2, total: 47,
+    timeIntoRun: '0:03',
+    iso: '2026-05-06T09:00:03.421Z',
+    fields: {
+      model: 'claude-sonnet-4-6',
+      prompt_tokens: 1843,
+      completion_tokens: 312,
+      latency_ms: 1840,
+      cost_usd: 0.0038,
+      temperature: 1.0,
+      prompt_preview: 'System: You are Outreach Agent. You help draft and send follow-up emails...\n\nUser: Draft follow-up email to Sarah Chen at Acme Corp. Last meeting was Apr 28...',
+      response_preview: 'I\'ll help you draft a follow-up email to Sarah Chen. Let me first retrieve her contact details and any relevant notes from the CRM before drafting.\n\nPlanned steps:\n1. Search CRM for Sarah Chen at Acme Corp\n2. Review meeting notes from Apr 28\n3. Draft personalised email\n4. Await your approval before sending'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ124",\n  "type": "llm_call",\n  "seq": 2,\n  "model": "claude-sonnet-4-6",\n  "prompt_tokens": 1843,\n  "completion_tokens": 312,\n  "total_tokens": 2155,\n  "latency_ms": 1840,\n  "cost_usd": 0.0038,\n  "temperature": 1.0,\n  "stop_reason": "end_turn",\n  "timestamp": "2026-05-06T09:00:03.421Z"\n}'
+  },
+  3: {
+    type: 'TOOL_CALL',
+    label: 'tool_call',
+    seq: 3, total: 47,
+    timeIntoRun: '0:04',
+    iso: '2026-05-06T09:00:04.109Z',
+    fields: {
+      tool_name: 'search_crm',
+      called_by_step: 2,
+      expected_result_type: 'contact_list',
+      input_args: '{\n  "query": "Sarah Chen Acme Corp",\n  "limit": 5,\n  "fields": [\n    "email",\n    "title",\n    "last_contact",\n    "deal_stage"\n  ]\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ125",\n  "type": "tool_call",\n  "seq": 3,\n  "tool_name": "search_crm",\n  "called_by_step": 2,\n  "expected_result_type": "contact_list",\n  "input": {\n    "query": "Sarah Chen Acme Corp",\n    "limit": 5,\n    "fields": ["email","title","last_contact","deal_stage"]\n  },\n  "timestamp": "2026-05-06T09:00:04.109Z"\n}'
+  },
+  4: {
+    type: 'TOOL_RESULT',
+    label: 'tool_result',
+    seq: 4, total: 47,
+    timeIntoRun: '0:06',
+    iso: '2026-05-06T09:00:06.884Z',
+    fields: {
+      tool_name: 'search_crm',
+      status: 'success',
+      latency_ms: 775,
+      result_payload: '{\n  "total": 1,\n  "contacts": [\n    {\n      "id": "hs_contact_4821",\n      "name": "Sarah Chen",\n      "title": "VP Operations",\n      "email": "sarah.chen@acmecorp.com",\n      "last_contact": "2026-04-28",\n      "deal_stage": "proposal_sent"\n    }\n  ]\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ126",\n  "type": "tool_result",\n  "seq": 4,\n  "tool_name": "search_crm",\n  "status": "success",\n  "latency_ms": 775,\n  "result": {\n    "total": 1,\n    "contacts": [{\n      "id": "hs_contact_4821",\n      "name": "Sarah Chen",\n      "title": "VP Operations",\n      "email": "sarah.chen@acmecorp.com",\n      "last_contact": "2026-04-28",\n      "deal_stage": "proposal_sent"\n    }]\n  },\n  "timestamp": "2026-05-06T09:00:06.884Z"\n}'
+  },
+  5: {
+    type: 'LLM_CALL',
+    label: 'llm_call',
+    seq: 5, total: 47,
+    timeIntoRun: '0:09',
+    iso: '2026-05-06T09:00:09.002Z',
+    fields: {
+      model: 'claude-sonnet-4-6',
+      prompt_tokens: 3102,
+      completion_tokens: 618,
+      latency_ms: 3140,
+      cost_usd: 0.0087,
+      temperature: 0.7,
+      prompt_preview: 'System: You are Outreach Agent...\n\n[CRM Result]: Sarah Chen, VP Operations, email sarah.chen@acmecorp.com...\n[Memory Block "brand-voice"]: We use warm, direct language...\n[Memory Block "key-stakeholders"]: Sarah is the renewal decision-maker...',
+      response_preview: 'Subject: Following up on our Q2 proposal\n\nHi Sarah,\n\nI hope this note finds you well. I wanted to follow up on the proposal we shared last week...'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ127",\n  "type": "llm_call",\n  "seq": 5,\n  "model": "claude-sonnet-4-6",\n  "prompt_tokens": 3102,\n  "completion_tokens": 618,\n  "total_tokens": 3720,\n  "latency_ms": 3140,\n  "cost_usd": 0.0087,\n  "temperature": 0.7,\n  "stop_reason": "end_turn",\n  "timestamp": "2026-05-06T09:00:09.002Z"\n}'
+  },
+  6: {
+    type: 'TOOL_CALL',
+    label: 'tool_call',
+    seq: 6, total: 47,
+    timeIntoRun: '0:18',
+    iso: '2026-05-06T09:00:18.451Z',
+    fields: {
+      tool_name: 'send_email',
+      called_by_step: 5,
+      expected_result_type: 'email_send_receipt',
+      input_args: '{\n  "to": "sarah.chen@acmecorp.com",\n  "subject": "Following up on our Q2 proposal",\n  "body": "Hi Sarah,\\n\\nI hope this note finds you well...",\n  "from_alias": "Alex at Agency",\n  "track_opens": true\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ128",\n  "type": "tool_call",\n  "seq": 6,\n  "tool_name": "send_email",\n  "called_by_step": 5,\n  "expected_result_type": "email_send_receipt",\n  "input": {\n    "to": "sarah.chen@acmecorp.com",\n    "subject": "Following up on our Q2 proposal",\n    "body": "Hi Sarah, I hope this note...",\n    "from_alias": "Alex at Agency",\n    "track_opens": true\n  },\n  "timestamp": "2026-05-06T09:00:18.451Z"\n}'
+  },
+  7: {
+    type: 'HITL_GATE',
+    label: 'hitl_gate',
+    seq: 7, total: 47,
+    timeIntoRun: '0:19',
+    iso: '2026-05-06T09:00:19.210Z',
+    fields: {
+      gate_type: 'approval',
+      awaiting: 'send_email tool execution',
+      who_can_approve: 'Role: operator / admin (this org)',
+      queued_at: '2026-05-06T09:00:19Z',
+      inbox_link: '#'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ129",\n  "type": "hitl_gate",\n  "seq": 7,\n  "gate_type": "approval",\n  "blocked_tool": "send_email",\n  "queued_at": "2026-05-06T09:00:19.210Z",\n  "allowed_roles": ["operator","admin"],\n  "inbox_item_id": "inbox_01HXYZ_gate",\n  "timestamp": "2026-05-06T09:00:19.210Z"\n}'
+  },
+  8: {
+    type: 'DELEGATION',
+    label: 'delegation',
+    seq: 8, total: 47,
+    timeIntoRun: '0:28',
+    iso: '2026-05-06T09:00:28.003Z',
+    fields: {
+      sub_agent_name: 'CRM Enrichment Agent',
+      sub_run_link: '#',
+      delegation_reason: 'Contact enrichment required: phone, LinkedIn, and latest interaction history. Delegating to specialist sub-agent.',
+      status: 'completed'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ130",\n  "type": "delegation",\n  "seq": 8,\n  "sub_agent_id": "agt_crm_enrichment",\n  "sub_agent_name": "CRM Enrichment Agent",\n  "sub_run_id": "run_01HXYZ_sub",\n  "delegation_reason": "Contact enrichment required",\n  "status": "completed",\n  "timestamp": "2026-05-06T09:00:28.003Z"\n}'
+  },
+  47: {
+    type: 'LLM_CALL',
+    label: 'llm_call',
+    seq: 47, total: 47,
+    timeIntoRun: '0:42',
+    iso: '2026-05-06T09:00:42.000Z',
+    fields: {
+      model: 'claude-sonnet-4-6',
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      latency_ms: null,
+      cost_usd: null,
+      temperature: 1.0,
+      prompt_preview: '...',
+      response_preview: 'Streaming...'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ_streaming",\n  "type": "llm_call",\n  "seq": 47,\n  "status": "streaming",\n  "timestamp": "2026-05-06T09:00:42.000Z"\n}'
+  }
+};
+
+// ── Build detail panel HTML per event type ───────────────────────────────────
+function buildDetailHtml(evt) {
+  const f = evt.fields;
+  let html = '';
+
+  if (evt.type === 'RUN_START') {
+    html += field('Trigger source', badge(f.trigger_source, f.trigger_source === 'manual' ? 'slate' : 'indigo'));
+    html += field('Started by', f.started_by);
+    html += field('Agent version', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.agent_version}</code>`);
+    html += field('Parent run', f.parent_run ? `<a href="#" style="color:var(--indigo-600);font-size:12.5px;">View parent run</a>` : '<span style="color:var(--slate-400);">None (root run)</span>');
+    html += fieldPre('Input payload', f.input_payload);
+  }
+
+  if (evt.type === 'LLM_CALL') {
+    const isStreaming = f.latency_ms === null;
+    html += field('Model', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.model}</code>`);
+    if (!isStreaming) {
+      html += field('Tokens', `<span style="color:var(--slate-700);">${f.prompt_tokens.toLocaleString()} prompt + ${f.completion_tokens.toLocaleString()} completion = ${(f.prompt_tokens + f.completion_tokens).toLocaleString()} total</span>`);
+      html += field('Latency', `${f.latency_ms.toLocaleString()} ms`);
+      html += field('Cost', `$${f.cost_usd.toFixed(4)}`);
+      if (f.temperature !== 1.0) {
+        html += field('Temperature', f.temperature.toString());
+      }
+      html += fieldPreExpandable('Prompt preview', f.prompt_preview);
+      html += fieldPreExpandable('Response preview', f.response_preview);
+    } else {
+      html += field('Status', badge('streaming', 'indigo'));
+    }
+  }
+
+  if (evt.type === 'TOOL_CALL') {
+    html += field('Tool name', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.tool_name}</code>`);
+    html += field('Called by step', `Step #${f.called_by_step}`);
+    html += field('Expected result type', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.expected_result_type}</code>`);
+    html += fieldPre('Input args', f.input_args);
+  }
+
+  if (evt.type === 'TOOL_RESULT') {
+    html += field('Tool name', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.tool_name}</code>`);
+    html += field('Status', badge(f.status, f.status === 'success' ? 'green' : 'red'));
+    html += field('Latency', `${f.latency_ms.toLocaleString()} ms`);
+    if (f.error_stack) {
+      html += fieldPre('Error stack', f.error_stack);
+    } else {
+      html += fieldPreExpandable('Result payload', f.result_payload);
+    }
+  }
+
+  if (evt.type === 'HITL_GATE') {
+    html += field('Gate type', badge(f.gate_type, 'amber'));
+    html += field('Awaiting', f.awaiting);
+    html += field('Who can approve', f.who_can_approve);
+    html += field('Queued at', f.queued_at);
+    html += field('Inbox item', `<a href="${f.inbox_link}" style="color:var(--indigo-600);font-size:12.5px;">Open in Inbox</a>`);
+  }
+
+  if (evt.type === 'DELEGATION') {
+    html += field('Sub-agent', f.sub_agent_name);
+    html += field('Status', badge(f.status, f.status === 'completed' ? 'green' : 'amber'));
+    html += field('Sub-run', `<a href="${f.sub_run_link}" style="color:var(--indigo-600);font-size:12.5px;">View sub-run trace</a>`);
+    html += fieldPre('Delegation reason', f.delegation_reason);
+  }
+
+  return html;
+}
+
+function field(label, valueHtml) {
+  return `<div class="detail-field"><div class="detail-field-label">${label}</div><div class="detail-field-value">${valueHtml}</div></div>`;
+}
+
+function fieldPre(label, text) {
+  return `<div class="detail-field"><div class="detail-field-label">${label}</div><div class="detail-field-pre">${escHtml(text)}</div></div>`;
+}
+
+function fieldPreExpandable(label, text) {
+  const id = 'expand_' + Math.random().toString(36).slice(2);
+  return `<div class="detail-field">
+    <div class="detail-field-label">${label}</div>
+    <div class="detail-field-pre expandable" id="${id}">${escHtml(text)}</div>
+    <a class="expand-link" onclick="toggleExpand('${id}',this);return false;" href="#">Show more</a>
+  </div>`;
+}
+
+function badge(text, color) {
+  return `<span class="badge badge-${color}" style="font-size:10.5px;">${text}</span>`;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+function toggleExpand(id, link) {
+  const el = document.getElementById(id);
+  if (el.style.maxHeight === 'none' || el.style.maxHeight === '') {
+    el.style.maxHeight = '80px';
+    link.textContent = 'Show more';
+  } else {
+    el.style.maxHeight = 'none';
+    link.textContent = 'Show less';
+  }
+}
+
+// ── selectEvent: updates the right panel ────────────────────────────────────
+let currentEventIdx = null;
+
+function selectEvent(n) {
+  // Highlight selected row
+  document.querySelectorAll('.event-row').forEach(r => r.classList.remove('selected'));
+  const rows = document.querySelectorAll('.event-row');
+  // Map event number to DOM row index
+  const rowMap = { 1:0, 2:1, 3:2, 4:3, 5:4, 6:5, 7:6, 8:7, 47:9 };
+  if (rowMap[n] !== undefined) {
+    rows[rowMap[n]].classList.add('selected');
+  }
+
+  const evt = EVENTS[n];
+  if (!evt) return;
+  currentEventIdx = n;
+
+  const typeLabels = {
+    RUN_START: 'run_start',
+    LLM_CALL: 'llm_call',
+    TOOL_CALL: 'tool_call',
+    TOOL_RESULT: 'tool_result',
+    HITL_GATE: 'hitl_gate',
+    DELEGATION: 'delegation'
+  };
+
+  document.getElementById('detail-title').textContent = `Event #${evt.seq} of ${evt.total}: ${typeLabels[evt.type] || evt.label}`;
+  document.getElementById('detail-sub').textContent = `${evt.timeIntoRun} into run  |  ${evt.iso}`;
+  document.getElementById('detail-body').innerHTML = buildDetailHtml(evt);
+  document.getElementById('detail-footer').style.display = '';
+}
+
+// ── Raw JSON modal ────────────────────────────────────────────────────────────
+function openRawJson() {
+  if (currentEventIdx === null) return;
+  const evt = EVENTS[currentEventIdx];
+  document.getElementById('raw-modal-title').textContent = `Raw event JSON (event #${evt.seq})`;
+  document.getElementById('raw-json-content').textContent = evt.raw;
+  document.getElementById('raw-json-modal').style.display = 'flex';
+}
+
+function closeRawJson(e) {
+  if (!e || e.target === document.getElementById('raw-json-modal')) {
+    document.getElementById('raw-json-modal').style.display = 'none';
+  }
+}
+
+// ── Mode switcher ─────────────────────────────────────────────────────────────
 function setMode(mode, btn) {
   document.querySelectorAll('.state-toggle-btn').forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
@@ -442,10 +837,7 @@ function setMode(mode, btn) {
     document.getElementById('event-count-label').textContent = '52 events';
   }
 }
-function selectEvent(row) {
-  document.querySelectorAll('.event-row').forEach(r => r.classList.remove('selected'));
-  row.classList.add('selected');
-}
+
 function switchRunTab(id, btn) {
   document.querySelectorAll('.tabs .tab-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');

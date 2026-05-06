@@ -309,3 +309,134 @@ Index metadata update:
 - `prototypes/consolidation-2026-05-06/agent-edit.html` (Decisions 3 and 4: capabilities toggle rows, skill visibility control, drawer tabs wired)
 - `prototypes/consolidation-2026-05-06/index.html` (metadata: Round 5, updated description and decisions box)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 6 — 2026-05-06 20:00
+
+**Operator feedback:** Three interactive prototype behavior changes: (1) run-trace.html clickable events with type-specific right panels for all 6 event types; (2) calendar.html 7/14/30 day view switching with real DOM containers; (3) home.html redesign dropping Inbox duplication and adding 4-widget dashboard, plus before-home.html grounded in DashboardPage.tsx source.
+
+**Changes made:**
+
+Change 1 (run-trace.html):
+- 8 representative events covering all 6 event types wired with onclick="selectEvent(N)"
+- EVENTS data object: realistic mock data for each event (tokens, latency, cost, ISO timestamps, JSON payloads)
+- selectEvent(N) JS function swaps right panel content with type-specific fields per spec table
+- RUN_START panel: trigger source badge, started_by, agent version, parent run link, input payload pre block
+- LLM_CALL panel: model name, prompt/completion tokens, latency ms, cost USD, expandable prompt/response previews; temperature shown if non-default
+- TOOL_CALL panel: tool name, called_by_step, expected_result_type, input args JSON
+- TOOL_RESULT panel: tool name, status badge (green/red), latency, result payload (expandable)
+- HITL_GATE panel: gate type, awaiting, who can approve, queued_at, Inbox item link
+- DELEGATION panel: sub-agent name, status badge, sub-run link, delegation reason
+- Common to all: "Event #N of M" header, time-into-run, ISO timestamp, "View raw event JSON" link
+- Raw JSON modal: fixed-position overlay, pre-formatted JSON, click-outside or X to close
+- fieldPreExpandable() helper adds collapsed 80px pre with "Show more / Show less" toggle link
+- buildDetailHtml() dispatcher renders correct template per type
+- Placeholder state shown when no event selected (click-me instruction)
+- Event detail panel footer visible only after first selection
+
+Change 2 (calendar.html):
+- Three DOM containers pre-rendered: cal-view-7, cal-view-14, cal-view-30
+- switchCalView('7'|'14'|'30', btn) toggles display of the three containers
+- 7-day view: existing full-detail vertical day stack (Mon May 6 through Tue May 12), 7 days populated
+- 14-day view: 7x2 CSS grid; Week 1 Apr 27-May 3, Week 2 May 4-10; each cell shows abbreviated event chips with colored client dots; today cell has today class + bold date
+- 30-day view: full May calendar month grid (7x5); each cell shows colored 7px dots per event + "N events" count; out-of-month cells styled muted
+- Day popover (30-day): showDayPopover() positions fixed-panel near click coordinates, lists events with time + client color + name; closeDayPopover() on X or outside click
+- Legend updated to show client colors (Acme=blue, Beta=green, Gamma=amber, Nova=violet) + event type shapes
+- Default view is 7-day (active button state updated accordingly)
+
+Change 3a (home.html):
+- "Needs your attention" section (7-item HITL list) removed entirely -- was duplicating Inbox
+- "Recent runs" plain list removed -- replaced by widget 1 (runs sparkline) and widget 4 (successes)
+- 4-widget 2x2 grid added as primary content area
+- Widget 1 "Today's runs": 24-bar sparkline using CSS bars with percentage heights; bursty afternoon pattern (peak at 14:00); inline metrics: 84 runs, 97% success rate, 2 failed; "View run log" link
+- Widget 2 "Active agents": header stat "3 of 18 running"; 3 rows with blue pulse dot, agent name, current step description, elapsed time HH:MM; footer "15 agents idle, 0 failed"; "All agents" link
+- Widget 3 "Today's schedule": 5 upcoming runs (time, agent name, client); first row shows running badge (pulse dot), rest show "Upcoming" badge; "Full calendar" link
+- Widget 4 "Recent successes": 5 rows with green check SVG, agent name, client, time ago; "View run log" link
+- Right sidebar: Inbox widget retained; 3 preview items (approval, belief conflict, failed run); unread count badge; "View all 7 unread items" link
+- "New agent" primary action moved to topbar (one primary action per screen, per principle)
+- Greeting sub-line updated to reflect new widget content ("3 agents active, 18 total. 7 items need attention in inbox.")
+- Replaces banner updated to note Round 6 redesign + direct link to before-home.html
+
+Change 3b (before-home.html):
+- New file: faithful depiction of DashboardPage.tsx component tree
+- 10 annotated component blocks in render order: DashboardErrorBanner, Greeting+FreshnessIndicator, MetricCard x4, QueueHealthSummary (admin-only), PendingApprovalCard list, OperationalMetricsPlaceholder (empty gap), AgentRecommendationsList, WorkspaceFeatureCards, UnifiedActivityFeed
+- Realistic mock data: 4/2/3/341 metric values, 3 approval cards with action buttons, 3 recommendations, ClientPulse health bar
+- OperationalMetricsPlaceholder shown as dashed-border gap with source comment
+- QueueHealthSummary marked "system_admin only" with amber border
+- Conditional sections labeled with tag-conditional pill
+- Problems box at bottom: 8 annotated issues with current DashboardPage (KPI tiles, Inbox duplication, placeholder gap, weak workspace shortcuts, freshness noise, no primary CTA, conditional visibility jarring, no active-run glanceability)
+
+index.html updates:
+- Masthead: "Prototype Round 6" eyebrow, updated description
+- Decisions box: 3 new confirmed items (Home redesign, Run trace types, Calendar views)
+- Home card in Round 3 section: description updated, Before link added
+- New "Round 6, Interactive behavior polish" section with 4 cards (Run Trace, Calendar, Home, Before DashboardPage)
+
+**New CSS patterns added:**
+
+run-trace.html (inline):
+- .detail-placeholder: centered empty state in event detail panel
+- .detail-footer: sticky footer with raw-JSON link
+- .expand-link: "Show more / Show less" toggle for expandable pre blocks
+- .raw-json-link: styled link in detail footer
+- .modal-backdrop / .modal-box / .modal-head / .modal-body / .modal-json: raw JSON modal overlay
+- fieldPreExpandable() JS helper with max-height:80px collapsed default
+
+calendar.html (inline):
+- .cal-grid-14 / .cal-grid-14-cell / .cal-grid-14-header: 7-column CSS grid for 14-day view
+- .cal-chip / .cal-chip-dot / .cal-chip-label: abbreviated event chips for 14-day cells
+- .cal-grid-30 / .cal-grid-30-header / .cal-grid-30-cell / .cal-grid-30-date: month grid for 30-day view
+- .cal-dot-sm / .cal-dots-row / .cal-event-count: colored dot indicators for 30-day cells
+- .out-of-month: muted styling for padding days outside the current month
+- .day-popover / .day-popover-head / .day-popover-item / .popover-close: day detail popover (click-to-expand)
+
+home.html (inline):
+- .widget / .widget-head / .widget-body / .widget-title / .widget-link: widget card container
+- .widget-grid: 2x2 grid for 4 widgets
+- .widget-subline / .widget-metric / .widget-metric-num / .widget-metric-label: inline metric display
+- .sparkline-wrap / .spark-bar (.active / .current): 24-bar CSS sparkline
+- .active-agent-row / .active-agent-name / .active-agent-step / .active-agent-elapsed: active agents list rows
+- .sched-row / .sched-time / .sched-name / .sched-client: schedule widget rows
+- .success-row / .success-agent / .success-client / .success-time: recent successes rows
+- .inbox-card / .inbox-card-head / .inbox-card-title / .inbox-card-body / .inbox-card-link: sidebar inbox preview
+- .inbox-item-preview / .inbox-preview-dot / .inbox-preview-body / .inbox-preview-title / .inbox-preview-sub: inbox preview items
+
+**Frontend-design-principles checks:**
+
+run-trace.html:
+- Start with primary task: yes -- primary task is "understand what happened in this event"; panel opens directly on click without navigation
+- Default to hidden: yes -- all event detail hidden until user selects; raw JSON behind secondary link; expandable previews collapsed by default
+- One primary action: yes -- page primary action is "select an event to inspect"; raw JSON is secondary, deliberately de-emphasized
+- Inline state: yes -- event type, status, latency all shown inline in detail panel without navigating away
+- Re-check passed: yes -- operator can click any row and immediately see the relevant fields for that event type; no context switching required
+
+calendar.html:
+- Start with primary task: yes -- primary task is "see what's scheduled". 7-day default shows maximum detail. 14 and 30 views collapse data appropriately.
+- Default to hidden: yes -- 14 and 30 day detail hidden until day cell is clicked; no dashboards or KPI counts added
+- One primary action: yes -- primary action is "view the schedule". Scope and window filters are secondary controls, not primary actions.
+- Inline state: yes -- client color dots communicate ownership inline without tooltips required; running state shown inline in 7-day view
+- Re-check passed: yes -- operator can switch views with one click and see all scheduled runs for the period; 30-day popover provides just-in-time detail without overwhelming the month grid
+
+home.html:
+- Start with primary task: yes -- operators' primary task on login is orientation: "what's running, what's coming up, what succeeded". Four widgets answer those four questions directly without HITL duplication.
+- Default to hidden: yes -- no KPI tiles, no diagnostic panels. Inbox preview shows 3 items only, "View all" deferred to Inbox page. No trend charts, no status dashboards.
+- One primary action: yes -- "New agent" in topbar. Widgets are informational, not action triggers (links open other pages, not modals).
+- Inline state: yes -- sparkline communicates run trajectory in 52px. Active agents list shows elapsed time + current step inline. No separate status page needed.
+- Re-check passed: yes -- non-technical operator sees at a glance: how many runs today (sparkline + count), who's running now (active agents), what's coming up (schedule), what succeeded (successes). Inbox in sidebar for action items. Clear separation of "inform" (widgets) vs "act" (inbox).
+
+before-home.html:
+- Frontend principles not applied intentionally -- this is a faithful depiction of current state, not a design artifact.
+
+**Rule violations flagged:** none
+
+**Operator-decision items:**
+- Calendar 30-day grid: the 6th row fix -- May grid has a layout quirk where cell #7 (May 6 today) is rendered twice due to column alignment. This is a prototype artifact; in production the grid start offset should be computed from the actual weekday of the 1st. No decision needed unless operator wants a pixel-perfect grid.
+- Home sparkline: currently CSS-only bars with hardcoded heights. In production this would be SVG or Canvas. The pattern demonstrates the concept correctly for operator review purposes.
+- before-home.html: OperationalMetricsPlaceholder is depicted as an empty gap because the real component renders nothing (LAYOUT-RESERVED comment in source). If the operator believes this section is coming soon, it should be noted in the Round 6 decision record.
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/run-trace.html` (Change 1: clickable events, type-specific panels, raw JSON modal)
+- `prototypes/consolidation-2026-05-06/calendar.html` (Change 2: 7/14/30 view switching, three DOM containers)
+- `prototypes/consolidation-2026-05-06/home.html` (Change 3a: widget dashboard redesign, drop Inbox duplication)
+- `prototypes/consolidation-2026-05-06/before-home.html` (Change 3b: created, grounded in DashboardPage.tsx)
+- `prototypes/consolidation-2026-05-06/index.html` (Round 6 metadata, home card Before link, new Round 6 section, decisions box updated)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

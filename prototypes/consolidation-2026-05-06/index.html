@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 5
+    Prototype Round 6
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 5 locked decisions: integrations table-density redesign, memory deletion suppression + HITL flow, agent capabilities toggle rows, per-skill client visibility, knowledge tab simplification (Option B), inbox UX improvements, and knowledge comprehensive dialog set.</p>
+  <p>Round 6 interactive behavior: run-trace event panel (type-specific fields per event type, all 6 types covered), calendar 7/14/30-day view switching (full-detail / chip-grid / month-dot layouts), home page redesigned with 4-widget dashboard (drops Inbox duplication), plus before-home grounded in DashboardPage.tsx source.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 5</div>
+    <div class="meta-item"><strong>Round:</strong> 6</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 40+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -113,6 +113,9 @@
     <li>Client Pulse deferred. Not in this consolidation.</li>
     <li>Per-skill visibility: Hidden (default) or Visible. Two options only.</li>
     <li>Knowledge: 3 tabs (Summary / Auto-memory / Authored). Single meta line replaces metric strip.</li>
+    <li>Home: "Needs your attention" central section removed (duplicated Inbox). Replaced with 4-widget grid: runs sparkline, active agents, today's schedule, recent successes.</li>
+    <li>Run trace: all 6 event types (RUN_START, LLM_CALL, TOOL_CALL, TOOL_RESULT, HITL_GATE, DELEGATION) have type-specific right-panel fields. Click any row to inspect. "View raw event JSON" opens modal.</li>
+    <li>Calendar: 7/14/30 day views wired. 7-day = full detail; 14-day = chip grid; 30-day = month dots with click-to-expand popover.</li>
   </ul>
 </div>
 
@@ -372,7 +375,7 @@
         <div class="proto-card-title">Home (default route)</div>
         <div class="proto-card-file">home.html</div>
       </div>
-      <div class="proto-card-desc">Operator daily landing page. Inline state for agents needing attention, automations awaiting approval, recent runs, and today's schedule. Primary action: New agent. Replaces DashboardPage as the default route.</div>
+      <div class="proto-card-desc">Round 6 redesign: 4-widget dashboard (Today's runs sparkline, Active agents list, Today's schedule, Recent successes). Drops "Needs your attention" section that duplicated Inbox. Right-side Inbox preview retained. Primary action: New agent.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Replaces</div>
         <div class="proto-card-replaces-list">
@@ -381,6 +384,7 @@
       </div>
       <div class="proto-card-footer">
         <a class="proto-card-link" href="home.html">Open mockup &#8594;</a>
+        <a href="before-home.html" class="before-link">Before</a>
       </div>
     </div>
 
@@ -531,6 +535,65 @@
       <div class="proto-card-desc">Gallery of error and blocked states: failed run with retry, expired credential with reconnect, blocked agent with unblock, rate-limited integration, schema migration in progress. Each error has one recovery action.</div>
       <div class="proto-card-footer">
         <a class="proto-card-link" href="lifecycle-errors.html">Open gallery &#8594;</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 6: Interactive behavior polish ───────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#4f46e5"></div>
+    Round 6, Interactive behavior polish
+  </div>
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Run Trace (event panels)</div>
+        <div class="proto-card-file">run-trace.html</div>
+      </div>
+      <div class="proto-card-desc">All 8 events wired with type-specific right panel. Click any row: RUN_START shows trigger/payload/user; LLM_CALL shows model/tokens/latency/cost/previews; TOOL_CALL shows args; TOOL_RESULT shows status/payload; HITL_GATE shows gate type/who-can-approve/inbox link; DELEGATION shows sub-agent/reason. "View raw event JSON" modal on every event.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="run-trace.html">Open mockup &#8594;</a>
+        <a href="before-run-trace.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Calendar (view switching)</div>
+        <div class="proto-card-file">calendar.html</div>
+      </div>
+      <div class="proto-card-desc">7/14/30 day buttons now switch real DOM containers. 7-day: full-detail vertical stack. 14-day: 7x2 chip grid (abbreviated events, colored client dots). 30-day: month grid with colored dot indicators and click-to-expand day popover. All use same underlying event data.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="calendar.html">Open mockup &#8594;</a>
+        <a href="before-calendar.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Home (widget dashboard)</div>
+        <div class="proto-card-file">home.html</div>
+      </div>
+      <div class="proto-card-desc">Round 6 redesign. "Needs your attention" section dropped (was duplicating Inbox). Replaced with 2x2 widget grid: Today's runs (sparkline + metrics), Active agents (elapsed + current step), Today's schedule (next 5 runs), Recent successes (last 5 completed). Inbox preview retained as right sidebar. Primary action: New agent in topbar.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="home.html">Open mockup &#8594;</a>
+        <a href="before-home.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Before: DashboardPage</div>
+        <div class="proto-card-file">before-home.html</div>
+      </div>
+      <div class="proto-card-desc">Faithful depiction of the current DashboardPage.tsx component tree: greeting, 4 MetricCard KPI tiles, QueueHealthSummary (admin only), PendingApprovalCard list, OperationalMetricsPlaceholder (unimplemented gap), AgentRecommendationsList, WorkspaceFeatureCards (ClientPulse + Settings), UnifiedActivityFeed. Problems annotated.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="before-home.html">Open before &#8594;</a>
+        <a href="home.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
       </div>
     </div>
 

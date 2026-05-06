@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<!--
+  BEFORE: DashboardPage (current state)
+  Grounded in: client/src/pages/DashboardPage.tsx
+
+  Components rendered (in order):
+    1. DashboardErrorBanner (conditional, shows on fetch error)
+    2. Greeting (h1 with time-of-day salutation + active agent count)
+    3. FreshnessIndicator ("Last updated X seconds ago")
+    4. MetricCard row x4: Pending Approval, Clients Needing Attention, Active Agents, Runs (7 days)
+    5. QueueHealthSummary (system_admin only)
+    6. PendingApprovalCard list (conditional, renders when attention.counts.total > 0)
+    7. OperationalMetricsPlaceholder (LAYOUT-RESERVED comment in source - renders an empty placeholder)
+    8. AgentRecommendationsList (conditional, renders when recommendationsTotal > 0)
+    9. "Your workspaces" section: WorkspaceFeatureCard x2 (ClientPulse, Settings)
+   10. "Recent activity" section: UnifiedActivityFeed
+
+  Problems with current state (for operator reference):
+    - 4 KPI tiles at top surface internal metrics operators don't need at-a-glance
+    - Pending approval section duplicates what would live in Inbox
+    - "Your workspaces" section with 2 feature cards is weak nav shortcut (already in sidebar)
+    - OperationalMetricsPlaceholder is a visible empty gap (reserved but unimplemented)
+    - FreshnessIndicator adds visual noise (WebSocket keeps data live)
+    - No "New agent" primary action anywhere on the page
+    - AgentRecommendations section has inconsistent visibility (hidden when 0 items, jarring on first load)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: DashboardPage | Consolidation Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Page-level scaffolding for before pages */
+.before-page-wrap {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  color: #1e293b;
+  background: #f8fafc;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+.before-header {
+  background: white;
+  border-bottom: 2px solid #fbbf24;
+  padding: 12px 32px;
+  display: flex; align-items: center; gap: 12px;
+}
+.before-badge {
+  background: #fef3c7; color: #92400e;
+  border: 1px solid #fde68a; border-radius: 5px;
+  font-size: 11px; font-weight: 700; padding: 3px 8px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.before-header-title { font-size: 14px; font-weight: 700; color: #334155; }
+.before-header-file { font-size: 11px; font-family: monospace; color: #94a3b8; background: #f1f5f9; padding: 2px 7px; border-radius: 4px; }
+.before-back { font-size: 12px; color: #4f46e5; font-weight: 600; text-decoration: none; margin-left: auto; }
+.before-back:hover { text-decoration: underline; }
+
+.before-main {
+  max-width: 900px; margin: 0 auto; padding: 32px 32px 48px;
+}
+
+/* Component annotation boxes */
+.component-block {
+  margin-bottom: 24px;
+  border: 1px solid #e2e8f0; border-radius: 10px;
+  overflow: hidden;
+  background: white;
+}
+.component-label {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 14px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: #94a3b8;
+  display: flex; align-items: center; gap: 8px;
+}
+.component-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tag-conditional { background: #eff6ff; color: #1d4ed8; }
+.tag-admin-only  { background: #fef3c7; color: #92400e; }
+.tag-placeholder { background: #fee2e2; color: #b91c1c; }
+.component-body { padding: 16px 20px; }
+
+/* KPI tile grid */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.kpi-tile {
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.kpi-icon-wrap {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; margin-bottom: 10px;
+}
+.kpi-label { font-size: 12px; color: #64748b; margin-bottom: 4px; font-weight: 500; }
+.kpi-value { font-size: 26px; font-weight: 800; color: #0f172a; line-height: 1; margin-bottom: 3px; }
+.kpi-sub { font-size: 11px; color: #94a3b8; }
+
+/* Greeting block */
+.dash-greeting { margin-bottom: 24px; }
+.dash-greeting h1 { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 6px; }
+.dash-greeting p { font-size: 13.5px; color: #64748b; margin-bottom: 4px; }
+.freshness { font-size: 12px; color: #94a3b8; }
+
+/* Pending approval cards */
+.approval-card {
+  border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;
+  background: #fafafa; margin-bottom: 8px;
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.approval-card:last-child { margin-bottom: 0; }
+.approval-icon { width: 36px; height: 36px; border-radius: 8px; background: #eff6ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.approval-body { flex: 1; }
+.approval-title { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
+.approval-sub { font-size: 12px; color: #64748b; }
+.approval-actions { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.btn-sm-approve { padding: 5px 12px; font-size: 12px; font-weight: 600; border-radius: 6px; background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; cursor: pointer; }
+.btn-sm-reject { padding: 5px 12px; font-size: 12px; font-weight: 600; border-radius: 6px; background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; cursor: pointer; }
+.btn-sm-open { padding: 5px 12px; font-size: 12px; font-weight: 600; border-radius: 6px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; cursor: pointer; }
+
+/* Workspace feature cards */
+.workspace-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.workspace-card {
+  border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px;
+  cursor: pointer; background: white;
+  transition: border-color 0.12s; display: block; text-decoration: none; color: inherit;
+}
+.workspace-card:hover { border-color: #818cf8; }
+.workspace-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 8px; }
+.workspace-card-sub { font-size: 13px; color: #64748b; }
+.health-bar { display: flex; height: 6px; border-radius: 99px; overflow: hidden; margin-bottom: 6px; }
+
+/* Activity feed rows */
+.activity-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+}
+.activity-row:last-child { border-bottom: none; }
+.activity-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.activity-text { flex: 1; color: #374151; }
+.activity-time { font-size: 11.5px; color: #94a3b8; white-space: nowrap; }
+
+/* Problems box */
+.problems-box {
+  background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px;
+  padding: 14px 18px; margin-top: 28px;
+}
+.problems-box h3 { font-size: 13px; font-weight: 700; color: #9f1239; margin-bottom: 10px; }
+.problems-box ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.problems-box li {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12.5px; color: #7f1d1d; line-height: 1.5;
+}
+.problems-box li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #f43f5e; margin-top: 7px; flex-shrink: 0; }
+
+.section-heading { font-size: 17px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; margin-bottom: 14px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="before-page-wrap">
+
+  <div class="before-header">
+    <span class="before-badge">Before</span>
+    <span class="before-header-title">DashboardPage (current state)</span>
+    <span class="before-header-file">client/src/pages/DashboardPage.tsx</span>
+    <a href="home.html" class="before-back">After: new Home &#8594;</a>
+  </div>
+
+  <div class="before-main">
+
+    <div style="margin-bottom:24px;">
+      <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.02em;margin-bottom:6px;">DashboardPage</div>
+      <div style="font-size:13.5px;color:#64748b;max-width:620px;line-height:1.6;">This is the current default route after login. The page below faithfully depicts the component structure of <code style="font-size:12px;background:#f1f5f9;padding:1px 5px;border-radius:3px;">DashboardPage.tsx</code> with realistic mock data.</div>
+    </div>
+
+    <!-- 1. DashboardErrorBanner (conditional) -->
+    <div class="component-block">
+      <div class="component-label">
+        DashboardErrorBanner
+        <span class="component-tag tag-conditional">Conditional</span>
+      </div>
+      <div class="component-body" style="background:#fff7ed;padding:10px 16px;font-size:12.5px;color:#92400e;border-radius:0 0 8px 8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <strong>Example error state:</strong> Could not load client health data. <a href="#" style="color:#b45309;font-weight:600;">Retry</a>
+        </div>
+        <div style="margin-top:4px;font-size:11.5px;color:#b45309;">Renders only when one or more API fetches fail. Hidden in normal operation.</div>
+      </div>
+    </div>
+
+    <!-- 2+3. Greeting + FreshnessIndicator -->
+    <div class="component-block">
+      <div class="component-label">Greeting + FreshnessIndicator</div>
+      <div class="component-body">
+        <div class="dash-greeting">
+          <h1>Good morning, Sarah</h1>
+          <p>3 AI agents ready to work.</p>
+          <div class="freshness">Last updated 12 seconds ago</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Metric cards -->
+    <div class="component-block">
+      <div class="component-label">
+        MetricCard row (x4) — grid auto-fills, min 200px per tile
+      </div>
+      <div class="component-body">
+        <div class="kpi-grid">
+          <div class="kpi-tile">
+            <div class="kpi-icon-wrap" style="background:#fff1f2;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            </div>
+            <div class="kpi-label">Pending Approval</div>
+            <div class="kpi-value">4</div>
+            <div class="kpi-sub">3 client, 1 config, 0 internal</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-icon-wrap" style="background:#fffbeb;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div class="kpi-label">Clients Needing Attention</div>
+            <div class="kpi-value">2</div>
+            <div class="kpi-sub">of 8 clients</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-icon-wrap" style="background:#eef2ff;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            </div>
+            <div class="kpi-label">Active Agents</div>
+            <div class="kpi-value">3</div>
+            <div class="kpi-sub">15 inactive</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-icon-wrap" style="background:#f0fdf4;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </div>
+            <div class="kpi-label">Runs (7 days)</div>
+            <div class="kpi-value">341</div>
+            <div class="kpi-sub">7 failed</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. QueueHealthSummary (admin only) -->
+    <div class="component-block">
+      <div class="component-label">
+        QueueHealthSummary
+        <span class="component-tag tag-admin-only">system_admin only</span>
+      </div>
+      <div class="component-body" style="background:#fffbeb;">
+        <div style="font-size:12.5px;color:#92400e;">Renders only when <code style="font-size:11px;background:#fef3c7;padding:1px 4px;border-radius:3px;">user.role === 'system_admin'</code>. Hidden from regular operators. Shows queue depths and health for background job processors.</div>
+        <div style="margin-top:10px;padding:12px 16px;background:white;border:1px solid #fde68a;border-radius:8px;display:flex;gap:16px;flex-wrap:wrap;">
+          <div style="text-align:center;"><div style="font-size:18px;font-weight:800;color:#0f172a;">12</div><div style="font-size:11px;color:#64748b;">Queue depth</div></div>
+          <div style="text-align:center;"><div style="font-size:18px;font-weight:800;color:#10b981;">healthy</div><div style="font-size:11px;color:#64748b;">Status</div></div>
+          <div style="text-align:center;"><div style="font-size:18px;font-weight:800;color:#0f172a;">3</div><div style="font-size:11px;color:#64748b;">Workers active</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Pending approval cards -->
+    <div class="component-block">
+      <div class="component-label">
+        "Pending your approval" section + PendingApprovalCard list
+        <span class="component-tag tag-conditional">Conditional: hidden when count = 0</span>
+      </div>
+      <div class="component-body">
+        <div class="section-heading" style="font-size:17px;">Pending your approval</div>
+        <div class="approval-card">
+          <div class="approval-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </div>
+          <div class="approval-body">
+            <div class="approval-title">CRM update request: mark 67 records as "renewal candidate"</div>
+            <div class="approval-sub">CRM Automation Agent, Acme Corp, client lane, 32m ago</div>
+            <div class="approval-actions">
+              <button class="btn-sm-approve">Approve</button>
+              <button class="btn-sm-reject">Reject</button>
+              <button class="btn-sm-open">Open</button>
+            </div>
+          </div>
+        </div>
+        <div class="approval-card">
+          <div class="approval-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <div class="approval-body">
+            <div class="approval-title">Weekly nurture sequence: send to 142 contacts</div>
+            <div class="approval-sub">Email Automation Agent, Beta Industries, client lane, 1h ago</div>
+            <div class="approval-actions">
+              <button class="btn-sm-approve">Approve</button>
+              <button class="btn-sm-reject">Reject</button>
+              <button class="btn-sm-open">Open</button>
+            </div>
+          </div>
+        </div>
+        <div class="approval-card">
+          <div class="approval-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </div>
+          <div class="approval-body">
+            <div class="approval-title">Memory block proposal: always CC legal on NDAs</div>
+            <div class="approval-sub">Contract Agent, internal lane, 4h ago</div>
+            <div class="approval-actions">
+              <button class="btn-sm-approve">Approve</button>
+              <button class="btn-sm-reject">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. OperationalMetricsPlaceholder -->
+    <div class="component-block">
+      <div class="component-label">
+        OperationalMetricsPlaceholder
+        <span class="component-tag tag-placeholder">Unimplemented: empty gap in UI</span>
+      </div>
+      <div class="component-body" style="background:#fff1f2;">
+        <div style="border: 2px dashed #fca5a5; border-radius: 8px; padding: 18px; text-align: center; color: #b91c1c; font-size: 12.5px;">
+          <code style="font-size:12px;">[LAYOUT-RESERVED: Piece 3 - Operational metrics]</code>
+          <div style="margin-top:8px;color:#94a3b8;font-size:12px;">This comment appears in the TSX source. The placeholder component renders an empty area. Visible as a gap in the layout.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. AgentRecommendationsList -->
+    <div class="component-block">
+      <div class="component-label">
+        AgentRecommendationsList + "A few things to look at" heading
+        <span class="component-tag tag-conditional">Conditional: hidden when total is null or 0</span>
+      </div>
+      <div class="component-body">
+        <div class="section-heading" style="font-size:17px;">A few things to look at</div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;background:#fafafa;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">Enable email verification skill</div>
+            <div style="font-size:12px;color:#64748b;">Outreach Agent would benefit from email validation before sending. 3 bounces last week.</div>
+          </div>
+          <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;background:#fafafa;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">Set a spending budget for CRM Agent</div>
+            <div style="font-size:12px;color:#64748b;">CRM Agent has no spending cap set. Consider adding one to prevent runaway cost.</div>
+          </div>
+          <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;background:#fafafa;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">Review stale knowledge blocks (4 blocks older than 30 days)</div>
+            <div style="font-size:12px;color:#64748b;">4 auto-memory blocks have not been refreshed in over 30 days. Review for accuracy.</div>
+          </div>
+          <button style="font-size:13px;font-weight:500;color:#4f46e5;background:none;border:none;cursor:pointer;text-align:left;padding:4px 0;">See all 7</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. Your workspaces -->
+    <div class="component-block">
+      <div class="component-label">
+        "Your workspaces" section + WorkspaceFeatureCard x2
+      </div>
+      <div class="component-body">
+        <div class="section-heading" style="font-size:17px;">Your workspaces</div>
+        <div class="workspace-grid">
+          <a class="workspace-card" href="#">
+            <div class="workspace-card-title">ClientPulse</div>
+            <div class="health-bar">
+              <div style="background:#34d399;width:60%;"></div>
+              <div style="background:#fbbf24;width:20%;"></div>
+              <div style="background:#f43f5e;width:10%;"></div>
+              <div style="background:#cbd5e1;width:10%;"></div>
+            </div>
+            <div class="workspace-card-sub">5 healthy, 2 need attention, 1 at risk</div>
+          </a>
+          <a class="workspace-card" href="#">
+            <div class="workspace-card-title">Settings</div>
+            <div class="workspace-card-sub" style="margin-top:8px;">Team, integrations &amp; billing</div>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. Recent activity -->
+    <div class="component-block">
+      <div class="component-label">
+        "Recent activity" section + UnifiedActivityFeed (limit 20, real-time WebSocket updates)
+      </div>
+      <div class="component-body">
+        <div class="section-heading" style="font-size:17px;">Recent activity</div>
+        <div class="activity-row">
+          <div class="activity-dot" style="background:#10b981;"></div>
+          <div class="activity-text"><strong>Research Agent</strong> completed run for Acme Corp</div>
+          <div class="activity-time">8m ago</div>
+        </div>
+        <div class="activity-row">
+          <div class="activity-dot" style="background:#3b82f6;"></div>
+          <div class="activity-text"><strong>Outreach Agent</strong> paused at HITL gate for Stark Industries</div>
+          <div class="activity-time">12m ago</div>
+        </div>
+        <div class="activity-row">
+          <div class="activity-dot" style="background:#10b981;"></div>
+          <div class="activity-text"><strong>Reporting Agent</strong> completed run for Maple Digital</div>
+          <div class="activity-time">1h ago</div>
+        </div>
+        <div class="activity-row">
+          <div class="activity-dot" style="background:#f43f5e;"></div>
+          <div class="activity-text"><strong>Blocker Agent</strong> failed: Gmail credential expired (Maple Digital)</div>
+          <div class="activity-time">2h ago</div>
+        </div>
+        <div class="activity-row">
+          <div class="activity-dot" style="background:#10b981;"></div>
+          <div class="activity-text"><strong>CRM Agent</strong> completed run for Nova Agency</div>
+          <div class="activity-time">3h ago</div>
+        </div>
+        <div style="margin-top:8px;font-size:12.5px;color:#94a3b8;">Showing 5 of 20. Updates in real-time via WebSocket.</div>
+      </div>
+    </div>
+
+    <!-- Problems identified -->
+    <div class="problems-box">
+      <h3>Problems with current state (basis for Round 6 redesign)</h3>
+      <ul>
+        <li>4 KPI tiles at top (Pending Approval, Clients Needing Attention, Active Agents, Runs 7 days) expose internal metrics. Operators need to act, not monitor numbers.</li>
+        <li>"Pending your approval" section duplicates Inbox content. Items appear in both places, creating confusion about where to act.</li>
+        <li>OperationalMetricsPlaceholder renders as an empty visible gap in the layout (LAYOUT-RESERVED comment in source, component not implemented yet).</li>
+        <li>"Your workspaces" section is a weak nav shortcut to ClientPulse and Settings, both already reachable from the sidebar.</li>
+        <li>FreshnessIndicator adds visual noise. WebSocket keeps data live; showing "updated X seconds ago" adds anxiety, not clarity.</li>
+        <li>No primary "New agent" action anywhere on the page. The dashboard has no clear call to action.</li>
+        <li>AgentRecommendationsList section has jarring conditional visibility: hidden on first load, appears after data fetch, shifts layout.</li>
+        <li>No glanceable view of run activity or active agents. The operator cannot tell "is anything running right now?" without reading the activity feed.</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

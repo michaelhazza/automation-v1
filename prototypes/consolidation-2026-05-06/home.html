@@ -1,4 +1,14 @@
 <!DOCTYPE html>
+<!--
+  Round 6 redesign: drop the "Needs your attention" central section (duplicates Inbox).
+  Replace with a 4-widget 2x2 grid:
+    1. Today's runs (sparkline + count + success rate)
+    2. Active agents (list, elapsed, current step)
+    3. Today's schedule (next 3-5 runs)
+    4. Recent successes (last 5 completed runs)
+  Right-side Inbox widget retained (small state preview, not duplicated central section).
+  Primary action: "New agent" (top-right, one per screen).
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -9,6 +19,132 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="_shared.css">
 <style>
+/* ── Page layout ───────────────────────────────────── */
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 20px;
+  align-items: start;
+}
+.home-main { display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Greeting ──────────────────────────────────────── */
+.greeting-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 20px; gap: 12px;
+}
+.greeting-name { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.02em; }
+.greeting-sub { font-size: 13.5px; color: var(--slate-500); margin-top: 3px; }
+
+/* ── Widget grid ───────────────────────────────────── */
+.widget-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.widget {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column;
+}
+.widget-head {
+  padding: 12px 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100);
+}
+.widget-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
+.widget-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+.widget-link:hover { text-decoration: underline; }
+.widget-body { padding: 12px 16px; flex: 1; }
+.widget-subline {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--slate-100);
+  font-size: 12px;
+}
+.widget-metric { display: flex; align-items: baseline; gap: 4px; }
+.widget-metric-num { font-size: 18px; font-weight: 800; color: var(--slate-900); line-height: 1; }
+.widget-metric-label { font-size: 11px; color: var(--slate-500); font-weight: 500; }
+
+/* ── Sparkline ─────────────────────────────────────── */
+.sparkline-wrap {
+  height: 52px; display: flex; align-items: flex-end; gap: 3px;
+}
+.spark-bar {
+  flex: 1; border-radius: 3px 3px 0 0;
+  background: var(--indigo-200);
+  transition: background 0.1s;
+  min-width: 6px;
+}
+.spark-bar.active { background: var(--indigo-500); }
+.spark-bar.current { background: var(--indigo-600); }
+
+/* ── Active agents widget ──────────────────────────── */
+.active-agent-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer; transition: background 0.08s;
+}
+.active-agent-row:last-child { border-bottom: none; }
+.active-agent-row:hover { background: var(--slate-50); margin: 0 -16px; padding: 8px 16px; border-radius: 6px; }
+.active-agent-name { font-size: 12.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.active-agent-step { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+.active-agent-elapsed { font-size: 11px; color: var(--indigo-600); font-weight: 600; white-space: nowrap; }
+
+.active-header-stat { font-size: 11.5px; color: var(--slate-500); margin-bottom: 10px; }
+
+/* ── Schedule widget ───────────────────────────────── */
+.sched-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer;
+}
+.sched-row:last-child { border-bottom: none; }
+.sched-time { font-size: 11px; font-weight: 700; color: var(--indigo-600); width: 44px; flex-shrink: 0; padding-top: 1px; font-family: monospace; }
+.sched-name { font-size: 12.5px; font-weight: 600; color: var(--slate-800); }
+.sched-client { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+
+/* ── Recent successes widget ───────────────────────── */
+.success-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 0; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer;
+}
+.success-row:last-child { border-bottom: none; }
+.success-agent { font-size: 12.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.success-client { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+.success-time { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+
+/* ── Inbox sidebar card ────────────────────────────── */
+.inbox-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.inbox-card-head {
+  padding: 12px 16px; background: var(--slate-50);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.inbox-card-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); display: flex; align-items: center; gap: 6px; }
+.inbox-card-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+.inbox-card-link:hover { text-decoration: underline; }
+.inbox-card-body { padding: 10px 16px; }
+
+.inbox-item-preview {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 0; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer;
+}
+.inbox-item-preview:last-child { border-bottom: none; }
+.inbox-item-preview:hover { background: var(--slate-50); margin: 0 -16px; padding: 9px 16px; border-radius: 6px; }
+.inbox-preview-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.inbox-preview-body { flex: 1; min-width: 0; }
+.inbox-preview-title { font-size: 12px; font-weight: 600; color: var(--slate-800); line-height: 1.4; }
+.inbox-preview-sub { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+
+/* ── Replaces banner ───────────────────────────────── */
 .replaces-banner {
   background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
   padding: 10px 16px; margin-bottom: 20px;
@@ -16,152 +152,6 @@
   display: flex; align-items: center; gap: 8px;
 }
 .replaces-banner strong { font-weight: 700; }
-
-/* Home-specific layout */
-.home-grid {
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 20px;
-  align-items: start;
-}
-.home-main { display: flex; flex-direction: column; gap: 16px; }
-.home-sidebar { display: flex; flex-direction: column; gap: 16px; }
-
-/* Greeting */
-.greeting-block { margin-bottom: 4px; }
-.greeting-name { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.02em; }
-.greeting-sub { font-size: 13.5px; color: var(--slate-500); margin-top: 3px; }
-.greeting-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
-
-/* Attention section */
-.attention-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 10px;
-}
-.attention-title { font-size: 13px; font-weight: 700; color: var(--slate-700); }
-.attention-count {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 20px; height: 20px; padding: 0 6px;
-  background: var(--amber-500); color: white;
-  border-radius: 10px; font-size: 11px; font-weight: 700;
-}
-
-.attention-list { display: flex; flex-direction: column; gap: 1px; }
-.attention-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 16px;
-  background: white; border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer; transition: all 0.1s;
-}
-.attention-item:hover { border-color: var(--indigo-200); background: var(--indigo-50); }
-.attention-item-icon {
-  width: 32px; height: 32px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; font-size: 14px;
-}
-.ai-amber { background: var(--amber-50); }
-.ai-red   { background: var(--red-50); }
-.ai-indigo{ background: var(--indigo-50); }
-.ai-blue  { background: #eff6ff; }
-.ai-violet{ background: var(--violet-50); }
-.ai-emerald{ background: var(--emerald-50); }
-
-.attention-item-body { flex: 1; min-width: 0; }
-.attention-item-title { font-size: 13px; font-weight: 600; color: var(--slate-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.attention-item-sub { font-size: 12px; color: var(--slate-500); margin-top: 1px; }
-.attention-item-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
-.attention-age { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
-
-/* Inline action buttons */
-.btn-approve {
-  padding: 4px 10px; font-size: 11.5px; font-weight: 600; border-radius: 5px;
-  background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0;
-  cursor: pointer; transition: all 0.1s;
-}
-.btn-approve:hover { background: #d1fae5; }
-.btn-decline {
-  padding: 4px 10px; font-size: 11.5px; font-weight: 600; border-radius: 5px;
-  background: var(--red-50); color: var(--red-600); border: 1px solid #fecaca;
-  cursor: pointer; transition: all 0.1s;
-}
-.btn-decline:hover { background: #fee2e2; }
-.btn-review {
-  padding: 4px 10px; font-size: 11.5px; font-weight: 600; border-radius: 5px;
-  background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200);
-  cursor: pointer; transition: all 0.1s;
-}
-.btn-review:hover { background: var(--indigo-100); }
-
-/* Recent runs */
-.run-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 16px;
-  background: white; border: 1px solid var(--border); border-radius: 8px;
-}
-.run-agent { font-size: 13px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; }
-.run-client { font-size: 12px; color: var(--slate-500); }
-.run-time { font-size: 11.5px; color: var(--slate-400); white-space: nowrap; }
-.run-list { display: flex; flex-direction: column; gap: 1px; }
-
-/* Sidebar cards */
-.sidebar-card {
-  background: white; border: 1px solid var(--border);
-  border-radius: 10px; overflow: hidden;
-}
-.sidebar-card-head {
-  padding: 12px 16px; background: var(--slate-50);
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-}
-.sidebar-card-head-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
-.sidebar-card-body { padding: 12px 16px; }
-
-.agent-status-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--slate-100);
-}
-.agent-status-row:last-child { border-bottom: none; }
-.agent-status-name { font-size: 12.5px; font-weight: 500; color: var(--slate-700); flex: 1; }
-.agent-status-last { font-size: 11px; color: var(--slate-400); }
-.agent-status-run { font-size: 11px; color: var(--slate-500); white-space: nowrap; }
-
-.schedule-item {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--slate-100);
-}
-.schedule-item:last-child { border-bottom: none; }
-.schedule-time { font-size: 11px; font-weight: 600; color: var(--indigo-600); width: 44px; flex-shrink: 0; }
-.schedule-name { font-size: 12.5px; font-weight: 500; color: var(--slate-700); }
-.schedule-client { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
-
-.inbox-summary-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--slate-100);
-}
-.inbox-summary-row:last-child { border-bottom: none; }
-.inbox-type { font-size: 12.5px; color: var(--slate-700); }
-.inbox-badge {
-  min-width: 20px; height: 20px; padding: 0 6px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 10px; font-size: 11px; font-weight: 700;
-}
-.inbox-badge-red    { background: var(--red-50); color: var(--red-600); border: 1px solid #fecaca; }
-.inbox-badge-amber  { background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a; }
-.inbox-badge-slate  { background: var(--slate-100); color: var(--slate-500); }
-
-.link-text { font-size: 12px; color: var(--indigo-600); font-weight: 600; text-decoration: none; cursor: pointer; }
-.link-text:hover { text-decoration: underline; }
-
-/* View-all footer */
-.card-footer-link {
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  text-align: center;
-}
 </style>
 </head>
 <body>
@@ -247,323 +237,280 @@
         <span class="topbar-breadcrumb-current">Home</span>
       </div>
       <div class="topbar-spacer"></div>
-      <span style="font-size:12px;color:var(--slate-500);">Wednesday, 7 May 2026</span>
+      <span style="font-size:12px;color:var(--slate-500);margin-right:12px;">Wednesday, 6 May 2026</span>
+      <button class="btn btn-primary" style="display:flex;align-items:center;gap:6px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New agent
+      </button>
     </div>
 
     <div class="page-body">
 
       <div class="replaces-banner">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span><strong>Replaces:</strong> DashboardPage (current main dashboard). This becomes the default route on login.</span>
+        <span><strong>Round 6 redesign:</strong> Dropped "Needs your attention" central section (duplicated Inbox). Replaced with 4-widget dashboard grid.
+        <a href="before-home.html" style="color:#b45309;font-weight:700;margin-left:6px;">View before (DashboardPage)</a></span>
       </div>
 
       <!-- Greeting -->
       <div class="greeting-row">
-        <div class="greeting-block">
+        <div>
           <div class="greeting-name">Good morning, Sarah</div>
-          <div class="greeting-sub">7 items need your attention. 2 automations are awaiting approval.</div>
+          <div class="greeting-sub">3 agents active, 18 total. 7 items need attention in your inbox.</div>
         </div>
-        <button class="btn btn-primary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New agent
-        </button>
       </div>
 
       <div class="home-grid">
-        <!-- Main column -->
+
+        <!-- Main: 2x2 widget grid + bottom run link -->
         <div class="home-main">
 
-          <!-- Needs attention -->
-          <div>
-            <div class="attention-header">
-              <div class="attention-title">Needs your attention</div>
-              <span class="attention-count">7</span>
+          <div class="widget-grid">
+
+            <!-- Widget 1: Today's runs sparkline -->
+            <div class="widget">
+              <div class="widget-head">
+                <span class="widget-title">Today's runs</span>
+                <a class="widget-link" href="#">View run log</a>
+              </div>
+              <div class="widget-body">
+                <!-- Sparkline: 24 hourly bars, bursty afternoon pattern -->
+                <div class="sparkline-wrap">
+                  <!-- Hours 0-23. Heights encode run counts: quiet morning, busy afternoon -->
+                  <div class="spark-bar" style="height:8%;"></div>   <!-- 00 -->
+                  <div class="spark-bar" style="height:4%;"></div>   <!-- 01 -->
+                  <div class="spark-bar" style="height:4%;"></div>   <!-- 02 -->
+                  <div class="spark-bar" style="height:4%;"></div>   <!-- 03 -->
+                  <div class="spark-bar" style="height:4%;"></div>   <!-- 04 -->
+                  <div class="spark-bar" style="height:10%;"></div>  <!-- 05 -->
+                  <div class="spark-bar" style="height:20%;"></div>  <!-- 06 -->
+                  <div class="spark-bar" style="height:28%;"></div>  <!-- 07 -->
+                  <div class="spark-bar" style="height:35%;"></div>  <!-- 08 -->
+                  <div class="spark-bar" style="height:55%;"></div>  <!-- 09 -->
+                  <div class="spark-bar" style="height:48%;"></div>  <!-- 10 -->
+                  <div class="spark-bar" style="height:38%;"></div>  <!-- 11 -->
+                  <div class="spark-bar" style="height:42%;"></div>  <!-- 12 -->
+                  <div class="spark-bar" style="height:65%;"></div>  <!-- 13 -->
+                  <div class="spark-bar active" style="height:100%;"></div>  <!-- 14 peak -->
+                  <div class="spark-bar active" style="height:90%;"></div>  <!-- 15 -->
+                  <div class="spark-bar active" style="height:72%;"></div>  <!-- 16 -->
+                  <div class="spark-bar active" style="height:58%;"></div>  <!-- 17 -->
+                  <div class="spark-bar active" style="height:45%;"></div>  <!-- 18 -->
+                  <div class="spark-bar active" style="height:30%;"></div>  <!-- 19 -->
+                  <div class="spark-bar current" style="height:40%;"></div> <!-- 20 current hour -->
+                  <div class="spark-bar" style="height:14%;opacity:0.4;"></div>  <!-- 21 future -->
+                  <div class="spark-bar" style="height:10%;opacity:0.4;"></div>  <!-- 22 future -->
+                  <div class="spark-bar" style="height:6%;opacity:0.4;"></div>   <!-- 23 future -->
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:4px;">
+                  <span style="font-size:10.5px;color:var(--slate-400);">12am</span>
+                  <span style="font-size:10.5px;color:var(--slate-400);">now</span>
+                </div>
+                <div class="widget-subline">
+                  <div class="widget-metric">
+                    <span class="widget-metric-num">84</span>
+                    <span class="widget-metric-label">runs today</span>
+                  </div>
+                  <div class="widget-metric">
+                    <span class="widget-metric-num" style="color:var(--emerald-600);">97%</span>
+                    <span class="widget-metric-label">success rate</span>
+                  </div>
+                  <div class="widget-metric">
+                    <span class="widget-metric-num" style="color:var(--red-500);">2</span>
+                    <span class="widget-metric-label">failed</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="attention-list">
 
-              <div class="attention-item">
-                <div class="attention-item-icon ai-amber">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <!-- Widget 2: Active agents -->
+            <div class="widget">
+              <div class="widget-head">
+                <span class="widget-title">Active agents</span>
+                <a class="widget-link" href="agents.html">All agents</a>
+              </div>
+              <div class="widget-body">
+                <div class="active-header-stat">3 of 18 agents running now</div>
+                <div class="active-agent-row">
+                  <div class="status-dot dot-blue dot-pulse"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="active-agent-name">Outreach Agent</div>
+                    <div class="active-agent-step">Step 7: awaiting HITL gate</div>
+                  </div>
+                  <div class="active-agent-elapsed">0:42</div>
                 </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Belief conflict: Acme Corp contact record has diverging phone data</div>
-                  <div class="attention-item-sub">Research Agent flagged 2 conflicting values. Review and pick one.</div>
+                <div class="active-agent-row">
+                  <div class="status-dot dot-blue dot-pulse"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="active-agent-name">Research Agent</div>
+                    <div class="active-agent-step">Step 3: LLM reasoning</div>
+                  </div>
+                  <div class="active-agent-elapsed">0:08</div>
                 </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">14m ago</span>
-                  <button class="btn-review">Review</button>
+                <div class="active-agent-row">
+                  <div class="status-dot dot-blue dot-pulse"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="active-agent-name">CRM Hygiene Agent</div>
+                    <div class="active-agent-step">Step 12: writing CRM records</div>
+                  </div>
+                  <div class="active-agent-elapsed">1:14</div>
+                </div>
+                <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--slate-100);font-size:11.5px;color:var(--slate-400);">
+                  15 agents idle, 0 failed
                 </div>
               </div>
-
-              <div class="attention-item">
-                <div class="attention-item-icon ai-indigo">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Automation approval: "Weekly nurture sequence" needs sign-off</div>
-                  <div class="attention-item-sub">Email Automation Agent requested permission to send 142 contacts.</div>
-                </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">32m ago</span>
-                  <button class="btn-approve">Approve</button>
-                  <button class="btn-decline">Decline</button>
-                </div>
-              </div>
-
-              <div class="attention-item">
-                <div class="attention-item-icon ai-indigo">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 4v4"/></svg>
-                </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Automation approval: "Lead re-engagement batch" needs sign-off</div>
-                  <div class="attention-item-sub">CRM Automation Agent requested permission to update 67 records.</div>
-                </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">1h ago</span>
-                  <button class="btn-approve">Approve</button>
-                  <button class="btn-decline">Decline</button>
-                </div>
-              </div>
-
-              <div class="attention-item">
-                <div class="attention-item-icon ai-red">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Run failed: "Morning report", Blocker Agent, Maple Digital</div>
-                  <div class="attention-item-sub">Gmail credential expired. Reconnect to retry.</div>
-                </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">2h ago</span>
-                  <button class="btn-review">Fix</button>
-                </div>
-              </div>
-
-              <div class="attention-item">
-                <div class="attention-item-icon ai-blue">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Clarification request: "Which pipeline stage for Stark Industries?"</div>
-                  <div class="attention-item-sub">Outreach Agent paused and is waiting for your answer.</div>
-                </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">3h ago</span>
-                  <button class="btn-review">Reply</button>
-                </div>
-              </div>
-
-              <div class="attention-item">
-                <div class="attention-item-icon ai-violet">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-                </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Memory block proposal: add rule "Always CC legal on NDAs"</div>
-                  <div class="attention-item-sub">Contract Agent suggested this rule. Accept to add it to Knowledge.</div>
-                </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">4h ago</span>
-                  <button class="btn-approve">Accept</button>
-                  <button class="btn-decline">Reject</button>
-                </div>
-              </div>
-
-              <div class="attention-item">
-                <div class="attention-item-icon ai-amber">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </div>
-                <div class="attention-item-body">
-                  <div class="attention-item-title">Scheduled run overdue: "Weekly pipeline review" for Nova Agency</div>
-                  <div class="attention-item-sub">Was due 6h ago. Agent is active, trigger manually or reschedule.</div>
-                </div>
-                <div class="attention-item-actions">
-                  <span class="attention-age">6h ago</span>
-                  <button class="btn-review">Run now</button>
-                </div>
-              </div>
-
             </div>
-            <div style="margin-top:8px;text-align:right;">
-              <a href="inbox.html" class="link-text">View all in Inbox (7 unread) &#8594;</a>
+
+            <!-- Widget 3: Today's schedule -->
+            <div class="widget">
+              <div class="widget-head">
+                <span class="widget-title">Today's schedule</span>
+                <a class="widget-link" href="calendar.html">Full calendar</a>
+              </div>
+              <div class="widget-body">
+                <div class="sched-row">
+                  <div class="sched-time">09:00</div>
+                  <div>
+                    <div class="sched-name">Outreach Agent</div>
+                    <div class="sched-client">Acme Corp</div>
+                  </div>
+                  <span class="status-dot dot-blue dot-pulse" style="margin-left:auto;"></span>
+                </div>
+                <div class="sched-row">
+                  <div class="sched-time">10:30</div>
+                  <div>
+                    <div class="sched-name">Lead nurture workflow</div>
+                    <div class="sched-client">Beta Industries</div>
+                  </div>
+                  <span class="badge badge-slate" style="margin-left:auto;font-size:10px;">Upcoming</span>
+                </div>
+                <div class="sched-row">
+                  <div class="sched-time">14:00</div>
+                  <div>
+                    <div class="sched-name">Compliance check</div>
+                    <div class="sched-client">Gamma Holdings</div>
+                  </div>
+                  <span class="badge badge-slate" style="margin-left:auto;font-size:10px;">Upcoming</span>
+                </div>
+                <div class="sched-row">
+                  <div class="sched-time">16:30</div>
+                  <div>
+                    <div class="sched-name">EOD summary report</div>
+                    <div class="sched-client">All clients</div>
+                  </div>
+                  <span class="badge badge-slate" style="margin-left:auto;font-size:10px;">Upcoming</span>
+                </div>
+                <div class="sched-row">
+                  <div class="sched-time">18:00</div>
+                  <div>
+                    <div class="sched-name">Nurture sequence prep</div>
+                    <div class="sched-client">Maple Digital</div>
+                  </div>
+                  <span class="badge badge-slate" style="margin-left:auto;font-size:10px;">Upcoming</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Widget 4: Recent successes -->
+            <div class="widget">
+              <div class="widget-head">
+                <span class="widget-title">Recent successes</span>
+                <a class="widget-link" href="#">View run log</a>
+              </div>
+              <div class="widget-body">
+                <div class="success-row">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <div style="flex:1;min-width:0;">
+                    <div class="success-agent">Research Agent</div>
+                    <div class="success-client">Acme Corp</div>
+                  </div>
+                  <span class="success-time">8m ago</span>
+                </div>
+                <div class="success-row">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <div style="flex:1;min-width:0;">
+                    <div class="success-agent">Reporting Agent</div>
+                    <div class="success-client">Maple Digital</div>
+                  </div>
+                  <span class="success-time">1h ago</span>
+                </div>
+                <div class="success-row">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <div style="flex:1;min-width:0;">
+                    <div class="success-agent">CRM Agent</div>
+                    <div class="success-client">Nova Agency</div>
+                  </div>
+                  <span class="success-time">3h ago</span>
+                </div>
+                <div class="success-row">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <div style="flex:1;min-width:0;">
+                    <div class="success-agent">Lead Scoring Agent</div>
+                    <div class="success-client">Acme Corp</div>
+                  </div>
+                  <span class="success-time">4h ago</span>
+                </div>
+                <div class="success-row">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <div style="flex:1;min-width:0;">
+                    <div class="success-agent">Contract Agent</div>
+                    <div class="success-client">Beacon Consulting</div>
+                  </div>
+                  <span class="success-time">5h ago</span>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /widget-grid -->
+
+        </div><!-- /home-main -->
+
+        <!-- Right sidebar: Inbox summary (small state preview only) -->
+        <div>
+          <div class="inbox-card">
+            <div class="inbox-card-head">
+              <span class="inbox-card-title">
+                Inbox
+                <span style="min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--amber-500);color:white;border-radius:9px;font-size:10.5px;font-weight:700;">7</span>
+              </span>
+              <a href="inbox.html" class="inbox-card-link">Open all</a>
+            </div>
+            <div class="inbox-card-body">
+
+              <div class="inbox-item-preview">
+                <div class="inbox-preview-dot" style="background:var(--amber-500);"></div>
+                <div class="inbox-preview-body">
+                  <div class="inbox-preview-title">Approval needed: "Weekly nurture sequence"</div>
+                  <div class="inbox-preview-sub">Email Automation Agent, 32m ago</div>
+                </div>
+              </div>
+
+              <div class="inbox-item-preview">
+                <div class="inbox-preview-dot" style="background:var(--amber-500);"></div>
+                <div class="inbox-preview-body">
+                  <div class="inbox-preview-title">Belief conflict: Acme Corp contact phone</div>
+                  <div class="inbox-preview-sub">Research Agent, 14m ago</div>
+                </div>
+              </div>
+
+              <div class="inbox-item-preview">
+                <div class="inbox-preview-dot" style="background:var(--red-500);"></div>
+                <div class="inbox-preview-body">
+                  <div class="inbox-preview-title">Run failed: Morning report, Maple Digital</div>
+                  <div class="inbox-preview-sub">Gmail credential expired, 2h ago</div>
+                </div>
+              </div>
+
+              <div style="margin-top:6px;padding-top:8px;border-top:1px solid var(--slate-100);">
+                <a href="inbox.html" class="inbox-card-link">View all 7 unread items</a>
+              </div>
             </div>
           </div>
-
-          <!-- Recent runs -->
-          <div>
-            <div class="attention-header">
-              <div class="attention-title">Recent runs</div>
-              <a href="#" class="link-text" style="font-size:12px;">View run log &#8594;</a>
-            </div>
-            <div class="run-list">
-
-              <div class="run-row">
-                <div class="status-dot dot-green"></div>
-                <div class="run-agent">Research Agent</div>
-                <div class="run-client">Acme Corp</div>
-                <span class="badge badge-green">Completed</span>
-                <span class="run-time">8m ago</span>
-              </div>
-
-              <div class="run-row">
-                <div class="status-dot dot-blue dot-pulse"></div>
-                <div class="run-agent">Outreach Agent</div>
-                <div class="run-client">Stark Industries</div>
-                <span class="badge badge-indigo">Running</span>
-                <span class="run-time">12m ago</span>
-              </div>
-
-              <div class="run-row">
-                <div class="status-dot dot-green"></div>
-                <div class="run-agent">Reporting Agent</div>
-                <div class="run-client">Maple Digital</div>
-                <span class="badge badge-green">Completed</span>
-                <span class="run-time">1h ago</span>
-              </div>
-
-              <div class="run-row">
-                <div class="status-dot dot-red"></div>
-                <div class="run-agent">Blocker Agent</div>
-                <div class="run-client">Maple Digital</div>
-                <span class="badge badge-red">Failed</span>
-                <span class="run-time">2h ago</span>
-              </div>
-
-              <div class="run-row">
-                <div class="status-dot dot-green"></div>
-                <div class="run-agent">CRM Agent</div>
-                <div class="run-client">Nova Agency</div>
-                <span class="badge badge-green">Completed</span>
-                <span class="run-time">3h ago</span>
-              </div>
-
-              <div class="run-row">
-                <div class="status-dot dot-amber"></div>
-                <div class="run-agent">Email Agent</div>
-                <div class="run-client">Beacon Consulting</div>
-                <span class="badge badge-amber">Awaiting approval</span>
-                <span class="run-time">3h ago</span>
-              </div>
-
-            </div>
-          </div>
-
         </div>
 
-        <!-- Sidebar column -->
-        <div class="home-sidebar">
-
-          <!-- Inbox summary -->
-          <div class="sidebar-card">
-            <div class="sidebar-card-head">
-              <span class="sidebar-card-head-title">Inbox</span>
-              <a href="inbox.html" class="link-text">Open &#8594;</a>
-            </div>
-            <div class="sidebar-card-body">
-              <div class="inbox-summary-row">
-                <span class="inbox-type">Approvals needed</span>
-                <span class="inbox-badge inbox-badge-amber">2</span>
-              </div>
-              <div class="inbox-summary-row">
-                <span class="inbox-type">Conflicts to resolve</span>
-                <span class="inbox-badge inbox-badge-amber">1</span>
-              </div>
-              <div class="inbox-summary-row">
-                <span class="inbox-type">Clarifications pending</span>
-                <span class="inbox-badge inbox-badge-red">1</span>
-              </div>
-              <div class="inbox-summary-row">
-                <span class="inbox-type">Memory proposals</span>
-                <span class="inbox-badge inbox-badge-slate">1</span>
-              </div>
-              <div class="inbox-summary-row">
-                <span class="inbox-type">Failed runs</span>
-                <span class="inbox-badge inbox-badge-red">1</span>
-              </div>
-              <div class="inbox-summary-row" style="border-bottom:none;">
-                <span class="inbox-type">Overdue schedules</span>
-                <span class="inbox-badge inbox-badge-amber">1</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Active agents -->
-          <div class="sidebar-card">
-            <div class="sidebar-card-head">
-              <span class="sidebar-card-head-title">Agents</span>
-              <a href="agents.html" class="link-text">All agents &#8594;</a>
-            </div>
-            <div class="sidebar-card-body">
-              <div class="agent-status-row">
-                <div class="status-dot dot-blue dot-pulse"></div>
-                <span class="agent-status-name">Outreach Agent</span>
-                <span class="agent-status-run">Running</span>
-              </div>
-              <div class="agent-status-row">
-                <div class="status-dot dot-green"></div>
-                <span class="agent-status-name">Research Agent</span>
-                <span class="agent-status-last">8m ago</span>
-              </div>
-              <div class="agent-status-row">
-                <div class="status-dot dot-green"></div>
-                <span class="agent-status-name">CRM Agent</span>
-                <span class="agent-status-last">3h ago</span>
-              </div>
-              <div class="agent-status-row">
-                <div class="status-dot dot-red"></div>
-                <span class="agent-status-name">Blocker Agent</span>
-                <span class="agent-status-last">Failed 2h ago</span>
-              </div>
-              <div class="agent-status-row">
-                <div class="status-dot dot-slate"></div>
-                <span class="agent-status-name">Contract Agent</span>
-                <span class="agent-status-last">Yesterday</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Today's schedule -->
-          <div class="sidebar-card">
-            <div class="sidebar-card-head">
-              <span class="sidebar-card-head-title">Scheduled today</span>
-              <a href="calendar.html" class="link-text">Calendar &#8594;</a>
-            </div>
-            <div class="sidebar-card-body">
-              <div class="schedule-item">
-                <div class="schedule-time">10:00</div>
-                <div>
-                  <div class="schedule-name">Weekly pipeline review</div>
-                  <div class="schedule-client">Nova Agency</div>
-                </div>
-              </div>
-              <div class="schedule-item">
-                <div class="schedule-time">14:00</div>
-                <div>
-                  <div class="schedule-name">Lead scoring update</div>
-                  <div class="schedule-client">Acme Corp</div>
-                </div>
-              </div>
-              <div class="schedule-item">
-                <div class="schedule-time">16:30</div>
-                <div>
-                  <div class="schedule-name">EOD summary report</div>
-                  <div class="schedule-client">All clients</div>
-                </div>
-              </div>
-              <div class="schedule-item" style="border-bottom:none;">
-                <div class="schedule-time">18:00</div>
-                <div>
-                  <div class="schedule-name">Nurture sequence prep</div>
-                  <div class="schedule-client">Maple Digital</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-  </div>
-</div>
+      </div><!-- /home-grid -->
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
 </body>
 </html>
