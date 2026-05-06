@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7e-1c
+    Prototype Round 7e-3
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7e-1: Capabilities tab retired on both agent-edit.html (Round 7e-1a) and org-agent-edit.html (Round 7e-1b). Replaced with two top-level tabs, Skills and Data sources, on both surfaces. agent-edit.html tabs are now: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab uses a search-driven Enabled / Add structure scaling to 200+ skills. Data sources tab is elevated to a top-level surface with type-coloured rows. org-agent-edit.html receives the same restructure with a two-tier System + Organisation view at the org level (no This client tier at org level). Round 7e-1c updates before-agent-edit.html and before-org-agent-edit.html to document the discoverability and IA gaps the new design fixes, and updates this index. Round 7d (Knowledge terminology rebuild) and Round 7c (permission demos) remain complete.</p>
+  <p>Round 7e-3: Recurring tasks surface added. Consolidates the <strong>scheduled_tasks</strong> schema (ScheduledTasksPage, RRULE-based recurring invocations) and <strong>agent_triggers</strong> schema (TriggersPage, event-based invocations) into a single "Recurring tasks" page. Both are a rule that describes when to invoke an agent; only the fire condition differs. The new surface adds a unified 17-row table with fire condition badges (Schedule / Event / Manual), filter chips, fire count/30d, next fire, and a 560px drawer with Configure / History / Test tabs. "+ New recurring task" modal creates and opens the drawer. Before companion documents the split and 8 problems. Triggers tab retired from automations.html in Round 7e-2 (already done). Sidebar updated: Recurring tasks added between Automations and Knowledge in the Build section. Round 7e-1 (Skills + Data sources tabs) remains complete.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7e-1c</div>
+    <div class="meta-item"><strong>Round:</strong> 7e-3</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 54+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 56+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -264,6 +264,25 @@
     Page merge
   </div>
   <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Recurring tasks</div>
+        <div class="proto-card-file">recurring-tasks.html</div>
+      </div>
+      <div class="proto-card-desc">Unified surface for all rule-fires-agent patterns. 17 tasks across three fire conditions (Schedule-fired 8, Event-fired 6, Manual 3). Filter chips, fire count/30d, next fire column. 560px drawer with Configure / History / Test tabs. Fire condition radio cards swap the sub-form (RRULE fields / event type and filter / manual run-now). Retry policy, token budget, status toggle. "+ New recurring task" modal. Round 7e-3.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Consolidates 2 schemas / 2 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">ScheduledTasksPage (scheduled_tasks)</span>
+          <span class="replace-pill strike">TriggersPage (agent_triggers)</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="recurring-tasks.html">Open mockup &#8594;</a>
+        <a href="before-recurring-tasks.html" class="before-link">Before</a>
+      </div>
+    </div>
 
     <div class="proto-card">
       <div class="proto-card-header">

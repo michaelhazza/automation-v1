@@ -98,8 +98,9 @@ const NAV = {
         label: 'Build',
         items: [
           { label: 'Agents',      href: 'agents.html',      icon: 'agents' },
-          { label: 'Automations', href: 'automations.html', icon: 'automations' },
-          { label: 'Knowledge',   href: 'knowledge.html',   icon: 'knowledge' },
+          { label: 'Automations',      href: 'automations.html',      icon: 'automations' },
+          { label: 'Recurring tasks',  href: 'recurring-tasks.html',  icon: 'calendar' },
+          { label: 'Knowledge',        href: 'knowledge.html',        icon: 'knowledge' },
           { label: 'Connections', href: 'integrations.html', icon: 'connections' },
         ],
       },

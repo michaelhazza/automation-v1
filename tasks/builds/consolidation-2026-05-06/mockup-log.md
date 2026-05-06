@@ -1201,4 +1201,31 @@ index.html:
 - `prototypes/consolidation-2026-05-06/run-trace.html` (timestamp formats)
 - `prototypes/consolidation-2026-05-06/automations.html` (Triggers tab removed)
 - `prototypes/consolidation-2026-05-06/home.html` (Recent runs + Recent activity added)
+
+## Round 7e-3 -- 2026-05-06
+
+**Operator feedback:** Build a unified "Recurring tasks" surface consolidating scheduled_tasks (RRULE-based) and agent_triggers (event-based) schemas. Both are a rule that fires an agent; only the fire condition differs. Add before companion, update sidebar, update index.
+
+**Changes made:**
+- `recurring-tasks.html` created: unified 17-task table with fire condition badges (Schedule-fired 8, Event-fired 6, Manual 3). Filter chips: All / Schedule-fired / Event-fired / Manual / Active / Paused / Error. Columns: Name, Fire condition (badge + detail sub-line), Action (agent + optional pinned workflow chip), Status (Active/Paused/Error with inline error note), Last fired, Fires/30d, Next fire, overflow actions. Row click opens 560px drawer. Drawer tabs: Configure (fire condition radio cards swap between RRULE scheduler, event type/filter, manual run-now panel; Action section: agent, pinned workflow, brief textarea; Retry policy; Token budget; Status toggle), History (last 30 fires table with run ID links to run-trace.html, status, duration, cost), Test (test-fire button, sample event payload editor for event tasks, result panel). "+ New recurring task" modal with name, fire condition, agent, and "Create and configure" button that opens the drawer.
+- `before-recurring-tasks.html` created: side-by-side split layout. Left: ScheduledTasksPage at /admin/subaccounts/:id/scheduled-tasks with 6 scheduled tasks, RRULE column, amber annotation "Only schedule-based fires". Right: TriggersPage at /admin/subaccounts/:id/triggers with 5 event triggers, event type and filter columns, amber annotation "Only event-based fires; cannot pin workflow; no run-now". Route notes with source file and schema name. Eight-item problems box covering: conceptual split, mental model, mid-flow context switch, no unified history, feature parity gap (workflow pinning), no manual fire mode, no run-now button, schema JOIN complexity.
+- `_sidebar.js` Build section: "Recurring tasks" added between Automations and Knowledge, href=recurring-tasks.html, icon=calendar. Not a stub.
+- `index.html` masthead: eyebrow updated to "Prototype Round 7e-3", description updated, file count updated to 56+. New proto-card added in Page merge section for recurring-tasks.html (before the Automations card) with "Consolidates 2 schemas / 2 pages" replaces list (ScheduledTasksPage/scheduled_tasks, TriggersPage/agent_triggers) and before-link to before-recurring-tasks.html.
+
+**Consolidation rationale:** scheduled_tasks and agent_triggers represent the same domain concept: a persistent rule that describes when to invoke an agent. The fire condition (cron/RRULE vs event subscription vs manual) is a property of the rule, not a reason to have two separate surfaces. Unifying them lets operators see all their recurring invocations in one list, compare fire counts across types, share history/test/retry-policy UX, and surfaces the Manual fire mode that neither legacy page supported.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- operator's primary task is "manage when my agents run automatically". The page opens on the full task list with all fire types visible, not segmented by schema origin.
+- Default to hidden: yes -- no KPI tile strip, no fire-count trend chart, no cost-per-task dashboard. Fire count/30d is a single number per row. History tab is behind a tab click.
+- One primary action: yes -- "+ New recurring task" is the single primary action on the page. Drawer has one primary action (Save changes) with secondary actions clearly outlined or at far right (Delete in red).
+- Inline state: yes -- status (Active/Paused/Error) shown as inline colored badge with status dot per row. Error message surfaced inline under the status badge rather than in a separate panel.
+- Re-check passed: yes -- a non-technical operator can scan the task list, see what fires when, and create a new task without understanding the scheduled_tasks vs agent_triggers schema distinction. Fire condition labels ("Schedule-fired daily 9am UTC") are plain English.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html` (created)
+- `prototypes/consolidation-2026-05-06/before-recurring-tasks.html` (created)
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (Recurring tasks nav item added)
+- `prototypes/consolidation-2026-05-06/index.html` (round metadata updated, Recurring tasks card added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
