@@ -38,11 +38,14 @@
 
   .proto-card {
     background: white; border: 1px solid #e8ecf0; border-radius: 12px;
-    padding: 18px 20px; text-decoration: none; color: inherit;
+    padding: 18px 20px; color: inherit;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     transition: all 0.15s; display: block;
+    position: relative;
   }
   .proto-card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
+  .proto-card-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }
+  .before-link { position: relative; z-index: 2; }
 
   .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
   .proto-card-title { font-size: 14px; font-weight: 700; color: #0f172a; }
@@ -119,7 +122,7 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="knowledge.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Knowledge</div>
         <div class="proto-card-file">knowledge.html</div>
@@ -135,12 +138,12 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-knowledge.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="knowledge.html">Open mockup &#8594;</a>
+        <a href="before-knowledge.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="inbox.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Inbox (NEW)</div>
         <div class="proto-card-file">inbox.html</div>
@@ -156,12 +159,12 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-inbox.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="inbox.html">Open mockup &#8594;</a>
+        <a href="before-inbox.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="agent-edit.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Agent Edit</div>
         <div class="proto-card-file">agent-edit.html</div>
@@ -178,12 +181,12 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-agent-edit.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="agent-edit.html">Open mockup &#8594;</a>
+        <a href="before-agent-edit.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="run-trace.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Run Trace</div>
         <div class="proto-card-file">run-trace.html</div>
@@ -197,10 +200,10 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-run-trace.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="run-trace.html">Open mockup &#8594;</a>
+        <a href="before-run-trace.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -213,7 +216,7 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="automations.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Automations</div>
         <div class="proto-card-file">automations.html</div>
@@ -227,12 +230,12 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-automations.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="automations.html">Open mockup &#8594;</a>
+        <a href="before-automations.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="calendar.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Calendar</div>
         <div class="proto-card-file">calendar.html</div>
@@ -246,12 +249,12 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-calendar.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="calendar.html">Open mockup &#8594;</a>
+        <a href="before-calendar.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="integrations.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Connections</div>
         <div class="proto-card-file">integrations.html</div>
@@ -265,10 +268,10 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-integrations.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="integrations.html">Open mockup &#8594;</a>
+        <a href="before-integrations.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -284,7 +287,7 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="automation-detail.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Automation Detail</div>
         <div class="proto-card-file">automation-detail.html</div>
@@ -299,10 +302,10 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-automation-detail.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="automation-detail.html">Open mockup &#8594;</a>
+        <a href="before-automation-detail.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -315,7 +318,7 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="shell-nav.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Left Nav (Before / After)</div>
         <div class="proto-card-file">shell-nav.html</div>
@@ -329,11 +332,11 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a class="proto-card-link" href="shell-nav.html">Open mockup &#8594;</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="manage-org.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Manage Org</div>
         <div class="proto-card-file">manage-org.html</div>
@@ -346,10 +349,10 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-manage-org.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="manage-org.html">Open mockup &#8594;</a>
+        <a href="before-manage-org.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -362,7 +365,7 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="home.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Home (default route)</div>
         <div class="proto-card-file">home.html</div>
@@ -375,42 +378,42 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a class="proto-card-link" href="home.html">Open mockup &#8594;</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="glossary.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">System Model (Glossary)</div>
         <div class="proto-card-file">glossary.html</div>
       </div>
       <div class="proto-card-desc">Plain-language definitions for every concept: Agent, Automation, Workflow, Run, Job, Skill, Block, Block Type, Org/Tenant, Subaccount/Client, Project, Knowledge, Memory Block. Relationship diagram. Linked from help icon in shell.</div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a class="proto-card-link" href="glossary.html">Open mockup &#8594;</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="page-disposition.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Page Disposition Table</div>
         <div class="proto-card-file">page-disposition.html</div>
       </div>
       <div class="proto-card-desc">Canonical reference: all 117 source pages mapped to disposition (KEEP / MERGED / TO DRAWER / RENAMED / REMOVED / SYSTEM ONLY / AUTH). Sortable by any column. Filterable by disposition and category. Used by engineering and operators to track consolidation work.</div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open reference &#8594;</div>
+        <a class="proto-card-link" href="page-disposition.html">Open reference &#8594;</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="onboarding.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Onboarding (first-run setup)</div>
         <div class="proto-card-file">onboarding.html</div>
       </div>
       <div class="proto-card-desc">5-step first-run flow: Welcome, Connect first integration, Create first agent (from template), Set up first automation (optional), Done. Each step shows what state the tenant ends up in. Skippable at each step.</div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
+        <a class="proto-card-link" href="onboarding.html">Open mockup &#8594;</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -423,7 +426,7 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="agents.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Agents (unified list)</div>
         <div class="proto-card-file">agents.html</div>
@@ -441,12 +444,12 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-agents.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="agents.html">Open mockup &#8594;</a>
+        <a href="before-agents.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="workflows.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Workflows (kept separate)</div>
         <div class="proto-card-file">workflows.html</div>
@@ -460,10 +463,10 @@
         </div>
       </div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open mockup &#8594;</div>
-        <a href="before-workflows.html" class="before-link" onclick="event.stopPropagation()">Before</a>
+        <a class="proto-card-link" href="workflows.html">Open mockup &#8594;</a>
+        <a href="before-workflows.html" class="before-link">Before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -496,38 +499,38 @@
   </div>
   <div class="card-grid">
 
-    <a class="proto-card" href="empty-states.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Empty States</div>
         <div class="proto-card-file">empty-states.html</div>
       </div>
       <div class="proto-card-desc">Gallery of empty state patterns: agents, inbox, knowledge (auto + authored), connections, runs, automations, calendar. Each has exactly one primary action. Rules embedded at top.</div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open gallery &#8594;</div>
+        <a class="proto-card-link" href="empty-states.html">Open gallery &#8594;</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="permissions.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Permission Patterns</div>
         <div class="proto-card-file">permissions.html</div>
       </div>
       <div class="proto-card-desc">Gallery of permission states: admin-only sections (dashed amber), locked rows, gated action buttons, full-page no-access states, role badge in topbar. Rules embedded at top.</div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open gallery &#8594;</div>
+        <a class="proto-card-link" href="permissions.html">Open gallery &#8594;</a>
       </div>
-    </a>
+    </div>
 
-    <a class="proto-card" href="lifecycle-errors.html">
+    <div class="proto-card">
       <div class="proto-card-header">
         <div class="proto-card-title">Lifecycle Error Patterns</div>
         <div class="proto-card-file">lifecycle-errors.html</div>
       </div>
       <div class="proto-card-desc">Gallery of error and blocked states: failed run with retry, expired credential with reconnect, blocked agent with unblock, rate-limited integration, schema migration in progress. Each error has one recovery action.</div>
       <div class="proto-card-footer">
-        <div class="proto-card-link">Open gallery &#8594;</div>
+        <a class="proto-card-link" href="lifecycle-errors.html">Open gallery &#8594;</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
