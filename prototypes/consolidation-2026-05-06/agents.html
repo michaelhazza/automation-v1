@@ -298,7 +298,7 @@ const AGENTS_BY_VIEW = {
     filterCounts: { all: 12, active: 9, inactive: 1, draft: 1 },
     orgChartLabel: 'Workspace agent hierarchy',
     newBtnLabel: 'New agent',
-    columns: ['Agent', 'Status', 'Last run', 'Tags', 'Actions'],
+    columns: ['Agent', 'Status', 'Last run', 'Tags', 'Reports to', 'Actions'],
     agents: [
       {
         id: 'outreach-agent',
@@ -310,6 +310,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'running', label: 'Running now', time: 'Started 12 minutes ago', color: '#3b82f6', dotClass: 'dot-blue dot-pulse' },
         tags: ['outreach', 'acme-hubspot'],
         meta: '142 runs last 30d',
+        reportsTo: 'Outreach Manager',
         actions: ['edit', 'view-run', 'more'],
       },
       {
@@ -321,6 +322,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'ok', label: 'Completed', time: '5 minutes ago', dotClass: 'dot-green' },
         tags: ['sales'],
         meta: '87 runs last 30d',
+        reportsTo: 'Outreach Manager',
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -332,6 +334,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'failed', label: 'Failed', time: '2 hours ago · credential expired', color: '#dc2626', timeColor: '#f87171', dotClass: 'dot-red' },
         tags: ['crm'],
         meta: '',
+        reportsTo: 'Outreach Manager',
         actions: ['edit', 'fix', 'more'],
       },
       {
@@ -343,6 +346,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'ok', label: 'Completed', time: '1 hour ago', dotClass: 'dot-green' },
         tags: ['sales'],
         meta: '',
+        reportsTo: 'Outreach Manager',
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -354,6 +358,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'ok', label: 'Completed', time: '30 minutes ago', dotClass: 'dot-green' },
         tags: ['csm'],
         meta: '',
+        reportsTo: 'CSM Manager',
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -365,6 +370,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'ok', label: 'Completed', time: '8 minutes ago', dotClass: 'dot-green' },
         tags: ['support'],
         meta: '',
+        reportsTo: 'CSM Manager',
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -378,6 +384,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'idle', label: 'Idle', time: 'No recent run', dotClass: 'dot-slate' },
         tags: [],
         meta: '',
+        reportsTo: 'Orchestrator',
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -390,6 +397,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'idle', label: 'Idle', time: 'No recent run', dotClass: 'dot-slate' },
         tags: [],
         meta: '',
+        reportsTo: 'Orchestrator',
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -403,6 +411,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'running', label: 'Always on', time: 'Active since workspace created', color: '#3b82f6', dotClass: 'dot-blue dot-pulse' },
         tags: [],
         meta: '',
+        reportsTo: null,
         actions: ['edit', 'more'],
       },
       {
@@ -414,6 +423,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'idle', label: 'Paused by user', time: '', dotClass: 'dot-slate' },
         tags: [],
         meta: '',
+        reportsTo: 'Orchestrator',
         actions: ['edit', 'activate', 'more'],
       },
       {
@@ -426,6 +436,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'ok', label: 'Completed', time: '2 hours ago', dotClass: 'dot-green' },
         tags: ['client:acme'],
         meta: '',
+        reportsTo: null,
         actions: ['edit', 'run', 'more'],
       },
       {
@@ -437,6 +448,7 @@ const AGENTS_BY_VIEW = {
         lastRun: { state: 'never', label: 'Never run', time: '', dotClass: 'dot-slate' },
         tags: [],
         meta: '',
+        reportsTo: 'Outreach Manager',
         actions: ['edit', 'activate', 'more'],
       },
     ],
@@ -878,6 +890,11 @@ function tagsHtml(tags, isLocal) {
   return out || '<span style="color:var(--slate-300);font-size:11px;">-</span>';
 }
 
+function reportsToHtml(manager) {
+  if (!manager) return '<span style="color:var(--slate-300);font-size:11.5px;">-</span>';
+  return `<a href="agent-edit.html" style="display:inline-block;padding:2px 9px;border-radius:5px;background:var(--slate-100);color:var(--slate-700);border:1px solid var(--slate-200);font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;" title="Click to view manager agent">${manager}</a>`;
+}
+
 function actionsHtml(actions, view, agentId) {
   const btns = [];
   actions.forEach(a => {
@@ -959,11 +976,13 @@ function renderAgentsForView(view) {
     let col2 = '';
     let col3 = '';
     let col4 = '';
+    let col5 = ''; /* Reports to — workspace only */
 
     if (view === 'workspace') {
       col2 = statusBadgeHtml(agent.statusBadge);
       col3 = lastRunHtml(agent.lastRun);
       col4 = tagsHtml(agent.tags || [], agent.local);
+      col5 = reportsToHtml(agent.reportsTo);
     } else if (view === 'org') {
       col2 = deploymentHtml(agent.deployment);
       col3 = `<div style="font-size:12px;color:var(--slate-600);line-height:1.5;">${agent.totalRuns}</div>`;
@@ -981,6 +1000,10 @@ function renderAgentsForView(view) {
       ? `<span style="font-size:10px;background:#ede9fe;color:#7c3aed;padding:1px 6px;border-radius:10px;font-weight:700;vertical-align:middle;margin-left:4px;">Draft</span>`
       : '';
 
+    const reportsToCell = view === 'workspace'
+      ? `<td>${col5}</td>`
+      : '';
+
     rows += `
       <tr>
         <td>
@@ -995,6 +1018,7 @@ function renderAgentsForView(view) {
         <td>${col2}</td>
         <td>${col3}</td>
         <td>${col4}</td>
+        ${reportsToCell}
         <td>${actionsHtml(agent.actions, view, agent.id)}</td>
       </tr>`;
   });

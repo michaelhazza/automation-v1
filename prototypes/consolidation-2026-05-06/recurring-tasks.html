@@ -368,6 +368,76 @@
 
 /* Overflow button cell */
 td.actions-cell { position: relative; }
+
+/* ── Scope / project filter row ─────────────────────────────── */
+.scope-filter-row {
+  padding: 12px 32px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+}
+.scope-filter-label {
+  font-size: 12.5px; font-weight: 600; color: var(--slate-600);
+  white-space: nowrap;
+}
+.scope-filter-select {
+  padding: 5px 28px 5px 10px; border: 1px solid var(--border);
+  border-radius: 7px; font-size: 12.5px; font-family: inherit;
+  color: var(--slate-800); background: white; cursor: pointer;
+  outline: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+  transition: border-color 0.12s;
+}
+.scope-filter-select:focus { border-color: var(--indigo-400); }
+
+/* ── Run now button (inline on manual rows) ──────────────────── */
+.run-now-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; font-size: 11px; font-weight: 700;
+  border-radius: 5px; border: 1px solid var(--indigo-200);
+  background: var(--indigo-50); color: var(--indigo-700);
+  cursor: pointer; transition: all 0.1s; white-space: nowrap;
+}
+.run-now-btn:hover { background: var(--indigo-100); border-color: var(--indigo-400); }
+
+/* ── One-off modal ───────────────────────────────────────────── */
+.oneoff-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.4);
+  z-index: 500; display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.18s;
+}
+.oneoff-modal-backdrop.open { opacity: 1; pointer-events: auto; }
+.oneoff-modal {
+  background: white; border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.18);
+  width: 520px; max-width: calc(100vw - 32px);
+  padding: 28px 28px 24px;
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+.oneoff-modal-backdrop.open .oneoff-modal { transform: scale(1) translateY(0); }
+.oneoff-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.oneoff-modal-title { font-size: 16px; font-weight: 700; color: var(--slate-900); }
+.oneoff-close { width:28px;height:28px;border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;color:var(--slate-500);font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;transition:all 0.12s; }
+.oneoff-close:hover { background:var(--slate-100);color:var(--slate-800); }
+.oneoff-footer { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; }
+
+/* Toast */
+.toast-container {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+  background: var(--slate-900); color: white;
+  padding: 11px 18px; border-radius: 9px; font-size: 13px; font-weight: 500;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.22); opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: auto; max-width: 340px;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast a { color: #a5b4fc; text-decoration: none; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -387,10 +457,36 @@ td.actions-cell { position: relative; }
         <p class="page-subtitle">Acme Corp &middot; 14 active tasks &middot; 3 paused</p>
       </div>
       <div class="page-header-actions">
+        <button class="btn btn-outline" onclick="openOneoffModal()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run a one-off task
+        </button>
         <button class="btn btn-primary" onclick="openModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           New recurring task
         </button>
+      </div>
+    </div>
+
+    <!-- Scope / Project filter row -->
+    <div class="scope-filter-row" id="scope-filter-row">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="scope-filter-label">Scope:</span>
+        <select class="scope-filter-select" id="scope-select" onchange="onScopeChange(this.value)">
+          <option value="workspace">This workspace (Acme Corp)</option>
+          <option value="org">Organisation-wide</option>
+          <option value="acme">Acme Corp</option>
+          <option value="maple">Maple Digital</option>
+          <option value="northbridge">Northbridge Media</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="scope-filter-label">Project:</span>
+        <select class="scope-filter-select" id="project-select" onchange="onProjectChange(this.value)">
+          <option value="">All projects</option>
+          <option value="q1-outreach">Q1 Outreach Campaign</option>
+          <option value="customer-health">Customer Health Q2</option>
+        </select>
       </div>
     </div>
 
@@ -421,6 +517,7 @@ td.actions-cell { position: relative; }
             <th>Name</th>
             <th>Fire condition</th>
             <th>Action</th>
+            <th class="project-col" style="display:none;">Project</th>
             <th>Status</th>
             <th>Last fired</th>
             <th>Fires / 30d</th>
@@ -773,31 +870,39 @@ type=lead</textarea>
 renderSidebar('workspace', 'recurring-tasks.html');
 
 /* ── Task data ─────────────────────────────────────────────────── */
+/* project: null means no project. Projects: 'q1-outreach', 'customer-health' */
 const TASKS = [
   // Schedule-fired (8)
-  { id:1,  name:'Daily morning briefing',   type:'schedule', detail:'Daily 9am UTC',      agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'Today 9:00am',          fires30:30,  nextFire:'Tomorrow 9:00am' },
-  { id:2,  name:'Weekly pipeline report',   type:'schedule', detail:'Weekly Mon 8am UTC', agent:'Reporting Agent',      workflow:'Weekly digest',    status:'active',  lastFired:'Last Monday',           fires30:4,   nextFire:'Next Monday 8:00am' },
-  { id:3,  name:'Monthly invoice generation',type:'schedule',detail:'Monthly 1st 00:00',  agent:'Billing Agent',        workflow:null,               status:'active',  lastFired:'May 1',                 fires30:1,   nextFire:'Jun 1 00:00' },
-  { id:4,  name:'Quarterly customer survey', type:'schedule',detail:'Quarterly Apr 1',    agent:'Survey Agent',         workflow:null,               status:'active',  lastFired:'Apr 1',                 fires30:1,   nextFire:'Jul 1' },
-  { id:5,  name:'Hourly CRM sync',           type:'schedule',detail:'Every hour',         agent:'CRM Sync Agent',       workflow:null,               status:'active',  lastFired:'23 min ago',            fires30:720, nextFire:'37 min from now' },
-  { id:6,  name:'End-of-day summary',        type:'schedule',detail:'Daily 6pm UTC',      agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Yesterday 6:00pm',      fires30:30,  nextFire:'Today 6:00pm' },
-  { id:7,  name:'Sunday data cleanup',       type:'schedule',detail:'Weekly Sun 2am UTC', agent:'Maintenance Agent',    workflow:'Cleanup workflow', status:'active',  lastFired:'Last Sunday',           fires30:4,   nextFire:'Next Sunday 2:00am' },
-  { id:8,  name:'Old contact archive',       type:'schedule',detail:'Monthly 15th 03:00', agent:'CRM Sync Agent',       workflow:null,               status:'paused',  lastFired:'Apr 15',                fires30:1,   nextFire:'Paused' },
+  { id:1,  name:'Daily morning briefing',    type:'schedule', detail:'Daily 9am UTC',      agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'Today 9:00am',     fires30:30,  nextFire:'Tomorrow 9:00am',      project:'customer-health' },
+  { id:2,  name:'Weekly pipeline report',    type:'schedule', detail:'Weekly Mon 8am UTC', agent:'Reporting Agent',      workflow:'Weekly digest',    status:'active',  lastFired:'Last Monday',      fires30:4,   nextFire:'Next Monday 8:00am',   project:null },
+  { id:3,  name:'Monthly invoice generation',type:'schedule', detail:'Monthly 1st 00:00',  agent:'Billing Agent',        workflow:null,               status:'active',  lastFired:'May 1',            fires30:1,   nextFire:'Jun 1 00:00',          project:null },
+  { id:4,  name:'Quarterly customer survey', type:'schedule', detail:'Quarterly Apr 1',    agent:'Survey Agent',         workflow:null,               status:'active',  lastFired:'Apr 1',            fires30:1,   nextFire:'Jul 1',                project:'customer-health' },
+  { id:5,  name:'Hourly CRM sync',           type:'schedule', detail:'Every hour',         agent:'CRM Sync Agent',       workflow:null,               status:'active',  lastFired:'23 min ago',       fires30:720, nextFire:'37 min from now',      project:null },
+  { id:6,  name:'End-of-day summary',        type:'schedule', detail:'Daily 6pm UTC',      agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Yesterday 6:00pm', fires30:30,  nextFire:'Today 6:00pm',         project:'q1-outreach' },
+  { id:7,  name:'Sunday data cleanup',       type:'schedule', detail:'Weekly Sun 2am UTC', agent:'Maintenance Agent',    workflow:'Cleanup workflow', status:'active',  lastFired:'Last Sunday',      fires30:4,   nextFire:'Next Sunday 2:00am',   project:null },
+  { id:8,  name:'Old contact archive',       type:'schedule', detail:'Monthly 15th 03:00', agent:'CRM Sync Agent',       workflow:null,               status:'paused',  lastFired:'Apr 15',           fires30:1,   nextFire:'Paused',               project:null },
   // Event-fired (6)
-  { id:9,  name:'Welcome new lead',          type:'event',   detail:'On task_created',    agent:'Outreach Agent',       workflow:'Welcome sequence', status:'active',  lastFired:'5 min ago',             fires30:47,  nextFire:null },
-  { id:10, name:'Risky deal escalation',     type:'event',   detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'2 hours ago',           fires30:12,  nextFire:null },
-  { id:11, name:'Failed sync notification',  type:'event',   detail:'On agent_completed', agent:'Internal Escalation',  workflow:null,               status:'active',  lastFired:'Yesterday',             fires30:8,   nextFire:null },
-  { id:12, name:'New customer onboarding',   type:'event',   detail:'On task_moved',      agent:'Onboarding Agent',     workflow:'Onboarding flow',  status:'active',  lastFired:'3 days ago',            fires30:5,   nextFire:null },
-  { id:13, name:'Demo follow-up',            type:'event',   detail:'On task_completed',  agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Today 11:00am',         fires30:18,  nextFire:null },
-  { id:14, name:'Churn risk monitor',        type:'event',   detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',           fires30:3,   nextFire:null, error:'HubSpot connection expired' },
+  { id:9,  name:'Welcome new lead',          type:'event',    detail:'On task_created',    agent:'Outreach Agent',       workflow:'Welcome sequence', status:'active',  lastFired:'5 min ago',        fires30:47,  nextFire:null,                   project:'q1-outreach' },
+  { id:10, name:'Risky deal escalation',     type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'2 hours ago',      fires30:12,  nextFire:null,                   project:'customer-health' },
+  { id:11, name:'Failed sync notification',  type:'event',    detail:'On agent_completed', agent:'Internal Escalation',  workflow:null,               status:'active',  lastFired:'Yesterday',        fires30:8,   nextFire:null,                   project:null },
+  { id:12, name:'New customer onboarding',   type:'event',    detail:'On task_moved',      agent:'Onboarding Agent',     workflow:'Onboarding flow',  status:'active',  lastFired:'3 days ago',       fires30:5,   nextFire:null,                   project:null },
+  { id:13, name:'Demo follow-up',            type:'event',    detail:'On task_completed',  agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Today 11:00am',    fires30:18,  nextFire:null,                   project:'q1-outreach' },
+  { id:14, name:'Churn risk monitor',        type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',      fires30:3,   nextFire:null,  error:'HubSpot connection expired', project:'customer-health' },
   // Manual (3)
-  { id:15, name:'Quarterly business review', type:'manual',  detail:'Manual only',        agent:'Reporting Agent',      workflow:'QBR workflow',     status:'active',  lastFired:'Apr 30',                fires30:1,   nextFire:null },
-  { id:16, name:'Custom outreach blast',     type:'manual',  detail:'Manual only',        agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'2 weeks ago',           fires30:1,   nextFire:null },
-  { id:17, name:'Compliance audit',          type:'manual',  detail:'Manual only',        agent:'Compliance Prefilter', workflow:null,               status:'paused',  lastFired:'Mar 1',                 fires30:0,   nextFire:null },
+  { id:15, name:'Quarterly business review', type:'manual',   detail:'Manual only',        agent:'Reporting Agent',      workflow:'QBR workflow',     status:'active',  lastFired:'Apr 30',           fires30:1,   nextFire:null,                   project:null },
+  { id:16, name:'Custom outreach blast',     type:'manual',   detail:'Manual only',        agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'2 weeks ago',      fires30:1,   nextFire:null,                   project:'q1-outreach' },
+  { id:17, name:'Compliance audit',          type:'manual',   detail:'Manual only',        agent:'Compliance Prefilter', workflow:null,               status:'paused',  lastFired:'Mar 1',            fires30:0,   nextFire:null,                   project:null },
 ];
+
+const PROJECT_LABELS = {
+  'q1-outreach':    'Q1 Outreach Campaign',
+  'customer-health':'Customer Health Q2',
+};
 
 const TYPE_LABELS = { schedule:'Schedule-fired', event:'Event-fired', manual:'Manual' };
 const STATUS_LABELS = { active:'Active', paused:'Paused', error:'Error' };
+
+let showProjectCol = false;
 
 function renderRows(tasks) {
   const tbody = document.getElementById('tasks-tbody');
@@ -813,20 +918,37 @@ function renderRows(tasks) {
 
     const nextCell = t.nextFire ? `<span class="next-fire">${escHtml(t.nextFire)}</span>` : '<span class="muted">-</span>';
 
-    return `<tr onclick="openDrawer(${t.id})" data-id="${t.id}" data-type="${t.type}" data-status="${t.status}">
+    const projectLabel = t.project ? PROJECT_LABELS[t.project] : null;
+    const projectCell = projectLabel
+      ? `<span style="font-size:11.5px;background:var(--indigo-50);color:var(--indigo-700);border:1px solid var(--indigo-200);padding:1px 7px;border-radius:4px;font-weight:600;">${escHtml(projectLabel)}</span>`
+      : `<span class="muted">-</span>`;
+
+    /* Run now button for manual rows; overflow-menu "Run now" for all */
+    const runNowBtn = t.type === 'manual'
+      ? `<button class="run-now-btn" onclick="event.stopPropagation();confirmRunNow(${t.id})">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run now
+        </button>`
+      : '';
+
+    return `<tr onclick="openDrawer(${t.id})" data-id="${t.id}" data-type="${t.type}" data-status="${t.status}" data-project="${t.project || ''}">
       <td><span class="task-name">${escHtml(t.name)}</span></td>
       <td>${fireBadge}</td>
       <td>${actionCell}</td>
+      <td class="project-col" style="display:${showProjectCol ? 'table-cell' : 'none'};">${projectCell}</td>
       <td>${statusBadge}</td>
       <td><span class="muted">${escHtml(t.lastFired)}</span></td>
       <td><span class="fire-count">${t.fires30}</span></td>
       <td>${nextCell}</td>
       <td class="actions-cell" onclick="event.stopPropagation()">
-        <button class="overflow-btn" onclick="toggleMenu(this, event)" title="Actions">&#8942;</button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          ${runNowBtn}
+          <button class="overflow-btn" onclick="toggleMenu(this, event)" title="Actions">&#8942;</button>
+        </div>
         <div class="overflow-menu">
           <div class="overflow-item" onclick="openDrawer(${t.id})">Edit</div>
           <div class="overflow-item">${t.status === 'active' ? 'Pause' : 'Resume'}</div>
-          <div class="overflow-item">Run now</div>
+          <div class="overflow-item" onclick="confirmRunNow(${t.id})">Run now</div>
           <div class="overflow-item danger">Delete</div>
         </div>
       </td>
@@ -950,6 +1072,150 @@ function runTest() {
   const result = document.getElementById('test-result');
   result.classList.add('show');
 }
+
+/* ── Scope / project filter handlers ──────────────────────────── */
+function onScopeChange(val) {
+  /* In proto, just re-render all rows regardless of scope (no per-scope data) */
+  renderRows(TASKS);
+  /* Keep project filter consistent */
+  onProjectChange(document.getElementById('project-select').value);
+}
+
+function onProjectChange(projectVal) {
+  showProjectCol = !!projectVal;
+  /* Show/hide project column header */
+  document.querySelectorAll('.project-col').forEach(el => {
+    el.style.display = projectVal ? 'table-cell' : 'none';
+  });
+  /* Filter rows */
+  document.querySelectorAll('#tasks-tbody tr').forEach(row => {
+    const rowProject = row.dataset.project || '';
+    if (!projectVal) {
+      row.style.display = '';
+    } else {
+      row.style.display = (rowProject === projectVal) ? '' : 'none';
+    }
+  });
+}
+
+/* ── Run now confirmation ────────────────────────────────────────── */
+let runNowTarget = null;
+
+function confirmRunNow(taskId) {
+  runNowTarget = TASKS.find(t => t.id === taskId);
+  if (!runNowTarget) return;
+  document.getElementById('runnow-task-name').textContent = runNowTarget.name;
+  document.getElementById('runnow-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeRunNowModal() {
+  document.getElementById('runnow-modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function confirmAndRun() {
+  closeRunNowModal();
+  showToast('Run started · <a href="run-trace.html">view in run trace</a>');
+}
+
+/* ── One-off task modal ─────────────────────────────────────────── */
+function openOneoffModal() {
+  document.getElementById('oneoff-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeOneoffModal() {
+  document.getElementById('oneoff-modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+function fireOneoff() {
+  closeOneoffModal();
+  showToast('One-off run started · <a href="run-trace.html">view in run trace</a>');
+}
+
+/* ── Toast ─────────────────────────────────────────────────────── */
+function showToast(msg) {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = msg;
+  container.appendChild(t);
+  requestAnimationFrame(() => { t.classList.add('show'); });
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 250);
+  }, 3500);
+}
 </script>
+
+<!-- ── Run now confirmation modal ─────────────────────────────────── -->
+<div class="modal-backdrop" id="runnow-modal" onclick="if(event.target===this)closeRunNowModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Run task now?</span>
+      <button class="modal-close" onclick="closeRunNowModal()">&#215;</button>
+    </div>
+    <p style="font-size:13.5px;color:var(--slate-700);margin:0 0 18px;">Run <strong id="runnow-task-name"></strong> now? The agent will be invoked with the configured brief.</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeRunNowModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAndRun()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Confirm
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── One-off task modal ──────────────────────────────────────────── -->
+<div class="oneoff-modal-backdrop" id="oneoff-modal" onclick="if(event.target===this)closeOneoffModal()">
+  <div class="oneoff-modal">
+    <div class="oneoff-modal-header">
+      <span class="oneoff-modal-title">Run a one-off task</span>
+      <button class="oneoff-close" onclick="closeOneoffModal()">&#215;</button>
+    </div>
+    <p style="font-size:12.5px;color:var(--slate-500);margin:0 0 18px;">Fires once immediately. Does not create a recurring rule.</p>
+
+    <div class="form-field">
+      <label class="form-label">Brief</label>
+      <textarea class="form-textarea" rows="4" placeholder="Describe what you want the agent to do..."></textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="form-field">
+        <label class="form-label">Agent</label>
+        <select class="form-select">
+          <option value="">Select an agent...</option>
+          <option>Account Health Agent</option>
+          <option>Reporting Agent</option>
+          <option>Outreach Agent</option>
+          <option>CRM Sync Agent</option>
+          <option>Research Agent</option>
+          <option>Compliance Prefilter</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Project <span>(optional)</span></label>
+        <select class="form-select">
+          <option value="">No project</option>
+          <option value="q1-outreach">Q1 Outreach Campaign</option>
+          <option value="customer-health">Customer Health Q2</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="oneoff-footer">
+      <button class="btn btn-outline" onclick="closeOneoffModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="fireOneoff()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Run now
+      </button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

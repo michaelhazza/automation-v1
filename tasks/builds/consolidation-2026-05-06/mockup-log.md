@@ -1342,3 +1342,29 @@ Pages checked with no changes needed:
 - `prototypes/consolidation-2026-05-06/automations.html` (recurring-tasks cross-link)
 - `prototypes/consolidation-2026-05-06/queues.html` (null indicator em-dashes)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 8a — 2026-05-06 14:00
+
+**Operator feedback:** Four focused changes: (1) home.html 2-column restructure, drop Today's schedule, table-ify Recent runs/activity, add timeframe selector to Runs widget. (2) calendar.html period nav relocated left-aligned. (3) recurring-tasks.html scope/project filters, manual fire Run now button, one-off task modal. (4) agents.html Reports to column on workspace view.
+
+**Changes made:**
+- `home.html`: Dropped 3-column grid (main + right sidebar). New 3-row 2-column layout: Row 1 = Inbox preview + Active agents. Row 2 = Runs widget (Today/This week/This month/This quarter timeframe pills, JS-wired sparkline and metric swap) + Spend and cap. Row 3 = Recent runs table + Recent activity table. Removed Today's schedule widget entirely. Recent runs table: Run/Subaccount/Actor/Status/Time columns, 9 rows, mixed automated+human-triggered. Recent activity table: Activity/Subaccount/Actor/Type chip/Time columns, 10 rows, mixed types. Footer links: activity.html?scope=subaccount&type=agent_run and activity.html?scope=subaccount. Timeframe data: Today 84 runs 97%; Week 520 95%; Month 2100 94%; Quarter 6100 93%.
+- `calendar.html`: Moved period nav (Today / prev / period-label / next) and view switcher (Week / Fortnight / Month) from a split left+right bar into a single left-aligned row below the scope filter row. Thin slate-300 divider separates nav from view switcher. No margin-left:auto present.
+- `recurring-tasks.html`: Added scope/project filter row (below header, above filter chips). Scope dropdown: This workspace (Acme Corp) / Organisation-wide / workspace names. Project dropdown: All projects / Q1 Outreach Campaign / Customer Health Q2. Project column added to table (hidden when All projects, shown when specific project selected via JS). 5 tasks given project associations. Run now button (indigo, inline) on all Manual-fire rows. All rows get Run now in overflow menu. Run now click shows confirmation modal; toast on confirm. Added Run a one-off task button in header. One-off modal: brief textarea, agent picker, project picker, Run now CTA.
+- `agents.html`: Added reportsTo property to all 12 workspace agents per spec (Outreach/Lead Qualifier/CRM Sync/Demo Scheduler to Outreach Manager; Account Health/Support Triage to CSM Manager; Outreach Manager/CSM Manager/Compliance Prefilter to Orchestrator; Orchestrator/Local Notes Agent null; Vacation Coverage to Outreach Manager). Added Reports to as 5th column in workspace columns array. Added reportsToHtml() helper rendering slate chip linking to agent-edit.html. Col only emitted in workspace view. Null shows muted "-".
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes - home restructure keeps active state and inbox (what needs attention) front-and-center; tables surface actionable data without overwhelming
+- Default to hidden: yes - project column hidden by default (only shown when project filter active); one-off modal is behind a button; Reports to is additive column context
+- One primary action: yes - home: New agent. recurring-tasks: New recurring task. agents: New agent.
+- Inline state: yes - timeframe pills update sparkline and metrics inline without page reload; project filter shows/hides column inline; run-now uses modal (appropriate for a consequential action)
+- Re-check passed: yes - 2-col home is cleaner than 3-col; calendar nav is easier to find when left-aligned; recurring tasks operator can see scope and trigger on demand
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/home.html`
+- `prototypes/consolidation-2026-05-06/calendar.html`
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html`
+- `prototypes/consolidation-2026-05-06/agents.html`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

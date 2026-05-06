@@ -209,47 +209,44 @@
         <p>Scheduled agent runs and workflow executions across your clients.</p>
       </div>
 
-      <!-- Controls row -->
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
-        <!-- Scope filter -->
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span style="font-size:12px;color:var(--slate-500);font-weight:500;">Scope:</span>
-          <button class="scope-pill active" onclick="setScope('all',this)">
-            <span class="scope-dot" style="background:var(--slate-400);"></span>
-            All clients
-          </button>
-          <button class="scope-pill" onclick="setScope('acme',this)">
-            <span class="scope-dot" style="background:#3b82f6;"></span>
-            Acme Corp
-          </button>
-          <button class="scope-pill" onclick="setScope('beta',this)">
-            <span class="scope-dot" style="background:#10b981;"></span>
-            Beta Industries
-          </button>
-          <button class="scope-pill" onclick="setScope('gamma',this)">
-            <span class="scope-dot" style="background:#f59e0b;"></span>
-            Gamma Holdings
-          </button>
-        </div>
+      <!-- Scope filter row -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:12px;color:var(--slate-500);font-weight:500;">Scope:</span>
+        <button class="scope-pill active" onclick="setScope('all',this)">
+          <span class="scope-dot" style="background:var(--slate-400);"></span>
+          All clients
+        </button>
+        <button class="scope-pill" onclick="setScope('acme',this)">
+          <span class="scope-dot" style="background:#3b82f6;"></span>
+          Acme Corp
+        </button>
+        <button class="scope-pill" onclick="setScope('beta',this)">
+          <span class="scope-dot" style="background:#10b981;"></span>
+          Beta Industries
+        </button>
+        <button class="scope-pill" onclick="setScope('gamma',this)">
+          <span class="scope-dot" style="background:#f59e0b;"></span>
+          Gamma Holdings
+        </button>
+      </div>
 
-        <div style="margin-left:auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-          <!-- Nav cluster: Today + prev/next arrows + period label -->
-          <div class="nav-cluster" style="display:flex;align-items:center;gap:6px;">
-            <!-- Today button -->
-            <button id="today-btn" onclick="resetToToday()" style="height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--slate-300);background:white;color:var(--slate-700);font-size:12.5px;font-weight:500;cursor:pointer;transition:all 0.12s;white-space:nowrap;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">Today</button>
-            <!-- Prev arrow -->
-            <button onclick="shiftPeriod(-1)" title="Previous period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8249;</button>
-            <!-- Period label -->
-            <span id="period-label" style="font-size:16px;font-weight:600;color:var(--slate-900);white-space:nowrap;min-width:200px;text-align:center;">May 6 – May 12, 2026</span>
-            <!-- Next arrow -->
-            <button onclick="shiftPeriod(1)" title="Next period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
-          </div>
-          <!-- View switcher (right, separate cluster) -->
-          <div style="display:flex;gap:2px;background:var(--slate-100);padding:3px;border-radius:8px;">
-            <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)" style="border-radius:6px;">Week</button>
-            <button class="window-btn" id="btn-fortnight" onclick="switchCalView('14',this)" style="border-radius:6px;">Fortnight</button>
-            <button class="window-btn" id="btn-month" onclick="switchCalView('30',this)" style="border-radius:6px;">Month</button>
-          </div>
+      <!-- Period nav + view switcher — left-aligned, single row, below scope -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+        <!-- Today button -->
+        <button id="today-btn" onclick="resetToToday()" style="height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--slate-300);background:white;color:var(--slate-700);font-size:12.5px;font-weight:500;cursor:pointer;transition:all 0.12s;white-space:nowrap;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">Today</button>
+        <!-- Prev arrow -->
+        <button onclick="shiftPeriod(-1)" title="Previous period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8249;</button>
+        <!-- Period label -->
+        <span id="period-label" style="font-size:15px;font-weight:600;color:var(--slate-900);white-space:nowrap;min-width:180px;">May 6 - May 12, 2026</span>
+        <!-- Next arrow -->
+        <button onclick="shiftPeriod(1)" title="Next period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
+        <!-- Divider -->
+        <div style="width:1px;height:20px;background:var(--slate-300);margin:0 4px;"></div>
+        <!-- View switcher -->
+        <div style="display:flex;gap:2px;background:var(--slate-100);padding:3px;border-radius:8px;">
+          <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)" style="border-radius:6px;">Week</button>
+          <button class="window-btn" id="btn-fortnight" onclick="switchCalView('14',this)" style="border-radius:6px;">Fortnight</button>
+          <button class="window-btn" id="btn-month" onclick="switchCalView('30',this)" style="border-radius:6px;">Month</button>
         </div>
       </div>
 
