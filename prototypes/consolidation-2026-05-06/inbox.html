@@ -85,15 +85,44 @@
 
   .item-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; margin-top: 2px; }
 
-  /* Decision 6a: stronger approve/reject visual hierarchy */
+  /*
+   * Round 7b-1: Uniform inbox action button sizing.
+   * All action buttons: padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px.
+   * Primary (Approve, Reply to agent, Open task, View run trace, Re-authenticate): solid indigo.
+   * Secondary (Reject, View draft, Re-suppress, Keep existing): white bg, slate-300 border, slate-700 text.
+   * Archive: white bg, slate-300 border, slate-500 text (muted to differentiate without being a plain link).
+   * Override btn-xs sizing with .inbox-btn base.
+   */
+  .inbox-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 7px 14px; font-size: 13px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+    transition: all 0.12s; line-height: 1; text-decoration: none;
+  }
+  .inbox-btn-primary {
+    background: var(--indigo-600); color: white; border: none;
+  }
+  .inbox-btn-primary:hover { background: var(--indigo-700); }
+  .inbox-btn-secondary {
+    background: white; color: var(--slate-700);
+    border: 1px solid var(--slate-300);
+  }
+  .inbox-btn-secondary:hover { background: var(--slate-50); border-color: var(--slate-400); }
+  .inbox-btn-archive {
+    background: white; color: var(--slate-500);
+    border: 1px solid var(--slate-300);
+  }
+  .inbox-btn-archive:hover { background: var(--slate-50); border-color: var(--slate-300); }
+
+  /* Legacy aliases so older inline-approve / inline-reject still work */
   .inline-approve {
     background: var(--indigo-600); color: white; border: none;
-    min-height: 32px; padding: 5px 14px; font-size: 12px; font-weight: 600;
+    padding: 7px 14px; font-size: 13px; font-weight: 600; border-radius: 6px;
   }
   .inline-approve:hover { background: var(--indigo-700); }
   .inline-reject {
-    background: white; color: var(--slate-500); border: 1px solid var(--slate-300);
-    min-height: 32px; padding: 5px 14px; font-size: 12px;
+    background: white; color: var(--slate-700); border: 1px solid var(--slate-300);
+    padding: 7px 14px; font-size: 13px; font-weight: 600; border-radius: 6px;
   }
   .inline-reject:hover { background: var(--slate-50); border-color: var(--slate-400); }
   .kb-hint { font-size: 10.5px; color: var(--slate-400); white-space: nowrap; margin-top: 4px; }
@@ -259,9 +288,9 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Accept new</button>
-              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Keep existing</button>
-              <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();">Archive</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Accept new</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep existing</button>
+              <button class="inbox-btn inbox-btn-archive" onclick="event.stopPropagation();">Archive</button>
             </div>
             <div class="kb-hint">A to approve · R to reject</div>
             <div class="item-time">May 5, 2:14pm</div>
@@ -288,9 +317,9 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Approve</button>
-              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Reject</button>
-              <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();">Details</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Approve</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Reject</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Details</button>
             </div>
             <div class="kb-hint">A to approve · R to reject</div>
             <div class="item-time">May 4, 10:02am</div>
@@ -316,9 +345,9 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve">Approve</button>
-              <button class="btn btn-xs inline-reject">Reject</button>
-              <button class="btn btn-xs btn-ghost">View draft</button>
+              <button class="inbox-btn inbox-btn-primary">Approve</button>
+              <button class="inbox-btn inbox-btn-secondary">Reject</button>
+              <button class="inbox-btn inbox-btn-secondary">View draft</button>
             </div>
             <div class="kb-hint">A to approve · R to reject</div>
             <div class="item-time">May 5, 11:30am</div>
@@ -343,8 +372,8 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="btn btn-xs btn-primary">Reply to agent</button>
-            <button class="btn btn-xs btn-ghost">Archive</button>
+            <button class="inbox-btn inbox-btn-primary">Reply to agent</button>
+            <button class="inbox-btn inbox-btn-archive">Archive</button>
           </div>
           <div class="item-time">May 3, 4:30pm</div>
         </div>
@@ -367,8 +396,8 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="btn btn-xs btn-primary">Open task</button>
-            <button class="btn btn-xs btn-ghost">Archive</button>
+            <button class="inbox-btn inbox-btn-primary">Open task</button>
+            <button class="inbox-btn inbox-btn-archive">Archive</button>
           </div>
           <div class="item-time">Apr 28, 5:00pm</div>
         </div>
@@ -392,9 +421,9 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve">Approve</button>
-              <button class="btn btn-xs inline-reject">Reject</button>
-              <button class="btn btn-xs btn-ghost">View draft</button>
+              <button class="inbox-btn inbox-btn-primary">Approve</button>
+              <button class="inbox-btn inbox-btn-secondary">Reject</button>
+              <button class="inbox-btn inbox-btn-secondary">View draft</button>
             </div>
             <div class="kb-hint">A to approve · R to reject</div>
             <div class="item-time">May 5, 9:15am</div>
@@ -420,9 +449,9 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="btn btn-xs btn-danger">View run trace</button>
-            <button class="btn btn-xs btn-ghost">Re-authenticate</button>
-            <button class="btn btn-xs btn-ghost">Archive</button>
+            <button class="inbox-btn inbox-btn-primary">View run trace</button>
+            <button class="inbox-btn inbox-btn-secondary">Re-authenticate</button>
+            <button class="inbox-btn inbox-btn-archive">Archive</button>
           </div>
           <div class="item-time">May 5, 7:45am</div>
         </div>
@@ -445,8 +474,8 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Re-add</button>
-              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Re-suppress</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Re-add</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Re-suppress</button>
             </div>
             <div class="kb-hint">A to re-add · R to re-suppress</div>
             <div class="item-time">May 6, 8:14am</div>
@@ -470,8 +499,8 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Re-add</button>
-              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Re-suppress</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Re-add</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Re-suppress</button>
             </div>
             <div class="kb-hint">A to re-add · R to re-suppress</div>
             <div class="item-time">May 5, 3:30pm</div>
@@ -495,8 +524,8 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Re-add</button>
-              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Re-suppress</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Re-add</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Re-suppress</button>
             </div>
             <div class="kb-hint">A to re-add · R to re-suppress</div>
             <div class="item-time">May 5, 11:45am</div>
@@ -527,7 +556,7 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="btn btn-xs btn-ghost">Archive</button>
+            <button class="inbox-btn inbox-btn-archive">Archive</button>
           </div>
           <div class="item-time">May 2</div>
         </div>
@@ -544,7 +573,7 @@
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
             </div>
           </div>
-          <div class="item-actions"><button class="btn btn-xs btn-ghost">Archive</button></div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
           <div class="item-time">May 2</div>
         </div>
 
@@ -560,7 +589,7 @@
               <span class="client-pill" style="background:#fef3c7;color:#b45309;"><span class="client-dot" style="background:#f59e0b;"></span>Revel Group</span>
             </div>
           </div>
-          <div class="item-actions"><button class="btn btn-xs btn-ghost">Archive</button></div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
           <div class="item-time">May 1</div>
         </div>
 
@@ -576,7 +605,7 @@
               <span class="client-pill" style="background:#dcfce7;color:#166534;"><span class="client-dot" style="background:#22c55e;"></span>TerraForm Partners</span>
             </div>
           </div>
-          <div class="item-actions"><button class="btn btn-xs btn-ghost">Archive</button></div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
           <div class="item-time">Apr 30</div>
         </div>
 
@@ -592,7 +621,7 @@
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
             </div>
           </div>
-          <div class="item-actions"><button class="btn btn-xs btn-ghost">Archive</button></div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
           <div class="item-time">Apr 29</div>
         </div>
 
@@ -608,7 +637,7 @@
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
             </div>
           </div>
-          <div class="item-actions"><button class="btn btn-xs btn-ghost">Archive</button></div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
           <div class="item-time">Apr 27</div>
         </div>
 
@@ -624,7 +653,7 @@
               <span class="client-pill" style="background:#e0f2fe;color:#0369a1;"><span class="client-dot" style="background:#38bdf8;"></span>Brightside Digital</span>
             </div>
           </div>
-          <div class="item-actions"><button class="btn btn-xs btn-ghost">Archive</button></div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
           <div class="item-time">Apr 26</div>
         </div>
 
@@ -641,8 +670,8 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="btn btn-xs btn-secondary">View task</button>
-            <button class="btn btn-xs btn-ghost">Archive</button>
+            <button class="inbox-btn inbox-btn-secondary">View task</button>
+            <button class="inbox-btn inbox-btn-archive">Archive</button>
           </div>
           <div class="item-time">Apr 25</div>
         </div>

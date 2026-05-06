@@ -547,3 +547,84 @@ Index updated:
 - `prototypes/consolidation-2026-05-06/automation-detail.html` (sidebar replaced)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead + decisions + Round 7a section)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-1 — 2026-05-06
+
+**Operator feedback:** Nav consolidation across all three sidebar modes. 10 approved nav decisions implemented. Three mechanical fixes: calendar period navigation, Connections logos, Inbox button consistency.
+
+**Changes made:**
+
+_sidebar.js nav consolidation (Change 1):
+- Workspace mode restructured from one flat "Workspace" section into 6 grouped sections: Work (Home, Inbox+badge, Calendar, Activity), Build (Agents, Automations, Knowledge, Connections), Tasks (Tasks stub), External (Pages stub, Portal stub), Setup (Team stub, Manage), ClientPulse (3 stubs labeled "separate thread")
+- Removed from workspace: Workflows (folded into Automations as tabs), Triggers (folded into Automations), Goals (retired, replaced by Project Objective field), Org Chart (folded into Team page as a tab), Sites (renamed to Pages)
+- Action Log: kept as stub pending Run trace consolidation discussion (not removed)
+- Bottom Manage link moved into Setup section; bottom section now contains only Profile Settings
+- Org mode restructured from one flat "Organisation" section into 5 grouped sections: Clients (Companies stub), Build (Agents, Automations, Skills, Knowledge, Connections stubs), Operate (Calendar, Activity), Setup (Team, Spending, Manage stubs), ClientPulse
+- Removed from org: Workflows (merged into Automations), Health (folded into Activity with type=health_finding filter), Teams (Team page now has Members+Teams tab), Spending Budgets+Spend Ledger (one "Spending" stub)
+- System mode restructured from one flat "System" section into 3 grouped sections: Inventory (Organisations, Agents, Skills, Workflow Studio, Automations stubs), Operate (Activity, Incidents+badge, Queues stub), Setup (Financials, Settings stubs)
+- Removed from system: Diagnostics and Job Queues as separate items (merged into one "Queues" stub)
+- Renamed in system: LLM P&L to Financials
+- New ICONS added: pages, manage, spending, financials (llmpnl icon repurposed)
+- Old icons removed: sites, triggers, goals, orgchart, health, budget, llmpnl, diagnostics, workflows (retained as nav was removed)
+- Section label rationale: Work (operator daily flow), Build (creating capability), Tasks (kanban board primitive), External (client-facing surfaces), Setup (team and config), Operate (cross-cutting visibility), Inventory (platform resources)
+
+calendar.html period navigation (Change 2):
+- Period type buttons renamed: "7 days" to "Week", "14 days" to "Fortnight", "30 days" to "Month"
+- Back/forward arrow pair added before period toggle, using chevron characters in a rounded-border wrapper
+- Period label element (`#period-label`) between arrows, min-width 160px centered, shows computed period string
+- Today button added to the right of the arrow group, highlights bold indigo when at offset 0
+- JS variables: `currentPeriodType` ('week'/'fortnight'/'month'), `currentPeriodOffset` (integer, 0=today's period)
+- `computePeriodLabel(type, offset)` computes the display string using real date math anchored to prototype date May 6, 2026; week starts Monday
+- `shiftPeriod(dir)` increments/decrements offset and calls renderPeriod()
+- `resetToToday()` resets offset to 0 and calls renderPeriod()
+- `switchCalView()` updated to set `currentPeriodType` from days param and reset offset to 0 on type change
+- `renderPeriod()` called on load to initialise the label to "May 6 - May 12, 2026"
+
+integrations.html app logos (Change 3):
+- Added `.app-logo` CSS class (28px square, border-radius 6px, flex centering) to `_shared.css`-style inline block in integrations.html
+- Replaced `conn-icon-sm` spans for all 8 connection rows with `.app-logo` spans containing inline SVG:
+  - Gmail: red M-shape envelope path
+  - Salesforce: blue cloud shape
+  - HubSpot: orange sprocket/spoke shape
+  - Client portal: generic plus-in-box (no external trademark)
+  - Internal data API: bar chart / waveform
+  - AWS S3: hexagon outline with S3 text
+  - Zapier: orange Z monogram on background
+  - LegalDocs Pro: document with checkmark (non-trademarked, generic)
+  - Slack: 4-square color grid (red/blue/green/amber)
+  - Google Analytics: bar chart bars (yellow/green/blue)
+  - Filesystem server: generic document lines (for MCP/custom/unknown)
+
+inbox.html button consistency (Change 4):
+- Added `.inbox-btn`, `.inbox-btn-primary`, `.inbox-btn-secondary`, `.inbox-btn-archive` CSS classes
+- All button sizing: padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px, line-height 1
+- Primary (inbox-btn-primary): solid indigo-600 background, white text (Approve, Accept new, Open task, Reply to agent, View run trace, Re-add)
+- Secondary (inbox-btn-secondary): white background, slate-300 border, slate-700 text (Reject, Keep existing, View draft, Re-authenticate, View task, Details, Re-suppress)
+- Archive (inbox-btn-archive): white background, slate-300 border, slate-500 text (differentiated from secondary without being a plain link)
+- Updated all active items: belief conflict (Accept new/Keep existing/Archive), block proposal (Approve/Reject/Details), email approval (Approve/Reject/View draft), clarification (Reply to agent/Archive), task (Open task/Archive), LinkedIn approval (Approve/Reject/View draft), failed run (View run trace/Re-authenticate/Archive), 3 suppressed memory items (Re-add/Re-suppress)
+- Updated all Earlier/Read section archive buttons to inbox-btn-archive
+- Legacy `.inline-approve` and `.inline-reject` CSS retained as aliases pointing to same dimensions (for any remaining usages not explicitly updated)
+
+index.html:
+- Masthead eyebrow updated to "Prototype Round 7b-1"
+- Description updated to describe the 4 changes
+- Decisions box: 6 new bullets for nav consolidation decisions and 3 mechanical fixes
+- Round 7b-1 section added with 4 cards (Sidebar JS, Calendar, Connections, Inbox)
+- Round 7a sidebar card description updated to note 7b-1 supersedes it
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- nav restructuring follows primary task groupings (Work = what operator does daily, Build = what they create). No new screens added.
+- Default to hidden: yes -- no new panels, dashboards, or diagnostic panels. Removed items (Goals, Workflows, Org Chart, etc.) are either folded as tabs or fully removed, reducing nav weight.
+- One primary action: yes -- calendar navigation: primary action remains "view the schedule". Period nav is a secondary control. Inbox: primary action is "Approve/act on item". Connections: "Connect service" unchanged.
+- Inline state: yes -- calendar period label shows the current period inline. No new dashboards.
+- Re-check passed: yes -- non-technical operator sees shorter, grouped nav without stub noise from removed items. Calendar period navigation is obvious (left/right arrows are universal). Inbox actions are visually clear (solid = act, outlined = secondary, outlined-muted = dismiss).
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (full nav restructure, 3 modes, section groupings, icon additions/removals)
+- `prototypes/consolidation-2026-05-06/calendar.html` (period navigation: arrows, label, Today button, JS state)
+- `prototypes/consolidation-2026-05-06/integrations.html` (app logo SVGs replacing initials, .app-logo CSS class)
+- `prototypes/consolidation-2026-05-06/inbox.html` (button consistency CSS, all active item buttons updated)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions, Round 7b-1 section)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

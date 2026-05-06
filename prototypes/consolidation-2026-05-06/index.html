@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7a
+    Prototype Round 7b-1
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7a: three-mode left nav (Workspace / Org / System) shared across all prototype pages via _sidebar.js. Mode persists in localStorage. New Activity page mirrors ActivityPage.tsx with full filter bar, 28 mock rows across all 24 activity types, scope toggle, and slide-in drawer for row detail. System mode is left-nav only (no new page content). All non-before pages updated to use shared sidebar.</p>
+  <p>Round 7b-1: nav consolidation across all three sidebar modes (Workspace / Org / System), grouped into labelled sections. Plus three mechanical fixes: calendar period navigation (arrows, period label, Today button), Connections page real app logos (inline SVG), and Inbox action button visual consistency (uniform sizing, outlined Archive).</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7a</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-1</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 42+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -121,6 +121,12 @@
     <li>System mode: left-nav only. No new page content. Links to system stubs only, except Activity which links to activity.html?scope=system.</li>
     <li>Activity page: three scopes (Subaccount / Org / System). Full filter bar. 28 rows across all 24 activity types. Slide-in drawer with type-specific fields. Links to run-trace.html and inbox.html from drawer.</li>
     <li>Tasks consolidated to Inbox (HITL). Scheduled to Calendar. Action Log kept as stub. Skills folded into Capabilities tab. Reports under ClientPulse stub.</li>
+    <li>Round 7b-1: Workspace nav grouped into Work / Build / Tasks / External / Setup sections. Workflows, Goals, Org Chart, Triggers removed as standalone items (folded into Automations tabs / Team tab / retired). Sites renamed to Pages.</li>
+    <li>Round 7b-1: Org mode grouped into Clients / Build / Operate / Setup. Health removed (into Activity with filter). Spending Budgets and Spend Ledger merged into one Spending item. Team+Teams merged into one Team item. Workflows folded into Automations.</li>
+    <li>Round 7b-1: System mode grouped into Inventory / Operate / Setup. Diagnostics+Job Queues merged into one Queues item. LLM P&L renamed to Financials.</li>
+    <li>Round 7b-1: Calendar period navigation: back/forward arrows, current period label, Today reset button. Period type buttons renamed Week / Fortnight / Month.</li>
+    <li>Round 7b-1: Connections page: inline SVG monogram logos for all 8 connections (Gmail, Salesforce, HubSpot, Zapier, AWS S3, Slack, Google Analytics, generic servers).</li>
+    <li>Round 7b-1: Inbox action buttons: uniform sizing (padding 7px 14px, font-size 13px) across all item types. Archive is now an outlined button, not a plain text link. Primary actions solid indigo, secondary actions outlined slate.</li>
   </ul>
 </div>
 
@@ -638,12 +644,72 @@
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Shared Sidebar JS</div>
+        <div class="proto-card-title">Shared Sidebar JS (7a)</div>
         <div class="proto-card-file">_sidebar.js</div>
       </div>
-      <div class="proto-card-desc">Three-mode sidebar shared across all prototype pages. Workspace mode: 15 nav items (Home, Inbox+badge, Calendar, Agents, Automations, Workflows, Tasks, Sites, Triggers, Goals, Org Chart, Portal, Team, Activity, Action Log) plus Knowledge, Connections, ClientPulse sections and Manage. Org mode: 13 items. System mode: 11 items, all stubs except Activity. Profile link at bottom of every mode. Mode pill switcher at top.</div>
+      <div class="proto-card-desc">Three-mode sidebar shared across all prototype pages. Round 7a: Workspace mode 15 items (flat list with stubs), Org mode 13 items, System mode 11 items. Updated in Round 7b-1 with section groupings and nav consolidation (see 7b-1 section below).</div>
       <div class="proto-card-footer">
         <span style="font-size:11.5px;color:var(--slate-400,#94a3b8);">No dedicated page, used by all pages</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-1: Nav consolidation + mechanical fixes ─────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#6366f1"></div>
+    Round 7b-1: Nav consolidation and mechanical fixes
+  </div>
+
+  <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#78350f;line-height:1.55;">
+    <strong>Nav consolidation:</strong> _sidebar.js restructured across all three modes with labelled section groups. Workspace: Work / Build / Tasks / External / Setup. Org: Clients / Build / Operate / Setup. System: Inventory / Operate / Setup. Items removed: Workflows (into Automations), Goals (retired), Org Chart (into Team tab), Triggers (into Automations). Items renamed: Sites to Pages, LLM P&L to Financials. Items merged: Diagnostics+Job Queues to Queues, Spending Budgets+Spend Ledger to Spending, Team+Teams to Team.
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Sidebar JS (7b-1 consolidated)</div>
+        <div class="proto-card-file">_sidebar.js</div>
+      </div>
+      <div class="proto-card-desc">Nav consolidation applied. Workspace: 4 items in Work, 4 in Build, 1 in Tasks, 2 in External, 2 in Setup, 3 ClientPulse stubs. Org: 1 in Clients, 5 in Build, 2 in Operate, 3 in Setup, 3 ClientPulse stubs. System: 5 in Inventory, 3 in Operate, 2 in Setup. Section labels rendered at 10px uppercase slate-500. Profile Settings at bottom of every mode.</div>
+      <div class="proto-card-footer">
+        <span style="font-size:11.5px;color:var(--slate-400,#94a3b8);">Shared across all non-before pages</span>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Calendar: period navigation</div>
+        <div class="proto-card-file">calendar.html</div>
+      </div>
+      <div class="proto-card-desc">Back and forward arrows navigate through periods. Period type buttons renamed: Week / Fortnight / Month. Current period label updates between arrows (e.g. "May 6 - May 12, 2026"). Today button resets to current period. Navigation uses real date math anchored to prototype date May 6, 2026.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="calendar.html">Open mockup &#8594;</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Connections: app logos</div>
+        <div class="proto-card-file">integrations.html</div>
+      </div>
+      <div class="proto-card-desc">Connection rows now show inline SVG monogram logos instead of generic text initials. Apps: Gmail (envelope + red), Salesforce (blue cloud), HubSpot (orange sprocket), Slack (4-color grid), AWS S3 (hex badge), Zapier (orange Z), Google Analytics (bar chart), and a generic document server icon for custom/MCP entries.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="integrations.html">Open mockup &#8594;</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Inbox: button consistency</div>
+        <div class="proto-card-file">inbox.html</div>
+      </div>
+      <div class="proto-card-desc">All action buttons unified to padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px. Primary actions (Approve, Open task, Reply to agent, View run trace) solid indigo. Secondary actions (Reject, View draft, Re-authenticate, View task) white bg with slate border. Archive is now an outlined button (white bg, slate border, slate-500 text) not a plain text link. Keyboard hints unchanged.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="inbox.html">Open mockup &#8594;</a>
       </div>
     </div>
 

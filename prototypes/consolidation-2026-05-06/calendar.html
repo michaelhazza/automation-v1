@@ -232,11 +232,20 @@
           </button>
         </div>
 
-        <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
-          <span style="font-size:12px;color:var(--slate-500);font-weight:500;margin-right:4px;">Window:</span>
-          <button class="window-btn active" onclick="switchCalView('7',this)">7 days</button>
-          <button class="window-btn" onclick="switchCalView('14',this)">14 days</button>
-          <button class="window-btn" onclick="switchCalView('30',this)">30 days</button>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <!-- Period navigation arrows + label -->
+          <div style="display:flex;align-items:center;gap:0;border:1px solid var(--slate-200);border-radius:8px;overflow:hidden;">
+            <button class="period-nav-btn" onclick="shiftPeriod(-1)" title="Previous period" style="padding:5px 10px;border:none;background:white;cursor:pointer;font-size:14px;color:var(--slate-500);transition:background 0.1s;line-height:1;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8249;</button>
+            <span id="period-label" style="padding:4px 12px;font-size:12.5px;font-weight:600;color:var(--slate-700);white-space:nowrap;border-left:1px solid var(--slate-200);border-right:1px solid var(--slate-200);min-width:160px;text-align:center;">May 6 - May 12, 2026</span>
+            <button class="period-nav-btn" onclick="shiftPeriod(1)" title="Next period" style="padding:5px 10px;border:none;background:white;cursor:pointer;font-size:14px;color:var(--slate-500);transition:background 0.1s;line-height:1;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
+          </div>
+          <button class="window-btn" onclick="resetToToday()" id="today-btn" style="font-size:12px;">Today</button>
+          <!-- Period type buttons -->
+          <div style="display:flex;gap:2px;">
+            <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)">Week</button>
+            <button class="window-btn" id="btn-fortnight" onclick="switchCalView('14',this)">Fortnight</button>
+            <button class="window-btn" id="btn-month" onclick="switchCalView('30',this)">Month</button>
+          </div>
         </div>
       </div>
 
@@ -706,14 +715,89 @@
 </div>
 
 <script>
+// ── Period navigation state ────────────────────────────────────
+var currentPeriodType = 'week';   // 'week' | 'fortnight' | 'month'
+var currentPeriodOffset = 0;      // 0 = today's period, -1 = previous, +1 = next
+
+var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function getWeekStart(date) {
+  // Returns the Monday of the week containing `date`
+  var d = new Date(date);
+  var day = d.getDay(); // 0 = Sunday
+  var diff = day === 0 ? -6 : 1 - day; // shift to Monday
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function formatDate(d) {
+  return MONTH_SHORT[d.getMonth()] + ' ' + d.getDate();
+}
+
+function computePeriodLabel(type, offset) {
+  var today = new Date(2026, 4, 6); // May 6, 2026 (prototype anchor)
+
+  if (type === 'week') {
+    var weekStart = getWeekStart(today);
+    weekStart.setDate(weekStart.getDate() + offset * 7);
+    var weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    return formatDate(weekStart) + ' - ' + formatDate(weekEnd) + ', ' + weekEnd.getFullYear();
+  }
+
+  if (type === 'fortnight') {
+    var fStart = getWeekStart(today);
+    fStart.setDate(fStart.getDate() + offset * 14);
+    var fEnd = new Date(fStart);
+    fEnd.setDate(fEnd.getDate() + 13);
+    return formatDate(fStart) + ' - ' + formatDate(fEnd) + ', ' + fEnd.getFullYear();
+  }
+
+  if (type === 'month') {
+    var base = new Date(2026, 4 + offset, 1); // May + offset months
+    return MONTH_NAMES[base.getMonth()] + ' ' + base.getFullYear();
+  }
+
+  return '';
+}
+
+function renderPeriod() {
+  var label = computePeriodLabel(currentPeriodType, currentPeriodOffset);
+  document.getElementById('period-label').textContent = label;
+  // Highlight Today button only when at offset 0
+  var todayBtn = document.getElementById('today-btn');
+  if (todayBtn) {
+    todayBtn.style.fontWeight = currentPeriodOffset === 0 ? '700' : '500';
+    todayBtn.style.color = currentPeriodOffset === 0 ? 'var(--indigo-600)' : '';
+  }
+}
+
+function shiftPeriod(dir) {
+  currentPeriodOffset += dir;
+  renderPeriod();
+}
+
+function resetToToday() {
+  currentPeriodOffset = 0;
+  renderPeriod();
+}
+
 // ── View switching ─────────────────────────────────────────────
 function switchCalView(days, btn) {
+  // Map button id to type string
+  var typeMap = { '7': 'week', '14': 'fortnight', '30': 'month' };
+  currentPeriodType = typeMap[days] || 'week';
+  currentPeriodOffset = 0; // reset to current period when switching type
+
   document.querySelectorAll('.window-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('cal-view-7').style.display  = days === '7'  ? '' : 'none';
   document.getElementById('cal-view-14').style.display = days === '14' ? '' : 'none';
   document.getElementById('cal-view-30').style.display = days === '30' ? '' : 'none';
   closeDayPopover();
+  renderPeriod();
 }
 
 // ── Scope filter ───────────────────────────────────────────────
@@ -721,6 +805,9 @@ function setScope(id, btn) {
   document.querySelectorAll('.scope-pill').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 }
+
+// ── Init period label on load ──────────────────────────────────
+renderPeriod();
 
 // ── Day popover (30-day view) ──────────────────────────────────
 function showDayPopover(evt, dateLabel, items) {
