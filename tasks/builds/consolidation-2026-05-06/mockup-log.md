@@ -1368,3 +1368,62 @@ Pages checked with no changes needed:
 - `prototypes/consolidation-2026-05-06/recurring-tasks.html`
 - `prototypes/consolidation-2026-05-06/agents.html`
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 8b — 2026-05-06
+
+**Operator feedback:** "I don't really know what T1, T2, and T3 mean. It's not really easy to use user-facing terminology, so we need a better solution for that. Also, the documents page looks horrible as well."
+
+**Changes made:**
+
+knowledge.html:
+- Removed "Prototype note" banner entirely. "Ignored memories" link + "+ New entry" moved to page header right-side. Page subtitle now carries a plain "View before state" small link instead.
+- "Ignored memories" button replaced with `.ignored-chip` chip (outlined, slate-700 text, slate-300 border) per spec.
+- All "Tier 1 / Tier 2 / Tier 3" filter chips replaced with 6 named category chips: Identity, Voice, Positioning, Audience, Constraints, Proof.
+- All chip-tier chip classes replaced with chip-cat-* classes (6 unique colors: purple/blue/indigo/green/slate/amber).
+- Entry cards restyled: now use 16px padding, 1px border, 8px radius, 6px gap, white background. Hover darkens border only (no lift). Pending review entries get `.pending-review` class (4px amber left-border). Inherited entries get `.inherited-entry` class (4px purple left-border + violet-tinted background).
+- All 10 authored entries assigned category chips per the schema mapping: Entry 1 Voice, Entry 2 Audience, Entry 3 Positioning, Entry 4 Constraints, Entry 5 Audience, Entry 6 Constraints, Entry 7 Positioning, Entry 8 Proof, Entry 9 Identity (pending), Entry 10 Positioning (pending).
+- Inherited entries (11-13) assigned Identity, Voice, Constraints categories respectively.
+- Documents tab: doc-list styled as bordered/rounded container. All SVG file icons replaced with `.doc-type-badge` colored rectangles (PDF=red bg, DOC=blue bg, XLS=green bg) with 2-3 letter type labels. File type prefix removed from meta text (already in badge). Row hover darkens border subtly.
+- Bundle cards: hover now darkens border only (no box-shadow lift). Cache utilization % stats removed (technical/invisible to operators). "Used by X agent" lines replace them.
+- Auto-memory suggested groupings: "Tier 1 candidate" and "Tier 2 candidate" text removed. Replaced with named categories in prose ("Identity entry", "Audience entry").
+- New entry drawer: "Tier (optional)" select field replaced with "Category (optional)" select with 6 named options.
+- JS filter function: tier1/tier2/tier3 filter cases replaced with identity/voice/positioning/audience/constraints/proof.
+- Bundle drawer: cache utilization + cached context impact stats removed from JS template.
+
+org-knowledge.html:
+- All `.chip-tier` Tier 1/2/3 chips replaced with `.chip-cat-*` named category chips.
+- 6 authored entries assigned: Identity, Voice, Proof, Constraints, Positioning, Audience (all 6 categories represented).
+- Filter chips strip: Tier 1 / Tier 2 / Tier 3 replaced with Identity / Voice / Positioning / Audience / Constraints / Proof.
+- Replaces banner replaced with one-line muted subtitle note.
+- Document rows: SVG icons replaced with `.doc-type-badge` colored rectangles.
+- Bundle cards: cache utilization removed.
+- New entry drawer: Tier select replaced with Category select.
+- Entry card CSS: same card/border/padding/hover improvements as knowledge.html.
+
+before-knowledge.html:
+- Problems list updated: added item (7) explaining "Tier 1 / Tier 2 / Tier 3" was internal schema jargon that non-technical operators could not decode; replaced with named categories.
+
+before-org-knowledge.html:
+- Round 7d note extended: added explanation that Tier 1/2/3 was visible in UI as a category, was schema jargon, and has been replaced with 6 named categories.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Authored memory tab opens on the entry list. Primary task (read/manage knowledge) unchanged. Header action buttons (Ignored chip + New entry) are in the page header, not competing with content.
+- Default to hidden: yes -- no new panels added. Prototype note banner removed, reducing noise. Cache utilization statistics removed from bundle cards (invisible to operators, not decision-relevant for primary task).
+- One primary action: yes -- "+ New entry" remains the single primary action. "Ignored" is a secondary chip, visually differentiated by outlined vs filled style.
+- Inline state: yes -- category chips communicate knowledge type inline per entry. Pending review left-border visually flags entries needing attention without a separate queue page.
+- Re-check passed: yes -- non-technical operator now sees "Identity", "Voice", "Positioning" etc rather than "Tier 1", "Tier 2" as category labels. Documents tab has clean visual hierarchy. Bundle cards are compact and scannable.
+
+**Rule violations flagged:** none
+
+**Completion check results:**
+- `grep -cE "Tier 1|Tier 2|Tier 3" knowledge.html org-knowledge.html`: 0/0 (pass)
+- `grep -cE "Identity|Voice|Positioning|..." knowledge.html`: 40 occurrences (pass, all 6 present)
+- `grep -cE "Identity|Voice|Positioning|..." org-knowledge.html`: 13 occurrences (pass, all 6 present)
+- `grep -E "Prototype note" knowledge.html`: empty (pass, banner removed)
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/knowledge.html`
+- `prototypes/consolidation-2026-05-06/org-knowledge.html`
+- `prototypes/consolidation-2026-05-06/before-knowledge.html`
+- `prototypes/consolidation-2026-05-06/before-org-knowledge.html`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

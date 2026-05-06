@@ -20,18 +20,24 @@
   .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
 
   .chip-used-by { display: inline-flex; align-items: center; gap: 4px; background: var(--indigo-50); border: 1px solid var(--indigo-200); color: var(--indigo-700); border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; }
-  .chip-tier { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
+  /* Category chips */
+  .chip-cat-identity   { background: #fdf4ff; color: #6d28d9; border: 1px solid #ddd6fe; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
+  .chip-cat-voice      { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
+  .chip-cat-positioning{ background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
+  .chip-cat-audience   { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
+  .chip-cat-constraints{ background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200); border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
+  .chip-cat-proof      { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
   .chip-type { background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200); border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
   .chip-pending { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
   .chip-in-use { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; }
 
   .entry-list { display: flex; flex-direction: column; gap: 0; }
-  .entry-card { padding: 14px 16px; border-bottom: 1px solid var(--slate-100); display: flex; align-items: flex-start; gap: 12px; cursor: pointer; transition: background 0.1s; }
-  .entry-card:hover { background: var(--slate-50); }
-  .entry-card:first-child { border-top: 1px solid var(--slate-100); }
+  .entry-card { padding: 16px; border: 1px solid var(--slate-200); border-radius: 8px; display: flex; align-items: flex-start; gap: 12px; cursor: pointer; transition: background 0.1s; margin-bottom: 6px; background: white; }
+  .entry-card:hover { background: var(--slate-50); border-color: var(--slate-300); }
+  .entry-card.pending-review { border-left: 4px solid #f59e0b; }
   .entry-body { flex: 1; min-width: 0; }
-  .entry-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 3px; line-height: 1.4; }
-  .entry-preview { font-size: 12.5px; color: var(--slate-500); line-height: 1.5; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .entry-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; line-height: 1.4; }
+  .entry-preview { font-size: 12.5px; color: var(--slate-500); line-height: 1.5; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .entry-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate-400); }
   .entry-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
   .entry-action-btn { padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 500; border: 1px solid var(--slate-200); background: white; color: var(--slate-600); cursor: pointer; transition: all 0.12s; white-space: nowrap; }
@@ -60,20 +66,22 @@
   .sub-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
 
   .bundle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-  .bundle-card { border: 1px solid var(--slate-200); border-radius: 10px; padding: 16px; background: white; cursor: pointer; transition: all 0.12s; }
-  .bundle-card:hover { border-color: var(--indigo-300); box-shadow: 0 2px 8px rgba(79,70,229,0.08); }
+  .bundle-card { border: 1px solid var(--slate-200); border-radius: 10px; padding: 16px; background: white; cursor: pointer; transition: border-color 0.1s; }
+  .bundle-card:hover { border-color: var(--slate-300); }
   .bundle-name { font-size: 14px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; }
   .bundle-desc { font-size: 12.5px; color: var(--slate-500); margin-bottom: 10px; line-height: 1.4; }
   .bundle-meta { font-size: 12px; color: var(--slate-400); }
-  .bundle-util { font-size: 11.5px; color: var(--slate-500); margin-top: 6px; }
 
-  .doc-list { display: flex; flex-direction: column; gap: 0; }
-  .doc-row { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--slate-100); cursor: pointer; transition: background 0.1s; }
+  .doc-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--slate-200); border-radius: 8px; overflow: hidden; }
+  .doc-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--slate-100); cursor: pointer; transition: background 0.1s; background: white; }
   .doc-row:hover { background: var(--slate-50); }
-  .doc-row:first-child { border-top: 1px solid var(--slate-100); }
-  .doc-icon { font-size: 18px; flex-shrink: 0; }
-  .doc-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--slate-700); }
-  .doc-meta { font-size: 11.5px; color: var(--slate-400); display: flex; align-items: center; gap: 8px; }
+  .doc-row:last-child { border-bottom: none; }
+  .doc-type-badge { width: 36px; height: 36px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
+  .doc-type-pdf  { background: #fee2e2; color: #dc2626; }
+  .doc-type-doc  { background: #dbeafe; color: #1d4ed8; }
+  .doc-type-xlsx { background: #dcfce7; color: #15803d; }
+  .doc-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--slate-700); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-meta { font-size: 11.5px; color: var(--slate-400); display: flex; align-items: center; gap: 8px; white-space: nowrap; flex-shrink: 0; }
 
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
@@ -102,7 +110,6 @@
   .rte-btn:hover { background: var(--slate-200); }
   .rte-area { min-height: 120px; padding: 10px 12px; border: 1px solid var(--slate-200); border-radius: 0 0 8px 8px; font-size: 13.5px; color: var(--slate-700); outline: none; line-height: 1.6; }
 
-  .replaces-banner { background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: var(--indigo-700); }
   .org-notice { background: #fdf4ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12.5px; color: #6d28d9; }
 </style>
 </head>
@@ -120,8 +127,8 @@
       <span style="font-size:12.5px;color:var(--slate-400);">Acme Agency · 4 workspaces</span>
     </div>
 
-    <div class="replaces-banner">
-      <strong>Prototype note:</strong> Round 7d rebuild. Same three-tab structure as workspace Knowledge. No inheritance chips here: this IS the source. "Used by N workspaces" replaces the Inheritance panel from 7b-8. <a href="before-org-knowledge.html" style="color:var(--indigo-600);font-weight:600;">View before state</a>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--slate-400);">
+      Organisation-level items are inherited by all workspaces. <a href="before-org-knowledge.html" style="color:var(--slate-400);">View before state</a>
     </div>
 
     <div class="tab-strip">
@@ -138,9 +145,12 @@
       <div class="tab-toolbar">
         <div class="filter-chips">
           <button class="filter-chip active">All (6)</button>
-          <button class="filter-chip">Tier 1</button>
-          <button class="filter-chip">Tier 2</button>
-          <button class="filter-chip">Tier 3</button>
+          <button class="filter-chip">Identity</button>
+          <button class="filter-chip">Voice</button>
+          <button class="filter-chip">Positioning</button>
+          <button class="filter-chip">Audience</button>
+          <button class="filter-chip">Constraints</button>
+          <button class="filter-chip">Proof</button>
         </div>
         <div class="tab-toolbar-right">
           <input class="search-input" type="text" placeholder="Search memory...">
@@ -154,7 +164,7 @@
             <div class="entry-title">Acme Inc brand identity: primary tier</div>
             <div class="entry-preview">Organisation-level brand guidelines covering colour, typography, tone, and logo usage. Applies across all workspaces serving Acme accounts.</div>
             <div class="entry-meta">
-              <span class="chip-tier">Tier 1</span>
+              <span class="chip-cat-identity">Identity</span>
               <span class="chip-used-by">Used by 4 of 4 workspaces</span>
               <span>Admin</span><span>·</span><span>2 days ago</span>
             </div>
@@ -177,7 +187,7 @@
             <div class="entry-title">Communication style guide</div>
             <div class="entry-preview">Organisation-wide communication norms: reply-time SLAs, meeting etiquette, email format guidelines, and escalation paths for external client queries.</div>
             <div class="entry-meta">
-              <span class="chip-tier">Tier 2</span>
+              <span class="chip-cat-voice">Voice</span>
               <span class="chip-used-by">Used by 4 of 4 workspaces</span>
               <span>Admin</span><span>·</span><span>1 week ago</span>
             </div>
@@ -200,7 +210,7 @@
             <div class="entry-title">Approved vendor list</div>
             <div class="entry-preview">List of pre-approved vendors for software, services, and contractors. Any new vendor not on this list requires COO sign-off before contracts are signed.</div>
             <div class="entry-meta">
-              <span class="chip-tier">Tier 2</span>
+              <span class="chip-cat-proof">Proof</span>
               <span class="chip-used-by">Used by 3 of 4 workspaces</span>
               <span>Admin</span><span>·</span><span>3 weeks ago</span>
             </div>
@@ -223,7 +233,7 @@
             <div class="entry-title">Data retention: 3-year minimum for all client records</div>
             <div class="entry-preview">All client communications, contracts, and deal records must be retained for a minimum of 3 years. Deletion before this period requires legal approval.</div>
             <div class="entry-meta">
-              <span class="chip-tier">Tier 3</span>
+              <span class="chip-cat-constraints">Constraints</span>
               <span class="chip-used-by">Used by 2 of 4 workspaces</span>
               <span>Legal team</span><span>·</span><span>2 months ago</span>
             </div>
@@ -246,7 +256,7 @@
             <div class="entry-title">Standard contract terms: net-30 payment, auto-renewal clause</div>
             <div class="entry-preview">All agreements default to net-30 payment terms and include an auto-renewal clause with 60-day cancellation notice. Sales can waive auto-renewal with VP approval.</div>
             <div class="entry-meta">
-              <span class="chip-tier">Tier 1</span>
+              <span class="chip-cat-positioning">Positioning</span>
               <span class="chip-used-by">Used by 4 of 4 workspaces</span>
               <span>Admin</span><span>·</span><span>6 weeks ago</span>
             </div>
@@ -269,7 +279,7 @@
             <div class="entry-title">Key relationship: Acme Corp executive sponsor is James Liang (CEO)</div>
             <div class="entry-preview">James Liang is the executive sponsor and ultimate decision-maker for all Acme Corp enterprise decisions. All strategic escalations go through him.</div>
             <div class="entry-meta">
-              <span class="chip-tier">Tier 1</span>
+              <span class="chip-cat-audience">Audience</span>
               <span class="chip-used-by">Used by 1 of 4 workspaces</span>
               <span>Sarah Chen</span><span>·</span><span>3 weeks ago</span>
             </div>
@@ -416,14 +426,14 @@
           </div>
         </div>
         <div class="doc-list">
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">Organisation brand guidelines.pdf</div><div class="doc-meta">PDF · 4.5 MB<span class="chip-used-by">Used by 4 workspaces</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">Approved vendor list 2026.pdf</div><div class="doc-meta">PDF · 350 KB<span class="chip-used-by">Used by 3 workspaces</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">SOC 2 audit report 2025.pdf</div><div class="doc-meta">PDF · 8.2 MB<span class="chip-used-by">Used by 2 workspaces</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">Data processing agreement template.pdf</div><div class="doc-meta">PDF · 210 KB<span class="chip-used-by">Used by 2 workspaces</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">Master services agreement v4.pdf</div><div class="doc-meta">PDF · 1.1 MB<span class="chip-used-by">Used by 4 workspaces</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">Security questionnaire template.docx</div><div class="doc-meta">Word · 340 KB<span class="chip-used-by">Used by 1 workspace</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 18l4-8 4 8"/><path d="M10 13h4"/></svg></div><div class="doc-name">Org-wide pricing tiers 2026.xlsx</div><div class="doc-meta">Spreadsheet · 450 KB<span class="chip-used-by">Used by 4 workspaces</span></div></div>
-          <div class="doc-row"><div class="doc-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="doc-name">Employee NDA template.pdf</div><div class="doc-meta">PDF · 180 KB<span class="chip-used-by">Not yet shared</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-pdf">PDF</div><div class="doc-name">Organisation brand guidelines.pdf</div><div class="doc-meta">4.5 MB <span class="chip-used-by">Used by 4 workspaces</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-pdf">PDF</div><div class="doc-name">Approved vendor list 2026.pdf</div><div class="doc-meta">350 KB <span class="chip-used-by">Used by 3 workspaces</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-pdf">PDF</div><div class="doc-name">SOC 2 audit report 2025.pdf</div><div class="doc-meta">8.2 MB <span class="chip-used-by">Used by 2 workspaces</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-pdf">PDF</div><div class="doc-name">Data processing agreement template.pdf</div><div class="doc-meta">210 KB <span class="chip-used-by">Used by 2 workspaces</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-pdf">PDF</div><div class="doc-name">Master services agreement v4.pdf</div><div class="doc-meta">1.1 MB <span class="chip-used-by">Used by 4 workspaces</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-doc">DOC</div><div class="doc-name">Security questionnaire template.docx</div><div class="doc-meta">340 KB <span class="chip-used-by">Used by 1 workspace</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-xlsx">XLS</div><div class="doc-name">Org-wide pricing tiers 2026.xlsx</div><div class="doc-meta">450 KB <span class="chip-used-by">Used by 4 workspaces</span></div></div>
+          <div class="doc-row"><div class="doc-type-badge doc-type-pdf">PDF</div><div class="doc-name">Employee NDA template.pdf</div><div class="doc-meta">180 KB <span style="font-style:italic;color:var(--slate-400);">Not yet shared</span></div></div>
         </div>
       </div>
 
@@ -438,21 +448,18 @@
             <div class="bundle-name">Legal templates</div>
             <div class="bundle-desc">Standard agreements, NDAs, and DPA templates. Shared across all workspaces for client-facing legal work.</div>
             <div class="bundle-meta">4 documents</div>
-            <div class="bundle-util">claude-sonnet-4-6: 83% · gpt-4o: 79%</div>
             <div class="bundle-meta" style="margin-top:6px;"><span class="chip-used-by">Used by 4 workspaces</span></div>
           </div>
           <div class="bundle-card">
             <div class="bundle-name">Compliance pack</div>
             <div class="bundle-desc">SOC 2 evidence, security questionnaire, and data processing docs. Used for client security reviews.</div>
             <div class="bundle-meta">3 documents</div>
-            <div class="bundle-util">claude-sonnet-4-6: 76% · gpt-4o: 71%</div>
             <div class="bundle-meta" style="margin-top:6px;"><span class="chip-used-by">Used by 2 workspaces</span></div>
           </div>
           <div class="bundle-card">
             <div class="bundle-name">Org brand assets</div>
             <div class="bundle-desc">Brand guidelines, logo usage, and approved messaging for all external communications.</div>
             <div class="bundle-meta">2 documents</div>
-            <div class="bundle-util">claude-sonnet-4-6: 91% · gpt-4o: 88%</div>
             <div class="bundle-meta" style="margin-top:6px;"><span class="chip-used-by">Used by 4 workspaces</span></div>
           </div>
         </div>
@@ -476,7 +483,7 @@
         <div class="rte-toolbar"><button class="rte-btn" onclick="document.execCommand('bold')"><b>B</b></button><button class="rte-btn" onclick="document.execCommand('italic')"><i>I</i></button><button class="rte-btn" onclick="document.execCommand('insertUnorderedList')">&#8226;</button></div>
         <div class="rte-area" contenteditable="true"></div>
       </div>
-      <div class="form-group"><label class="form-label">Tier</label><select class="form-select"><option value="">No tier</option><option>Tier 1 - highest priority</option><option>Tier 2 - standard priority</option><option>Tier 3 - reference only</option></select></div>
+      <div class="form-group"><label class="form-label">Category</label><select class="form-select"><option value="">No category</option><option value="identity">Identity (brand, logo, naming)</option><option value="voice">Voice (tone, style, communication)</option><option value="positioning">Positioning (offer, messaging, demo)</option><option value="audience">Audience (ICP, personas, segments)</option><option value="constraints">Constraints (rules, limits, approvals)</option><option value="proof">Proof (case studies, results, evidence)</option></select></div>
       <div class="form-group"><label class="form-label">Share with workspaces</label><select class="form-select"><option>All workspaces (4)</option><option>Selected workspaces</option><option>Org only (not inherited)</option></select></div>
     </div>
     <div class="drawer-footer">
