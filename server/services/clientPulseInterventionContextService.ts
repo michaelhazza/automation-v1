@@ -9,6 +9,7 @@
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import { actions } from '../db/schema/actions.js';
 import { agents } from '../db/schema/agents.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
@@ -363,9 +364,9 @@ export async function createOperatorProposal(
   const [agentRow] = await db
     .select({ id: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
     .where(
-      and(eq(agents.organisationId, organisationId), eq(systemAgents.slug, PROPOSER_AGENT_SLUG)),
+      and(eq(agents.organisationId, organisationId), isActive(agents), eq(systemAgents.slug, PROPOSER_AGENT_SLUG)),
     )
     .limit(1);
   if (!agentRow) {
@@ -496,7 +497,7 @@ export async function enqueueInterventionProposal(params: {
     metadata: params.metadata,
   });
 
-  let isNew = proposed.isNew;
+  const isNew = proposed.isNew;
   if (isNew) {
     const actionRow = await actionService.getAction(proposed.actionId, params.organisationId);
     await reviewService.createReviewItem(actionRow, {

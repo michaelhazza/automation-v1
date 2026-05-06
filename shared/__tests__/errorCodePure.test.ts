@@ -5,22 +5,8 @@
  *   npx tsx shared/__tests__/errorCodePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { getErrorCode } from '../errorCode.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
   if (actual !== expected) {
@@ -30,62 +16,54 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 // Branch A — flat string code
 test('flat string code', () => {
-  assertEqual(getErrorCode('approval_already_decided'), 'approval_already_decided', 'flat string');
+  expect(getErrorCode('approval_already_decided'), 'flat string').toBe('approval_already_decided');
 });
 
 test('empty string returns null', () => {
-  assertEqual(getErrorCode(''), null, 'empty');
+  expect(getErrorCode(''), 'empty').toBe(null);
 });
 
 // `{ code: ... }` envelope (nested-style return)
 test('object with .code', () => {
-  assertEqual(getErrorCode({ code: 'permission_denied' }), 'permission_denied', '.code');
+  expect(getErrorCode({ code: 'permission_denied' }), '.code').toBe('permission_denied');
 });
 
 test('object with non-string .code returns null', () => {
-  assertEqual(getErrorCode({ code: 42 }), null, '.code numeric');
+  expect(getErrorCode({ code: 42 }), '.code numeric').toBe(null);
 });
 
 // `{ error: 'code_string' }` (HTTP body style)
 test('object with .error string', () => {
-  assertEqual(getErrorCode({ error: 'artefact_not_found' }), 'artefact_not_found', '.error string');
+  expect(getErrorCode({ error: 'artefact_not_found' }), '.error string').toBe('artefact_not_found');
 });
 
 test('object with .error nested', () => {
-  assertEqual(
-    getErrorCode({ error: { code: 'rate_limited', message: 'too many', context: {} } }),
-    'rate_limited',
-    '.error.code',
-  );
+  expect(getErrorCode({ error: { code: 'rate_limited', message: 'too many', context: {} } }), '.error.code').toBe('rate_limited');
 });
 
 test('mixed: status + error shape', () => {
-  assertEqual(
-    getErrorCode({ status: 'failed', error: 'artefact_stale' }),
-    'artefact_stale',
-    'status + error',
-  );
+  expect(getErrorCode({ status: 'failed', error: 'artefact_stale' }), 'status + error').toBe('artefact_stale');
 });
 
 // Edge cases
 test('null returns null', () => {
-  assertEqual(getErrorCode(null), null, 'null');
+  expect(getErrorCode(null), 'null').toBe(null);
 });
 
 test('undefined returns null', () => {
-  assertEqual(getErrorCode(undefined), null, 'undefined');
+  expect(getErrorCode(undefined), 'undefined').toBe(null);
 });
 
 test('number returns null', () => {
-  assertEqual(getErrorCode(404), null, 'number');
+  expect(getErrorCode(404), 'number').toBe(null);
 });
 
 test('object without code/error returns null', () => {
-  assertEqual(getErrorCode({ foo: 'bar' }), null, 'unrelated obj');
+  expect(getErrorCode({ foo: 'bar' }), 'unrelated obj').toBe(null);
 });
 
 test('object with empty .code returns null', () => {
-  assertEqual(getErrorCode({ code: '' }), null, 'empty .code');
+  expect(getErrorCode({ code: '' }), 'empty .code').toBe(null);
 });
 
 test('Error-like object with .code is recognised', () => {
@@ -94,17 +72,17 @@ test('Error-like object with .code is recognised', () => {
     message: 'something broke',
     code: 'custom_failure',
   };
-  assertEqual(getErrorCode(err), 'custom_failure', 'Error-like .code');
+  expect(getErrorCode(err), 'Error-like .code').toBe('custom_failure');
 });
 
 test('thrown Error without .code returns defaultCode', () => {
   const err = new Error('connection refused');
-  assertEqual(getErrorCode(err), null, 'no default → null');
-  assertEqual(getErrorCode(err, 'unknown_error'), 'unknown_error', 'with default');
+  expect(getErrorCode(err), 'no default → null').toBe(null);
+  expect(getErrorCode(err, 'unknown_error'), 'with default').toBe('unknown_error');
 });
 
 test('null with defaultCode returns the default', () => {
-  assertEqual(getErrorCode(null, 'unknown_error'), 'unknown_error', 'null + default');
+  expect(getErrorCode(null, 'unknown_error'), 'null + default').toBe('unknown_error');
 });
 
 test('Error.message is NOT treated as the code', () => {
@@ -112,15 +90,11 @@ test('Error.message is NOT treated as the code', () => {
   // refuse to elevate a thrown Error's message to the code slot — that
   // would let consumers branch on user-visible English strings.
   const err = new Error('approval_already_decided');
-  assertEqual(getErrorCode(err), null, 'message-as-code is rejected');
+  expect(getErrorCode(err), 'message-as-code is rejected').toBe(null);
 });
 
 test('defaultCode is returned for unrelated objects', () => {
-  assertEqual(getErrorCode({ foo: 'bar' }, 'unknown_error'), 'unknown_error', 'unrelated obj + default');
+  expect(getErrorCode({ foo: 'bar' }, 'unknown_error'), 'unrelated obj + default').toBe('unknown_error');
 });
 
 console.log('');
-console.log(`Passed: ${passed}`);
-console.log(`Failed: ${failed}`);
-
-if (failed > 0) process.exit(1);

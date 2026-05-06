@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   DEFAULT_REDACTION_PATTERNS,
   redactValue,
@@ -9,30 +8,30 @@ test('redactValue: bearer token replaced', () => {
   const { value, redactions } = redactValue(
     'Authorization: Bearer abcdefghij1234567890xxxyz',
   );
-  assert.equal(typeof value, 'string');
-  assert.ok((value as string).includes('[REDACTED:bearer]'));
-  assert.ok(redactions.some((r) => r.pattern === 'bearer_token'));
+  expect(typeof value).toBe('string');
+  expect((value as string).includes('[REDACTED:bearer]')).toBeTruthy();
+  expect(redactions.some((r) => r.pattern === 'bearer_token')).toBeTruthy();
 });
 
 test('redactValue: near-miss bearer (too short) is not flagged', () => {
   const { value, redactions } = redactValue('Bearer abc');
-  assert.equal(value, 'Bearer abc');
-  assert.equal(redactions.length, 0);
+  expect(value).toBe('Bearer abc');
+  expect(redactions.length).toBe(0);
 });
 
 test('redactValue: openai key patterns', () => {
   const { value, redactions } = redactValue(
     'OPENAI_KEY=sk-abcdefghij1234567890xxxyz',
   );
-  assert.ok((value as string).includes('[REDACTED:openai_key]'));
-  assert.ok(redactions.some((r) => r.pattern === 'openai_key'));
+  expect((value as string).includes('[REDACTED:openai_key]')).toBeTruthy();
+  expect(redactions.some((r) => r.pattern === 'openai_key')).toBeTruthy();
 });
 
 test('redactValue: github PAT', () => {
   const token = 'ghp_' + 'a'.repeat(36);
   const { value, redactions } = redactValue(`token=${token}`);
-  assert.ok((value as string).includes('[REDACTED:github_token]'));
-  assert.equal(redactions.length, 1);
+  expect((value as string).includes('[REDACTED:github_token]')).toBeTruthy();
+  expect(redactions.length).toBe(1);
 });
 
 test('redactValue: walks nested arrays + objects', () => {
@@ -42,10 +41,10 @@ test('redactValue: walks nested arrays + objects', () => {
     },
   });
   const serialised = JSON.stringify(value);
-  assert.ok(serialised.includes('[REDACTED:bearer]'));
+  expect(serialised.includes('[REDACTED:bearer]')).toBeTruthy();
   const r = redactions.find((x) => x.pattern === 'bearer_token');
-  assert.ok(r);
-  assert.ok(r!.path.startsWith('outer.inner.'));
+  expect(r).toBeTruthy();
+  expect(r!.path.startsWith('outer.inner.')).toBeTruthy();
 });
 
 test('redactValue: cycle-safe', () => {
@@ -53,7 +52,7 @@ test('redactValue: cycle-safe', () => {
   obj.self = obj;
   const { value } = redactValue(obj);
   // Walker replaces the cycle with the literal '[cycle]' sentinel.
-  assert.ok(value);
+  expect(value).toBeTruthy();
 });
 
 test('redactValue: hits from several patterns are all recorded', () => {
@@ -61,21 +60,21 @@ test('redactValue: hits from several patterns are all recorded', () => {
     'keys: Bearer abcdefghij1234567890xxxyz and ghp_' + 'x'.repeat(36);
   const { redactions } = redactValue(input);
   const names = new Set(redactions.map((r) => r.pattern));
-  assert.ok(names.has('bearer_token'));
-  assert.ok(names.has('github_pat'));
+  expect(names.has('bearer_token')).toBeTruthy();
+  expect(names.has('github_pat')).toBeTruthy();
 });
 
 test('DEFAULT_REDACTION_PATTERNS: includes bearer + openai + github', () => {
   const names = DEFAULT_REDACTION_PATTERNS.map((p) => p.name);
-  assert.ok(names.includes('bearer_token'));
-  assert.ok(names.includes('openai_key'));
-  assert.ok(names.includes('github_pat'));
+  expect(names.includes('bearer_token')).toBeTruthy();
+  expect(names.includes('openai_key')).toBeTruthy();
+  expect(names.includes('github_pat')).toBeTruthy();
 });
 
 test('redactValue: returns the replacement text exactly', () => {
   const { redactions } = redactValue('Bearer abcdefghij1234567890xxxyz');
   const hit = redactions.find((r) => r.pattern === 'bearer_token');
-  assert.ok(hit);
-  assert.equal(hit!.replacedWith, '[REDACTED:bearer]');
-  assert.equal(hit!.count, 1);
+  expect(hit).toBeTruthy();
+  expect(hit!.replacedWith).toBe('[REDACTED:bearer]');
+  expect(hit!.count).toBe(1);
 });

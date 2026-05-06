@@ -16,36 +16,22 @@
  * Runnable via:
  *   npx tsx server/jobs/__tests__/bundleUtilizationJob.idempotency.test.ts
  */
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level await and local declarations don't collide
 
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { __testHooks } = await import('../bundleUtilizationJob.js');
 
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  __testHooks.pauseBetweenClaimAndCommit = undefined;
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
 }
 
-await test('bundleUtilizationJob: __testHooks is exported with canonical shape', () => {
+test('bundleUtilizationJob: __testHooks is exported with canonical shape', () => {
   check(typeof __testHooks === 'object' && __testHooks !== null, '__testHooks must be an object');
   check(
     __testHooks.pauseBetweenClaimAndCommit === undefined,
@@ -53,7 +39,7 @@ await test('bundleUtilizationJob: __testHooks is exported with canonical shape',
   );
 });
 
-await test('bundleUtilizationJob: __testHooks override is invokable', async () => {
+test('bundleUtilizationJob: __testHooks override is invokable', async () => {
   let called = 0;
   __testHooks.pauseBetweenClaimAndCommit = async () => {
     called += 1;
@@ -63,11 +49,8 @@ await test('bundleUtilizationJob: __testHooks override is invokable', async () =
   check(called === 2, 'override is invokable repeatedly');
 });
 
-await test('bundleUtilizationJob: __testHooks reset clears override to undefined', () => {
+test('bundleUtilizationJob: __testHooks reset clears override to undefined', () => {
   __testHooks.pauseBetweenClaimAndCommit = async () => {};
   __testHooks.pauseBetweenClaimAndCommit = undefined;
   check(__testHooks.pauseBetweenClaimAndCommit === undefined, 'reset clears the override');
-});
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+});

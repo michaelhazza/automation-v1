@@ -1,4 +1,5 @@
 // guard-ignore-file: pure-helper-convention reason="Inline pure simulation — orgId-guard logic inlined to avoid db/drizzle transitive imports; no sibling import needed"
+import { expect, test } from 'vitest';
 /**
  * skillStudioServicePure unit tests — runnable via:
  *   npx tsx server/services/__tests__/skillStudioServicePure.test.ts
@@ -9,9 +10,6 @@
  *
  * Spec: docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md §B1
  */
-
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
 
 // ---------------------------------------------------------------------------
 // Pure extraction of the saveSkillVersion orgId guard
@@ -51,27 +49,13 @@ function validateOrgIdForScope(scope: Scope, orgId: string | null): void {
 // ---------------------------------------------------------------------------
 
 test('saveSkillVersion rejects when orgId is null for scope=org', async () => {
-  assert.throws(
-    () => validateOrgIdForScope('org', null),
-    (err: unknown) => {
-      assert.ok(err instanceof Error);
-      assert.equal(err.message, 'saveSkillVersion: orgId is required for scope=org');
-      return true;
-    },
-  );
+  expect(() => validateOrgIdForScope('org', null)).toThrow('saveSkillVersion: orgId is required for scope=org');
 });
 
 test('saveSkillVersion rejects when orgId is null for scope=subaccount', async () => {
-  assert.throws(
-    () => validateOrgIdForScope('subaccount', null),
-    (err: unknown) => {
-      assert.ok(err instanceof Error);
-      assert.equal(err.message, 'saveSkillVersion: orgId is required for scope=subaccount');
-      return true;
-    },
-  );
+  expect(() => validateOrgIdForScope('subaccount', null)).toThrow('saveSkillVersion: orgId is required for scope=subaccount');
 });
 
 test('saveSkillVersion does NOT throw when orgId is null for scope=system', async () => {
-  assert.doesNotThrow(() => validateOrgIdForScope('system', null));
+  expect(() => validateOrgIdForScope('system', null)).not.toThrow();
 });

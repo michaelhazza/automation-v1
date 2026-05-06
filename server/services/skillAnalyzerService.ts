@@ -1579,7 +1579,7 @@ async function runExecute(params: {
       // listSkills() includes inactive rows too — a matched inactive row may
       // reference an unregistered handler. Re-read the row inside the txn
       // and check before writing. See spec §8 PARTIAL_OVERLAP branch.
-      let matchedRow: SystemSkill | null = null;
+      let matchedRow: SystemSkill | null;
       try {
         matchedRow = await systemSkillService.getSkill(result.matchedSkillId);
       } catch {

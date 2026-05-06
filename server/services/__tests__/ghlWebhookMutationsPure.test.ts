@@ -8,31 +8,13 @@
  *   npx tsx server/services/__tests__/ghlWebhookMutationsPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   normaliseGhlMutation,
   classifyUserKindByVolume,
   isOutboundStaffMessage,
   type GhlEventEnvelope,
 } from '../ghlWebhookMutationsPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(msg);
-}
 
 function assertEq<T>(actual: T, expected: T, msg: string) {
   if (actual !== expected) {
@@ -50,11 +32,11 @@ test('ContactCreate → contact_created mutation with createdBy attribution', ()
     dateAdded: '2026-04-10T12:00:00Z',
     contact: { id: 'contact-1', createdBy: 'user-42' },
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'contact_created', 'mutationType');
-  assertEq(result.sourceEntity, 'contact', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-42', 'externalUserId');
-  assertEq(result.externalId, 'trace-abc', 'externalId prefers traceId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'contact_created', 'mutationType');
+  assertEq(result!.sourceEntity, 'contact', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-42', 'externalUserId');
+  assertEq(result!.externalId, 'trace-abc', 'externalId prefers traceId');
 });
 
 test('ContactUpdate → contact_updated mutation with updatedBy attribution', () => {
@@ -65,9 +47,9 @@ test('ContactUpdate → contact_updated mutation with updatedBy attribution', ()
     dateUpdated: '2026-04-10T12:30:00Z',
     contact: { id: 'contact-1', updatedBy: 'user-9' },
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'contact_updated', 'mutationType');
-  assertEq(result.externalUserId, 'user-9', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'contact_updated', 'mutationType');
+  assertEq(result!.externalUserId, 'user-9', 'externalUserId');
 });
 
 test('OpportunityStageUpdate → opportunity_stage_changed', () => {
@@ -77,10 +59,10 @@ test('OpportunityStageUpdate → opportunity_stage_changed', () => {
     traceId: 'trace-3',
     opportunity: { id: 'opp-1', updatedBy: 'user-7' },
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'opportunity_stage_changed', 'mutationType');
-  assertEq(result.sourceEntity, 'opportunity', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-7', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'opportunity_stage_changed', 'mutationType');
+  assertEq(result!.sourceEntity, 'opportunity', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-7', 'externalUserId');
 });
 
 test('OpportunityStatusUpdate → opportunity_status_changed', () => {
@@ -90,9 +72,9 @@ test('OpportunityStatusUpdate → opportunity_status_changed', () => {
     traceId: 'trace-4',
     opportunity: { id: 'opp-2', updatedBy: 'user-5' },
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'opportunity_status_changed', 'mutationType');
-  assertEq(result.externalUserId, 'user-5', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'opportunity_status_changed', 'mutationType');
+  assertEq(result!.externalUserId, 'user-5', 'externalUserId');
 });
 
 test('ConversationUpdated with outbound staff message → message_sent_outbound', () => {
@@ -103,10 +85,10 @@ test('ConversationUpdated with outbound staff message → message_sent_outbound'
     id: 'conv-100',
     message: { id: 'msg-2', direction: 'outbound', userId: 'user-7' },
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'message_sent_outbound', 'mutationType');
-  assertEq(result.sourceEntity, 'conversation', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-7', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'message_sent_outbound', 'mutationType');
+  assertEq(result!.sourceEntity, 'conversation', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-7', 'externalUserId');
 });
 
 test('ConversationCreated with outbound staff message → message_sent_outbound', () => {
@@ -117,10 +99,10 @@ test('ConversationCreated with outbound staff message → message_sent_outbound'
     id: 'conv-99',
     message: { id: 'msg-1', direction: 'outbound', userId: 'user-3' },
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'message_sent_outbound', 'mutationType');
-  assertEq(result.sourceEntity, 'conversation', 'sourceEntity');
-  assertEq(result.externalUserId, 'user-3', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'message_sent_outbound', 'mutationType');
+  assertEq(result!.sourceEntity, 'conversation', 'sourceEntity');
+  assertEq(result!.externalUserId, 'user-3', 'externalUserId');
 });
 
 test('ConversationCreated inbound → no mutation', () => {
@@ -157,10 +139,10 @@ test('INSTALL event → app_installed mutation', () => {
     traceId: 'trace-i',
     installedBy: 'agency-owner',
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'app_installed', 'mutationType');
-  assertEq(result.sourceEntity, 'location', 'sourceEntity');
-  assertEq(result.externalUserId, 'agency-owner', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'app_installed', 'mutationType');
+  assertEq(result!.sourceEntity, 'location', 'sourceEntity');
+  assertEq(result!.externalUserId, 'agency-owner', 'externalUserId');
 });
 
 test('UNINSTALL event → app_uninstalled mutation', () => {
@@ -170,8 +152,8 @@ test('UNINSTALL event → app_uninstalled mutation', () => {
     traceId: 'trace-u',
     uninstalledBy: 'agency-owner',
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'app_uninstalled', 'mutationType');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'app_uninstalled', 'mutationType');
 });
 
 test('LocationCreate event → location_created mutation', () => {
@@ -181,9 +163,9 @@ test('LocationCreate event → location_created mutation', () => {
     traceId: 'trace-lc',
     createdBy: 'admin',
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'location_created', 'mutationType');
-  assertEq(result.externalUserId, 'admin', 'externalUserId');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'location_created', 'mutationType');
+  assertEq(result!.externalUserId, 'admin', 'externalUserId');
 });
 
 test('LocationUpdate event → location_updated mutation', () => {
@@ -193,8 +175,8 @@ test('LocationUpdate event → location_updated mutation', () => {
     traceId: 'trace-lu',
     updatedBy: 'admin',
   });
-  assert(result !== null, 'should map');
-  assertEq(result.mutationType, 'location_updated', 'mutationType');
+  expect(result !== null, 'should map').toBeTruthy();
+  assertEq(result!.mutationType, 'location_updated', 'mutationType');
 });
 
 test('Unrecognised event type → null', () => {
@@ -214,44 +196,35 @@ test('Fallback externalId when traceId absent uses type + id + timestamp', () =>
     contact: { id: 'contact-xyz', createdBy: 'u1' },
     dateAdded: '2026-04-10T00:00:00Z',
   });
-  assert(result !== null, 'should map');
-  assert(result.externalId.startsWith('ContactCreate:'), `fallback prefix: ${result.externalId}`);
+  expect(result !== null, 'should map').toBeTruthy();
+  expect(result!.externalId.startsWith('ContactCreate:'), `fallback prefix: ${result!.externalId}`).toBeTruthy();
 });
 
 // ── Outbound staff-message guard (isolated) ──────────────────────────────
 
 test('isOutboundStaffMessage returns true for direction=outbound + userId + no providerId', () => {
-  assert(
-    isOutboundStaffMessage({
+  expect(isOutboundStaffMessage({
       type: 'ConversationCreated',
       locationId: 'loc-1',
       message: { direction: 'outbound', userId: 'u1' },
-    }),
-    'canonical staff send',
-  );
+    }), 'canonical staff send').toBeTruthy();
 });
 
 test('isOutboundStaffMessage accepts top-level fields as fallback', () => {
-  assert(
-    isOutboundStaffMessage({
+  expect(isOutboundStaffMessage({
       type: 'ConversationCreated',
       locationId: 'loc-1',
       direction: 'outbound',
       userId: 'u1',
-    }),
-    'fields at top level',
-  );
+    }), 'fields at top level').toBeTruthy();
 });
 
 test('isOutboundStaffMessage rejects when providerId set', () => {
-  assert(
-    !isOutboundStaffMessage({
+  expect(!isOutboundStaffMessage({
       type: 'ConversationCreated',
       locationId: 'loc-1',
       message: { direction: 'outbound', userId: 'u1', conversationProviderId: 'closebot:xyz' },
-    }),
-    'third-party dispatch excluded',
-  );
+    }), 'third-party dispatch excluded').toBeTruthy();
 });
 
 // ── Outlier-volume classifier (§2.0b) ────────────────────────────────────
@@ -320,5 +293,3 @@ test('classifyUserKindByVolume boundary: threshold is strict (> not >=)', () => 
 // ── Summary ──────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`ghlWebhookMutationsPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -3,8 +3,7 @@
  * Run via: npx tsx server/services/__tests__/ruleTeachabilityClassifierPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   classifyTeachabilityPure,
   DEFAULT_TEACHABILITY_CONFIG,
@@ -48,9 +47,9 @@ function makeInput(overrides: Partial<TeachabilityInput['userContext']> = {}): T
 
 test('returns user_disabled when suggestionFrequency is off', () => {
   const result = classifyTeachabilityPure(makeInput({ suggestionFrequency: 'off' }));
-  assert.equal(result.shouldSuggest, false);
-  assert.equal(result.reason, 'user_disabled');
-  assert.equal(result.noveltyScore, 0);
+  expect(result.shouldSuggest).toBe(false);
+  expect(result.reason).toBe('user_disabled');
+  expect(result.noveltyScore).toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -60,15 +59,15 @@ test('returns user_disabled when suggestionFrequency is off', () => {
 test('returns on_backoff when suggestionBackoffUntil is in the future', () => {
   const future = new Date(Date.now() + 1000 * 60 * 60 * 24); // +1 day
   const result = classifyTeachabilityPure(makeInput({ suggestionBackoffUntil: future }));
-  assert.equal(result.shouldSuggest, false);
-  assert.equal(result.reason, 'on_backoff');
+  expect(result.shouldSuggest).toBe(false);
+  expect(result.reason).toBe('on_backoff');
 });
 
 test('does not backoff when suggestionBackoffUntil is in the past', () => {
   const past = new Date(Date.now() - 1000);
   const result = classifyTeachabilityPure(makeInput({ suggestionBackoffUntil: past }));
   // Should not be blocked by backoff (may be novel or routine depending on score)
-  assert.notEqual(result.reason, 'on_backoff');
+  expect(result.reason).not.toBe('on_backoff');
 });
 
 // ---------------------------------------------------------------------------
@@ -79,15 +78,15 @@ test('returns on_backoff when skipStreakCount hits threshold', () => {
   const result = classifyTeachabilityPure(
     makeInput({ skipStreakCount: DEFAULT_TEACHABILITY_CONFIG.skipBackoffThreshold }),
   );
-  assert.equal(result.shouldSuggest, false);
-  assert.equal(result.reason, 'on_backoff');
+  expect(result.shouldSuggest).toBe(false);
+  expect(result.reason).toBe('on_backoff');
 });
 
 test('does not backoff when skipStreakCount is below threshold', () => {
   const result = classifyTeachabilityPure(
     makeInput({ skipStreakCount: DEFAULT_TEACHABILITY_CONFIG.skipBackoffThreshold - 1 }),
   );
-  assert.notEqual(result.reason, 'on_backoff');
+  expect(result.reason).not.toBe('on_backoff');
 });
 
 // ---------------------------------------------------------------------------
@@ -100,9 +99,9 @@ test('suggests novel when first-time approval with high-risk card', () => {
     approvalCard: { ...BASE_CARD, riskLevel: 'high' },
   };
   const result = classifyTeachabilityPure(input);
-  assert.equal(result.shouldSuggest, true);
-  assert.equal(result.reason, 'novel');
-  assert.ok(result.noveltyScore >= DEFAULT_TEACHABILITY_CONFIG.minNoveltyScore);
+  expect(result.shouldSuggest).toBe(true);
+  expect(result.reason).toBe('novel');
+  expect(result.noveltyScore >= DEFAULT_TEACHABILITY_CONFIG.minNoveltyScore).toBeTruthy();
 });
 
 test('suggests novel on rejection signal', () => {
@@ -111,8 +110,8 @@ test('suggests novel on rejection signal', () => {
     wasApproved: false,
   };
   const result = classifyTeachabilityPure(input);
-  assert.equal(result.shouldSuggest, true);
-  assert.equal(result.reason, 'novel');
+  expect(result.shouldSuggest).toBe(true);
+  expect(result.reason).toBe('novel');
 });
 
 // ---------------------------------------------------------------------------
@@ -121,8 +120,8 @@ test('suggests novel on rejection signal', () => {
 
 test('returns routine when action is very familiar', () => {
   const result = classifyTeachabilityPure(makeInput({ priorSimilarApprovals: 20 }));
-  assert.equal(result.shouldSuggest, false);
-  assert.equal(result.reason, 'routine');
+  expect(result.shouldSuggest).toBe(false);
+  expect(result.reason).toBe('routine');
 });
 
 // ---------------------------------------------------------------------------
@@ -154,7 +153,7 @@ test('frequent frequency lowers effective threshold and may suggest where occasi
 
   // frequent should have a lower effective min score; verify it's at least as permissive
   if (!frequentResult.shouldSuggest) {
-    assert.equal(occasionalResult.shouldSuggest, false, 'occasional must also not suggest if frequent does not');
+    expect(occasionalResult.shouldSuggest, 'occasional must also not suggest if frequent does not').toBe(false);
   }
   // If occasional also suggests, both are consistent — that's fine too
 });
@@ -172,6 +171,6 @@ test('noveltyScore is always in [0, 1]', () => {
   ];
   for (const input of inputs) {
     const { noveltyScore } = classifyTeachabilityPure(input);
-    assert.ok(noveltyScore >= 0 && noveltyScore <= 1, `noveltyScore ${noveltyScore} out of range`);
+    expect(noveltyScore >= 0 && noveltyScore <= 1).toBeTruthy();
   }
 });

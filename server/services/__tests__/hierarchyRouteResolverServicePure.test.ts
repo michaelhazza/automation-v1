@@ -8,26 +8,12 @@
  *   npx tsx server/services/__tests__/hierarchyRouteResolverServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   resolveRootForScopePure,
   type SubaccountRootRow,
   type OrgLevelLink,
 } from '../hierarchyRouteResolverServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertNull(actual: unknown, label: string): void {
   if (actual !== null) {
@@ -106,12 +92,12 @@ test('scope:org with orgLevelLink returns org link with fallback:none', () => {
     subaccountRoots: [],
     orgLevelLink: ORG_LINK,
   });
-  assertEqual(result, {
+  expect(result, 'org scope with link').toEqual({
     subaccountAgentId: 'sa-org-001',
     agentId: 'agent-org-001',
     subaccountId: 'sub-sentinel',
     fallback: 'none',
-  }, 'org scope with link');
+  });
 });
 
 test('scope:org without orgLevelLink returns null', () => {
@@ -135,12 +121,12 @@ test('scope:subaccount with null subaccountId falls back to org link with fallba
     subaccountRoots: [],
     orgLevelLink: ORG_LINK,
   });
-  assertEqual(result, {
+  expect(result, 'null subaccountId fallback').toEqual({
     subaccountAgentId: 'sa-org-001',
     agentId: 'agent-org-001',
     subaccountId: 'sub-sentinel',
     fallback: 'expected',
-  }, 'null subaccountId fallback');
+  });
 });
 
 test('scope:subaccount with null subaccountId and no org link returns null', () => {
@@ -164,12 +150,12 @@ test('scope:subaccount with one root returns that root with fallback:none', () =
     subaccountRoots: [ROOT_ROW_A],
     orgLevelLink: ORG_LINK,
   });
-  assertEqual(result, {
+  expect(result, 'one root').toEqual({
     subaccountAgentId: 'sa-sub-001',
     agentId: 'agent-sub-001',
     subaccountId: 'sub-123',
     fallback: 'none',
-  }, 'one root');
+  });
 });
 
 test('scope:subaccount with one root ignores org link entirely', () => {
@@ -179,12 +165,12 @@ test('scope:subaccount with one root ignores org link entirely', () => {
     subaccountRoots: [ROOT_ROW_A],
     orgLevelLink: null,
   });
-  assertEqual(result, {
+  expect(result, 'one root, no org link').toEqual({
     subaccountAgentId: 'sa-sub-001',
     agentId: 'agent-sub-001',
     subaccountId: 'sub-123',
     fallback: 'none',
-  }, 'one root, no org link');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -198,12 +184,12 @@ test('scope:subaccount with zero roots falls back to org link with fallback:degr
     subaccountRoots: [],
     orgLevelLink: ORG_LINK,
   });
-  assertEqual(result, {
+  expect(result, 'zero roots fallback (misconfigured subaccount)').toEqual({
     subaccountAgentId: 'sa-org-001',
     agentId: 'agent-org-001',
     subaccountId: 'sub-sentinel',
     fallback: 'degraded',
-  }, 'zero roots fallback (misconfigured subaccount)');
+  });
 });
 
 test('scope:subaccount with zero roots and no org link returns null', () => {
@@ -228,12 +214,12 @@ test('scope:subaccount with multiple roots picks oldest by createdAt', () => {
     subaccountRoots: [ROOT_ROW_B, ROOT_ROW_A], // intentionally out of order
     orgLevelLink: ORG_LINK,
   });
-  assertEqual(result, {
+  expect(result, 'multiple roots picks oldest').toEqual({
     subaccountAgentId: 'sa-sub-001', // ROOT_ROW_A is older
     agentId: 'agent-sub-001',
     subaccountId: 'sub-123',
     fallback: 'none',
-  }, 'multiple roots picks oldest');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -241,7 +227,3 @@ test('scope:subaccount with multiple roots picks oldest by createdAt', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

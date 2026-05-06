@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-04-27 (§§8.10–8.16, §2 maintenance-job rule, §9 cross-entity rule from pre-launch-hardening reviews; §8.6 generalised; §9 count fixed; §§8.17–8.22 added from PR #211 ChatGPT rounds 1-3)
+**Last updated:** 2026-05-05 (§8.27 leftJoin / `isActive` ON-vs-WHERE; §8.28 JWT `iat` second-precision alignment; §8.29 per-route body-size cap before the global parser — pre-launch-phase-2 hardening pass)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -50,6 +50,8 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 
 - **Schema files are leaves.** `server/db/schema/**` may only import from `drizzle-orm`, `shared/types/**`, and other schema files — never from `services/`, `lib/`, `routes/`, or `middleware/`. One violation drove 175 circular cycles in the 2026-04-25 audit.
 - **Types crossing the schema/service boundary live in `shared/types/`.** If a type is used by both a schema file (as a JSONB column) and a service (as a return type), put it in `shared/types/` and have services re-export for backward compat.
+- **Partial unique indexes on soft-deletable tables must include `AND deleted_at IS NULL`.** Without it, re-inserting a soft-deleted row permanently fails with a unique constraint violation — the record is logically gone but still occupies the index.
+- **Soft-delete enforcement is two-layered: SQL exclusion is the rule, runtime assertion is defence-in-depth.** Joins against soft-deletable tables (`agents`, `systemAgents`, etc.) carry `isNull(table.deletedAt)` in the join `ON` clause — never in `WHERE` for `leftJoin`s, since that converts outer to inner semantics. `assertNotSoftDeleted(record, label)` may be called on hot paths after fetch as a regression catcher; it is supplementary, not a replacement for the SQL filter.
 
 ---
 
@@ -96,9 +98,9 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 
 - **Gates pass = done.** A green gate run in CI is the definition of done for a phase. Local sessions do not run the gate suite — see §5 and `CLAUDE.md` § *Test gates are CI-only — never run locally*.
 - **New runtime tests are added only for pure functions** — functions that accept data and return data with no DB, network, or filesystem side effects.
-- **Do not add** vitest/jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding).
+- **Do not add** jest/playwright/supertest/E2E tests until `docs/spec-context.md` flips `testing_posture` (triggered by first live agency client onboarding). Runtime unit tests use **Vitest** — see `docs/testing-conventions.md` for the canonical pattern.
 - **`*Pure.test.ts` naming is enforced by `verify-pure-helper-convention.sh`.** Files matching that pattern must have zero transitive DB imports. If a test needs the DB, drop `Pure` from the filename — do not suppress the gate violation.
-- **Run individual tests** with `npx tsx <path-to-test-file>` — `scripts/run-all-unit-tests.sh` ignores `--` filter args.
+- **Run individual tests** with `npx vitest run <path-to-test-file>` — do not use `npx tsx` or `scripts/run-all-unit-tests.sh` for Vitest tests.
 - **Spy on the logger object directly, not `process.env` or `console.*`.** `server/lib/logger.ts` resolves `LOG_LEVEL` to a `const` at import time, so patching env in `beforeEach` is a no-op — use `mock.method(logger, 'warn', () => {})` to intercept at the object level.
 
 When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
@@ -194,6 +196,34 @@ Any pure resolver / reducer / ranker whose source array can be reordered between
 ### 8.22 Allow-list annotations name the function they cover
 
 Per-file allow-listing is insufficient; call-site annotations (e.g. `@rls-allowlist-bypass: <table> <function_name>`) name the immediately-following declaration so renames and moves invalidate the binding.
+
+### 8.23 ACTION_REGISTRY entries must be registered in SKILL_HANDLERS
+
+Any action registered in `ACTION_REGISTRY` must also have a matching entry in `SKILL_HANDLERS` in `skillExecutor.ts`; registration in one without the other leaves the action unreachable at runtime with no compile-time error.
+
+### 8.24 Module-level in-process caches require a size cap
+
+Module-level `Map` or `Set` used as a process-lifetime dedup or idempotency cache must be bounded by an explicit size cap with LRU eviction; unbounded maps grow indefinitely under production load.
+
+### 8.25 `<button>` elements outside a submit context require `type="button"`
+
+Every `<button>` that does not intentionally submit a form must declare `type="button"`; the HTML default is `type="submit"`, which silently submits any ancestor `<form>` on click.
+
+### 8.26 Feature kill switches must gate all consumer paths
+
+A system-disabled flag must short-circuit every route that touches the feature — mutation routes, read-through routes, picker/integration endpoints — not just the primary write path; partial gating leaves orphaned traffic and partial state when the flag is flipped.
+
+### 8.27 Soft-delete filter goes through `isActive(table)`
+
+Every join on a soft-deletable table uses `isActive(table)` from `server/lib/queryHelpers`. Raw `isNull(table.deletedAt)` is a lint-waivable finding that must be explicitly justified inline. For leftJoin, the filter MUST live in the join's ON clause, never the WHERE — placing it in WHERE converts outer to inner semantics.
+
+### 8.28 Token `iat` invalidation comparisons align both sides to whole seconds
+
+JWT `iat` is second-precision (`iat * 1000` is whole-second × 1000). Any state field used to invalidate tokens (`passwordChangedAt`, session-revocation-at, etc.) must floor to whole seconds at write time and compare with strict `>` against `iat` — never compare a millisecond-precision Date to a second-precision token claim, and never use `>=` (revokes valid tokens issued in the same wall-clock second as the state change).
+
+### 8.29 Per-route body-size caps install BEFORE the global JSON parser
+
+Routes that need a tighter body cap than the global `express.json({ limit: '10mb' })` (audit endpoints, abuse-prone reporting endpoints, anything where authenticated abuse can inflate downstream layers) install a path-scoped `express.json({ limit: '<smaller>' })` BEFORE the global parser. Once `req._body` is populated by the tight parser, the global parser short-circuits — oversized payloads return 413 from the path-scoped parser. Reverse order silently lets oversized bodies through.
 
 ---
 

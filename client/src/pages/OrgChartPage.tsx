@@ -16,6 +16,18 @@ const GitBranch = (props: IcoProps) => <Ico {...props}><line x1="6" y1="3" x2="6
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+interface OrgChartNode {
+  actorId: string;
+  actorKind: 'agent' | 'human';
+  displayName: string;
+  parentActorId: string | null;
+  parentValidationError?: 'cross_subaccount_parent' | 'cycle_detected';
+  agentRole: string | null;
+  agentTitle: string | null;
+  identity?: { id: string; emailAddress: string; status: string; photoUrl: string | null };
+  user?: { id: string; email: string };
+}
+
 interface AgentNode {
   id: string;
   agentId: string;
@@ -23,6 +35,8 @@ interface AgentNode {
   agentTitle: string | null;
   parentSubaccountAgentId: string | null;
   isActive: boolean;
+  actorKind?: 'agent' | 'human';
+  identityStatus?: string;
   agent: { name: string; icon: string | null; status: string };
   children: AgentNode[];
 }
@@ -159,6 +173,19 @@ const STATUS_DOT: Record<string, string> = {
   draft: '#facc15',
 };
 
+// Actor kind border colours
+const KIND_BORDER: Record<string, string> = {
+  human: '#f59e0b',   // amber
+  agent: 'var(--indigo-500, #6366f1)', // indigo
+};
+
+// Lifecycle dot colour derived from workspace identity status
+function identityStatusDot(status: string | undefined): string {
+  if (status === 'active') return '#22c55e';    // green
+  if (status === 'suspended') return '#f97316'; // orange
+  return '#94a3b8';                              // grey (not_onboarded / no identity)
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function OrgChartPage({ user: _user }: { user: User }) {
@@ -187,10 +214,60 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
       api.get(`/api/subaccounts/${activeClientId}/agents`),
       api.get('/api/agents').catch((err) => { console.error('[OrgChart] Failed to fetch org agents:', err); return { data: [] }; }),
       api.get(`/api/subaccounts/${activeClientId}/live-status`).catch(() => ({ data: { runningAgentIds: [] } })),
-    ]).then(([saRes, _orgRes, liveRes]) => {
+      api.get(`/api/subaccounts/${activeClientId}/workspace/org-chart`).catch(() => ({ data: [] })),
+    ]).then(([saRes, _orgRes, liveRes, wsRes]) => {
       const liveIds = new Set<string>((liveRes.data?.runningAgentIds ?? []) as string[]);
       setLiveAgentIds(liveIds);
-      setAgents(saRes.data as Omit<AgentNode, 'children'>[]);
+
+      const saAgents = saRes.data as Omit<AgentNode, 'children'>[];
+      const wsNodes = wsRes.data as OrgChartNode[];
+
+      // Build a lookup: workspaceActorId → saAgent, so workspace actors that
+      // correspond to an existing subaccount agent can be deduplicated.
+      const actorToSaAgent = new Map<string, Omit<AgentNode, 'children'>>();
+      for (const a of saAgents) {
+        // saAgent rows carry workspaceActorId if the agent has been onboarded
+        const waid = (a as any).workspaceActorId as string | undefined;
+        if (waid) actorToSaAgent.set(waid, a);
+      }
+
+      // For each workspace actor, either upgrade the existing saAgent entry
+      // (use workspace parentActorId as the authoritative parent) or add a
+      // synthetic AgentNode for actors that have no corresponding saAgent.
+      const extraNodes: Omit<AgentNode, 'children'>[] = [];
+      const seenActorIds = new Set<string>();
+
+      for (const ws of wsNodes) {
+        seenActorIds.add(ws.actorId);
+        const existingSa = actorToSaAgent.get(ws.actorId);
+
+        if (existingSa) {
+          // Upgrade in-place: use workspace parent and carry kind + identity status
+          (existingSa as any).parentSubaccountAgentId = ws.parentActorId;
+          (existingSa as any).actorKind = ws.actorKind;
+          (existingSa as any).identityStatus = ws.identity?.status;
+        } else {
+          // Workspace actor with no corresponding saAgent — add as synthetic node
+          const identityStatus = ws.identity?.status;
+          extraNodes.push({
+            id: ws.actorId,
+            agentId: ws.user?.id ?? ws.actorId,
+            parentSubaccountAgentId: ws.parentActorId,
+            agentRole: ws.agentRole,
+            agentTitle: ws.agentTitle,
+            isActive: identityStatus === 'active',
+            actorKind: ws.actorKind,
+            identityStatus,
+            agent: {
+              name: ws.displayName,
+              icon: null,
+              status: identityStatus ?? 'not_onboarded',
+            },
+          } as any);
+        }
+      }
+
+      setAgents([...saAgents, ...extraNodes]);
     }).catch((err) => { console.error('[OrgChart] Failed to load org chart data:', err); setAgents([]); })
       .finally(() => setLoading(false));
   }, [activeClientId]);
@@ -465,23 +542,36 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
             {layout.map((l) => {
               const a = l.node;
               const isLive = liveAgentIds.has(a.agentId);
-              const dotColor = isLive ? '#22c55e' : (STATUS_DOT[a.agent.status] ?? '#cbd5e1');
+              const hasIdentity = !!(a as any).identityStatus;
+              // Nodes with an identity status use the lifecycle dot; others use the legacy status dot
+              const dotColor = hasIdentity
+                ? identityStatusDot((a as any).identityStatus)
+                : isLive ? '#22c55e' : (STATUS_DOT[a.agent.status] ?? '#cbd5e1');
+              const kindBorder = (a as any).actorKind
+                ? KIND_BORDER[(a as any).actorKind as string] ?? undefined
+                : undefined;
 
               return (
                 <div
                   key={a.id}
                   data-card
                   onClick={() => navigate(`/agents/${a.agentId}`)}
-                  className="absolute bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer"
+                  className="absolute bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer overflow-hidden"
                   style={{
                     width: CARD_W,
                     height: CARD_H,
                     transform: `translate(${l.x - CARD_W / 2}px, ${l.y}px)`,
                   }}
                 >
-                  <div className="flex items-center gap-2.5 px-2.5 h-full relative">
+                  {/* Kind indicator: coloured left border for humans (amber) and agents (indigo) */}
+                  {kindBorder && (
+                    <div
+                      style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: kindBorder, borderRadius: '8px 0 0 8px' }}
+                    />
+                  )}
+                  <div className="flex items-center gap-2.5 h-full relative" style={{ paddingLeft: kindBorder ? 10 : 10, paddingRight: 10 }}>
                     <div className="w-[34px] h-[34px] rounded-[8px] shrink-0 flex items-center justify-center text-[18px] bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
-                      {a.agent.icon || '🤖'}
+                      {a.agent.icon || ((a as any).actorKind === 'human' ? '👤' : '🤖')}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[12.5px] font-semibold text-slate-900 truncate leading-tight">
@@ -494,7 +584,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
                       )}
                     </div>
                     <span
-                      className={`absolute top-2 right-2 w-[6px] h-[6px] rounded-full${isLive ? ' animate-pulse' : ''}`}
+                      className={`absolute top-2 right-2 w-[6px] h-[6px] rounded-full${isLive && !hasIdentity ? ' animate-pulse' : ''}`}
                       style={{ background: dotColor }}
                     />
                   </div>

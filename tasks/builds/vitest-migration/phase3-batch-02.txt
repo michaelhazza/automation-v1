@@ -1,0 +1,10 @@
+server/jobs/__tests__/fastPathDecisionsPruneJobPure.test.ts
+server/jobs/__tests__/fastPathRecalibrateJobPure.test.ts
+server/jobs/__tests__/ledgerArchivePure.test.ts
+server/jobs/__tests__/measureInterventionOutcomeJob.idempotency.test.ts
+server/jobs/__tests__/measureInterventionOutcomeJobPure.test.ts
+server/jobs/__tests__/ruleAutoDeprecateJob.idempotency.test.ts
+server/jobs/__tests__/ruleAutoDeprecateJobPure.test.ts
+server/jobs/__tests__/staleAnalyzerJobSweepJobPure.test.ts
+server/lib/__tests__/briefContractTestHarness.example.test.ts
+server/lib/__tests__/briefContractTestHarness.test.ts

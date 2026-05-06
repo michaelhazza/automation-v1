@@ -1,17 +1,13 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { pickRecommendedTemplate } from '../recommendedInterventionPure.js';
 
 test('no candidates → no_candidates reason', () => {
-  assert.deepEqual(
-    pickRecommendedTemplate({
+  expect(pickRecommendedTemplate({
       candidates: [],
       outcomes: [],
       currentBand: 'atRisk',
       minTrialsForOutcomeWeight: 5,
-    }),
-    { pickedSlug: '', reason: 'no_candidates' },
-  );
+    })).toEqual({ pickedSlug: '', reason: 'no_candidates' });
 });
 
 test('sparse data (all trials below threshold) → priority_fallback', () => {
@@ -26,8 +22,8 @@ test('sparse data (all trials below threshold) → priority_fallback', () => {
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.reason, 'priority_fallback');
-  assert.equal(pick.pickedSlug, 'tpl_a');
+  expect(pick.reason).toBe('priority_fallback');
+  expect(pick.pickedSlug).toBe('tpl_a');
 });
 
 test('priority tie-break lexicographic on slug', () => {
@@ -40,8 +36,8 @@ test('priority tie-break lexicographic on slug', () => {
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.pickedSlug, 'tpl_a');
-  assert.equal(pick.reason, 'priority_fallback');
+  expect(pick.pickedSlug).toBe('tpl_a');
+  expect(pick.reason).toBe('priority_fallback');
 });
 
 test('outcome-weighted — higher improve rate wins', () => {
@@ -57,8 +53,8 @@ test('outcome-weighted — higher improve rate wins', () => {
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.pickedSlug, 'tpl_b');
-  assert.equal(pick.reason, 'outcome_weighted');
+  expect(pick.pickedSlug).toBe('tpl_b');
+  expect(pick.reason).toBe('outcome_weighted');
 });
 
 test('outcome-weighted — tie on rate, higher avgScoreDelta wins via score', () => {
@@ -74,8 +70,8 @@ test('outcome-weighted — tie on rate, higher avgScoreDelta wins via score', ()
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.pickedSlug, 'tpl_b');
-  assert.equal(pick.reason, 'outcome_weighted');
+  expect(pick.pickedSlug).toBe('tpl_b');
+  expect(pick.reason).toBe('outcome_weighted');
 });
 
 test('outcome-weighted — same score, more trials wins', () => {
@@ -91,7 +87,7 @@ test('outcome-weighted — same score, more trials wins', () => {
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.pickedSlug, 'tpl_b');
+  expect(pick.pickedSlug).toBe('tpl_b');
 });
 
 test('mix: one candidate has data, another sparse → data-weighted candidate wins', () => {
@@ -107,8 +103,8 @@ test('mix: one candidate has data, another sparse → data-weighted candidate wi
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.pickedSlug, 'tpl_measured');
-  assert.equal(pick.reason, 'outcome_weighted');
+  expect(pick.pickedSlug).toBe('tpl_measured');
+  expect(pick.reason).toBe('outcome_weighted');
 });
 
 test('outcomes for different band are ignored', () => {
@@ -120,6 +116,6 @@ test('outcomes for different band are ignored', () => {
     currentBand: 'atRisk',
     minTrialsForOutcomeWeight: 5,
   });
-  assert.equal(pick.reason, 'priority_fallback');
-  assert.equal(pick.pickedSlug, 'tpl_a');
+  expect(pick.reason).toBe('priority_fallback');
+  expect(pick.pickedSlug).toBe('tpl_a');
 });

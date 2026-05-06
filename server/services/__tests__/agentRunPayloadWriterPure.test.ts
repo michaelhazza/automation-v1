@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { buildPayloadRow } from '../agentRunPayloadWriter.js';
 
 // ---------------------------------------------------------------------------
@@ -15,9 +14,9 @@ test('buildPayloadRow: under-cap no-op', () => {
     response: { ok: true },
     maxBytes: 1_000_000,
   });
-  assert.equal(out.modifications.length, 0, 'no modifications expected under cap');
-  assert.equal(out.redactedFields.length, 0, 'no redactions expected');
-  assert.ok(out.totalSizeBytes > 0);
+  expect(out.modifications.length, 'no modifications expected under cap').toBe(0);
+  expect(out.redactedFields.length, 'no redactions expected').toBe(0);
+  expect(out.totalSizeBytes > 0).toBeTruthy();
 });
 
 test('buildPayloadRow: redaction rewrites a bearer token and records it', () => {
@@ -34,10 +33,10 @@ test('buildPayloadRow: redaction rewrites a bearer token and records it', () => 
     maxBytes: 1_000_000,
   });
   const serialised = JSON.stringify(out.messages);
-  assert.ok(serialised.includes('[REDACTED:'), 'bearer token should be replaced');
-  assert.ok(out.redactedFields.length > 0, 'redactedFields must record the hit');
+  expect(serialised.includes('[REDACTED:')).toBeTruthy();
+  expect(out.redactedFields.length > 0).toBeTruthy();
   const hit = out.redactedFields.find((r) => r.pattern === 'bearer_token' || r.pattern === 'anthropic_key');
-  assert.ok(hit, 'at least one redaction pattern should match');
+  expect(hit).toBeTruthy();
 });
 
 test('buildPayloadRow: tool-policy args-never-persisted wipes input regardless of size', () => {
@@ -61,14 +60,11 @@ test('buildPayloadRow: tool-policy args-never-persisted wipes input regardless o
     maxBytes: 1_000_000,
   });
   const serialised = JSON.stringify(out.messages);
-  assert.ok(
-    serialised.includes('[POLICY:args-never-persisted]'),
-    'tool-call input should be replaced with policy marker',
-  );
+  expect(serialised.includes('[POLICY:args-never-persisted]')).toBeTruthy();
   const mod = out.modifications.find(
     (m) => m.kind === 'tool_policy' && m.toolSlug === 'oauth-exchange',
   );
-  assert.ok(mod, 'modifications must record the tool-policy substitution');
+  expect(mod).toBeTruthy();
 });
 
 test('buildPayloadRow: oversized payload is truncated greatest-first under cap', () => {
@@ -84,17 +80,14 @@ test('buildPayloadRow: oversized payload is truncated greatest-first under cap',
     response: { text: 'ok' },
     maxBytes: 100_000,
   });
-  assert.ok(
-    out.totalSizeBytes <= 100_000,
-    `totalSizeBytes ${out.totalSizeBytes} should fit under cap after truncation`,
-  );
+  expect(out.totalSizeBytes <= 100_000).toBeTruthy();
   const truncs = out.modifications.filter((m) => m.kind === 'truncated');
-  assert.ok(truncs.length > 0, 'should have at least one truncation modification');
+  expect(truncs.length > 0).toBeTruthy();
   // Greatest-first: the first-truncated field's originalSizeBytes should be
   // the biggest of the candidates.
   const first = truncs[0];
   if (first.kind === 'truncated') {
-    assert.ok(first.originalSizeBytes >= 200_000);
+    expect(first.originalSizeBytes >= 200_000).toBeTruthy();
   }
 });
 
@@ -118,16 +111,10 @@ test('buildPayloadRow: redaction + tool-policy + truncation compose correctly', 
     toolPolicies: { 'oauth-exchange': 'args-redacted' },
     maxBytes: 100_000,
   });
-  assert.ok(out.totalSizeBytes <= 100_000);
-  assert.ok(out.redactedFields.length > 0, 'bearer should be redacted');
-  assert.ok(
-    out.modifications.some((m) => m.kind === 'tool_policy' && m.policy === 'args-redacted'),
-    'tool-policy args-redacted recorded',
-  );
-  assert.ok(
-    out.modifications.some((m) => m.kind === 'truncated'),
-    'truncation recorded',
-  );
+  expect(out.totalSizeBytes <= 100_000).toBeTruthy();
+  expect(out.redactedFields.length > 0).toBeTruthy();
+  expect(out.modifications.some((m) => m.kind === 'tool_policy' && m.policy === 'args-redacted')).toBeTruthy();
+  expect(out.modifications.some((m) => m.kind === 'truncated')).toBeTruthy();
 });
 
 test('buildPayloadRow: returns fresh copies (no mutation of caller inputs)', () => {
@@ -141,7 +128,7 @@ test('buildPayloadRow: returns fresh copies (no mutation of caller inputs)', () 
     maxBytes: 1_000_000,
   });
   out.messages[0] = { mutated: true };
-  assert.deepEqual(originalMessages[0], { role: 'user', content: 'hi' });
+  expect(originalMessages[0]).toEqual({ role: 'user', content: 'hi' });
   (out.response as Record<string, unknown>).added = 'x';
-  assert.equal((originalResponse as Record<string, unknown>).added, undefined);
+  expect((originalResponse as Record<string, unknown>).added).toBe(undefined);
 });

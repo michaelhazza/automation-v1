@@ -1,6 +1,8 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
+import { connectorConfigs } from './connectorConfigs.js';
 
 // Memory & Briefings spec — portal mode tier enum (migration 0131, §6.2)
 export type PortalMode = 'hidden' | 'transparency' | 'collaborative';
@@ -71,9 +73,29 @@ export const subaccounts = pgTable(
     // ── Pulse — per-subaccount retention override (migration 0160) ──
     runRetentionDays: integer('run_retention_days'),
 
+    // ── Sub-Account Optimiser — opt-out toggle (migration 0267, spec §4) ──
+    // Default true: every sub-account participates in daily optimiser scans
+    // unless the operator explicitly opts out via admin SQL or Configuration Assistant.
+    optimiserEnabled: boolean('optimiser_enabled').notNull().default(true),
+
+    // ── F1 baseline artefacts capture status (migration 0277, spec §3) ──
+    // Tracks per-artefact completion state across three tiers. Null until
+    // first onboarding wizard visit; default set by migration for existing rows.
+    baselineArtefactsStatus: jsonb('baseline_artefacts_status').default(
+      sql`'{"version":1,"tier1":{"brand_identity":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null},"voice_tone":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null}},"tier2":{"offer_positioning":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null},"audience_icp":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null}},"tier3":{"operating_constraints":{"status":"not_started","captured_at":null,"skipped_at":null,"workspace_memory_id":null,"captured_by_user_id":null},"proof_library":{"status":"not_started","captured_at":null,"skipped_at":null,"workspace_memory_id":null,"captured_by_user_id":null}}}'::jsonb`
+    ),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    connectorConfigId: uuid('connector_config_id').references((): AnyPgColumn => connectorConfigs.id),
+    externalId: text('external_id'),
+
+    // ── Phase 3 D.5 — GHL location idempotency namespace (migration 0285) ──
+    // Namespaces the externalId so the partial unique index only applies to
+    // GHL-enrolled rows. Other providers may use externalId with their own
+    // namespace values in future without colliding.
+    externalIdNamespace: text('external_id_namespace'),
   },
   (table) => ({
     orgIdx: index('subaccounts_org_idx').on(table.organisationId),
@@ -81,6 +103,12 @@ export const subaccounts = pgTable(
     slugUniqueIdx: uniqueIndex('subaccounts_slug_unique_idx')
       .on(table.organisationId, table.slug)
       .where(sql`${table.deletedAt} IS NULL`),
+    // Partial unique index for GHL location idempotency — prevents duplicate
+    // enrolment of the same GHL location across the background pagination job.
+    // Only enforced for ghl_location namespace, soft-delete aware.
+    orgExternalGhlLocationIdx: uniqueIndex('subaccounts_org_external_ghl_location_idx')
+      .on(table.organisationId, table.externalId)
+      .where(sql`${table.externalIdNamespace} = 'ghl_location' AND ${table.deletedAt} IS NULL`),
   })
 );
 

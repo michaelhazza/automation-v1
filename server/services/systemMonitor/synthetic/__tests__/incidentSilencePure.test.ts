@@ -4,26 +4,12 @@
  * Runnable via:
  *   npx tsx server/services/systemMonitor/synthetic/__tests__/incidentSilencePure.test.ts
  */
+import { expect, test } from 'vitest';
 import {
   isMonitoringSilent,
   parseSilenceHoursEnv,
   parseProofOfLifeHoursEnv,
 } from '../incidentSilencePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -86,6 +72,3 @@ test('parseProofOfLifeHoursEnv: zero → default 24 (non-positive)', () => {
 test('parseProofOfLifeHoursEnv: valid 48 → 48', () => {
   check(parseProofOfLifeHoursEnv('48') === 48, 'expected 48 for valid string "48"');
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

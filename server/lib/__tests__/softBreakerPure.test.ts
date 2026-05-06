@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   createBreakerState,
   DEFAULT_SOFT_BREAKER_CONFIG,
@@ -26,7 +25,7 @@ const cfg: SoftBreakerConfig = {
 test('closed breaker allows every attempt', () => {
   const state = createBreakerState();
   for (let i = 0; i < 100; i++) {
-    assert.equal(shouldAttempt(state, 1_000 + i), true, `attempt ${i} must pass`);
+    expect(shouldAttempt(state, 1_000 + i), `attempt ${i} must pass`).toBe(true);
   }
 });
 
@@ -34,10 +33,10 @@ test('below minSamples — never trips even at 100% failures', () => {
   const state = createBreakerState();
   for (let i = 0; i < cfg.minSamples - 1; i++) {
     const { trippedNow } = recordOutcome(state, false, 1_000, cfg);
-    assert.equal(trippedNow, false);
+    expect(trippedNow).toBe(false);
   }
-  assert.equal(isOpen(state, 1_000), false);
-  assert.equal(shouldAttempt(state, 1_000), true);
+  expect(isOpen(state, 1_000)).toBe(false);
+  expect(shouldAttempt(state, 1_000)).toBe(true);
 });
 
 test('trips exactly at threshold with enough samples', () => {
@@ -48,8 +47,8 @@ test('trips exactly at threshold with enough samples', () => {
     const { trippedNow } = recordOutcome(state, false, 1_000 + i, cfg);
     if (trippedNow) trippedTimes++;
   }
-  assert.equal(trippedTimes, 1, 'exactly one trip notification per open cycle');
-  assert.equal(isOpen(state, 1_000 + cfg.minSamples), true);
+  expect(trippedTimes, 'exactly one trip notification per open cycle').toBe(1);
+  expect(isOpen(state, 1_000 + cfg.minSamples)).toBe(true);
 });
 
 test('shouldAttempt returns false while open, true after openDuration', () => {
@@ -58,9 +57,9 @@ test('shouldAttempt returns false while open, true after openDuration', () => {
     recordOutcome(state, false, 1_000, cfg);
   }
   // Breaker opens at timestamp 1_000; openedUntilMs = 1_000 + 60_000.
-  assert.equal(shouldAttempt(state, 1_500), false, 'within open window — suppressed');
-  assert.equal(shouldAttempt(state, 60_999), false, 'just before expiry — suppressed');
-  assert.equal(shouldAttempt(state, 61_000), true, 'at expiry — half-open probe allowed');
+  expect(shouldAttempt(state, 1_500), 'within open window — suppressed').toBe(false);
+  expect(shouldAttempt(state, 60_999), 'just before expiry — suppressed').toBe(false);
+  expect(shouldAttempt(state, 61_000), 'at expiry — half-open probe allowed').toBe(true);
 });
 
 test('successful probe after expiry closes the breaker (next call attempts normally)', () => {
@@ -69,12 +68,12 @@ test('successful probe after expiry closes the breaker (next call attempts norma
     recordOutcome(state, false, 1_000, cfg);
   }
   // Half-open probe at 61_000
-  assert.equal(shouldAttempt(state, 61_000), true);
+  expect(shouldAttempt(state, 61_000)).toBe(true);
   // Probe succeeds — record it
   const { trippedNow } = recordOutcome(state, true, 61_000, cfg);
-  assert.equal(trippedNow, false, 'probe success doesn\'t re-trip');
+  expect(trippedNow, 'probe success doesn\'t re-trip').toBe(false);
   // Subsequent attempts should flow normally
-  assert.equal(shouldAttempt(state, 61_100), true);
+  expect(shouldAttempt(state, 61_100)).toBe(true);
 });
 
 test('probe failure after expiry re-opens immediately (trippedNow=true)', () => {
@@ -82,7 +81,7 @@ test('probe failure after expiry re-opens immediately (trippedNow=true)', () => 
   for (let i = 0; i < cfg.minSamples; i++) {
     recordOutcome(state, false, 1_000, cfg);
   }
-  assert.equal(shouldAttempt(state, 61_000), true, 'half-open probe allowed');
+  expect(shouldAttempt(state, 61_000), 'half-open probe allowed').toBe(true);
   // Fill the now-empty window (see recordOutcome clearing on trip) with
   // enough failures to re-trip.
   let trippedTimes = 0;
@@ -90,8 +89,8 @@ test('probe failure after expiry re-opens immediately (trippedNow=true)', () => 
     const { trippedNow } = recordOutcome(state, false, 61_000 + i, cfg);
     if (trippedNow) trippedTimes++;
   }
-  assert.equal(trippedTimes, 1, 're-trip fires exactly one notification');
-  assert.equal(isOpen(state, 61_000 + cfg.minSamples), true);
+  expect(trippedTimes, 're-trip fires exactly one notification').toBe(1);
+  expect(isOpen(state, 61_000 + cfg.minSamples)).toBe(true);
 });
 
 test('sliding window — stale failures outside window are forgotten', () => {
@@ -109,8 +108,8 @@ test('sliding window — stale failures outside window are forgotten', () => {
   for (let i = 0; i < 2; i++) recordOutcome(state, true, 1_300 + i, cfg);
   // Now outcomes is all s's. Adding one failure → rate 1/10 = 10%, no trip.
   const { trippedNow } = recordOutcome(state, false, 1_400, cfg);
-  assert.equal(trippedNow, false, 'stale failures outside window shouldn\'t trip');
-  assert.equal(isOpen(state, 1_400), false);
+  expect(trippedNow, 'stale failures outside window shouldn\'t trip').toBe(false);
+  expect(isOpen(state, 1_400)).toBe(false);
 });
 
 test('default config — trips at 10 failures out of 50 sample slider? no, at 25/50', () => {
@@ -121,7 +120,7 @@ test('default config — trips at 10 failures out of 50 sample slider? no, at 25
   for (let i = 0; i < DEFAULT_SOFT_BREAKER_CONFIG.minSamples; i++) {
     recordOutcome(state, false, 1_000 + i);
   }
-  assert.equal(isOpen(state, 1_000 + DEFAULT_SOFT_BREAKER_CONFIG.minSamples), true);
+  expect(isOpen(state, 1_000 + DEFAULT_SOFT_BREAKER_CONFIG.minSamples)).toBe(true);
 });
 
 test('trippedNow fires exactly once per open cycle, not on every subsequent failure', () => {
@@ -132,11 +131,11 @@ test('trippedNow fires exactly once per open cycle, not on every subsequent fail
     const out = recordOutcome(state, false, 1_000 + i, cfg);
     if (out.trippedNow) trips++;
   }
-  assert.equal(trips, 1, 'one trip during the ramp-up');
+  expect(trips, 'one trip during the ramp-up').toBe(1);
   // Now continue recording failures while open — trippedNow must NOT
   // re-fire (that would spam the "breaker opened" log).
   for (let i = 0; i < 20; i++) {
     const out = recordOutcome(state, false, 1_000 + i, cfg);
-    assert.equal(out.trippedNow, false, 'no re-trip while already open');
+    expect(out.trippedNow, 'no re-trip while already open').toBe(false);
   }
 });

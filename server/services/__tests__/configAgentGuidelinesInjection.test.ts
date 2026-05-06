@@ -2,55 +2,18 @@
  * configAgentGuidelinesInjection — runtime injection path tests
  *
  * Two sections:
- *
- * 1. Pure (no DB) — tests `formatBlocksForPrompt` with a mock
- *    config-agent-guidelines block. Verifies that the block is correctly
- *    formatted for prompt injection when `getBlocksForAgent` returns it.
- *
- * 2. Integration (requires DATABASE_URL) — calls `getBlocksForAgent` against a
- *    real DB seeded with the guidelines block, and asserts the block is present
- *    in the returned array with `permission: 'read'`. Skipped when
- *    DATABASE_URL is not set.
- *
- * Runnable via:
- *   npx tsx server/services/__tests__/configAgentGuidelinesInjection.test.ts
+ *   1. Pure (no DB) — formatBlocksForPrompt formatting tests.
+ *   2. Integration (requires DATABASE_URL=...&NODE_ENV=integration) —
+ *      getBlocksForAgent against a real DB seeded with the guidelines block.
  *
  * Spec: docs/config-agent-guidelines-spec.md §3.5, §8 criterion 5
  */
 
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { formatBlocksForPrompt } from '../memoryBlockServicePure.js';
 import type { MemoryBlockForPrompt } from '../memoryBlockServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void | Promise<void>) {
-  return Promise.resolve()
-    .then(() => fn())
-    .then(() => {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    })
-    .catch((err) => {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message : err}`);
-    });
-}
-
-function assertEqual<T>(actual: T, expected: T, label: string) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(`Assertion failed: ${label}`);
-}
-
 // ─── Section 1: Pure (no DB) ──────────────────────────────────────────────────
-
-console.log('\n--- configAgentGuidelinesInjection (pure) ---');
 
 const guidelinesBlock: MemoryBlockForPrompt = {
   id: 'test-guidelines-id',
@@ -59,133 +22,127 @@ const guidelinesBlock: MemoryBlockForPrompt = {
   permission: 'read',
 };
 
-await test('formatBlocksForPrompt includes config-agent-guidelines block name', async () => {
+test('formatBlocksForPrompt includes config-agent-guidelines block name', () => {
   const result = formatBlocksForPrompt([guidelinesBlock]);
-  assert(result !== null, 'result is not null');
-  assert(result!.includes('config-agent-guidelines'), 'block name in output');
+  expect(result).not.toBe(null);
+  expect(result!.includes('config-agent-guidelines')).toBe(true);
 });
 
-await test('formatBlocksForPrompt includes config-agent-guidelines content', async () => {
+test('formatBlocksForPrompt includes config-agent-guidelines content', () => {
   const result = formatBlocksForPrompt([guidelinesBlock]);
-  assert(result !== null, 'result is not null');
-  assert(result!.includes('Three Cs: Context, Clarity, Confirmation.'), 'content in output');
+  expect(result).not.toBe(null);
+  expect(result!.includes('Three Cs: Context, Clarity, Confirmation.')).toBe(true);
 });
 
-await test('formatBlocksForPrompt returns null for empty array (no injection when block absent)', async () => {
+test('formatBlocksForPrompt returns null for empty array (no injection when block absent)', () => {
   const result = formatBlocksForPrompt([]);
-  assertEqual(result, null, 'result for empty array');
+  expect(result).toBe(null);
 });
 
-await test('formatBlocksForPrompt preserves read permission on guidelines block (schema contract)', async () => {
+test('formatBlocksForPrompt preserves read permission on guidelines block (schema contract)', () => {
   // The MemoryBlockForPrompt type carries permission through for write-path
-  // decisions. Verify that the block we store has permission 'read' — not
-  // 'read_write' — which would allow the agent to self-overwrite the block.
-  assertEqual(guidelinesBlock.permission, 'read', 'permission');
+  // decisions. permission must stay 'read' — 'read_write' would let the agent
+  // overwrite the block.
+  expect(guidelinesBlock.permission).toBe('read');
 });
 
-console.log(`\n  ${passed + failed} tests: ${passed} passed, ${failed} failed`);
+// ─── Section 2: Integration (requires DATABASE_URL + NODE_ENV=integration) ───
 
-const pureResults = { passed, failed };
+const SKIP_INTEGRATION = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
 
-// ─── Section 2: Integration (requires DATABASE_URL) ───────────────────────────
-
-if (!process.env.DATABASE_URL) {
-  console.log('\n--- configAgentGuidelinesInjection (integration) ---');
-  console.log('  SKIP  DATABASE_URL not set — run with a real database to test getBlocksForAgent');
-  console.log('        npx tsx server/services/__tests__/configAgentGuidelinesInjection.test.ts');
-  console.log('\n  0 tests: 0 passed, 0 failed (skipped)');
-} else {
-  // Dynamic imports to avoid loading DB modules in pure/unit test contexts.
-  const postgres = (await import('postgres')).default;
-  const { drizzle } = await import('drizzle-orm/postgres-js');
-  const { eq, and, isNull } = await import('drizzle-orm');
-  const {
-    memoryBlocks,
-    memoryBlockAttachments,
-    agents,
-  } = await import('../../db/schema/index.js');
-  const { getBlocksForAgent } = await import('../memoryBlockService.js');
-
-  const sql = postgres(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
-
+describe.skipIf(SKIP_INTEGRATION)('configAgentGuidelinesInjection (integration)', () => {
   const CONFIG_ASSISTANT_SLUG = 'configuration-assistant';
   const BLOCK_NAME = 'config-agent-guidelines';
 
-  console.log('\n--- configAgentGuidelinesInjection (integration) ---');
+  // reason: populated via dynamic imports in beforeAll; declared as `any` because module types are not statically available at declaration site.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sql: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let db: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let memoryBlocks: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let memoryBlockAttachments: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let getBlocksForAgent: any;
 
-  let iPassed = 0;
-  let iFailed = 0;
+  let configAgent: { id: string; organisationId: string } | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let eq: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let and: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let isNull: any;
 
-  async function itest(name: string, fn: () => Promise<void>) {
-    try {
-      await fn();
-      iPassed++;
-      console.log(`  PASS  ${name}`);
-    } catch (err) {
-      iFailed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message : err}`);
-    }
-  }
+  beforeAll(async () => {
+    const postgres = (await import('postgres')).default;
+    const drizzleMod = await import('drizzle-orm/postgres-js');
+    const orm = await import('drizzle-orm');
+    const schema = await import('../../db/schema/index.js');
+    const service = await import('../memoryBlockService.js');
 
-  // Find any org that has the Configuration Assistant agent
-  const [configAgent] = await db
-    .select({ id: agents.id, organisationId: agents.organisationId })
-    .from(agents)
-    .where(and(eq(agents.slug, CONFIG_ASSISTANT_SLUG), isNull(agents.deletedAt)));
+    eq = orm.eq;
+    and = orm.and;
+    isNull = orm.isNull;
+    memoryBlocks = schema.memoryBlocks;
+    memoryBlockAttachments = schema.memoryBlockAttachments;
+    getBlocksForAgent = service.getBlocksForAgent;
 
-  if (!configAgent) {
-    console.log('  SKIP  No configuration-assistant agent found — is the DB seeded?');
-    console.log('\n  0 tests: 0 passed, 0 failed (skipped)');
-  } else {
-    await itest('getBlocksForAgent returns config-agent-guidelines block', async () => {
-      const blocks = await getBlocksForAgent(configAgent.id, configAgent.organisationId);
-      const guidelinesInBlocks = blocks.find((b) => b.name === BLOCK_NAME);
-      assert(guidelinesInBlocks !== undefined, `block '${BLOCK_NAME}' present in getBlocksForAgent result`);
-    });
+    sql = postgres(process.env.DATABASE_URL!);
+    db = drizzleMod.drizzle(sql);
 
-    await itest('config-agent-guidelines block has permission: read', async () => {
-      const blocks = await getBlocksForAgent(configAgent.id, configAgent.organisationId);
-      const guidelinesInBlocks = blocks.find((b) => b.name === BLOCK_NAME);
-      assert(guidelinesInBlocks !== undefined, `block '${BLOCK_NAME}' present`);
-      assertEqual(guidelinesInBlocks!.permission, 'read', 'permission');
-    });
+    const [agent] = await db
+      .select({ id: schema.agents.id, organisationId: schema.agents.organisationId })
+      .from(schema.agents)
+      .where(and(eq(schema.agents.slug, CONFIG_ASSISTANT_SLUG), isNull(schema.agents.deletedAt)));
+    configAgent = agent;
+  });
 
-    await itest('config-agent-guidelines attachment row has deletedAt = null', async () => {
-      // Verify the attachment is live (not tombstoned) in the DB
-      const [block] = await db
-        .select({ id: memoryBlocks.id })
-        .from(memoryBlocks)
-        .where(
-          and(
-            eq(memoryBlocks.organisationId, configAgent.organisationId),
-            eq(memoryBlocks.name, BLOCK_NAME),
-            isNull(memoryBlocks.deletedAt),
-          ),
-        );
-      assert(block !== undefined, `memory block '${BLOCK_NAME}' exists`);
+  afterAll(async () => {
+    if (sql) await sql.end();
+  });
 
-      const [attachment] = await db
-        .select({ id: memoryBlockAttachments.id, deletedAt: memoryBlockAttachments.deletedAt })
-        .from(memoryBlockAttachments)
-        .where(
-          and(
-            eq(memoryBlockAttachments.blockId, block.id),
-            eq(memoryBlockAttachments.agentId, configAgent.id),
-            isNull(memoryBlockAttachments.deletedAt),
-          ),
-        );
-      assert(attachment !== undefined, 'live attachment row exists');
-      assertEqual(attachment!.deletedAt, null, 'deletedAt is null');
-    });
+  test.skipIf(SKIP_INTEGRATION)('getBlocksForAgent returns config-agent-guidelines block', async () => {
+    if (!configAgent) return; // No seeded Configuration Assistant agent — vacuous pass.
+    const blocks = await getBlocksForAgent(configAgent.id, configAgent.organisationId);
+    const guidelinesInBlocks = blocks.find((b: { name: string }) => b.name === BLOCK_NAME);
+    expect(guidelinesInBlocks).toBeDefined();
+  });
 
-    console.log(`\n  ${iPassed + iFailed} tests: ${iPassed} passed, ${iFailed} failed`);
+  test.skipIf(SKIP_INTEGRATION)('config-agent-guidelines block has permission: read', async () => {
+    if (!configAgent) return;
+    const blocks = await getBlocksForAgent(configAgent.id, configAgent.organisationId);
+    const guidelinesInBlocks = blocks.find((b: { name: string }) => b.name === BLOCK_NAME);
+    expect(guidelinesInBlocks).toBeDefined();
+    expect(guidelinesInBlocks!.permission).toBe('read');
+  });
 
-    if (iFailed > 0) process.exitCode = 1;
-  }
+  test.skipIf(SKIP_INTEGRATION)('config-agent-guidelines attachment row has deletedAt = null', async () => {
+    if (!configAgent) return;
+    const [block] = await db
+      .select({ id: memoryBlocks.id })
+      .from(memoryBlocks)
+      .where(
+        and(
+          eq(memoryBlocks.organisationId, configAgent.organisationId),
+          eq(memoryBlocks.name, BLOCK_NAME),
+          isNull(memoryBlocks.deletedAt),
+        ),
+      );
+    expect(block).toBeDefined();
 
-  await sql.end();
-}
+    const [attachment] = await db
+      .select({ id: memoryBlockAttachments.id, deletedAt: memoryBlockAttachments.deletedAt })
+      .from(memoryBlockAttachments)
+      .where(
+        and(
+          eq(memoryBlockAttachments.blockId, block.id),
+          eq(memoryBlockAttachments.agentId, configAgent.id),
+          isNull(memoryBlockAttachments.deletedAt),
+        ),
+      );
+    expect(attachment).toBeDefined();
+    expect(attachment!.deletedAt).toBe(null);
+  });
+});
 
-if (pureResults.failed > 0) process.exitCode = 1;

@@ -1,0 +1,5 @@
+server/tools/config/__tests__/configSkillHandlersPure.test.ts
+shared/__tests__/errorCodePure.test.ts
+shared/__tests__/stateMachineGuardsPure.test.ts
+shared/lib/parseContextSwitchCommand.test.ts
+server/services/scopeResolutionService.test.ts

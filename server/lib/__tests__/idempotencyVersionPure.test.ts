@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { IDEMPOTENCY_KEY_VERSION } from '../idempotencyVersion.js';
 
 // ---------------------------------------------------------------------------
@@ -15,16 +14,16 @@ import { IDEMPOTENCY_KEY_VERSION } from '../idempotencyVersion.js';
 // ---------------------------------------------------------------------------
 
 test('IDEMPOTENCY_KEY_VERSION matches /^v\\d+$/', () => {
-  assert.match(IDEMPOTENCY_KEY_VERSION, /^v\d+$/);
+  expect(IDEMPOTENCY_KEY_VERSION).toMatch(/^v\d+$/);
 });
 
 test('IDEMPOTENCY_KEY_VERSION is non-empty', () => {
-  assert.notEqual(IDEMPOTENCY_KEY_VERSION, '');
+  expect(IDEMPOTENCY_KEY_VERSION).not.toBe('');
 });
 
 test('IDEMPOTENCY_KEY_VERSION current value pinned at v1', () => {
   // Fixture pin — the version must change deliberately via the constant,
   // not via a copy-paste of hash output anywhere else. Bumping this line
   // in the same commit as a canonicalisation change is the whole point.
-  assert.equal(IDEMPOTENCY_KEY_VERSION, 'v1');
+  expect(IDEMPOTENCY_KEY_VERSION).toBe('v1');
 });

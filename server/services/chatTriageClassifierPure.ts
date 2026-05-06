@@ -71,6 +71,21 @@ function isCheapAnswer(text: string): boolean {
   return CHEAP_ANSWER_PATTERNS.some((re) => re.test(text));
 }
 
+// "make this a workflow" intent pattern
+const WORKFLOW_DRAFT_RE = /\b(make (this|it) a workflow|save (this|it) as a workflow|turn (this|it) into a workflow|workflow-ify)\b/i;
+
+/**
+ * Detects whether the text is a request to save the current task as a workflow draft.
+ * Returns 'workflow_draft_request' if matched, null otherwise.
+ * Pure, no I/O.
+ */
+export function detectWorkflowDraftIntent(text: string): 'workflow_draft_request' | null {
+  if (WORKFLOW_DRAFT_RE.test(text)) {
+    return 'workflow_draft_request';
+  }
+  return null;
+}
+
 /**
  * Tier 1 heuristic classifier — pure, no I/O, P99 < 2ms target.
  *

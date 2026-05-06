@@ -178,7 +178,7 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
           event.sequenceNumber > lastSeenSeqRef.current + 1
         ) {
           clientMetrics.sequenceGapsTotal += 1;
-          // eslint-disable-next-line no-console
+           
           console.warn('AgentRunLivePage: sequence gap', {
             lastSeen: lastSeenSeqRef.current,
             received: event.sequenceNumber,
@@ -319,7 +319,7 @@ function mergeEvents(
   for (let i = 1; i < merged.length; i++) {
     if (merged[i - 1].sequenceNumber === merged[i].sequenceNumber) {
       clientMetrics.sequenceCollisionsTotal += 1;
-      // eslint-disable-next-line no-console
+       
       console.warn('AgentRunLivePage.mergeEvents: sequence collision', {
         sequenceNumber: merged[i].sequenceNumber,
         ids: [merged[i - 1].id, merged[i].id],

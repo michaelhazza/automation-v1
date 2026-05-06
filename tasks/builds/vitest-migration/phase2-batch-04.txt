@@ -1,0 +1,10 @@
+server/services/__tests__/notifyOperatorFanoutServicePure.test.ts
+server/services/__tests__/recommendedInterventionPure.test.ts
+server/services/__tests__/referenceDocumentServicePure.test.ts
+server/services/__tests__/resolveRequiredConnectionsPure.test.ts
+server/services/__tests__/ruleConflictDetectorPure.test.ts
+server/services/__tests__/ruleTeachabilityClassifierPure.test.ts
+server/services/__tests__/skillIdempotencyKeysPure.test.ts
+server/services/__tests__/skillStudioServicePure.test.ts
+server/services/__tests__/workflowEngineApprovalResumeDispatch.integration.test.ts
+server/services/adapters/__tests__/apiAdapterClassifierPure.test.ts

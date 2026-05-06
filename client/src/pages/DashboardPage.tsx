@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket, useSocketRoom, useSocketConnected } from '../hooks/useSocket';
 import api from '../lib/api';
-import { User } from '../lib/auth';
+import { User, getActiveClientId } from '../lib/auth';
 import MetricCard from '../components/MetricCard';
 import { PendingApprovalCard } from '../components/dashboard/PendingApprovalCard';
 import WorkspaceFeatureCard from '../components/dashboard/WorkspaceFeatureCard';
@@ -18,6 +18,9 @@ import {
   trackPendingCardRejected,
 } from '../lib/telemetry';
 import type { PulseItem, PulseAttentionResponse } from '../hooks/usePulseAttention';
+import { AgentRecommendationsList } from '../components/recommendations/AgentRecommendationsList';
+import { useAgentRecommendationsTotal } from '../hooks/useAgentRecommendationsTotal';
+import type { RecommendationsTotalScope } from '../hooks/useAgentRecommendationsTotal';
 
 type DashboardErrorMap = {
   agents: boolean;
@@ -52,6 +55,19 @@ export default function DashboardPage({ user }: { user: User }) {
     agents: false, activity: false, pulseAttention: false, clientHealth: false,
   });
   const navigate = useNavigate();
+
+  // ── Recommendations section ───────────────────────────────────────────────
+  // activeClientId is read from localStorage (same source as Layout). Initialize
+  // once per mount — the value is stable for the lifetime of this page render.
+  const [activeClientId] = useState<string | null>(() => getActiveClientId());
+  const [recommendationsMode, setRecommendationsMode] = useState<'collapsed' | 'expanded'>('collapsed');
+  const recScope = useMemo<RecommendationsTotalScope | null>(
+    () => activeClientId
+      ? { type: 'subaccount', id: activeClientId }
+      : { type: 'org', id: user.organisationId },
+    [activeClientId, user.organisationId],
+  );
+  const recommendationsTotal = useAgentRecommendationsTotal(recScope);
 
   // ── Per-group timestamp refs (latest-data-wins) ──────────────────────────
   const approvalsTs     = useRef<string>('');
@@ -419,6 +435,34 @@ export default function DashboardPage({ user }: { user: User }) {
 
       {/* [LAYOUT-RESERVED: Piece 3 — Operational metrics] */}
       <OperationalMetricsPlaceholder />
+
+      {/* ── Agent recommendations (Invariant 29: no mount when total === null or 0) ── */}
+      {recommendationsTotal !== null && recommendationsTotal > 0 && (
+        <div className="mb-8">
+          <h2 className="text-[17px] font-bold text-slate-900 tracking-tight mb-3.5">
+            A few things to look at
+          </h2>
+          <AgentRecommendationsList
+            scope={
+              activeClientId
+                ? { type: 'subaccount', subaccountId: activeClientId }
+                : { type: 'org', orgId: user.organisationId }
+            }
+            includeDescendantSubaccounts={!activeClientId}
+            mode={recommendationsMode}
+            limit={recommendationsMode === 'collapsed' ? 3 : 20}
+          />
+          {recommendationsMode === 'collapsed' && recommendationsTotal > 3 && (
+            <button
+              type="button"
+              className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+              onClick={() => setRecommendationsMode('expanded')}
+            >
+              See all {recommendationsTotal}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Your workspaces ───────────────────────────────────────────────── */}
       <div className="mb-8">

@@ -16,8 +16,7 @@
  *   npx tsx --test server/services/__tests__/canonicalDataService.principalContext.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { fromOrgId } from '../principal/fromOrgId.js';
 
 // ---------------------------------------------------------------------------
@@ -168,19 +167,15 @@ const dbStub = {
 
 test('canonicalDataService.getAccountById throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await assert.rejects(
-    () => (canonicalDataService.getAccountById as unknown as (p: unknown, id: string) => Promise<unknown>)(
+  await expect(() => (canonicalDataService.getAccountById as unknown as (p: unknown, id: string) => Promise<unknown>)(
       null,
       'acc-1',
-    ),
-    /principal is required/,
-  );
+    )).rejects.toThrow(/principal is required/);
 });
 
 test('canonicalDataService.upsertAccount throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await assert.rejects(
-    () => (canonicalDataService.upsertAccount as unknown as (
+  await expect(() => (canonicalDataService.upsertAccount as unknown as (
       p: unknown,
       ccid: string,
       data: Record<string, unknown>,
@@ -188,42 +183,31 @@ test('canonicalDataService.upsertAccount throws when principal is null', async (
       null,
       'cfg-1',
       { externalId: 'ext-1' },
-    ),
-    /principal is required/,
-  );
+    )).rejects.toThrow(/principal is required/);
 });
 
 test('canonicalDataService.getAccountsByOrg throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await assert.rejects(
-    () => (canonicalDataService.getAccountsByOrg as unknown as (p: unknown) => Promise<unknown>)(null),
-    /principal is required/,
-  );
+  await expect(() => (canonicalDataService.getAccountsByOrg as unknown as (p: unknown) => Promise<unknown>)(null)).rejects.toThrow(/principal is required/);
 });
 
 test('canonicalDataService.findAccountBySubaccountId throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await assert.rejects(
-    () => (canonicalDataService.findAccountBySubaccountId as unknown as (
+  await expect(() => (canonicalDataService.findAccountBySubaccountId as unknown as (
       p: unknown,
       sub: string,
-    ) => Promise<unknown>)(null, 'sub-1'),
-    /principal is required/,
-  );
+    ) => Promise<unknown>)(null, 'sub-1')).rejects.toThrow(/principal is required/);
 });
 
 test('canonicalDataService.listInactiveContacts throws when principal is null', async () => {
   const { canonicalDataService } = await import('../canonicalDataService.js');
-  await assert.rejects(
-    () => (canonicalDataService.listInactiveContacts as unknown as (
+  await expect(() => (canonicalDataService.listInactiveContacts as unknown as (
       p: unknown,
       a: Record<string, unknown>,
     ) => Promise<unknown>)(
       null,
       { sinceDaysAgo: 30, limit: 10 },
-    ),
-    /principal is required/,
-  );
+    )).rejects.toThrow(/principal is required/);
 });
 
 // ---------------------------------------------------------------------------
@@ -232,15 +216,15 @@ test('canonicalDataService.listInactiveContacts throws when principal is null', 
 
 test('fromOrgId() returns a principal with type=service and the given organisationId', () => {
   const principal = fromOrgId('org-abc');
-  assert.strictEqual(principal.organisationId, 'org-abc');
-  assert.strictEqual(principal.type, 'service');
-  assert.strictEqual(principal.subaccountId, null);
+  expect(principal.organisationId).toBe('org-abc');
+  expect(principal.type).toBe('service');
+  expect(principal.subaccountId).toBe(null);
 });
 
 test('fromOrgId(orgId, subaccountId) carries the subaccountId on the principal', () => {
   const principal = fromOrgId('org-abc', 'sub-xyz');
-  assert.strictEqual(principal.organisationId, 'org-abc');
-  assert.strictEqual(principal.subaccountId, 'sub-xyz');
+  expect(principal.organisationId).toBe('org-abc');
+  expect(principal.subaccountId).toBe('sub-xyz');
 });
 
 // Suppress unused warnings on stub helpers retained for future expansion

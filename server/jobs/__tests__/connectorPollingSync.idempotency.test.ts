@@ -22,42 +22,26 @@
  * Runnable via:
  *   npx tsx server/jobs/__tests__/connectorPollingSync.idempotency.test.ts
  */
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level await and local declarations don't collide
 
 // connectorPollingSync transitively pulls in server/lib/env.ts which validates
 // required env vars via zod. Seed placeholders before any dynamic import so the
 // zod parse does not throw. This test is purely structural — it never touches
 // the DB or the connector polling service.
-await import('dotenv/config');
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { __testHooks } = await import('../connectorPollingSync.js');
 
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  // Reset-on-import enforcement (spec §B2 production-safety invariant #3): a
-  // forgotten override in one test must not leak into the next.
-  __testHooks.pauseBetweenClaimAndCommit = undefined;
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
 }
 
-await test('connectorPollingSync: __testHooks is exported with canonical shape', () => {
+test('connectorPollingSync: __testHooks is exported with canonical shape', () => {
   check(typeof __testHooks === 'object' && __testHooks !== null, '__testHooks must be an object');
   check(
     __testHooks.pauseBetweenClaimAndCommit === undefined,
@@ -65,7 +49,7 @@ await test('connectorPollingSync: __testHooks is exported with canonical shape',
   );
 });
 
-await test('connectorPollingSync: __testHooks override is observable to call site', async () => {
+test('connectorPollingSync: __testHooks override is observable to call site', async () => {
   let called = false;
   __testHooks.pauseBetweenClaimAndCommit = async () => {
     called = true;
@@ -75,11 +59,8 @@ await test('connectorPollingSync: __testHooks override is observable to call sit
   check(called, 'override is invoked when called');
 });
 
-await test('connectorPollingSync: __testHooks reset returns to undefined default', () => {
+test('connectorPollingSync: __testHooks reset returns to undefined default', () => {
   __testHooks.pauseBetweenClaimAndCommit = async () => {};
   __testHooks.pauseBetweenClaimAndCommit = undefined;
   check(__testHooks.pauseBetweenClaimAndCommit === undefined, 'reset clears the override');
-});
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+});

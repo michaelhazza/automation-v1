@@ -1,0 +1,5 @@
+# Known-bad fixture for verify-audit-event-namespace.sh (B.4) — Pass 1
+# This pattern SHOULD trip the gate: raw string literal as eventType in
+# a recordSecurityEvent call instead of using the auditEvent factory.
+
+recordSecurityEvent({ eventType: 'foo.bar.baz', organisationId: orgId, meta: {} });

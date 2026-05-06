@@ -266,7 +266,7 @@ export async function getPrioritisedClients(
 
   // ── 4. Sparkline: one batched query, 4 weekly buckets over last 28 days ──
   // Returns one row per (subaccount_id, week_bucket) with AVG score.
-  let sparklineMap = new Map<string, number[]>();
+  const sparklineMap = new Map<string, number[]>();
   try {
     const sparklineResult = await Promise.race([
       dbClient.execute<{

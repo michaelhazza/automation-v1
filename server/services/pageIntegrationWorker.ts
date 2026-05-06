@@ -57,7 +57,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
     .set({ integrationStatus: 'processing' })
     .where(eq(formSubmissions.id, submissionId));
 
-  let result: { success: boolean; error?: unknown; data?: unknown } = { success: false };
+  let result: { success: boolean; error?: unknown; data?: unknown };
 
   try {
     // 2. Look up connection

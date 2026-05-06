@@ -12,32 +12,14 @@
 
 export {};
 
+import { expect, test } from 'vitest';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg);
-}
 
 console.log('\nH3 + invariant 6.3 — computeRunResultStatus pure tests\n');
 
 // ── Invariant 6.3: completed → success when no demotion signals ────────────
 test('all-completed, no error, no uncertainty → success', () => {
-  assert(computeRunResultStatus('completed', false, false) === 'success', 'all-completed must be success');
+  expect(computeRunResultStatus('completed', false, false) === 'success', 'all-completed must be success').toBeTruthy();
 });
 
 // ── H3: summary absence does NOT demote ────────────────────────────────────
@@ -45,38 +27,38 @@ test('completed + no summary (hasSummary=false) → success (H3: summary absence
   // hasSummary is no longer a parameter; this test asserts the function
   // only considers finalStatus, hasError, hadUncertainty.
   // Calling with the 3-arg signature and no hasSummary confirms H3 fix.
-  assert(computeRunResultStatus('completed', false, false) === 'success', 'no-summary completed must be success, not partial');
+  expect(computeRunResultStatus('completed', false, false) === 'success', 'no-summary completed must be success, not partial').toBeTruthy();
 });
 
 // ── Any-error → partial (on completed) ───────────────────────────────────
 test('completed + hasError → partial', () => {
-  assert(computeRunResultStatus('completed', true, false) === 'partial', 'error demotes to partial');
+  expect(computeRunResultStatus('completed', true, false) === 'partial', 'error demotes to partial').toBeTruthy();
 });
 
 // ── Uncertainty → partial ─────────────────────────────────────────────────
 test('completed + hadUncertainty → partial', () => {
-  assert(computeRunResultStatus('completed', false, true) === 'partial', 'uncertainty demotes to partial');
+  expect(computeRunResultStatus('completed', false, true) === 'partial', 'uncertainty demotes to partial').toBeTruthy();
 });
 
 // ── Failure statuses → failed (regardless of error/uncertainty signals) ───
 const failureStatuses = ['failed', 'timeout', 'loop_detected', 'budget_exceeded', 'cancelled'];
 for (const s of failureStatuses) {
   test(`${s} → failed`, () => {
-    assert(computeRunResultStatus(s, false, false) === 'failed', `${s} must be failed`);
-    assert(computeRunResultStatus(s, true, true) === 'failed', `${s} must be failed regardless of signals`);
+    expect(computeRunResultStatus(s, false, false) === 'failed', `${s} must be failed`).toBeTruthy();
+    expect(computeRunResultStatus(s, true, true) === 'failed', `${s} must be failed regardless of signals`).toBeTruthy();
   });
 }
 
 // ── completed_with_uncertainty → partial ─────────────────────────────────
 test('completed_with_uncertainty → partial (invariant 6.3)', () => {
-  assert(computeRunResultStatus('completed_with_uncertainty', false, false) === 'partial', 'completed_with_uncertainty is partial');
+  expect(computeRunResultStatus('completed_with_uncertainty', false, false) === 'partial', 'completed_with_uncertainty is partial').toBeTruthy();
 });
 
 // ── Non-terminal → null (invariant 6.3: do not write until terminal) ──────
 const nonTerminalStatuses = ['pending', 'running', 'delegated', 'awaiting_clarification', 'waiting_on_clarification'];
 for (const s of nonTerminalStatuses) {
   test(`${s} → null (non-terminal; caller MUST NOT write runResultStatus)`, () => {
-    assert(computeRunResultStatus(s, false, false) === null, `${s} must return null (non-terminal)`);
+    expect(computeRunResultStatus(s, false, false) === null, `${s} must return null (non-terminal)`).toBeTruthy();
   });
 }
 
@@ -86,9 +68,6 @@ test('H3 side-channel contract: summary presence does not affect output (3-arg f
   // The old 4-arg signature accepted hasSummary; removal is the contract change.
   const r1 = computeRunResultStatus('completed', false, false);
   const r2 = computeRunResultStatus('completed', false, false);
-  assert(r1 === r2, 'pure: same inputs must produce same output');
-  assert(r1 === 'success', 'completed + clean signals → success regardless of external summary state');
+  expect(r1 === r2, 'pure: same inputs must produce same output').toBeTruthy();
+  expect(r1 === 'success', 'completed + clean signals → success regardless of external summary state').toBeTruthy();
 });
-
-console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

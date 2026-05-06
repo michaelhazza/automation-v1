@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>03 — Subaccount agents list · Acme Client Co.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 03 / 16 · <span class="muted">SubaccountAgentsPage (existing) — extended with Workplace column</span> · <a href="04-onboard-step1-identity.html">Next: Onboard step 1 →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Subaccounts</a>
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Agents</span>
+  </span>
+  <span class="right">
+    <span class="user-pill"><span class="avatar">M</span><span>Maya Lim · Acme Agency</span></span>
+  </span>
+</div>
+
+<div class="tabs">
+  <a href="#">Integrations</a>
+  <a href="#">Onboarding</a>
+  <a href="#">Engines</a>
+  <a href="#">Workflows</a>
+  <a href="#" class="active">Agents</a>
+  <a href="#">Beliefs</a>
+  <a href="#">Categories</a>
+  <a href="#">Tags</a>
+  <a href="#">Board</a>
+  <a href="#">Memory</a>
+  <a href="#">Usage</a>
+  <a href="#">Admin</a>
+  <a href="01-workspace-setup-native.html">Workspace</a>
+</div>
+
+<div class="page" style="max-width: 1200px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Agents</h1>
+      <p class="page-sub">Agents at this client. Inherited from system templates. Onboard them to the workplace to give them an email and calendar so the team can interact with them.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <a href="08-org-chart.html" class="btn btn-secondary">View org chart →</a>
+      <button class="btn btn-secondary">Load more from catalogue</button>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px; padding: 10px 16px; background: white; border: 1px solid var(--sl-200); border-radius: 8px; font-size: 12px;">
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <span style="font-weight: 500; color: var(--sl-700);">Backend:</span>
+      <span class="pill pill-info"><span class="dot" style="background: var(--indigo-500);"></span>Synthetos-native</span>
+    </div>
+    <div style="height: 14px; width: 1px; background: var(--sl-200);"></div>
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <span style="font-weight: 500; color: var(--sl-700);">Onboarded to workplace:</span>
+      <span class="num"><strong>4</strong> of 5 agents · <strong>4</strong> of 25 seats</span>
+    </div>
+    <div style="height: 14px; width: 1px; background: var(--sl-200);"></div>
+    <a href="01-workspace-setup-native.html" style="color: var(--indigo-600); text-decoration: none; font-weight: 500;">Workspace settings →</a>
+
+    <div style="margin-left: auto; display: flex; gap: 6px;">
+      <button class="btn btn-secondary btn-sm" style="background: white;">List</button>
+      <button class="btn btn-ghost btn-sm">Hierarchy</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Role</th>
+          <th>Reports to</th>
+          <th>Workplace</th>
+          <th>Live</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="avatar avatar-sm avatar-agent">SA</span>
+              <div>
+                <div style="font-weight: 600; color: var(--sl-900);">Sarah</div>
+                <div class="text-xs muted">Marketing analyst</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="pill pill-purple">Specialist</span></td>
+          <td class="text-sm">Maya Lim</td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <code class="text-xs">sarah@acme.synthetos.io</code>
+              <span class="pill pill-active" style="width: fit-content;"><span class="dot"></span>Onboarded</span>
+            </div>
+          </td>
+          <td><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green-700); font-weight: 500;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.18);"></span>Running</span></td>
+          <td><a href="09-agent-identity-tab.html" style="font-size: 12px; color: var(--indigo-600); text-decoration: none;">Open →</a></td>
+        </tr>
+        <tr>
+          <td>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="avatar avatar-sm avatar-agent">JO</span>
+              <div>
+                <div style="font-weight: 600; color: var(--sl-900);">Johnny</div>
+                <div class="text-xs muted">SDR</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="pill pill-info">Worker</span></td>
+          <td class="text-sm">Maya Lim</td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <code class="text-xs">johnny@acme.synthetos.io</code>
+              <span class="pill pill-active" style="width: fit-content;"><span class="dot"></span>Onboarded</span>
+            </div>
+          </td>
+          <td><span class="text-xs muted">—</span></td>
+          <td><a href="#" style="font-size: 12px; color: var(--indigo-600); text-decoration: none;">Open →</a></td>
+        </tr>
+        <tr>
+          <td>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="avatar avatar-sm avatar-agent">HE</span>
+              <div>
+                <div style="font-weight: 600; color: var(--sl-900);">Helena</div>
+                <div class="text-xs muted">Content marketer</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="pill pill-info">Worker</span></td>
+          <td class="text-sm">Sarah</td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <code class="text-xs">helena@acme.synthetos.io</code>
+              <span class="pill pill-active" style="width: fit-content;"><span class="dot"></span>Onboarded · <span style="font-weight: 400;">no email</span></span>
+            </div>
+          </td>
+          <td><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green-700); font-weight: 500;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.18);"></span>Running</span></td>
+          <td><a href="#" style="font-size: 12px; color: var(--indigo-600); text-decoration: none;">Open →</a></td>
+        </tr>
+        <tr>
+          <td>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="avatar avatar-sm avatar-agent">PA</span>
+              <div>
+                <div style="font-weight: 600; color: var(--sl-900);">Patel</div>
+                <div class="text-xs muted">Support triage</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="pill pill-info">Worker</span></td>
+          <td class="text-sm">Johnny</td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <code class="text-xs">patel@acme.synthetos.io</code>
+              <span class="pill pill-suspend" style="width: fit-content;"><span class="dot"></span>Suspended</span>
+            </div>
+          </td>
+          <td><span class="text-xs muted">—</span></td>
+          <td><a href="#" style="font-size: 12px; color: var(--indigo-600); text-decoration: none;">Open →</a></td>
+        </tr>
+        <tr style="background: var(--amber-50);">
+          <td>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="avatar avatar-sm avatar-neutral">RI</span>
+              <div>
+                <div style="font-weight: 600; color: var(--sl-900);">Riley</div>
+                <div class="text-xs muted">Reporting agent</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="pill pill-info">Worker</span></td>
+          <td class="text-sm muted">—</td>
+          <td>
+            <span class="pill pill-amber"><span class="dot" style="background: var(--amber-600);"></span>Not onboarded</span>
+          </td>
+          <td><span class="text-xs muted">—</span></td>
+          <td><a href="04-onboard-step1-identity.html" class="btn btn-primary btn-sm" style="font-size: 11px; padding: 4px 10px;">Onboard to workplace →</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout-info" style="margin-top: 8px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div><strong>Onboarding</strong> turns an existing agent into a colleague the client's team can interact with — email and calendar. The agent is already on the org chart; onboarding fills in their email, photo, and lifecycle state. Agents can keep working as automation without being onboarded.</div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -36,7 +36,7 @@ import {
   type ReviewMode,
 } from './chatgpt-reviewPure.js';
 
-const DEFAULT_MODEL = 'gpt-4o';
+const DEFAULT_MODEL = 'gpt-4.1';
 const OPENAI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
 interface CliArgs {
@@ -218,6 +218,7 @@ async function main(): Promise<void> {
     process.stderr.write(`--- raw response (full) ---\n${rawContent}\n--- end raw response ---\n`);
     throw new Error(
       `failed to parse model output as JSON: ${err instanceof Error ? err.message : String(err)} (full response written to stderr)`,
+      { cause: err },
     );
   }
 

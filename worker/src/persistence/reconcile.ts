@@ -8,7 +8,7 @@
 import { and, eq, lt, ne, inArray } from 'drizzle-orm';
 import { db } from '../db.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
-import { budgetReservations } from '../../../server/db/schema/budgetReservations.js';
+import { computeReservations } from '../../../server/db/schema/computeReservations.js';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
 
@@ -45,9 +45,9 @@ export async function reconcileAbandonedRuns(currentWorkerInstanceId: string): P
     if (failed.length > 0) {
       const reservationKeys = failed.map(r => `iee:${r.id}`);
       await tx
-        .update(budgetReservations)
+        .update(computeReservations)
         .set({ status: 'released' })
-        .where(inArray(budgetReservations.idempotencyKey, reservationKeys));
+        .where(inArray(computeReservations.idempotencyKey, reservationKeys));
     }
 
     return failed;

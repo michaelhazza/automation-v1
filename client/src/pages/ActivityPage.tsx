@@ -1,44 +1,48 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Link, useSearchParams, useParams, useLocation } from 'react-router-dom';
+import { useSearchParams, useParams, useLocation } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import ActivityFeedTable, { ActivityItem } from '../components/activity/ActivityFeedTable';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type ActivityType =
-  | 'agent_run'
-  | 'review_item'
-  | 'health_finding'
-  | 'inbox_item'
-  | 'workflow_run'
-  | 'workflow_execution';
+  | 'agent_run' | 'review_item' | 'health_finding' | 'inbox_item' | 'workflow_run' | 'workflow_execution'
+  | 'email.sent' | 'email.received' | 'calendar.event_created' | 'calendar.event_accepted'
+  | 'calendar.event_declined' | 'identity.provisioned' | 'identity.activated' | 'identity.suspended'
+  | 'identity.resumed' | 'identity.revoked' | 'identity.archived' | 'identity.email_sending_enabled'
+  | 'identity.email_sending_disabled' | 'identity.migrated' | 'identity.migration_failed'
+  | 'identity.provisioning_failed' | 'actor.onboarded' | 'subaccount.migration_completed';
 
 type NormalisedStatus = 'active' | 'attention_needed' | 'completed' | 'failed' | 'cancelled';
 
-type ActivityItem = {
-  id: string;
-  type: ActivityType;
-  status: NormalisedStatus;
-  subject: string;
-  actor: string;
-  subaccountId: string | null;
-  subaccountName: string | null;
-  agentId: string | null;
-  agentName: string | null;
-  severity: 'critical' | 'warning' | 'info' | null;
-  createdAt: string;
-  updatedAt: string;
-  detailUrl: string;
-};
-
 type Scope = 'subaccount' | 'org' | 'system';
 
-const ACTIVITY_TYPES: ActivityType[] = [
+type WorkspaceActor = {
+  actorId: string;
+  displayName: string;
+};
+
+// Core activity types (non-workspace)
+const CORE_ACTIVITY_TYPES: ActivityType[] = [
   'agent_run', 'review_item', 'health_finding', 'inbox_item',
   'workflow_run', 'workflow_execution',
 ];
+
+// Workspace event types
+const WORKSPACE_ACTIVITY_TYPES: ActivityType[] = [
+  'email.sent', 'email.received',
+  'calendar.event_created', 'calendar.event_accepted', 'calendar.event_declined',
+  'identity.provisioned', 'identity.activated', 'identity.suspended',
+  'identity.resumed', 'identity.revoked', 'identity.archived',
+  'identity.email_sending_enabled', 'identity.email_sending_disabled',
+  'identity.migrated', 'identity.migration_failed', 'identity.provisioning_failed',
+  'actor.onboarded', 'subaccount.migration_completed',
+];
+
+const ACTIVITY_TYPES: ActivityType[] = [...CORE_ACTIVITY_TYPES, ...WORKSPACE_ACTIVITY_TYPES];
 
 const STATUS_OPTIONS: NormalisedStatus[] = ['active', 'attention_needed', 'completed', 'failed', 'cancelled'];
 
@@ -56,43 +60,11 @@ const SORT_OPTIONS = [
 // ---------------------------------------------------------------------------
 
 function typeLabel(t: ActivityType): string {
+  if (t.includes('.')) {
+    const parts = t.split('.');
+    return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+  }
   return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function statusBadge(s: NormalisedStatus) {
-  const map: Record<NormalisedStatus, { bg: string; text: string }> = {
-    active: { bg: 'bg-blue-50 border-blue-200', text: 'text-blue-700' },
-    attention_needed: { bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700' },
-    completed: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700' },
-    failed: { bg: 'bg-red-50 border-red-200', text: 'text-red-700' },
-    cancelled: { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-500' },
-  };
-  const { bg, text } = map[s];
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-semibold rounded-full border ${bg} ${text}`}>
-      {s.replace(/_/g, ' ')}
-    </span>
-  );
-}
-
-function severityBadge(sev: 'critical' | 'warning' | 'info' | null) {
-  if (!sev) return <span className="text-slate-300 text-[12px]">--</span>;
-  const map = {
-    critical: 'bg-red-100 text-red-700 border-red-200',
-    warning: 'bg-amber-100 text-amber-700 border-amber-200',
-    info: 'bg-sky-50 text-sky-700 border-sky-200',
-  };
-  return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10.5px] font-semibold rounded-full border ${map[sev]}`}>
-      {sev}
-    </span>
-  );
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +98,7 @@ function ColHeader({
         className={`flex items-center gap-1.5 w-full py-3 bg-transparent border-0 cursor-pointer text-[13px] font-semibold text-left transition-colors ${isOpen ? 'text-indigo-600' : 'text-slate-700 hover:text-slate-900'}`}
       >
         <span>{label}</span>
-        {isSorted && <span className="text-indigo-500 text-[11px]">{sortDir === 'asc' ? '\u2191' : '\u2193'}</span>}
+        {isSorted && <span className="text-indigo-500 text-[11px]">{sortDir === 'asc' ? '↑' : '↓'}</span>}
         {hasActiveFilter && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block" />}
         <svg
           className={`ml-auto w-3 h-3 transition-transform ${isOpen ? 'rotate-180 text-indigo-500' : 'text-slate-400'}`}
@@ -144,15 +116,15 @@ function ColHeader({
               onClick={() => onSort(col as SortCol, 'asc')}
               className={`flex items-center gap-2 w-full px-2 py-1.5 text-[12px] rounded-md border-0 cursor-pointer transition-colors text-left ${isSorted && sortDir === 'asc' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-transparent text-slate-700 hover:bg-slate-50'}`}
             >
-              <span className="text-[11px] w-3">{'\u2191'}</span> A {'\u2192'} Z
-              {isSorted && sortDir === 'asc' && <span className="ml-auto text-indigo-500">{'\u2713'}</span>}
+              <span className="text-[11px] w-3">{'↑'}</span> A {'→'} Z
+              {isSorted && sortDir === 'asc' && <span className="ml-auto text-indigo-500">{'✓'}</span>}
             </button>
             <button
               onClick={() => onSort(col as SortCol, 'desc')}
               className={`flex items-center gap-2 w-full px-2 py-1.5 text-[12px] rounded-md border-0 cursor-pointer transition-colors text-left ${isSorted && sortDir === 'desc' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-transparent text-slate-700 hover:bg-slate-50'}`}
             >
-              <span className="text-[11px] w-3">{'\u2193'}</span> Z {'\u2192'} A
-              {isSorted && sortDir === 'desc' && <span className="ml-auto text-indigo-500">{'\u2713'}</span>}
+              <span className="text-[11px] w-3">{'↓'}</span> Z {'→'} A
+              {isSorted && sortDir === 'desc' && <span className="ml-auto text-indigo-500">{'✓'}</span>}
             </button>
           </div>
           {children && (
@@ -180,7 +152,7 @@ function FilterActions({ onAll, onNone }: { onAll: () => void; onNone: () => voi
   return (
     <div className="flex items-center gap-2 px-2 pb-1.5">
       <button onClick={onAll} className="text-[11px] text-indigo-600 hover:text-indigo-800 bg-transparent border-0 p-0 cursor-pointer">All</button>
-      <span className="text-slate-300 text-[11px]">{'\u00B7'}</span>
+      <span className="text-slate-300 text-[11px]">{'·'}</span>
       <button onClick={onNone} className="text-[11px] text-indigo-600 hover:text-indigo-800 bg-transparent border-0 p-0 cursor-pointer">None</button>
     </div>
   );
@@ -202,10 +174,14 @@ export default function ActivityPage({ user }: { user: User }) {
       ? 'system'
       : 'org';
 
-  // Data state
+  // Data state — DE-CR-7: cursor pagination only; `total` is not part of the
+  // server contract any more, so the "X items" counter reflects items currently
+  // loaded into the feed.
   const [items, setItems] = useState<ActivityItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Workspace actors (subaccount scope only)
+  const [actors, setActors] = useState<WorkspaceActor[]>([]);
 
   // Client-side column filters — exclusion sets (values in set are HIDDEN)
   // Empty set = no filter (all values shown). Matches SystemSkillsPage ColHeader pattern.
@@ -218,6 +194,7 @@ export default function ActivityPage({ user }: { user: User }) {
   const [sort, setSort] = useState<string>(searchParams.get('sort') ?? 'attention_first');
   const [from, setFrom] = useState(searchParams.get('from') ?? '');
   const [to, setTo] = useState(searchParams.get('to') ?? '');
+  const [filterActorId, setFilterActorId] = useState<string | undefined>(undefined);
 
   // Client-side column sort (applied on top of server sort)
   const [sortCol, setSortCol] = useState<SortCol | null>(null);
@@ -234,6 +211,25 @@ export default function ActivityPage({ user }: { user: User }) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Fetch workspace actors for subaccount scope (for actor filter dropdown)
+  // Uses the workspace identity list bundled in the existing workspace summary endpoint.
+  // If no dedicated actors endpoint exists, the dropdown stays empty (shows "All actors" only).
+  useEffect(() => {
+    if (scope !== 'subaccount' || !paramSubaccountId) return;
+
+    api.get(`/api/subaccounts/${paramSubaccountId}/workspace/actors`)
+      .then((res) => {
+        const data = res.data;
+        if (Array.isArray(data)) {
+          setActors(data as WorkspaceActor[]);
+        }
+      })
+      .catch(() => {
+        // Endpoint doesn't exist yet — actor dropdown shows "All actors" only
+        setActors([]);
+      });
+  }, [scope, paramSubaccountId]);
 
   // Toggle filter helper
   const toggleFilter = <T extends string>(set: Set<T>, setFn: React.Dispatch<React.SetStateAction<Set<T>>>, val: T) => {
@@ -259,20 +255,19 @@ export default function ActivityPage({ user }: { user: User }) {
       if (q) params.q = q;
       if (from) params.from = from;
       if (to) params.to = to;
+      if (filterActorId) params.actorId = filterActorId;
 
       const res = await api.get(getEndpoint(), { params });
       const data = scope === 'org'
         ? res.data.data
         : res.data;
-      setItems(data.items);
-      setTotal(data.total);
+      setItems(data.items ?? []);
     } catch {
       setItems([]);
-      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [getEndpoint, q, from, to, sort]);
+  }, [getEndpoint, q, from, to, sort, filterActorId]);
 
   // Initial load + polling every 10s
   useEffect(() => { load(); }, [load]);
@@ -291,8 +286,10 @@ export default function ActivityPage({ user }: { user: User }) {
     setSearchParams(p, { replace: true });
   }, [sort, q, from, to, setSearchParams]);
 
-  const hasFilters = filterType.size > 0 || filterStatus.size > 0 || filterSeverity.size > 0 || q || from || to || sort !== 'attention_first';
-  const activeFilterCount = filterType.size + filterStatus.size + filterSeverity.size + (q ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0);
+  const hasFilters = filterType.size > 0 || filterStatus.size > 0 || filterSeverity.size > 0
+    || q || from || to || sort !== 'attention_first' || !!filterActorId;
+  const activeFilterCount = filterType.size + filterStatus.size + filterSeverity.size
+    + (q ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) + (filterActorId ? 1 : 0);
 
   const clearAll = () => {
     setFilterType(new Set());
@@ -303,6 +300,7 @@ export default function ActivityPage({ user }: { user: User }) {
     setTo('');
     setSort('attention_first');
     setSortCol(null);
+    setFilterActorId(undefined);
   };
 
   // Client-side column sort
@@ -314,7 +312,7 @@ export default function ActivityPage({ user }: { user: User }) {
 
   // Client-side exclusion filter: values in the set are HIDDEN
   const filtered = items.filter((item) => {
-    if (filterType.has(item.type)) return false;
+    if (filterType.has(item.type as ActivityType)) return false;
     if (filterStatus.has(item.status)) return false;
     if (item.severity && filterSeverity.has(item.severity)) return false;
     return true;
@@ -335,6 +333,9 @@ export default function ActivityPage({ user }: { user: User }) {
 
   const scopeLabel = scope === 'subaccount' ? 'Subaccount' : scope === 'system' ? 'System' : 'Organisation';
 
+  // Selected actor display name
+  const selectedActor = actors.find((a) => a.actorId === filterActorId);
+
   return (
     <div className="max-w-[1400px] mx-auto">
       {/* Header */}
@@ -352,13 +353,30 @@ export default function ActivityPage({ user }: { user: User }) {
               Clear all
             </button>
           )}
-          <span className="text-[13px] text-slate-500">{total} items</span>
+          <span className="text-[13px] text-slate-500">{items.length} items</span>
         </div>
       </div>
 
       {/* Filter bar */}
       <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 mb-5">
         <div className="flex gap-3 flex-wrap items-end">
+          {/* Actor filter — subaccount scope only */}
+          {scope === 'subaccount' && (
+            <div className="flex-1 min-w-[160px]">
+              <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Actor</label>
+              <select
+                value={filterActorId ?? ''}
+                onChange={(e) => setFilterActorId(e.target.value || undefined)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">All actors</option>
+                {actors.map((a) => (
+                  <option key={a.actorId} value={a.actorId}>{a.displayName}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="flex-1 min-w-[160px]">
             <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Search</label>
             <input
@@ -419,30 +437,9 @@ export default function ActivityPage({ user }: { user: User }) {
         </div>
       </div>
 
-      {/* Table */}
-      <div ref={tableRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        {loading && items.length === 0 ? (
-          <div className="p-5 flex flex-col gap-2">
-            {[1,2,3,4,5].map((i) => <div key={i} className="h-[52px] rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
-          </div>
-        ) : displayed.length === 0 ? (
-          <div className="p-12 flex flex-col items-center text-center">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-              </svg>
-            </div>
-            <p className="font-bold text-[16px] text-slate-900 mb-1.5">No activity found</p>
-            <p className="text-[13.5px] text-slate-500 mb-5">
-              {hasFilters ? 'Try adjusting your filters.' : 'Activity from agents and workflows will appear here.'}
-            </p>
-            {hasFilters && (
-              <button onClick={clearAll} className="btn btn-secondary">
-                Clear filters
-              </button>
-            )}
-          </div>
-        ) : (
+      {/* Column filters */}
+      <div ref={tableRef} className="mb-3">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-visible">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100">
@@ -456,7 +453,17 @@ export default function ActivityPage({ user }: { user: User }) {
                     onAll={() => setFilterType(new Set())}
                     onNone={() => setFilterType(new Set(ACTIVITY_TYPES))}
                   />
-                  {ACTIVITY_TYPES.map((t) => (
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold px-2 py-1 mt-0.5">Core</div>
+                  {CORE_ACTIVITY_TYPES.map((t) => (
+                    <CheckOption
+                      key={t}
+                      checked={!filterType.has(t)}
+                      onChange={() => toggleFilter(filterType, setFilterType, t)}
+                      label={typeLabel(t)}
+                    />
+                  ))}
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold px-2 py-1 mt-0.5 border-t border-slate-100 pt-1.5">Workspace</div>
+                  {WORKSPACE_ACTIVITY_TYPES.map((t) => (
                     <CheckOption
                       key={t}
                       checked={!filterType.has(t)}
@@ -511,37 +518,69 @@ export default function ActivityPage({ user }: { user: User }) {
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Created</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
-              {displayed.map((item) => (
-                <tr key={`${item.type}-${item.id}`} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                      {typeLabel(item.type)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{statusBadge(item.status)}</td>
-                  <td className="px-4 py-3">
-                    <Link
-                      to={item.detailUrl}
-                      className="text-indigo-600 hover:text-indigo-700 text-[13px] font-medium no-underline hover:underline"
-                    >
-                      {item.subject.length > 80 ? item.subject.slice(0, 80) + '...' : item.subject}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-[13px] text-slate-600">{item.actor}</td>
-                  <td className="px-4 py-3">{severityBadge(item.severity)}</td>
-                  {scope !== 'subaccount' && (
-                    <td className="px-4 py-3 text-[13px] text-slate-500">
-                      {item.subaccountName ?? <span className="text-slate-300">--</span>}
-                    </td>
-                  )}
-                  <td className="px-4 py-3 text-[13px] text-slate-500">{formatDate(item.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
           </table>
-        )}
+        </div>
       </div>
+
+      {/* Active filter summary */}
+      {(filterActorId || filterType.size > 0 || filterStatus.size > 0 || filterSeverity.size > 0) && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          {filterActorId && selectedActor && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-[12px] text-indigo-700 font-medium">
+              Actor: {selectedActor.displayName}
+              <button
+                onClick={() => setFilterActorId(undefined)}
+                className="bg-transparent border-0 p-0 cursor-pointer text-indigo-400 hover:text-indigo-700"
+                aria-label="Remove actor filter"
+              >
+                &times;
+              </button>
+            </span>
+          )}
+          {filterType.size > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-[12px] text-indigo-700 font-medium">
+              {filterType.size} type{filterType.size > 1 ? 's' : ''} hidden
+              <button
+                onClick={() => setFilterType(new Set())}
+                className="bg-transparent border-0 p-0 cursor-pointer text-indigo-400 hover:text-indigo-700"
+                aria-label="Clear type filter"
+              >
+                &times;
+              </button>
+            </span>
+          )}
+          {filterStatus.size > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-[12px] text-indigo-700 font-medium">
+              {filterStatus.size} status{filterStatus.size > 1 ? 'es' : ''} hidden
+              <button
+                onClick={() => setFilterStatus(new Set())}
+                className="bg-transparent border-0 p-0 cursor-pointer text-indigo-400 hover:text-indigo-700"
+                aria-label="Clear status filter"
+              >
+                &times;
+              </button>
+            </span>
+          )}
+          {filterSeverity.size > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-[12px] text-indigo-700 font-medium">
+              {filterSeverity.size} severit{filterSeverity.size > 1 ? 'ies' : 'y'} hidden
+              <button
+                onClick={() => setFilterSeverity(new Set())}
+                className="bg-transparent border-0 p-0 cursor-pointer text-indigo-400 hover:text-indigo-700"
+                aria-label="Clear severity filter"
+              >
+                &times;
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Table — rendered by ActivityFeedTable */}
+      <ActivityFeedTable
+        items={displayed}
+        loading={loading}
+      />
     </div>
   );
 }

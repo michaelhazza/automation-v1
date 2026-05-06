@@ -1,0 +1,10 @@
+server/services/__tests__/invalidationRacePure.test.ts
+server/services/__tests__/invokeAutomationStepErrorShapePure.test.ts
+server/services/__tests__/invokeAutomationStepF15Pure.test.ts
+server/services/__tests__/invokeAutomationStepPure.test.ts
+server/services/__tests__/llmRouterCostBreaker.test.ts
+server/services/__tests__/llmRouterLaelIntegration.test.ts
+server/services/__tests__/mcpToolInvocationsPure.test.ts
+server/services/__tests__/memoryBlockServicePure.test.ts
+server/services/__tests__/memoryBlockSynthesisServicePure.test.ts
+server/services/__tests__/memoryBlockUpsertPure.test.ts

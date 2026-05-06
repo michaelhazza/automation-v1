@@ -24,30 +24,17 @@
 // to placeholder values — this test is purely structural, it never hits the
 // DB or signs a JWT. ESM imports are hoisted, so we seed process.env *before*
 // a dynamic import pulls skillExecutor through the env-validated db module.
-await import('dotenv/config');
+import { expect, test } from 'vitest';
+
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { SKILL_HANDLERS } = await import('../skillExecutor.js');
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Canonical handler key set (177 entries)
+// Canonical handler key set (193 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -237,6 +224,27 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'read_skill_execution',
   'write_diagnosis',
   'write_event',
+  // Tier-1 UI uplift — thread context handler (wired in with conversation thread context feature)
+  'update_thread_context',
+  // Subaccount Optimiser chunk 1 — agent-recommendations output primitive (PR #250)
+  'output.recommend',
+  // Agentic Commerce — spend-enabled skills (PR #255)
+  'pay_invoice',
+  'purchase_resource',
+  'subscribe_to_service',
+  'top_up_balance',
+  'issue_refund',
+  // Workflows V1 — orchestrator skill that dispatches a published workflow run (PR #258)
+  'workflow.run.start',
+  // Sub-account Optimiser stream 2 — 8 telemetry scan skills (PR #262)
+  'optimiser.scan_agent_budget',
+  'optimiser.scan_workflow_escalations',
+  'optimiser.scan_skill_latency',
+  'optimiser.scan_inactive_workflows',
+  'optimiser.scan_escalation_phrases',
+  'optimiser.scan_memory_citation',
+  'optimiser.scan_routing_uncertainty',
+  'optimiser.scan_cache_efficiency',
 ];
 
 // ---------------------------------------------------------------------------
@@ -272,11 +280,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 177 keys', () => {
+test('SKILL_HANDLERS has exactly 193 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 177) {
+  if (count !== 193) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 177. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 193. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }
@@ -295,9 +303,6 @@ test('Every SKILL_HANDLERS entry is a function', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`skillHandlerRegistryEquivalence: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
-
 // Make this file a module so the top-level `await import()` used above
 // satisfies TS1375 (top-level await requires ESM module semantics).
 export {};

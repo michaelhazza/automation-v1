@@ -2165,14 +2165,11 @@ export function buildRuleBasedMerge({ candidate, library }: RuleBasedMergeInput)
   const name = library.name || candidate.name;
 
   // Description: prefer the shorter of the two if both present; else whichever exists.
-  let description = '';
-  if (candidate.description && library.description) {
-    description = candidate.description.length <= library.description.length
+  const description = (candidate.description && library.description)
+    ? (candidate.description.length <= library.description.length
       ? candidate.description
-      : library.description;
-  } else {
-    description = candidate.description || library.description || '';
-  }
+      : library.description)
+    : (candidate.description || library.description || '');
 
   // Definition: dominant's schema wins; if dominant has none but secondary
   // does, adopt secondary's. When dominant has a definition, overwrite its

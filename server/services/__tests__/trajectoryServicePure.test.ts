@@ -6,26 +6,8 @@
  * P3.3 of docs/improvements-roadmap-spec.md.
  */
 
+import { expect, test } from 'vitest';
 import { compare, matchArgs, formatDiff } from '../trajectoryServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -48,7 +30,7 @@ test('compare exact: matches identical sequences', () => {
       { actionType: 'create_task' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, true, 'identical sequences');
+  expect(compare(actual, reference).pass, 'identical sequences').toBe(true);
 });
 
 test('compare exact: fails on different sequence length', () => {
@@ -61,7 +43,7 @@ test('compare exact: fails on different sequence length', () => {
       { actionType: 'create_task' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, false, 'different length');
+  expect(compare(actual, reference).pass, 'different length').toBe(false);
 });
 
 test('compare exact: fails on wrong tool at a position', () => {
@@ -77,7 +59,7 @@ test('compare exact: fails on wrong tool at a position', () => {
       { actionType: 'create_task' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, false, 'wrong tool at position');
+  expect(compare(actual, reference).pass, 'wrong tool at position').toBe(false);
 });
 
 // ── compare — in-order mode ────────────────────────────────────────
@@ -97,7 +79,7 @@ test('compare in-order: matches subsequence in order', () => {
       { actionType: 'create_task' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, true, 'subsequence in order');
+  expect(compare(actual, reference).pass, 'subsequence in order').toBe(true);
 });
 
 test('compare in-order: fails when order is reversed', () => {
@@ -113,7 +95,7 @@ test('compare in-order: fails when order is reversed', () => {
       { actionType: 'create_task' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, false, 'reversed order');
+  expect(compare(actual, reference).pass, 'reversed order').toBe(false);
 });
 
 // ── compare — any-order mode ───────────────────────────────────────
@@ -132,7 +114,7 @@ test('compare any-order: matches set containment regardless of order', () => {
       { actionType: 'send_email' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, true, 'set containment');
+  expect(compare(actual, reference).pass, 'set containment').toBe(true);
 });
 
 test('compare any-order: fails when expected tool is missing', () => {
@@ -147,7 +129,7 @@ test('compare any-order: fails when expected tool is missing', () => {
       { actionType: 'send_email' },
     ],
   };
-  assertEqual(compare(actual, reference).pass, false, 'missing tool');
+  expect(compare(actual, reference).pass, 'missing tool').toBe(false);
 });
 
 // ── compare — single-tool mode ─────────────────────────────────────
@@ -162,7 +144,7 @@ test('compare single-tool: matches if tool exists anywhere', () => {
     matchMode: 'single-tool' as const,
     expected: [{ actionType: 'read_inbox' }],
   };
-  assertEqual(compare(actual, reference).pass, true, 'tool found');
+  expect(compare(actual, reference).pass, 'tool found').toBe(true);
 });
 
 test('compare single-tool: fails if tool not found', () => {
@@ -174,7 +156,7 @@ test('compare single-tool: fails if tool not found', () => {
     matchMode: 'single-tool' as const,
     expected: [{ actionType: 'read_inbox' }],
   };
-  assertEqual(compare(actual, reference).pass, false, 'tool not found');
+  expect(compare(actual, reference).pass, 'tool not found').toBe(false);
 });
 
 // ── matchArgs ──────────────────────────────────────────────────────
@@ -182,18 +164,18 @@ test('compare single-tool: fails if tool not found', () => {
 test('matchArgs: matches with partial equality', () => {
   const actual = { to: 'test@example.com', subject: 'Hello', body: 'Hi there' };
   const matchers = { to: 'test@example.com' };
-  assertEqual(matchArgs(actual, matchers), true, 'partial match');
+  expect(matchArgs(actual, matchers), 'partial match').toBe(true);
 });
 
 test('matchArgs: fails on value mismatch', () => {
   const actual = { to: 'wrong@example.com' };
   const matchers = { to: 'test@example.com' };
-  assertEqual(matchArgs(actual, matchers), false, 'value mismatch');
+  expect(matchArgs(actual, matchers), 'value mismatch').toBe(false);
 });
 
 test('matchArgs: passes with no matchers', () => {
-  assertEqual(matchArgs({ anything: true }, undefined), true, 'undefined matchers');
-  assertEqual(matchArgs({ anything: true }, {}), true, 'empty matchers');
+  expect(matchArgs({ anything: true }, undefined), 'undefined matchers').toBe(true);
+  expect(matchArgs({ anything: true }, {}), 'empty matchers').toBe(true);
 });
 
 // ── formatDiff ─────────────────────────────────────────────────────
@@ -201,7 +183,7 @@ test('matchArgs: passes with no matchers', () => {
 test('formatDiff: formats a passing diff', () => {
   const diff = { name: 'test-diff', matchMode: 'exact' as const, pass: true, entries: [] };
   const output = formatDiff(diff);
-  assert(output.includes('PASS'), 'should contain PASS');
+  expect(output.includes('PASS'), 'should contain PASS').toBeTruthy();
 });
 
 test('formatDiff: formats a failing diff with entries', () => {
@@ -214,11 +196,9 @@ test('formatDiff: formats a failing diff with entries', () => {
     ],
   };
   const output = formatDiff(diff);
-  assert(output.includes('FAIL'), 'should contain FAIL');
-  assert(output.includes('read_inbox'), 'should contain tool name');
+  expect(output.includes('FAIL'), 'should contain FAIL').toBeTruthy();
+  expect(output.includes('read_inbox'), 'should contain tool name').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

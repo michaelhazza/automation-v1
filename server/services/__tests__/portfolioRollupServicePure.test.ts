@@ -13,6 +13,8 @@
  *   npx tsx server/services/__tests__/portfolioRollupServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
+
 export {}; // force module scope so top-level identifiers don't collide
 
 // Inline the constant rather than importing from the impure service, since
@@ -20,25 +22,6 @@ export {}; // force module scope so top-level identifiers don't collide
 // the pure-test environment. The canonical source is still
 // portfolioRollupService.ts — keep this in sync.
 const PORTFOLIO_AUTO_ENABLE_THRESHOLD = 3;
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
-}
 
 console.log('');
 console.log('portfolioRollupServicePure — constants (§11 S23)');
@@ -49,7 +32,7 @@ console.log('');
 // ---------------------------------------------------------------------------
 
 test('auto-enable threshold is 3', () => {
-  assertTrue(PORTFOLIO_AUTO_ENABLE_THRESHOLD === 3, 'threshold = 3');
+  expect(PORTFOLIO_AUTO_ENABLE_THRESHOLD === 3, 'threshold = 3').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -59,11 +42,9 @@ test('auto-enable threshold is 3', () => {
 test('drill-through link uses /admin/subaccounts/:id', () => {
   const subaccountId = '11111111-2222-3333-4444-555555555555';
   const link = `/admin/subaccounts/${subaccountId}`;
-  assertTrue(link.includes(subaccountId), 'contains id');
-  assertTrue(link.startsWith('/admin/subaccounts/'), 'correct prefix');
+  expect(link.includes(subaccountId), 'contains id').toBe(true);
+  expect(link.startsWith('/admin/subaccounts/'), 'correct prefix').toBe(true);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

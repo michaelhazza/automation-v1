@@ -17,19 +17,8 @@
  *   npx tsx server/services/__tests__/orgConfigServiceReadPathPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { resolveEffectiveOperationalConfig } from '../orgOperationalConfigMigrationPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try { fn(); passed++; console.log(`  PASS  ${name}`); }
-  catch (err) { failed++; console.log(`  FAIL  ${name}`); console.log(`        ${err instanceof Error ? err.message : err}`); }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -49,13 +38,10 @@ test('S1-A1: override present on one leaf inherits siblings from system defaults
     alertLimits: { maxPerRun: 5 },
   };
   const result = resolveEffectiveOperationalConfig(systemDefaults, override);
-  assert(
-    deepEqual(result, {
+  expect(deepEqual(result, {
       alertLimits: { maxPerRun: 5, maxAlertsPerAccountPerDay: 3 },
       healthScoreFactors: [{ slug: 'x', weight: 1.0 }],
-    }),
-    `expected override-wins + sibling inherit, got ${JSON.stringify(result)}`,
-  );
+    }), `expected override-wins + sibling inherit, got ${JSON.stringify(result)}`).toBeTruthy();
 });
 
 // Additional regression: the legacy pre-Session-1 case where the org has a
@@ -63,15 +49,12 @@ test('S1-A1: override present on one leaf inherits siblings from system defaults
 test('legacy org: null systemDefaults + non-null override returns override intact', () => {
   const override = { churnBands: { healthy: [75, 100], watch: [50, 74] } };
   const result = resolveEffectiveOperationalConfig(null, override);
-  assert(deepEqual(result, override), 'expected override as-is');
+  expect(deepEqual(result, override), 'expected override as-is').toBeTruthy();
 });
 
 // Both null — fresh org with no template and no overrides (shouldn't happen
 // in practice but the decoder must not throw).
 test('brand-new org: null systemDefaults + null override returns {}', () => {
   const result = resolveEffectiveOperationalConfig(null, null);
-  assert(deepEqual(result, {}), 'expected {}');
+  expect(deepEqual(result, {}), 'expected {}').toBeTruthy();
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

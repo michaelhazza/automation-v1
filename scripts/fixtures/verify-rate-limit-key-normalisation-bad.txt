@@ -1,0 +1,5 @@
+# Known-bad fixture for verify-rate-limit-key-normalisation.sh (B.3)
+# This pattern SHOULD trip the gate: bypassing the normaliseEmail constructor
+# by casting a raw string directly to NormalisedEmail.
+
+const key = loginEmailOnlyKey('foo@example.com' as NormalisedEmail);

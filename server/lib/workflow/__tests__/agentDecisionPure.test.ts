@@ -10,6 +10,7 @@
  * Spec: docs/playbook-agent-decision-step-spec.md §12, §14, §24.
  */
 
+import { expect, test } from 'vitest';
 import {
   computeSkipSet,
   computeStepReadiness,
@@ -23,41 +24,19 @@ import type {
 } from '../agentDecisionPure.js';
 import type { WorkflowDefinition, AgentDecisionStep } from '../types.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
+function assertThrows(fn: () => unknown, pattern: string | RegExp, _label: string): void {
+  let thrown: unknown;
+  try { fn(); } catch (e) { thrown = e; }
+  if (thrown === undefined) throw new Error(`${_label}: expected an error to be thrown`);
+  const msg = thrown instanceof Error ? thrown.message : String(thrown);
+  const matches = typeof pattern === 'string' ? msg.includes(pattern) : pattern.test(msg);
+  if (!matches) throw new Error(`${_label}: error message "${msg}" did not match "${pattern}"`);
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
   if (a !== e) throw new Error(`${label}: expected ${e}, got ${a}`);
-}
-
-function assertThrows(fn: () => void, matcher: string | RegExp, label: string) {
-  let threw = false;
-  let msg = '';
-  try { fn(); } catch (err) { threw = true; msg = err instanceof Error ? err.message : String(err); }
-  if (!threw) throw new Error(`${label}: expected to throw`);
-  if (matcher instanceof RegExp) {
-    if (!matcher.test(msg)) throw new Error(`${label}: message '${msg}' did not match ${matcher}`);
-  } else {
-    if (!msg.includes(matcher)) throw new Error(`${label}: message '${msg}' did not include '${matcher}'`);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -168,21 +147,21 @@ console.log('\n--- computeSkipSet ---');
 test('skip_set: choosing branch_a skips branch_b_step but not branch_a_step', () => {
   const def = makeDecisionDef();
   const skipSet = computeSkipSet(def, 'decision', 'branch_a');
-  assert(skipSet.has('branch_b_step'), 'branch_b_step must be skipped');
-  assert(!skipSet.has('branch_a_step'), 'branch_a_step must NOT be skipped');
+  expect(skipSet.has('branch_b_step'), 'branch_b_step must be skipped').toBeTruthy();
+  expect(!skipSet.has('branch_a_step'), 'branch_a_step must NOT be skipped').toBeTruthy();
 });
 
 test('skip_set: choosing branch_b skips branch_a_step but not branch_b_step', () => {
   const def = makeDecisionDef();
   const skipSet = computeSkipSet(def, 'decision', 'branch_b');
-  assert(skipSet.has('branch_a_step'), 'branch_a_step must be skipped');
-  assert(!skipSet.has('branch_b_step'), 'branch_b_step must NOT be skipped');
+  expect(skipSet.has('branch_a_step'), 'branch_a_step must be skipped').toBeTruthy();
+  expect(!skipSet.has('branch_b_step'), 'branch_b_step must NOT be skipped').toBeTruthy();
 });
 
 test('skip_set: decision step itself is never in the skip set', () => {
   const def = makeDecisionDef();
   const skipSet = computeSkipSet(def, 'decision', 'branch_a');
-  assert(!skipSet.has('decision'), 'decision step must never be skipped');
+  expect(!skipSet.has('decision'), 'decision step must never be skipped').toBeTruthy();
 });
 
 test('skip_set: convergence step (merge) is NOT skipped when one branch is chosen', () => {
@@ -190,7 +169,7 @@ test('skip_set: convergence step (merge) is NOT skipped when one branch is chose
   // Choosing branch_a means branch_b_step is skipped but merge has branch_a_step as a live ancestor.
   const def = makeDecisionDef();
   const skipSet = computeSkipSet(def, 'decision', 'branch_a');
-  assert(!skipSet.has('merge'), 'merge (convergence) must not be skipped');
+  expect(!skipSet.has('merge'), 'merge (convergence) must not be skipped').toBeTruthy();
 });
 
 test('skip_set: downstream of non-chosen branch entry step is also skipped', () => {
@@ -208,8 +187,8 @@ test('skip_set: downstream of non-chosen branch entry step is also skipped', () 
     ],
   });
   const skipSet = computeSkipSet(def, 'decision', 'branch_a');
-  assert(skipSet.has('branch_b_step'), 'branch_b_step must be skipped');
-  assert(skipSet.has('branch_b_sub'), 'branch_b_sub must be skipped (transitive)');
+  expect(skipSet.has('branch_b_step'), 'branch_b_step must be skipped').toBeTruthy();
+  expect(skipSet.has('branch_b_sub'), 'branch_b_sub must be skipped (transitive)').toBeTruthy();
 });
 
 test('skip_set: multi-level skip chain (3 levels deep)', () => {
@@ -237,12 +216,12 @@ test('skip_set: multi-level skip chain (3 levels deep)', () => {
     ],
   });
   const skipSet = computeSkipSet(def, 'decision', 'branch_a');
-  assert(skipSet.has('branch_b_step'), 'branch_b_step skipped');
-  assert(skipSet.has('branch_b_sub'), 'branch_b_sub skipped (depth 2)');
-  assert(skipSet.has('branch_b_leaf'), 'branch_b_leaf skipped (depth 3)');
-  assert(!skipSet.has('merge'), 'merge (convergence) NOT skipped');
-  assert(!skipSet.has('branch_a_step'), 'branch_a_step NOT skipped');
-  assert(!skipSet.has('decision'), 'decision NOT skipped');
+  expect(skipSet.has('branch_b_step'), 'branch_b_step skipped').toBeTruthy();
+  expect(skipSet.has('branch_b_sub'), 'branch_b_sub skipped (depth 2)').toBeTruthy();
+  expect(skipSet.has('branch_b_leaf'), 'branch_b_leaf skipped (depth 3)').toBeTruthy();
+  expect(!skipSet.has('merge'), 'merge (convergence) NOT skipped').toBeTruthy();
+  expect(!skipSet.has('branch_a_step'), 'branch_a_step NOT skipped').toBeTruthy();
+  expect(!skipSet.has('decision'), 'decision NOT skipped').toBeTruthy();
 });
 
 test('skip_set: convergence step is NOT skipped when it depends on multiple branches and one is chosen', () => {
@@ -254,12 +233,12 @@ test('skip_set: convergence step is NOT skipped when it depends on multiple bran
   const skipSetB = computeSkipSet(def, 'decision', 'branch_b');
 
   // Whichever branch is chosen, merge must stay alive.
-  assert(!skipSetA.has('merge'), 'merge not skipped when branch_a chosen');
-  assert(!skipSetB.has('merge'), 'merge not skipped when branch_b chosen');
+  expect(!skipSetA.has('merge'), 'merge not skipped when branch_a chosen').toBeTruthy();
+  expect(!skipSetB.has('merge'), 'merge not skipped when branch_b chosen').toBeTruthy();
 
   // Exactly one branch entry step is skipped per choice.
-  assertEqual(skipSetA.has('branch_b_step') && !skipSetA.has('branch_a_step'), true, 'A: only b skipped');
-  assertEqual(skipSetB.has('branch_a_step') && !skipSetB.has('branch_b_step'), true, 'B: only a skipped');
+  expect(skipSetA.has('branch_b_step') && !skipSetA.has('branch_a_step'), 'A: only b skipped').toBe(true);
+  expect(skipSetB.has('branch_a_step') && !skipSetB.has('branch_b_step'), 'B: only a skipped').toBe(true);
 });
 
 test('skip_set: throws if decision step not found', () => {
@@ -299,9 +278,9 @@ test('skip_set: 3-branch — choosing branch_a skips b and c entry steps', () =>
     ],
   });
   const skipSet = computeSkipSet(def, 'decision', 'branch_a');
-  assert(skipSet.has('branch_b_step'), 'branch_b_step must be skipped');
-  assert(skipSet.has('branch_c_step'), 'branch_c_step must be skipped');
-  assert(!skipSet.has('branch_a_step'), 'branch_a_step must not be skipped');
+  expect(skipSet.has('branch_b_step'), 'branch_b_step must be skipped').toBeTruthy();
+  expect(skipSet.has('branch_c_step'), 'branch_c_step must be skipped').toBeTruthy();
+  expect(!skipSet.has('branch_a_step'), 'branch_a_step must not be skipped').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -313,48 +292,48 @@ console.log('\n--- computeStepReadiness ---');
 test('readiness: root step (no deps) is always ready', () => {
   const step = { id: 'start', dependsOn: [] } as any;
   const r = computeStepReadiness(step, new Map());
-  assertEqual(r, 'ready', 'root step should be ready');
+  expect(r, 'root step should be ready').toBe('ready');
 });
 
 test('readiness: all deps completed → ready', () => {
   const step = { id: 'child', dependsOn: ['a', 'b'] } as any;
   const statuses = new Map<string, StepRunStatus>([['a', 'completed'], ['b', 'completed']]);
-  assertEqual(computeStepReadiness(step, statuses), 'ready', 'all completed');
+  expect(computeStepReadiness(step, statuses), 'all completed').toBe('ready');
 });
 
 test('readiness: mix of completed and skipped → ready (at least one completed)', () => {
   const step = { id: 'child', dependsOn: ['a', 'b'] } as any;
   const statuses = new Map<string, StepRunStatus>([['a', 'completed'], ['b', 'skipped']]);
-  assertEqual(computeStepReadiness(step, statuses), 'ready', 'mixed completed+skipped');
+  expect(computeStepReadiness(step, statuses), 'mixed completed+skipped').toBe('ready');
 });
 
 test('readiness: all deps skipped → skipped', () => {
   const step = { id: 'child', dependsOn: ['a', 'b'] } as any;
   const statuses = new Map<string, StepRunStatus>([['a', 'skipped'], ['b', 'skipped']]);
-  assertEqual(computeStepReadiness(step, statuses), 'skipped', 'all skipped');
+  expect(computeStepReadiness(step, statuses), 'all skipped').toBe('skipped');
 });
 
 test('readiness: one dep running → waiting', () => {
   const step = { id: 'child', dependsOn: ['a', 'b'] } as any;
   const statuses = new Map<string, StepRunStatus>([['a', 'completed'], ['b', 'running']]);
-  assertEqual(computeStepReadiness(step, statuses), 'waiting', 'one running');
+  expect(computeStepReadiness(step, statuses), 'one running').toBe('waiting');
 });
 
 test('readiness: one dep pending → waiting', () => {
   const step = { id: 'child', dependsOn: ['a'] } as any;
   const statuses = new Map<string, StepRunStatus>([['a', 'pending']]);
-  assertEqual(computeStepReadiness(step, statuses), 'waiting', 'one pending');
+  expect(computeStepReadiness(step, statuses), 'one pending').toBe('waiting');
 });
 
 test('readiness: dep has no row yet (undefined) → waiting', () => {
   const step = { id: 'child', dependsOn: ['a'] } as any;
-  assertEqual(computeStepReadiness(step, new Map()), 'waiting', 'no row');
+  expect(computeStepReadiness(step, new Map()), 'no row').toBe('waiting');
 });
 
 test('readiness: awaiting_input dep → waiting', () => {
   const step = { id: 'child', dependsOn: ['a'] } as any;
   const statuses = new Map<string, StepRunStatus>([['a', 'awaiting_input']]);
-  assertEqual(computeStepReadiness(step, statuses), 'waiting', 'awaiting_input');
+  expect(computeStepReadiness(step, statuses), 'awaiting_input').toBe('waiting');
 });
 
 // ---------------------------------------------------------------------------
@@ -368,85 +347,85 @@ const decisionStep = makeDecisionStep();
 test('parse: valid minimal JSON', () => {
   const raw = JSON.stringify({ chosenBranchId: 'branch_a', rationale: 'good reason' });
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(result.ok, `expected ok=true, got error: ${!result.ok && result.error.message}`);
+  expect(result.ok, `expected ok=true, got error: ${!result.ok && result.error.message}`).toBeTruthy();
   if (result.ok) {
-    assertEqual(result.output.chosenBranchId, 'branch_a', 'chosenBranchId');
-    assertEqual(result.output.rationale, 'good reason', 'rationale');
+    expect(result.output.chosenBranchId, 'chosenBranchId').toBe('branch_a');
+    expect(result.output.rationale, 'rationale').toBe('good reason');
   }
 });
 
 test('parse: valid JSON with confidence', () => {
   const raw = JSON.stringify({ chosenBranchId: 'branch_b', rationale: 'reasoning', confidence: 0.8 });
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(result.ok, 'should succeed with confidence field');
-  if (result.ok) assertEqual(result.output.confidence, 0.8, 'confidence');
+  expect(result.ok, 'should succeed with confidence field').toBeTruthy();
+  if (result.ok) expect(result.output.confidence, 'confidence').toBe(0.8);
 });
 
 test('parse: strips leading/trailing whitespace', () => {
   const raw = `  \n${JSON.stringify({ chosenBranchId: 'branch_a', rationale: 'ok' })}\n  `;
-  assert(parseDecisionOutput(raw, decisionStep).ok, 'whitespace stripped');
+  expect(parseDecisionOutput(raw, decisionStep).ok, 'whitespace stripped').toBeTruthy();
 });
 
 test('parse: strips json code fence', () => {
   const inner = JSON.stringify({ chosenBranchId: 'branch_a', rationale: 'ok' });
   const raw = `\`\`\`json\n${inner}\n\`\`\``;
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(result.ok, `json fence stripped: ${!result.ok && (result as any).error?.message}`);
+  expect(result.ok, `json fence stripped: ${!result.ok && (result as any).error?.message}`).toBeTruthy();
 });
 
 test('parse: strips bare code fence', () => {
   const inner = JSON.stringify({ chosenBranchId: 'branch_a', rationale: 'ok' });
   const raw = `\`\`\`\n${inner}\n\`\`\``;
-  assert(parseDecisionOutput(raw, decisionStep).ok, 'bare fence stripped');
+  expect(parseDecisionOutput(raw, decisionStep).ok, 'bare fence stripped').toBeTruthy();
 });
 
 test('parse: strips leading prose before first brace', () => {
   const inner = JSON.stringify({ chosenBranchId: 'branch_a', rationale: 'ok' });
   const raw = `Sure, here is my decision:\n${inner}`;
-  assert(parseDecisionOutput(raw, decisionStep).ok, 'leading prose stripped');
+  expect(parseDecisionOutput(raw, decisionStep).ok, 'leading prose stripped').toBeTruthy();
 });
 
 test('parse: invalid JSON returns invalid_json error', () => {
   const result = parseDecisionOutput('not json at all', decisionStep);
-  assert(!result.ok, 'should fail');
-  if (!result.ok) assertEqual(result.error.code, 'invalid_json' as DecisionParseErrorCode, 'error code');
+  expect(!result.ok, 'should fail').toBeTruthy();
+  if (!result.ok) expect(result.error.code, 'error code').toEqual('invalid_json' as DecisionParseErrorCode);
 });
 
 test('parse: missing chosenBranchId returns schema_violation', () => {
   const raw = JSON.stringify({ rationale: 'forgot the branch id' });
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(!result.ok, 'should fail');
-  if (!result.ok) assertEqual(result.error.code, 'schema_violation' as DecisionParseErrorCode, 'error code');
+  expect(!result.ok, 'should fail').toBeTruthy();
+  if (!result.ok) expect(result.error.code, 'error code').toEqual('schema_violation' as DecisionParseErrorCode);
 });
 
 test('parse: missing rationale returns schema_violation', () => {
   const raw = JSON.stringify({ chosenBranchId: 'branch_a' });
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(!result.ok, 'should fail');
-  if (!result.ok) assertEqual(result.error.code, 'schema_violation' as DecisionParseErrorCode, 'error code');
+  expect(!result.ok, 'should fail').toBeTruthy();
+  if (!result.ok) expect(result.error.code, 'error code').toEqual('schema_violation' as DecisionParseErrorCode);
 });
 
 test('parse: unknown branch id returns unknown_branch error', () => {
   const raw = JSON.stringify({ chosenBranchId: 'nonexistent', rationale: 'oops' });
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(!result.ok, 'should fail');
-  if (!result.ok) assertEqual(result.error.code, 'unknown_branch' as DecisionParseErrorCode, 'error code');
+  expect(!result.ok, 'should fail').toBeTruthy();
+  if (!result.ok) expect(result.error.code, 'error code').toEqual('unknown_branch' as DecisionParseErrorCode);
 });
 
 test('parse: passthrough extra fields are preserved', () => {
   const raw = JSON.stringify({ chosenBranchId: 'branch_a', rationale: 'ok', myExtra: 42 });
   const result = parseDecisionOutput(raw, decisionStep);
-  assert(result.ok, 'should succeed');
+  expect(result.ok, 'should succeed').toBeTruthy();
   if (result.ok) {
     const out = result.output as Record<string, unknown>;
-    assertEqual(out.myExtra as any, 42, 'extra field preserved');
+    expect(out.myExtra as any, 'extra field preserved').toBe(42);
   }
 });
 
 test('parse: empty string returns invalid_json', () => {
   const result = parseDecisionOutput('', decisionStep);
-  assert(!result.ok, 'should fail on empty');
-  if (!result.ok) assertEqual(result.error.code, 'invalid_json' as DecisionParseErrorCode, 'code');
+  expect(!result.ok, 'should fail on empty').toBeTruthy();
+  if (!result.ok) expect(result.error.code, 'code').toEqual('invalid_json' as DecisionParseErrorCode);
 });
 
 // ---------------------------------------------------------------------------
@@ -474,7 +453,7 @@ test('validate: valid step passes', () => {
   const def = makeDecisionDef();
   const step = validStep();
   const r = validateDecisionStep(step, def);
-  assert(r.ok, `should pass: ${r.ok === false ? r.errors.map((e) => e.rule).join(', ') : ''}`);
+  expect(r.ok, `should pass: ${r.ok === false ? r.errors.map((e) => e.rule).join(', ') : ''}`).toBeTruthy();
 });
 
 test('validate: fewer than 2 branches fails decision_branches_too_few', () => {
@@ -552,7 +531,7 @@ test('validate: invalid defaultBranchId fails decision_default_branch_invalid', 
 test('validate: valid defaultBranchId passes', () => {
   const step = validStep({ defaultBranchId: 'branch_a' });
   const r = validateDecisionStep(step, makeDecisionDef());
-  assert(r.ok, `valid defaultBranchId should pass: ${r.ok === false ? r.errors.map((e) => e.rule).join(', ') : ''}`);
+  expect(r.ok, `valid defaultBranchId should pass: ${r.ok === false ? r.errors.map((e) => e.rule).join(', ') : ''}`).toBeTruthy();
 });
 
 test('validate: minConfidence out of range (negative) fails decision_min_confidence_out_of_range', () => {
@@ -567,12 +546,12 @@ test('validate: minConfidence out of range (> 1) fails decision_min_confidence_o
 
 test('validate: minConfidence = 0 is valid', () => {
   const step = validStep({ minConfidence: 0 });
-  assert(validateDecisionStep(step, makeDecisionDef()).ok, 'minConfidence=0 is valid');
+  expect(validateDecisionStep(step, makeDecisionDef()).ok, 'minConfidence=0 is valid').toBeTruthy();
 });
 
 test('validate: minConfidence = 1 is valid', () => {
   const step = validStep({ minConfidence: 1 });
-  assert(validateDecisionStep(step, makeDecisionDef()).ok, 'minConfidence=1 is valid');
+  expect(validateDecisionStep(step, makeDecisionDef()).ok, 'minConfidence=1 is valid').toBeTruthy();
 });
 
 test('validate: empty entrySteps fails decision_branch_no_entry_steps', () => {
@@ -597,10 +576,10 @@ test('renderBranchesTable: outputs branch ids and labels', () => {
     { id: 'branch_b', label: 'Path B', description: 'Take path B', entrySteps: ['b_step'] },
   ];
   const table = renderBranchesTable(branches);
-  assert(table.includes('branch_a'), 'contains branch_a id');
-  assert(table.includes('branch_b'), 'contains branch_b id');
-  assert(table.includes('Path A'), 'contains label A');
-  assert(table.includes('Take path A'), 'contains description A');
+  expect(table.includes('branch_a'), 'contains branch_a id').toBeTruthy();
+  expect(table.includes('branch_b'), 'contains branch_b id').toBeTruthy();
+  expect(table.includes('Path A'), 'contains label A').toBeTruthy();
+  expect(table.includes('Take path A'), 'contains description A').toBeTruthy();
 });
 
 test('renderBranchesTable: escapes triple backticks in description', () => {
@@ -609,7 +588,7 @@ test('renderBranchesTable: escapes triple backticks in description', () => {
     { id: 'c', label: 'M', description: 'Normal', entrySteps: ['t'] },
   ];
   const table = renderBranchesTable(branches);
-  assert(!table.includes('```code```'), 'raw triple backtick must be escaped');
+  expect(!table.includes('```code```'), 'raw triple backtick must be escaped').toBeTruthy();
 });
 
 test('renderBranchesTable: each branch separated with blank line', () => {
@@ -621,19 +600,16 @@ test('renderBranchesTable: each branch separated with blank line', () => {
   const table = renderBranchesTable(branches);
   // Should have two blank-line separators for 3 branches
   const doubleLf = (table.match(/\n\n/g) ?? []).length;
-  assert(doubleLf >= 2, `expected at least 2 blank-line separators, got ${doubleLf}`);
+  expect(doubleLf >= 2, `expected at least 2 blank-line separators, got ${doubleLf}`).toBeTruthy();
 });
 
 test('renderBranchesTable: single branch renders without separator', () => {
   const branches = [{ id: 'only', label: 'Only', description: 'The one', entrySteps: ['s'] }];
   const table = renderBranchesTable(branches);
-  assert(table.includes('only'), 'id present');
-  assert(table.includes('The one'), 'description present');
+  expect(table.includes('only'), 'id present').toBeTruthy();
+  expect(table.includes('The one'), 'description present').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

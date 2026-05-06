@@ -4,6 +4,7 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/registryMatcherPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { normaliseIntent } from '../normaliseIntentPure.js';
 import {
   matchRegistryEntry,
@@ -11,25 +12,6 @@ import {
   RegistryConflictError,
 } from '../registryMatcherPure.js';
 import type { CanonicalQueryRegistry } from '../../../../shared/types/crmQueryPlanner.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -74,65 +56,65 @@ const ctx = { callerCapabilities: new Set(['crm.query']) };
 test('alias "stale contacts" → contacts.inactive_over_days', () => {
   const intent = normaliseIntent('stale contacts');
   const result = matchRegistryEntry(intent, stubRegistry, ctx);
-  assert(result !== null, 'expected a match');
-  assertEqual(result!.registryKey, 'contacts.inactive_over_days');
+  expect(result !== null, 'expected a match').toBeTruthy();
+  expect(result!.registryKey).toBe('contacts.inactive_over_days');
 });
 
 // synonym: "inactive" → "stale", so both surface the same registry entry
 test('synonym alias "inactive contacts" → contacts.inactive_over_days (via synonym)', () => {
   const intent = normaliseIntent('inactive contacts');
   const result = matchRegistryEntry(intent, stubRegistry, ctx);
-  assert(result !== null, 'expected a match via synonym');
-  assertEqual(result!.registryKey, 'contacts.inactive_over_days');
+  expect(result !== null, 'expected a match via synonym').toBeTruthy();
+  expect(result!.registryKey).toBe('contacts.inactive_over_days');
 });
 
 test('alias "contacts no activity" → contacts.inactive_over_days', () => {
   const intent = normaliseIntent('contacts no activity');
   const result = matchRegistryEntry(intent, stubRegistry, ctx);
-  assert(result !== null, 'expected a match');
-  assertEqual(result!.registryKey, 'contacts.inactive_over_days');
+  expect(result !== null, 'expected a match').toBeTruthy();
+  expect(result!.registryKey).toBe('contacts.inactive_over_days');
 });
 
 test('alias "stale deals" (synonym: deals→opportunities) → opportunities.stale_over_days', () => {
   const intent = normaliseIntent('stale deals');
   const result = matchRegistryEntry(intent, stubRegistry, ctx);
-  assert(result !== null, 'expected a match');
-  assertEqual(result!.registryKey, 'opportunities.stale_over_days');
+  expect(result !== null, 'expected a match').toBeTruthy();
+  expect(result!.registryKey).toBe('opportunities.stale_over_days');
 });
 
 test('alias "stuck deals" → opportunities.stale_over_days', () => {
   const intent = normaliseIntent('stuck deals');
   const result = matchRegistryEntry(intent, stubRegistry, ctx);
-  assert(result !== null, 'expected a match');
-  assertEqual(result!.registryKey, 'opportunities.stale_over_days');
+  expect(result !== null, 'expected a match').toBeTruthy();
+  expect(result!.registryKey).toBe('opportunities.stale_over_days');
 });
 
 // ── Plan shape on hit ──────────────────────────────────────────────────────
 
 test('matched plan has validated:true and stageResolved:1', () => {
   const result = matchRegistryEntry(normaliseIntent('inactive contacts'), stubRegistry, ctx);
-  assert(result !== null, 'expected a match');
-  assertEqual(result!.plan.validated, true);
-  assertEqual(result!.plan.stageResolved, 1);
-  assertEqual(result!.plan.source, 'canonical');
-  assertEqual(result!.plan.confidence, 1.0);
+  expect(result !== null, 'expected a match').toBeTruthy();
+  expect(result!.plan.validated).toBe(true);
+  expect(result!.plan.stageResolved).toBe(1);
+  expect(result!.plan.source).toBe('canonical');
+  expect(result!.plan.confidence).toBe(1.0);
 });
 
 // ── Miss cases ────────────────────────────────────────────────────────────
 
 test('unrecognised intent returns null', () => {
   const result = matchRegistryEntry(normaliseIntent('weather forecast tomorrow'), stubRegistry, ctx);
-  assertEqual(result, null);
+  expect(result).toBe(null);
 });
 
 test('empty intent returns null', () => {
   const result = matchRegistryEntry(normaliseIntent(''), stubRegistry, ctx);
-  assertEqual(result, null);
+  expect(result).toBe(null);
 });
 
 test('intent that is a stop-word-only string returns null', () => {
   const result = matchRegistryEntry(normaliseIntent('the a an'), stubRegistry, ctx);
-  assertEqual(result, null);
+  expect(result).toBe(null);
 });
 
 // ── Alias collision detection ──────────────────────────────────────────────
@@ -163,7 +145,7 @@ test('collision detected at index build time', () => {
   try { buildAliasIndex(conflicting); } catch (e) {
     threw = e instanceof RegistryConflictError;
   }
-  assert(threw, 'RegistryConflictError expected on alias collision');
+  expect(threw, 'RegistryConflictError expected on alias collision').toBeTruthy();
 });
 
 // ── All-alias coverage — §8.4 requirement ─────────────────────────────────
@@ -196,8 +178,8 @@ for (const [registryKey, entry] of Object.entries(REGISTRY_META)) {
     test(`alias "${alias}" → ${registryKey}`, () => {
       const intent = normaliseIntent(alias);
       const result = matchRegistryEntry(intent, fullMockRegistry, fullCtx);
-      assert(result !== null, `expected a hit for alias "${alias}"`);
-      assertEqual(result!.registryKey, registryKey, `registryKey for "${alias}"`);
+      expect(result !== null, `expected a hit for alias "${alias}"`).toBeTruthy();
+      expect(result!.registryKey, `registryKey for "${alias}"`).toEqual(registryKey);
     });
   }
 }
@@ -216,12 +198,9 @@ for (const { alias, expectedKey } of synonymAliasChecks) {
   test(`synonym alias "${alias}" → ${expectedKey} (not in explicit alias list)`, () => {
     const intent = normaliseIntent(alias);
     const result = matchRegistryEntry(intent, fullMockRegistry, fullCtx);
-    assert(result !== null, `expected a synonym-path hit for "${alias}"`);
-    assertEqual(result!.registryKey, expectedKey, `registryKey for "${alias}"`);
+    expect(result !== null, `expected a synonym-path hit for "${alias}"`).toBeTruthy();
+    expect(result!.registryKey, `registryKey for "${alias}"`).toEqual(expectedKey);
   });
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

@@ -64,7 +64,7 @@ export function setRateLimitDeniedHeaders(res: import('express').Response, reset
   res.set('X-RateLimit-Policy', RATE_LIMIT_POLICY_HEADER_VALUE);
 }
 
-interface CheckRow {
+interface CheckRow extends Record<string, unknown> {
   current_count: number;
   curr_window_start: Date;
   prev_count: number;
@@ -75,6 +75,12 @@ interface CheckRow {
 /**
  * Sliding-window rate-limit check. Atomic UPSERT — every call increments the
  * bucket regardless of allowed/denied.
+ *
+ * IMPORTANT: callers MUST encode the window size in the key namespace when
+ * the same key prefix is reused with multiple windowSec values. Two buckets
+ * sharing the same `key` but different `windowSec` corrupt each other's window.
+ * Convention: `<feature>:<windowName>:<keyParts>` — e.g. 'auth:login:short:ip:email'
+ * for 60s and 'auth:login:long:ip:email' for 3600s.
  *
  * @param key       Caller-defined opaque string from rateLimitKeys.ts builders.
  * @param limit     Maximum allowed calls per window.

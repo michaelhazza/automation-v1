@@ -70,7 +70,7 @@ export async function evaluateCritiqueGate(
   context: PostCallContext,
 ): Promise<CritiqueGateResult> {
   const results: CritiqueGateResult['results'] = [];
-  let hasSuspect = false;
+  const hasSuspect = false;
 
   for (const tc of toolCalls) {
     const actionDef = getActionDefinition(tc.name);

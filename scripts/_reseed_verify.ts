@@ -17,7 +17,7 @@ const live = await pool.query(
 
 console.log('-- Password hash match --');
 for (const b of backup) {
-  const l = live.rows.find((r: any) => r.email === b.email);
+  const l = live.rows.find((r: Record<string, unknown>) => r.email === b.email);
   const match = l && l.password_hash === b.password_hash;
   console.log(`  ${b.email}: ${match ? 'OK (hash preserved)' : 'MISMATCH'}`);
 }

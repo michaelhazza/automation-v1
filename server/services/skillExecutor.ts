@@ -1,4 +1,5 @@
-﻿import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+﻿import { eq, and, count, inArray } from 'drizzle-orm';
+import { isActive } from '../lib/queryHelpers.js';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_OF_SCOPE } from '../../shared/types/delegation.js';
 import { insertOutcomeSafe } from './delegationOutcomeService.js';
@@ -61,6 +62,9 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 import { recordIncident } from './incidentIngestor.js';
+import { updateThreadContextHandler } from '../actions/updateThreadContext.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { logger } from '../lib/logger.js';
 
 registerAdapter('worker', createWorkerAdapter(async (rawActionType, payload, ctx) => {
   const context = ctx as unknown as SkillExecutionContext;
@@ -169,6 +173,19 @@ export interface SkillExecutionContext {
   mcpCallCount?: number;
   /** Whether this run is a test run — propagated from agentRun.isTestRun. */
   isTestRun?: boolean;
+  /**
+   * Depth of the current workflow run chain. 1 = top-level. Incremented on
+   * each workflow.run.start call. MAX_WORKFLOW_DEPTH = 3.
+   * Absent for non-workflow runs (orchestrator job, direct agent invocations).
+   */
+  workflowRunDepth?: number;
+  /**
+   * The conversation this run is associated with, when known. Populated from
+   * AgentRunRequest.conversationId so that worker skills that need to write
+   * conversation-scoped data (e.g. update_thread_context) can resolve the
+   * correct conversation without a DB lookup.
+   */
+  conversationId?: string;
   /**
    * Loaded context data for this run — populated by agentExecutionService
    * via loadRunContextData before the loop starts. Used by the
@@ -601,6 +618,10 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   import_n8n_workflow: async (input) => {
     return executeImportN8nWorkflow(input);
+  },
+  'workflow.run.start': async (input, context) => {
+    const { handleWorkflowRunStartSkill } = await import('./workflowRunStartSkillService.js');
+    return handleWorkflowRunStartSkill(input, context);
   },
 
   // ── Review-gated skills (proposes action, does NOT execute immediately) ──
@@ -1869,6 +1890,297 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   write_event: async (input, context) => {
     const { executeWriteEvent } = await import('./systemMonitor/skills/writeEvent.js');
     return executeWriteEvent(input, context);
+  },
+
+  // ── Sub-Account Optimiser: generic agent-output primitive (Chunk 1) ────────
+  // output.recommend — any agent with this skill can surface operator-facing
+  // recommendations via the generic agent_recommendations primitive.
+  // Spec: docs/sub-account-optimiser-spec.md §6.2
+  'output.recommend': async (input, context) => {
+    // Requires an agent execution context — non-agent callers are rejected.
+    if (!context.agentId) {
+      return {
+        success: false,
+        error: 'output.recommend requires an agent execution context (agentId missing)',
+      };
+    }
+
+    const {
+      scope_type,
+      scope_id,
+      category,
+      severity,
+      title,
+      body,
+      evidence,
+      action_hint,
+      dedupe_key,
+    } = input as Record<string, unknown>;
+
+    // Validate required fields
+    if (!scope_type || (scope_type !== 'org' && scope_type !== 'subaccount')) {
+      return { success: false, error: 'scope_type must be "org" or "subaccount"' };
+    }
+    if (!scope_id || typeof scope_id !== 'string') {
+      return { success: false, error: 'scope_id must be a valid UUID string' };
+    }
+    // Basic UUID validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(scope_id)) {
+      return { success: false, error: 'scope_id must be a valid UUID' };
+    }
+    if (!severity || !['info', 'warn', 'critical'].includes(severity as string)) {
+      return { success: false, error: 'severity must be "info", "warn", or "critical"' };
+    }
+    if (!category || typeof category !== 'string') {
+      return { success: false, error: 'category is required' };
+    }
+    // Validate three-segment format
+    const categoryParts = (category as string).split('.');
+    if (categoryParts.length < 3) {
+      return {
+        success: false,
+        error: 'category must follow <agent_namespace>.<area>.<finding> format (three segments)',
+      };
+    }
+    if (!title || typeof title !== 'string') {
+      return { success: false, error: 'title is required' };
+    }
+    if (!body || typeof body !== 'string') {
+      return { success: false, error: 'body is required' };
+    }
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+      return { success: false, error: 'evidence must be a plain object' };
+    }
+    if (!dedupe_key || typeof dedupe_key !== 'string') {
+      return { success: false, error: 'dedupe_key is required' };
+    }
+    // Validate action_hint: null/omitted accepted; non-null must match scheme://path format
+    if (action_hint !== undefined && action_hint !== null) {
+      if (typeof action_hint !== 'string' || action_hint === '') {
+        return { success: false, error: 'action_hint must be null/omitted or a non-empty URI string' };
+      }
+      const actionHintRegex = /^[a-z][a-z0-9-]*:\/\/[^\s]+$/;
+      if (!actionHintRegex.test(action_hint as string)) {
+        return {
+          success: false,
+          error: 'action_hint must match pattern ^[a-z][a-z0-9-]*://[^\\s]+$ (e.g. configuration-assistant://agent/id?focus=budget)',
+        };
+      }
+    }
+
+    const { upsertRecommendation } = await import('./agentRecommendationsService.js');
+    const result = await upsertRecommendation(
+      {
+        organisationId: context.organisationId,
+        agentId: context.agentId,
+      },
+      {
+        scope_type: scope_type as 'org' | 'subaccount',
+        scope_id: scope_id as string,
+        category: category as string,
+        severity: severity as 'info' | 'warn' | 'critical',
+        title: title as string,
+        body: body as string,
+        evidence: evidence as Record<string, unknown>,
+        action_hint: (action_hint as string | null | undefined) ?? null,
+        dedupe_key: dedupe_key as string,
+      },
+    );
+    return { success: true, ...result };
+  },
+
+  // ── Thread context (Chunk A — per-conversation living doc) ───────────────
+  update_thread_context: async (input, context) => {
+    if (!context.conversationId) {
+      return { success: false, error: 'update_thread_context requires a conversation context — this run has no associated conversation.' };
+    }
+    return executeWithActionAudit('update_thread_context', input, context, () =>
+      updateThreadContextHandler(input, {
+        conversationId: context.conversationId!,
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId ?? null,
+      }),
+    );
+  },
+
+  // ── Sub-Account Optimiser: scan skills (Chunk 5) ─────────────────────────
+  // Each scan skill is a thin wrapper: query module → evaluator → EvaluatorOutput[].
+  // All scan skills are read-only (no action record, no side effects).
+  // Spec: docs/sub-account-optimiser-spec.md §5
+
+  'optimiser.scan_agent_budget': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_agent_budget');
+    try {
+      const { module: agentBudgetModule } = await import('./optimiser/queries/agentBudget.js');
+      const { evaluate } = await import('./optimiser/recommendations/agentBudget.js');
+      const tx = getOrgScopedDb('optimiser.scan_agent_budget');
+      const rows = await agentBudgetModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: agentBudgetModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.agent.over_budget', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_workflow_escalations': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_workflow_escalations');
+    try {
+      const { module: escalationRateModule } = await import('./optimiser/queries/escalationRate.js');
+      const { evaluate } = await import('./optimiser/recommendations/playbookEscalation.js');
+      const tx = getOrgScopedDb('optimiser.scan_workflow_escalations');
+      const rows = await escalationRateModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: escalationRateModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.playbook.escalation_rate', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_skill_latency': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_skill_latency');
+    try {
+      const { skillLatencyModule, peerMediansViewIsPopulated, runSkillLatencyQuery } = await import('./optimiser/queries/skillLatency.js');
+      const { evaluateSkillSlow } = await import('./optimiser/recommendations/skillSlow.js');
+      // peerMediansViewIsPopulated manages its own admin connection internally
+      const populated = await peerMediansViewIsPopulated();
+      if (!populated) {
+        logger.info('optimiser.scan.partial', { scanCategory: skillLatencyModule.category, medianVersion: 0, subaccountId });
+        return { success: true, outputs: [] };
+      }
+      // allowRlsBypass: reading cross-tenant peer medians view (optimiser_skill_peer_medians) — read-only aggregate, no tenant data written
+      const { withAdminConnectionGuarded: adminGuarded } = await import('../lib/rlsBoundaryGuard.js');
+      let outputs: import('./optimiser/recommendations/types.js').EvaluatorOutput[] = [];
+      await adminGuarded(
+        { source: 'optimiser.scan_skill_latency', allowRlsBypass: false },
+        async (adminTx) => {
+          const versionRows = await adminTx.execute<{ max_version: number }>(
+            (await import('drizzle-orm')).sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
+          );
+          const medianVersion = versionRows[0]?.max_version ?? 0;
+          const rows = await runSkillLatencyQuery(adminTx, subaccountId, medianVersion);
+          logger.info('optimiser.scan.completed', { scanCategory: skillLatencyModule.category, resultCount: rows.length, subaccountId });
+          outputs = evaluateSkillSlow(rows, { subaccountId, organisationId: context.organisationId, medianVersion, priorRecsByDedupe: new Map() });
+        },
+      );
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.skill.slow', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_inactive_workflows': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_inactive_workflows');
+    try {
+      const { module: inactiveWorkflowsModule } = await import('./optimiser/queries/inactiveWorkflows.js');
+      const { evaluate } = await import('./optimiser/recommendations/inactiveWorkflow.js');
+      const tx = getOrgScopedDb('optimiser.scan_inactive_workflows');
+      const rows = await inactiveWorkflowsModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: inactiveWorkflowsModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.inactive.workflow', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_escalation_phrases': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_escalation_phrases');
+    try {
+      const { module: escalationPhrasesModule } = await import('./optimiser/queries/escalationPhrases.js');
+      const { evaluate } = await import('./optimiser/recommendations/repeatPhrase.js');
+      const tx = getOrgScopedDb('optimiser.scan_escalation_phrases');
+      const rows = await escalationPhrasesModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: escalationPhrasesModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.escalation.repeat_phrase', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_memory_citation': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_memory_citation');
+    try {
+      const { module: memoryCitationModule } = await import('./optimiser/queries/memoryCitation.js');
+      const { evaluate } = await import('./optimiser/recommendations/memoryCitation.js');
+      const tx = getOrgScopedDb('optimiser.scan_memory_citation');
+      const rows = await memoryCitationModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: memoryCitationModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.memory.low_citation_waste', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_routing_uncertainty': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_routing_uncertainty');
+    try {
+      const { module: routingUncertaintyModule } = await import('./optimiser/queries/routingUncertainty.js');
+      const { evaluate } = await import('./optimiser/recommendations/routingUncertainty.js');
+      const tx = getOrgScopedDb('optimiser.scan_routing_uncertainty');
+      const rows = await routingUncertaintyModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: routingUncertaintyModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.agent.routing_uncertainty', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  'optimiser.scan_cache_efficiency': async (input, context) => {
+    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_cache_efficiency');
+    try {
+      const { module: cacheEfficiencyModule } = await import('./optimiser/queries/cacheEfficiency.js');
+      const { evaluate } = await import('./optimiser/recommendations/cacheEfficiency.js');
+      const tx = getOrgScopedDb('optimiser.scan_cache_efficiency');
+      const rows = await cacheEfficiencyModule.run(tx, subaccountId);
+      logger.info('optimiser.scan.completed', { scanCategory: cacheEfficiencyModule.category, resultCount: rows.length, subaccountId });
+      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
+      return { success: true, outputs };
+    } catch (err) {
+      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.llm.cache_poor_reuse', error: err instanceof Error ? err.message : String(err), subaccountId });
+      throw err;
+    }
+  },
+
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ─────────────────────────────
+  // Thin shells over chargeRouterService.proposeCharge. Each handler validates
+  // input, resolves spending context, normalises merchant (invariant 21), and
+  // delegates to spendSkillHandlers. Dual registration enforced per invariant 14:
+  // every spendsMoney:true ACTION_REGISTRY entry has a matching SKILL_HANDLERS entry.
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
+  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
+  pay_invoice: async (input, context) => {
+    const { executePayInvoice } = await import('./spendSkillHandlers.js');
+    return executePayInvoice(input, context);
+  },
+  purchase_resource: async (input, context) => {
+    const { executePurchaseResource } = await import('./spendSkillHandlers.js');
+    return executePurchaseResource(input, context);
+  },
+  subscribe_to_service: async (input, context) => {
+    const { executeSubscribeToService } = await import('./spendSkillHandlers.js');
+    return executeSubscribeToService(input, context);
+  },
+  top_up_balance: async (input, context) => {
+    const { executeTopUpBalance } = await import('./spendSkillHandlers.js');
+    return executeTopUpBalance(input, context);
+  },
+  issue_refund: async (input, context) => {
+    const { executeIssueRefund } = await import('./spendSkillHandlers.js');
+    return executeIssueRefund(input, context);
   },
 };
 
@@ -3204,7 +3516,7 @@ async function executeTriageIntake(
     const conditions = [
       eq(tasks.subaccountId, context.subaccountId!),
       eq(tasks.status, 'inbox'),
-      isNull(tasks.deletedAt),
+      isActive(tasks),
     ];
     if (scope === 'single' && relatedTaskId) {
       conditions.push(eq(tasks.id, relatedTaskId));
@@ -3372,14 +3684,13 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       sa: subaccountAgents,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, req.subaccountId),
         eq(subaccountAgents.agentId, req.agentId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 
@@ -3586,14 +3897,13 @@ async function executeReassignTask(
     const [saLinkRow] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
           eq(subaccountAgents.agentId, agentId),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 
@@ -3836,14 +4146,13 @@ async function executeSpawnSubAgents(
     const [saLink] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.subaccountId, context.subaccountId!),
           eq(subaccountAgents.agentId, st.assigned_agent_id),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
         )
       );
 
@@ -4472,7 +4781,7 @@ async function executeMonitorWebpage(
   }
 
   // ── 3. Establish initial baseline ────────────────────────────────────────
-  let baselineContentHash = '';
+  let baselineContentHash: string;
   let baselineExtractedData: Record<string, unknown> | null = null;
 
   if (fields) {

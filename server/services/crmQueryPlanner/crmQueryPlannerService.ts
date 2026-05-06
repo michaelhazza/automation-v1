@@ -18,7 +18,7 @@ import { runLlmStage3 } from './llmPlanner.js';
 import { validatePlanPure, ValidationError } from './validatePlanPure.js';
 import { computePlannerCostPreview, computeActualCostCents } from './plannerCostPure.js';
 import { systemSettingsService, SETTING_KEYS } from '../systemSettingsService.js';
-import { BudgetExceededError } from '../budgetService.js';
+import { ComputeBudgetExceededError, isComputeBudgetExceededError } from '../computeBudgetService.js';
 import { isParseFailureError } from '../../lib/parseFailureError.js';
 import { FailureError } from '../../../shared/iee/failure.js';
 import { withPrincipalContext } from '../../db/withPrincipalContext.js';
@@ -105,32 +105,27 @@ function makeLiveCallFailedError(intentHash: string, message: string): BriefChat
   };
 }
 
-// Recognises every shape `llmRouter` uses to signal budget exhaustion:
-//   1. `BudgetExceededError` — original typed error from `budgetService` (not
-//      thrown by the router in production, but safe to support).
-//   2. Plain-object `{ statusCode: 402, code: 'BUDGET_EXCEEDED' }` — thrown
+// Recognises every shape `llmRouter` uses to signal compute budget exhaustion:
+//   1. `ComputeBudgetExceededError` — typed error from `computeBudgetService`.
+//   2. Plain-object `{ statusCode: 402, code: 'COMPUTE_BUDGET_EXCEEDED' }` — thrown
 //      pre-call after the router writes its `budget_blocked` ledger row.
 //      NOTE: llmRouter also throws `statusCode: 402` with
 //      `code: 'RATE_LIMITED'` for reservation-side rate limiting — that is a
-//      transient failure, not a budget overrun, so the `code` discriminator
-//      matters. Only `BUDGET_EXCEEDED` matches here; `RATE_LIMITED` falls
+//      transient failure, not a compute budget overrun, so the `code` discriminator
+//      matters. Only `COMPUTE_BUDGET_EXCEEDED` matches here; `RATE_LIMITED` falls
 //      through to the parse-failure / ambiguous_intent path downstream.
 //   3. `FailureError` with `failureDetail === 'cost_limit_exceeded'` — thrown
 //      post-call by the `runCostBreaker.assertWithinRunBudgetFromLedger` guard.
-function isBudgetExceededError(err: unknown): boolean {
-  if (err instanceof BudgetExceededError) return true;
+function isComputeBudgetExhaustedError(err: unknown): boolean {
+  if (isComputeBudgetExceededError(err)) return true;
   // FailureError.failure is required and readonly per shared/iee/failure.ts —
   // no optional chain needed.
   if (err instanceof FailureError && err.failure.failureDetail === 'cost_limit_exceeded') return true;
-  if (typeof err === 'object' && err !== null && 'statusCode' in err) {
-    const shape = err as { statusCode?: unknown; code?: unknown };
-    if (shape.statusCode === 402 && shape.code === 'BUDGET_EXCEEDED') return true;
-  }
   return false;
 }
 
 // Distinguishes reservation-side rate-limit 402s from budget-exceeded 402s.
-// `llmRouter` shares `statusCode: 402` across BUDGET_EXCEEDED / RATE_LIMITED
+// `llmRouter` shares `statusCode: 402` across COMPUTE_BUDGET_EXCEEDED / RATE_LIMITED
 // but uses the `code` discriminator for the semantic. Rate-limit is transient
 // provider-side infrastructure failure, not user-side ambiguity or malformed
 // model output — it deserves its own internal subcategory for analytics.
@@ -466,10 +461,10 @@ async function runQueryPipeline(
     });
   } catch (err) {
     // Per-run ledger budget exceeded inside llmRouter → cost_exceeded (spec §16.2).
-    // Router surfaces three shapes (see `isBudgetExceededError`): the typed
-    // `BudgetExceededError`, a plain `{ statusCode: 402 }` pre-call, and a
+    // Router surfaces three shapes (see `isComputeBudgetExhaustedError`): the typed
+    // `ComputeBudgetExceededError`, a plain `{ statusCode: 402 }` pre-call, and a
     // `FailureError` with `cost_limit_exceeded` post-ledger via runCostBreaker.
-    if (isBudgetExceededError(err)) {
+    if (isComputeBudgetExhaustedError(err)) {
       const artefact = makeCostExceededError(intentHash);
       trace.stage3 = { used: true, parseFailure: true };
       trace.terminalOutcome = 'error';

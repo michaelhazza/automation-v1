@@ -7,6 +7,7 @@ import {
   boardConfigs,
   agents,
 } from '../db/schema/index.js';
+import { assertActive } from '../lib/queryHelpers.js';
 import type { Task } from '../db/schema/tasks.js';
 
 type TaskStatus = Task['status'];
@@ -39,6 +40,23 @@ function mergeAgentIds(
 
 export const taskService = {
   // ─── Tasks (Kanban Cards) ──────────────────────────────────────────────────
+
+  /**
+   * Returns true iff a task with the given id exists in the org. Soft-deleted
+   * tasks are still considered owned (for audit / replay paths). Routes use
+   * this to scope task-id paths without leaking existence across orgs.
+   *
+   * Per DEVELOPMENT_GUIDELINES §2 routes never import `db` directly — call
+   * this from the route layer instead of inlining a select.
+   */
+  async assertOrgOwnsTask(taskId: string, organisationId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId)))
+      .limit(1);
+    return row != null;
+  },
 
   async listTasks(
     organisationId: string,
@@ -138,6 +156,15 @@ export const taskService = {
 
     const { agentId, agentIds } = mergeAgentIds(data.assignedAgentId, data.assignedAgentIds);
 
+    if (agentId) {
+      const [assignedAgent] = await db
+        .select({ id: agents.id, deletedAt: agents.deletedAt })
+        .from(agents)
+        .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
+        .limit(1);
+      assertActive(assignedAgent, 'Agent');
+    }
+
     const [item] = await db
       .insert(tasks)
       .values({
@@ -151,6 +178,7 @@ export const taskService = {
         assignedAgentId: agentId,
         assignedAgentIds: agentIds,
         createdByAgentId: data.createdByAgentId ?? null,
+        createdByUserId: userId ?? null,
         processId: data.processId ?? null,
         position,
         dueDate: data.dueDate ?? null,

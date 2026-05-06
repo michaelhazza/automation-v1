@@ -4,6 +4,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { users } from './users';
+import { workflowTemplateVersions } from './workflowTemplates';
 
 // ---------------------------------------------------------------------------
 // Scheduled Tasks — user-configured recurring tasks
@@ -72,6 +73,10 @@ export const scheduledTasks = pgTable(
       slack?: boolean;
     } | null>(),
 
+    // Workflows V1 (migration 0270) — pin a specific template version for scheduled runs
+    pinnedTemplateVersionId: uuid('pinned_template_version_id').references(
+      () => workflowTemplateVersions.id
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -93,6 +98,9 @@ export const scheduledTasks = pgTable(
     workflowSlugIdx: index('scheduled_tasks_workflow_slug_idx')
       .on(table.createdByWorkflowSlug)
       .where(sql`${table.createdByWorkflowSlug} IS NOT NULL`),
+    pinnedTemplateVersionIdx: index('scheduled_tasks_pinned_template_version_idx')
+      .on(table.pinnedTemplateVersionId)
+      .where(sql`${table.pinnedTemplateVersionId} IS NOT NULL`),
   })
 );
 

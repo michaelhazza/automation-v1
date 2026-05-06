@@ -11,8 +11,30 @@ import {
   type LLMMessage,
 } from './llmService.js';
 import { routeCall } from './llmRouter.js';
+import { calculateCost } from './pricingService.js';
 import { env } from '../lib/env.js';
 import { emitConversationUpdate } from '../websocket/emitters.js';
+import { parseSuggestedActions } from '../../shared/types/messageSuggestedActions.js';
+
+// ---------------------------------------------------------------------------
+// Cost helpers — convert tokensIn/tokensOut → whole cents using pricingService.
+// Falls back to 0 cost rather than throwing so a pricing miss never breaks chat.
+// ---------------------------------------------------------------------------
+
+async function computeCostCents(
+  provider: string,
+  modelId: string,
+  tokensIn: number,
+  tokensOut: number,
+  organisationId: string,
+): Promise<number> {
+  try {
+    const result = await calculateCost(provider, modelId, tokensIn, tokensOut, organisationId);
+    return result.costWithMarginCents;
+  } catch {
+    return 0;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Conversation CRUD
@@ -204,11 +226,19 @@ export const conversationService = {
     const orgProcesses = await getOrgProcessesForTools(organisationId);
 
     // ── 5. Build system prompt ────────────────────────────────────────────────
-    const systemPrompt = buildSystemPrompt(
+    const baseSystemPrompt = buildSystemPrompt(
       agent.masterPrompt,
       dataSourceContents,
       orgProcesses,
     );
+    const systemPrompt = baseSystemPrompt + `
+---
+OPTIONAL CHIP SUGGESTIONS: At the very end of your response (after all substantive content), you may optionally include a <suggested_actions> block with up to 4 follow-up actions. Only include chips when genuinely useful. Format:
+<suggested_actions>
+[{"kind":"prompt","label":"Short label ≤80 chars","prompt":"Pre-fill text ≤2000 chars"},{"kind":"system","label":"Short label","actionKey":"save_thread_as_agent|schedule_daily|pin_skill"}]
+</suggested_actions>
+Most responses should have NO chips. Include them only for natural next-steps.
+`;
 
     // ── 6. Build message history (last N messages) ────────────────────────────
     const maxContextMessages = env.AGENT_CONTEXT_MESSAGES;
@@ -274,10 +304,10 @@ export const conversationService = {
       context: {
         organisationId,
         userId,
-        sourceType: 'agent_run',
+        sourceType: 'system',
+        systemCallerPolicy: 'bypass_routing',
         agentName: agent.name,
         taskType: 'general',
-        executionPhase: 'planning',
         provider: agent.modelProvider ?? 'anthropic',
         model: agent.modelId,
         routingMode: 'ceiling',
@@ -288,6 +318,15 @@ export const conversationService = {
     let triggeredExecutionId: string | undefined;
 
     if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+      // Compute cost for the initial LLM call (tool-use request)
+      const initialCostCents = await computeCostCents(
+        agent.modelProvider ?? 'anthropic',
+        agent.modelId,
+        llmResponse.tokensIn,
+        llmResponse.tokensOut,
+        organisationId,
+      );
+
       // Save the assistant's tool-use message
       const [assistantToolMsg] = await db
         .insert(agentMessages)
@@ -301,6 +340,10 @@ export const conversationService = {
               name: toolCall.name,
               input: toolCall.input,
             })),
+            costCents: initialCostCents,
+            tokensIn: llmResponse.tokensIn,
+            tokensOut: llmResponse.tokensOut,
+            modelId: agent.modelId,
             createdAt: new Date(),
           })
         .returning();
@@ -391,62 +434,130 @@ export const conversationService = {
         context: {
           organisationId,
           userId,
-          sourceType: 'agent_run',
+          sourceType: 'system',
+          systemCallerPolicy: 'bypass_routing',
           agentName: agent.name,
           taskType: 'process_trigger',
-          executionPhase: 'synthesis',
           provider: agent.modelProvider ?? 'anthropic',
           model: agent.modelId,
           routingMode: 'ceiling',
         },
       });
 
+      const finalCostCents = await computeCostCents(
+        agent.modelProvider ?? 'anthropic',
+        agent.modelId,
+        llmResponse.tokensIn,
+        llmResponse.tokensOut,
+        organisationId,
+      );
+
       // Save final assistant response
+      const { chips: finalChips, strippedContent: finalContent } = parseSuggestedActions(
+        llmResponse.content,
+        { conversationId },
+      );
+
       const [finalMsg] = await db
         .insert(agentMessages)
         .values({
           conversationId,
           role: 'assistant',
-          content: llmResponse.content,
+          content: finalContent,
           triggeredExecutionId: triggeredExecutionId ?? null,
+          suggestedActions: finalChips.length > 0 ? finalChips : null,
+          costCents: finalCostCents,
+          tokensIn: llmResponse.tokensIn,
+          tokensOut: llmResponse.tokensOut,
+          modelId: agent.modelId,
           createdAt: new Date(),
         })
         .returning();
 
       emitConversationUpdate(conversationId, 'conversation:message', {
-        message: { id: finalMsg.id, role: 'assistant', content: llmResponse.content, createdAt: finalMsg.createdAt },
+        message: { id: finalMsg.id, role: 'assistant', content: finalContent, suggestedActions: finalChips.length > 0 ? finalChips : null, createdAt: finalMsg.createdAt },
         triggeredExecutionId: triggeredExecutionId ?? null,
       });
 
       return {
         userMessageId: userMsg.id,
         assistantMessageId: finalMsg.id,
-        content: llmResponse.content,
+        content: finalContent,
         triggeredExecutionId: triggeredExecutionId ?? null,
       };
     }
 
     // ── 10. Save regular assistant response ───────────────────────────────────
+    const regularCostCents = await computeCostCents(
+      agent.modelProvider ?? 'anthropic',
+      agent.modelId,
+      llmResponse.tokensIn,
+      llmResponse.tokensOut,
+      organisationId,
+    );
+
+    const { chips: regularChips, strippedContent: regularContent } = parseSuggestedActions(
+      llmResponse.content,
+      { conversationId },
+    );
+
     const [assistantMsg] = await db
       .insert(agentMessages)
       .values({
         conversationId,
         role: 'assistant',
-        content: llmResponse.content,
+        content: regularContent,
+        suggestedActions: regularChips.length > 0 ? regularChips : null,
+        costCents: regularCostCents,
+        tokensIn: llmResponse.tokensIn,
+        tokensOut: llmResponse.tokensOut,
+        modelId: agent.modelId,
         createdAt: new Date(),
       })
       .returning();
 
     emitConversationUpdate(conversationId, 'conversation:message', {
-      message: { id: assistantMsg.id, role: 'assistant', content: llmResponse.content, createdAt: assistantMsg.createdAt },
+      message: { id: assistantMsg.id, role: 'assistant', content: regularContent, suggestedActions: regularChips.length > 0 ? regularChips : null, createdAt: assistantMsg.createdAt },
       triggeredExecutionId: null,
     });
 
     return {
       userMessageId: userMsg.id,
       assistantMessageId: assistantMsg.id,
-      content: llmResponse.content,
+      content: regularContent,
       triggeredExecutionId: null,
     };
   },
 };
+
+export async function verifyConversationAccess(params: {
+  convId: string;
+  agentId: string;
+  userId: string;
+  organisationId: string;
+}): Promise<void> {
+  const { convId, agentId, userId, organisationId } = params;
+  const [conv] = await db
+    .select({ id: agentConversations.id, userId: agentConversations.userId })
+    .from(agentConversations)
+    .where(
+      and(
+        eq(agentConversations.id, convId),
+        eq(agentConversations.agentId, agentId),
+        eq(agentConversations.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+  if (!conv) throw { statusCode: 404, message: 'Conversation not found', errorCode: 'CONVERSATION_NOT_FOUND' };
+  if (conv.userId !== userId) throw { statusCode: 403, message: 'Forbidden', errorCode: 'FORBIDDEN' };
+}
+
+export async function verifyMessageInConversation(messageId: string, convId: string): Promise<void> {
+  const [msg] = await db
+    .select({ id: agentMessages.id })
+    .from(agentMessages)
+    .where(and(eq(agentMessages.id, messageId), eq(agentMessages.conversationId, convId)))
+    .limit(1);
+  if (!msg) throw { statusCode: 404, message: 'Message not found', errorCode: 'NOT_FOUND' };
+}
+

@@ -1,0 +1,28 @@
+You are reviewing a draft implementation specification for a feature in the Automation OS codebase.
+
+Spec path: docs/sub-account-optimiser-spec.md
+
+Project framing (do NOT raise findings against any of these — they are intentional):
+- Pre-production environment, no live users, no live agencies. Feature flags only for behaviour modes (shadow vs active), not for rollout gating. No staged rollout. No canary deploys. No production observability uplift beyond what already exists.
+- Testing posture: static gates primary, pure-function unit tests, NO frontend tests, NO E2E tests against this app, NO API contract tests, NO performance baselines, NO composition tests.
+- Prefer existing primitives over new ones. The agent_recommendations table + output.recommend skill + <AgentRecommendationsList> component triplet IS a deliberately new primitive — design-locked at design review per §0.1 / §6 / §6.4.
+- Org-tier optimiser is deliberately deferred (Portfolio Health Agent occupies that role) — not a gap.
+- Bespoke subaccount_recommendations table was deliberately rejected at design review in favour of the generic agent_recommendations primitive.
+
+Your job: read the spec carefully and produce findings on **implementation-readiness** — places where the spec is internally inconsistent, ambiguous, contradicts itself, references files/tables/columns without naming them concretely, has phase-sequencing bugs, has file-inventory drift, has load-bearing claims without backing mechanisms, has missing verdicts, has schema overlaps without a declared source of truth, or has invariants stated in one place but not enforced elsewhere.
+
+Format each finding as a short paragraph with:
+- Section / line range it points at
+- One-sentence description of the problem
+- Suggested fix (the smallest mechanical change that resolves the issue)
+- Severity: critical / important / minor / nit
+
+DO NOT propose:
+- New tests beyond the existing pure-unit + 1-integration envelope
+- Feature flags for the migration / rollout
+- Staged / phased rollout
+- Production monitoring / SLOs / dashboards
+- Bespoke tables (e.g. "use subaccount_recommendations instead of generic")
+- An org-tier optimiser
+
+Read the entire spec from start to finish before writing findings. Then produce a numbered list of findings.

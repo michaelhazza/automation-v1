@@ -206,9 +206,9 @@ async function executeFromCheckpoint(
     }
 
     // ── Auto-gated / direct step: execute inline ───────────────────────────
-    let output: unknown = null;
+    let output: unknown;
     let errorMessage: string | undefined;
-    let stepStatus: 'completed' | 'failed' = 'completed';
+    const stepStatus: 'completed' | 'failed' = 'completed';
 
     try {
       const mergedPayload = { ...step.payload, ...accumulatedOutputs };
@@ -227,7 +227,6 @@ async function executeFromCheckpoint(
 
       accumulatedOutputs = { ...accumulatedOutputs, [step.stepId]: output };
     } catch (err) {
-      stepStatus = 'failed';
       errorMessage = err instanceof Error ? err.message : String(err);
       output = { error: errorMessage };
 

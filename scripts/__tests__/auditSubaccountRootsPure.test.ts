@@ -5,26 +5,8 @@
  * Run via: npx tsx scripts/__tests__/auditSubaccountRootsPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { auditSubaccountRoots } from '../auditSubaccountRootsPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -37,14 +19,14 @@ test('all counts ≤ 1 → no violations, summary says OK', () => {
     { subaccountId: 'sa-3', orgId: 'org-2', count: 0, agentSlugs: [] },
   ];
   const { violations, summary } = auditSubaccountRoots(rows);
-  assert(violations.length === 0, `expected 0 violations, got ${violations.length}`);
-  assert(summary.startsWith('OK'), `expected summary to start with 'OK', got: ${summary}`);
+  expect(violations.length === 0, `expected 0 violations, got ${violations.length}`).toBeTruthy();
+  expect(summary.startsWith('OK'), `expected summary to start with 'OK', got: ${summary}`).toBeTruthy();
 });
 
 test('empty input → no violations, summary says OK', () => {
   const { violations, summary } = auditSubaccountRoots([]);
-  assert(violations.length === 0, `expected 0 violations, got ${violations.length}`);
-  assert(summary.startsWith('OK'), `expected summary to start with 'OK', got: ${summary}`);
+  expect(violations.length === 0, `expected 0 violations, got ${violations.length}`).toBeTruthy();
+  expect(summary.startsWith('OK'), `expected summary to start with 'OK', got: ${summary}`).toBeTruthy();
 });
 
 test('one violation found', () => {
@@ -53,10 +35,10 @@ test('one violation found', () => {
     { subaccountId: 'sa-2', orgId: 'org-1', count: 2, agentSlugs: ['orchestrator', 'portfolio-health-agent'] },
   ];
   const { violations, summary } = auditSubaccountRoots(rows);
-  assert(violations.length === 1, `expected 1 violation, got ${violations.length}`);
-  assert(violations[0].subaccountId === 'sa-2', `expected violating subaccountId 'sa-2', got '${violations[0].subaccountId}'`);
-  assert(summary.includes('VIOLATION'), `expected summary to include 'VIOLATION', got: ${summary}`);
-  assert(summary.includes('sa-2'), `expected summary to mention 'sa-2', got: ${summary}`);
+  expect(violations.length === 1, `expected 1 violation, got ${violations.length}`).toBeTruthy();
+  expect(violations[0].subaccountId === 'sa-2', `expected violating subaccountId 'sa-2', got '${violations[0].subaccountId}'`).toBeTruthy();
+  expect(summary.includes('VIOLATION'), `expected summary to include 'VIOLATION', got: ${summary}`).toBeTruthy();
+  expect(summary.includes('sa-2'), `expected summary to mention 'sa-2', got: ${summary}`).toBeTruthy();
 });
 
 test('multi-org mixed — only violating entries returned', () => {
@@ -67,11 +49,11 @@ test('multi-org mixed — only violating entries returned', () => {
     { subaccountId: 'sa-d', orgId: 'org-2', count: 2, agentSlugs: ['orchestrator', 'ops-agent'] },
   ];
   const { violations, summary } = auditSubaccountRoots(rows);
-  assert(violations.length === 2, `expected 2 violations, got ${violations.length}`);
+  expect(violations.length === 2, `expected 2 violations, got ${violations.length}`).toBeTruthy();
   const ids = violations.map((v) => v.subaccountId).sort();
-  assert(ids[0] === 'sa-b', `expected 'sa-b', got '${ids[0]}'`);
-  assert(ids[1] === 'sa-d', `expected 'sa-d', got '${ids[1]}'`);
-  assert(summary.includes('2 subaccount'), `expected summary to mention '2 subaccount', got: ${summary}`);
+  expect(ids[0] === 'sa-b', `expected 'sa-b', got '${ids[0]}'`).toBeTruthy();
+  expect(ids[1] === 'sa-d', `expected 'sa-d', got '${ids[1]}'`).toBeTruthy();
+  expect(summary.includes('2 subaccount'), `expected summary to mention '2 subaccount', got: ${summary}`).toBeTruthy();
 });
 
 test('count=0 row excluded even when other violations exist', () => {
@@ -80,8 +62,8 @@ test('count=0 row excluded even when other violations exist', () => {
     { subaccountId: 'sa-2', orgId: 'org-1', count: 2, agentSlugs: ['alpha', 'beta'] },
   ];
   const { violations } = auditSubaccountRoots(rows);
-  assert(violations.length === 1, `expected 1 violation, got ${violations.length}`);
-  assert(violations[0].subaccountId === 'sa-2', `expected 'sa-2', got '${violations[0].subaccountId}'`);
+  expect(violations.length === 1, `expected 1 violation, got ${violations.length}`).toBeTruthy();
+  expect(violations[0].subaccountId === 'sa-2', `expected 'sa-2', got '${violations[0].subaccountId}'`).toBeTruthy();
 });
 
 test('violation row contains expected agent slugs', () => {
@@ -89,17 +71,12 @@ test('violation row contains expected agent slugs', () => {
     { subaccountId: 'sa-1', orgId: 'org-1', count: 2, agentSlugs: ['alpha', 'beta'] },
   ];
   const { violations } = auditSubaccountRoots(rows);
-  assert(violations.length === 1, 'expected 1 violation');
-  assert(
-    violations[0].agentSlugs.includes('alpha') && violations[0].agentSlugs.includes('beta'),
-    'expected agentSlugs to contain alpha and beta'
-  );
+  expect(violations.length === 1, 'expected 1 violation').toBeTruthy();
+  expect(violations[0].agentSlugs.includes('alpha') && violations[0].agentSlugs.includes('beta'), 'expected agentSlugs to contain alpha and beta').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
-console.log('');
-console.log(`auditSubaccountRootsPure: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+console.log('');

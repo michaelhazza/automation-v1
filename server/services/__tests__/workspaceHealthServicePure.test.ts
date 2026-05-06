@@ -5,36 +5,12 @@
  *   npx tsx server/services/__tests__/workspaceHealthServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   runDetectors,
   diffFindings,
 } from '../workspaceHealth/workspaceHealthServicePure.js';
 import type { DetectorContext, WorkspaceHealthFinding } from '../workspaceHealth/detectorTypes.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  const aJson = JSON.stringify(a);
-  const bJson = JSON.stringify(b);
-  if (aJson !== bJson) throw new Error(`${label} — expected ${bJson}, got ${aJson}`);
-}
-
-function assertTrue(value: boolean, label: string) {
-  if (!value) throw new Error(`${label} — expected truthy`);
-}
 
 const FIXED_NOW = new Date('2026-04-11T00:00:00.000Z').getTime();
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -70,8 +46,8 @@ test('agent.no_recent_runs — fires when active agent never ran', () => {
     defaultSkillSlugs: ['x'],
   });
   const f = runDetectors(ctx);
-  assertEqual(f.length, 1, 'one finding');
-  assertEqual(f[0].detector, 'agent.no_recent_runs', 'detector name');
+  expect(f.length, 'one finding').toBe(1);
+  expect(f[0].detector, 'detector name').toBe('agent.no_recent_runs');
 });
 
 test('agent.no_recent_runs — does not fire for inactive agents', () => {
@@ -85,7 +61,7 @@ test('agent.no_recent_runs — does not fire for inactive agents', () => {
     defaultSkillSlugs: ['x'],
   });
   const f = runDetectors(ctx);
-  assertEqual(f.length, 0, 'no finding');
+  expect(f.length, 'no finding').toBe(0);
 });
 
 test('agent.no_recent_runs — does not fire when last run is recent', () => {
@@ -99,7 +75,7 @@ test('agent.no_recent_runs — does not fire when last run is recent', () => {
     defaultSkillSlugs: ['x'],
   });
   const f = runDetectors(ctx);
-  assertEqual(f.length, 0, 'no finding');
+  expect(f.length, 'no finding').toBe(0);
 });
 
 // ── subaccount_agent.no_skills ────────────────────────────────────────────
@@ -119,7 +95,7 @@ test('subaccount_agent.no_skills — fires when both tiers empty', () => {
   });
   const f = runDetectors(ctx);
   const noSkills = f.filter((x) => x.detector === 'subaccount_agent.no_skills');
-  assertEqual(noSkills.length, 1, 'one finding');
+  expect(noSkills.length, 'one finding').toBe(1);
 });
 
 test('subaccount_agent.no_skills — does NOT fire when org default exists', () => {
@@ -137,7 +113,7 @@ test('subaccount_agent.no_skills — does NOT fire when org default exists', () 
   });
   const f = runDetectors(ctx);
   const noSkills = f.filter((x) => x.detector === 'subaccount_agent.no_skills');
-  assertEqual(noSkills.length, 0, 'no finding');
+  expect(noSkills.length, 'no finding').toBe(0);
 });
 
 // ── subaccount_agent.no_schedule ──────────────────────────────────────────
@@ -157,8 +133,8 @@ test('subaccount_agent.no_schedule — fires when both heartbeat and cron disabl
   });
   const f = runDetectors(ctx);
   const noSched = f.filter((x) => x.detector === 'subaccount_agent.no_schedule');
-  assertEqual(noSched.length, 1, 'one finding');
-  assertEqual(noSched[0].severity, 'info', 'info severity');
+  expect(noSched.length, 'one finding').toBe(1);
+  expect(noSched[0].severity, 'info severity').toBe('info');
 });
 
 // ── process.broken_connection_mapping ─────────────────────────────────────
@@ -185,9 +161,9 @@ test('process.broken_connection_mapping — fires when required slot is missing'
   });
   const f = runDetectors(ctx);
   const broken = f.filter((x) => x.detector === 'process.broken_connection_mapping');
-  assertEqual(broken.length, 1, 'one finding');
-  assertEqual(broken[0].severity, 'critical', 'critical severity');
-  assertTrue(broken[0].message.includes('gmail_account'), 'mentions missing key');
+  expect(broken.length, 'one finding').toBe(1);
+  expect(broken[0].severity, 'critical severity').toBe('critical');
+  expect(broken[0].message.includes('gmail_account'), 'mentions missing key').toBe(true);
 });
 
 test('process.broken_connection_mapping — composite resourceId distinguishes the same process across subaccounts', () => {
@@ -208,10 +184,10 @@ test('process.broken_connection_mapping — composite resourceId distinguishes t
   );
   const f = runDetectors(ctx);
   const broken = f.filter((x) => x.detector === 'process.broken_connection_mapping');
-  assertEqual(broken.length, 2, 'one finding per subaccount');
+  expect(broken.length, 'one finding per subaccount').toBe(2);
   // Composite resourceIds must differ so the unique upsert keeps both rows.
-  assertTrue(broken[0].resourceId !== broken[1].resourceId, 'distinct resourceIds');
-  assertTrue(broken.every((x) => x.resourceId.includes(':')), 'composite key contains colon');
+  expect(broken[0].resourceId !== broken[1].resourceId, 'distinct resourceIds').toBe(true);
+  expect(broken.every((x) => x.resourceId.includes(':')), 'composite key contains colon').toBe(true);
 });
 
 test('process.broken_connection_mapping — does NOT fire when all required slots are mapped', () => {
@@ -232,7 +208,7 @@ test('process.broken_connection_mapping — does NOT fire when all required slot
   });
   const f = runDetectors(ctx);
   const broken = f.filter((x) => x.detector === 'process.broken_connection_mapping');
-  assertEqual(broken.length, 0, 'no finding');
+  expect(broken.length, 'no finding').toBe(0);
 });
 
 // ── process.no_engine ─────────────────────────────────────────────────────
@@ -249,7 +225,7 @@ test('process.no_engine — fires for org process with null engine', () => {
   });
   const f = runDetectors(ctx);
   const noEng = f.filter((x) => x.detector === 'process.no_engine');
-  assertEqual(noEng.length, 1, 'one finding');
+  expect(noEng.length, 'one finding').toBe(1);
 });
 
 test('process.no_engine — does NOT fire for system processes', () => {
@@ -264,7 +240,7 @@ test('process.no_engine — does NOT fire for system processes', () => {
   });
   const f = runDetectors(ctx);
   const noEng = f.filter((x) => x.detector === 'process.no_engine');
-  assertEqual(noEng.length, 0, 'no finding');
+  expect(noEng.length, 'no finding').toBe(0);
 });
 
 // ── system_agent_link.never_synced ────────────────────────────────────────
@@ -279,7 +255,7 @@ test('system_agent_link.never_synced — fires when updatedAt is null', () => {
   });
   const f = runDetectors(ctx);
   const sync = f.filter((x) => x.detector === 'system_agent_link.never_synced');
-  assertEqual(sync.length, 1, 'one finding');
+  expect(sync.length, 'one finding').toBe(1);
 });
 
 test('system_agent_link.never_synced — fires when updatedAt is older than threshold', () => {
@@ -292,7 +268,7 @@ test('system_agent_link.never_synced — fires when updatedAt is older than thre
   });
   const f = runDetectors(ctx);
   const sync = f.filter((x) => x.detector === 'system_agent_link.never_synced');
-  assertEqual(sync.length, 1, 'one finding');
+  expect(sync.length, 'one finding').toBe(1);
 });
 
 test('system_agent_link.never_synced — does NOT fire when updatedAt is recent', () => {
@@ -305,7 +281,7 @@ test('system_agent_link.never_synced — does NOT fire when updatedAt is recent'
   });
   const f = runDetectors(ctx);
   const sync = f.filter((x) => x.detector === 'system_agent_link.never_synced');
-  assertEqual(sync.length, 0, 'no finding');
+  expect(sync.length, 'no finding').toBe(0);
 });
 
 // ── runner dedup ──────────────────────────────────────────────────────────
@@ -328,7 +304,7 @@ test('runner dedup — same (detector, resourceId) collapses to one', () => {
   // dedup-aware runner: not directly callable, but the diff helper
   // demonstrates the contract.
   const diff = diffFindings([a, { ...a }], []);
-  assertEqual(diff.toUpsert.length, 2, 'diff does not dedup; runner does');
+  expect(diff.toUpsert.length, 'diff does not dedup; runner does').toBe(2);
 });
 
 // ── diffFindings auto-resolution ──────────────────────────────────────────
@@ -350,8 +326,8 @@ test('diffFindings — marks missing existing rows for resolution', () => {
     { detector: 'agent.no_recent_runs', resourceId: 'a-2' }, // not in new sweep
   ];
   const diff = diffFindings(newFindings, existing);
-  assertEqual(diff.toResolve.length, 1, 'one to resolve');
-  assertEqual(diff.toResolve[0].resourceId, 'a-2', 'correct row');
+  expect(diff.toResolve.length, 'one to resolve').toBe(1);
+  expect(diff.toResolve[0].resourceId, 'correct row').toBe('a-2');
 });
 
 test('diffFindings — counts by severity', () => {
@@ -361,20 +337,16 @@ test('diffFindings — counts by severity', () => {
     { detector: 'd3', severity: 'info',     resourceKind: 'agent', resourceId: '3', resourceLabel: 'c', message: '', recommendation: '' },
   ];
   const diff = diffFindings(findings, []);
-  assertEqual(diff.counts, { critical: 1, warning: 1, info: 1, total: 3 }, 'counts');
+  expect(diff.counts, 'counts').toEqual({ critical: 1, warning: 1, info: 1, total: 3 });
 });
 
 // ── empty org happy path ──────────────────────────────────────────────────
 
 test('empty org — no findings', () => {
   const f = runDetectors(emptyCtx());
-  assertEqual(f.length, 0, 'no findings');
+  expect(f.length, 'no findings').toBe(0);
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

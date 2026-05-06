@@ -33,7 +33,7 @@ export function getIdempotentHitCount(): number { return idempotentHitCount; }
 export function getIdempotentEvictionCount(): number { return idempotentEvictionCount; }
 
 export function __resetForTest(): void {
-  if (process.env.NODE_ENV !== 'test') return;
+  if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'integration') return;
   lru.clear();
   idempotentHitCount = 0;
   idempotentEvictionCount = 0;

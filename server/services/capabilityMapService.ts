@@ -1,6 +1,7 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import {
   loadIntegrationReference,
   type IntegrationReferenceSnapshot,
@@ -184,9 +185,6 @@ export async function listAgentCapabilityMaps(
   const conditions = [
     eq(subaccountAgents.organisationId, organisationId),
     eq(subaccountAgents.isActive, true),
-    // Exclude soft-deleted agents — a soft-deleted agent can still have an
-    // active subaccount_agents row, and we must not route tasks to it.
-    isNull(agents.deletedAt),
   ];
   if (subaccountId !== null) {
     conditions.push(eq(subaccountAgents.subaccountId, subaccountId));
@@ -200,7 +198,9 @@ export async function listAgentCapabilityMaps(
       capabilityMap: subaccountAgents.capabilityMap,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+    // Exclude soft-deleted agents — a soft-deleted agent can still have an
+    // active subaccount_agents row, and we must not route tasks to it.
+    .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isActive(agents)))
     .where(and(...conditions));
 
   return rows.map((r) => ({

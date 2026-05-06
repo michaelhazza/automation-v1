@@ -1,18 +1,40 @@
 # Project Knowledge Base
 
-Append-only register of patterns, decisions, and gotchas discovered during development.
+Append-only register of patterns, gotchas, conventions, and corrections discovered during development.
 Read this at the start of every session. Never edit or remove existing entries — only append.
+
+> **Architecture decisions live in [`docs/decisions/`](./docs/decisions/), not here** (convention introduced 2026-05-03). KNOWLEDGE.md captures the "watch out for this" stream — observations, gotchas, learned conventions, user corrections. ADRs capture the "we chose X over Y because Z" stream — durable architectural choices with rationale and trade-offs. When in doubt, write a KNOWLEDGE entry first; promote to ADR if the decision keeps coming up.
+>
+> Entries before 2026-05-03 mix both streams (the convention didn't exist yet). They stay in place — splitting historical entries adds noise without adding signal. New entries follow the split.
+
+## Size-bound policy
+
+KNOWLEDGE.md is append-only and grows. At year 1, a healthy KNOWLEDGE.md is ~1,500–2,500 lines. Beyond ~3,000 it becomes noise — future sessions skim past entries that don't match their domain.
+
+Two safety valves:
+
+1. **Quarterly grouping pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. The originals stay; the summary becomes the entry future sessions read first. Never edit existing entries.
+2. **Promote to ADR / architecture.md when an entry keeps being cited.** If a Pattern entry has been quoted in 3+ specs or review logs, promote it: write an ADR or extend `architecture.md`, then leave a final entry pointing future readers to the new home.
+
+The file's value is in retrieval, not preservation. If retrieval slows down, the file is too big.
 
 ---
 
 ## How to Use
 
-### When to write (proactively, not just on failure)
+### When to write a KNOWLEDGE entry (proactively, not just on failure)
 - You discover a non-obvious codebase pattern
-- You make an architectural decision during implementation
 - You find a gotcha that would trip up a future session
 - You learn something about how a library/tool behaves in this project
 - The user corrects you (always capture the correction)
+- You learn a convention not documented elsewhere
+
+### When to write an ADR instead (`docs/decisions/`)
+- You make an architectural decision (chose X over Y) and the rationale matters for future sessions
+- You lock in a contract or invariant the system depends on
+- You set a policy (rate-limit, retention, security) that needs to be defended later
+
+See [`docs/decisions/README.md`](./docs/decisions/README.md) for the ADR convention and template.
 
 ### Entry format
 
@@ -22,12 +44,13 @@ Read this at the start of every session. Never edit or remove existing entries �
 [1-3 sentences. Be specific. Include file paths and function names where relevant.]
 ```
 
-### Categories
+### Categories (post-split)
 - **Pattern** — how something works in this codebase
-- **Decision** — why we chose X over Y
 - **Gotcha** — non-obvious trap or edge case
 - **Correction** — user corrected a wrong assumption
 - **Convention** — team/project convention not documented elsewhere
+
+The historical **Decision** category is retired for new entries — write an ADR instead. Existing Decision entries stay in place; future readers should treat them as observations rather than authoritative ADRs.
 
 ---
 
@@ -292,6 +315,22 @@ Closing out the cached-context spec after 5 rounds of external ChatGPT review + 
 
 **Rule for vocabulary drift:** when a user or reviewer observes that a spec is using two names for the same concept (backend name vs UI name), rename to the single preferred name immediately, at every layer (schema, services, routes, types, error codes, prose, mockups). Do not "defer to implementation" — vocabulary inconsistency compounds with every layer it survives into. This spec's pack → bundle rename fixed 390+ references across 6 files in one commit because it happened pre-implementation.
 
+### 2026-05-01 Convention — Coordinator handoff write ordering on abort (seen 1 time)
+
+On any coordinator abort or hard-escalation path: always write `handoff.md` FIRST, then update `tasks/current-focus.md`. Never reverse this order. A crash between the two writes leaves current-focus.md pointing at a valid handoff (recoverable) rather than an updated current-focus with no handoff (ambiguous state that every subsequent coordinator launch will reject as a bug). Applied in §6.4.2 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`. Generalises to any two-file state machine where the second write is the pointer.
+
+### 2026-05-01 Pattern — Commit file-scope invariant in coordinator-driven builds (seen 1 time)
+
+When a coordinator stages files after a builder sub-agent run: (1) capture the builder's declared "Files changed" list, (2) run `git diff --name-only HEAD`, (3) hard fail if unexpected files appear — do NOT offer to stage only declared files. The "stage only declared files" option allows a distracted operator to accidentally commit cross-chunk bleed. Hard fail forces investigation. Never use `git add .` or `git add -A` from a coordinator. Always `git add <explicit file list>`. Applied in §2.9.3 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Pattern — Pre-resume typecheck gate for coordinator resume runs (seen 1 time)
+
+When feature-coordinator resumes from an interrupted build (any chunk is `done` in progress.md): run one full `npm run typecheck` BEFORE processing any chunk-skip decisions. If it fails, do NOT skip any completed chunks — type drift from incomplete later chunks can make a previously-passing chunk look clean when it isn't. The typecheck gate is the cheapest way to catch integrated-state drift before acting on stale progress.md data. Applied in §2.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
+### 2026-05-01 Convention — Doc-sync count enforcement (seen 1 time)
+
+When enforcing a doc-sync gate (coordinator or review agent): count the registered docs in `docs/doc-sync.md`, then verify the verdict table in progress.md / session log has exactly that many rows. A row count shortfall is a gate failure, not a review comment. "Missing verdict blocks finalisation" is only enforceable if you verify count, not just presence of some verdicts. Applied in §2.12 and §3.9 of `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`.
+
 **Rule for testing-posture framing in long specs:** if the spec inherits a framing default from a higher-level doc (e.g. `runtime_tests: pure_function_only` from `docs/spec-context.md`), and the spec defines tests that deviate from that default, declare the deviation explicitly in the spec's own framing-deviations section. Silence creates a cross-layer contradiction that reviewers will catch late. Caught in round 5 of this spec; worth doing proactively next time.
 
 Applies to any implementation-readiness spec review: API contracts, primitive rollouts, cross-cutting concerns.
@@ -303,6 +342,18 @@ During PR #183 (cached-context-infrastructure) the ChatGPT review loop went two 
 The failure mode: ChatGPT appears to pattern-match on the Round 1 discussion surface (the areas where it previously engaged) rather than re-reading the PR diff / spec state *post*-Round-1 fixes. The model re-opens discussions that were already closed with a recorded architectural rationale, hoping the variant phrasing will change the outcome. 
 
 **Rules for future `chatgpt-pr-review` sessions:**
+
+### 2026-05-03 Pattern — GHL agency-level OAuth uses a dual-table token architecture (seen 1 time)
+
+GHL Module C introduces two distinct token tiers. (1) **Agency token**: one per `(organisationId, companyId)`, stored in `connector_configs` with `token_scope='agency'`, refreshed on a 24h cycle via the standard OAuth refresh_token path. Used for agency-scope endpoints only: `/locations/search` and `/saas/location/.../subscription`. (2) **Location tokens**: minted on demand by POSTing `{ companyId, locationId }` to `/oauth/locationToken` with the agency token as Bearer; cached in `connector_location_tokens` (new table) keyed by `(connector_config_id, location_id) WHERE deleted_at IS NULL`; TTL = 24h, refresh window = 5min. Used for all per-location endpoints (9 methods in ghlAdapter). Key invariants: (a) `connector_location_tokens` is an RLS-protected tenant-scoped table — add to `rlsProtectedTables.ts` in the same migration. (b) `getLocationToken` uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` as the mint concurrency guard — no additional application-level locking required for correctness. (c) Validate `LocationTokenResponse.companyId === agencyConnection.companyId` and `LocationTokenResponse.locationId === requestedLocationId` before persisting; mismatch → `LOCATION_TOKEN_MISMATCH`, do not persist. Spec: `docs/ghl-module-c-oauth-spec.md`.
+
+### 2026-05-03 Gotcha — OAuth state must carry orgId + nonce; callback must not derive org from session (seen 1 time)
+
+For GHL (and any agency-initiated OAuth install flow), the state parameter passed to the provider MUST contain `{ orgId, nonce }` together, not just a CSRF nonce. The callback is stateless — it arrives on whatever instance handles the redirect and may not have session context. Extracting `orgId` from the request session at callback time is wrong: it's either absent (session expired, different instance) or stale (re-install scenario). The state payload is the only place orgId can travel safely. Invariant: the `orgId` extracted from the validated state entry is the sole authoritative identity for the callback — never fall back to session, query param, or body. If `orgId` is absent after nonce validation, reject with HTTP 400. State store: in-process memory map with 10-min TTL, one-shot deletion on first use. Multi-instance caveat: in-memory state is only safe for single-instance deployments — multi-instance requires a shared store (DB/Redis) or sticky sessions.
+
+### 2026-05-03 Gotcha — Webhook event dedupe row MUST commit AFTER side effects, not before (seen 1 time)
+
+The GHL webhook dedupe row (keyed on `gohighlevel_webhook_id`) must be written only after all side effects for the event have committed successfully. If the dedupe key is written before side effects, a partial failure (side effect fails after the dedupe commits) silently drops the event — GHL's retry sees a committed dedupe key and treats the event as durably processed. Correct ordering: run side effects → commit dedupe row atomically. Any code path that exits before completing side effects must leave the dedupe key absent. The `xmax = 0` upsert guard on `subaccounts` makes side effects idempotent under replay, so re-delivery is safe. Before shipping Phase 5: verify `ghlWebhookMutationsService.ts` commits in this order; if it commits before side effects, reverse the ordering — it is a hard spec invariant, not a "check during implementation".
 
 1. **After Round 1, expect Round 2 to re-raise the Round 1 rejects.** Budget it mentally — don't be surprised. The correct response to a re-raise is `reject` with rationale "already adjudicated in round 1 — no new information", not a fresh analysis as if the item were new.
 2. **A round that produces only variant-reframings of prior rejections is a convergence signal, not a new round of signal.** Finalize after that round. Additional rounds will produce diminishing returns, not insight.
@@ -1603,3 +1654,942 @@ When a job is refactored from `pg_advisory_xact_lock + SELECT ... WHERE NOT EXIS
 `measureInterventionOutcomeJob` was the canonical case: PR #235 replaced `advisory lock + NOT EXISTS` with `ON CONFLICT (intervention_id) DO NOTHING` against the migration-0244 UNIQUE constraint. ChatGPT PR #235 review round 1 surfaced the unstated invariant; the remediation was a load-bearing INVARIANT comment on the file header explicitly naming `recordOutcome` as the SOLE mutation per processed row. Equivalent test (deferred to follow-up): run the job twice concurrently against the same eligible row and assert exactly one INSERT plus zero duplicated upstream side effects.
 
 **Rule:** any refactor of the form "replace lock-around-work with ON-CONFLICT-at-write" lands a load-bearing invariant comment AND a regression test in the same PR. The comment must name the invariant explicitly ("recordX is the SOLE mutation per Y; everything before it must be a pure read OR idempotent") and the test must verify it under concurrent-runner conditions. ON CONFLICT only deduplicates the final write — never the work leading up to it.
+
+### [2026-04-29] Correction — Brief + GlobalAskBar + orchestrator IS the single-prompt fan-out primitive
+
+I underrated our orchestration in a Google-Cloud-Next comparison, calling it "less polished" than Gemini Enterprise's single-prompt-fans-out demo. That was wrong. The brief stack (`server/services/briefCreationService.ts:14`, `server/services/briefMessageHandlerPure.ts:62`, `server/routes/sessionMessage.ts:28`, `server/services/scopeResolutionService.ts`, `server/jobs/orchestratorFromTaskJob.ts`, `server/services/delegationGraphService.ts`, `client/src/components/global-ask-bar/GlobalAskBar.tsx`, `client/src/pages/BriefDetailPage.tsx`, `client/src/components/run-trace/DelegationGraphView.tsx`) implements the same primitive with a classified fast-path (`cheap_answer | simple_reply | needs_clarification | needs_orchestrator`), persistent debuggable delegation graph (`agent_runs.parentRunId / handoffSourceRunId / delegationScope / hierarchyDepth`), inline ILIKE disambiguation, and server-side scope re-validation. The honest gap vs Gemini Enterprise is content surfaces (Workspace canvas mode, in-flow VO3 video / Slides decks), not orchestration. Future agent / Cloud-Next comparisons must read these files before claiming a gap.
+
+### [2026-04-29] Decision — Workspace identity uses canonical pattern (mirrors CRM), one workspace per subaccount
+
+Designing "agents are real employees with their own Gmail / 365 / native identity" must mirror the CRM canonical pattern: provider-agnostic `canonical_workspace_identities` / `canonical_messages` / `canonical_calendar_events` / `canonical_documents`, with `connector_configs.connector_type` extended to include `google_workspace | microsoft_365 | synthetos_native`, per-provider adapters under `server/adapters/`, and provenance tracked via the `connector_config_id` FK edge (not duplicated columns). Both `agents.workspace_identity_id` and `users.workspace_identity_id` point at the same `canonical_workspace_identities` table — agents and humans share one identity space. Workspace tenant is per-subaccount (one provider per `(organisationId, subaccountId)`), not per-agent: per-agent is overkill because a company's identity domain is single-tenant, inter-agent collaboration breaks across tenants, and it mirrors the one-CRM-per-company logic. This deliberately diverges from the CRM's org-level `(organisationId, connector_type)` unique constraint — workspace must be `(organisationId, subaccountId, connector_type)`. Native (`synthetos_native`) ships first to avoid being blocked by Google/Microsoft API integration; Google adapter (service-account + domain-wide delegation) is the launch wedge against Gemini Enterprise's "agent uses the human's permissions" model.
+
+### 2026-04-30 Pattern — Per-action loading + error state on multi-action UI cards
+
+When a UI component exposes several mutating actions (e.g. `IdentityCard`'s suspend / resume / revoke / archive / toggle-email), don't drive each from its own ad-hoc `await`-then-`setState` handler. Pattern: hoist a single `pendingAction: <ActionId> | null` and `actionError: string | null` to the parent, run every mutation through one helper (`runIdentityAction(id, fn)` in `client/src/pages/SubaccountAgentEditPage.tsx`), and pass both back into the card. The card uses `pendingAction` to disable every other button while one is in-flight, shows `…ing` text on the active button, and renders `actionError` in an inline banner. Avoids double-clicks, gives users error feedback when an action fails, and keeps refresh-after-success in one place. Don't fall back to "optimistic-without-rollback" patterns — re-fetch on success instead.
+
+### 2026-04-30 Pattern — Server returns effective config; client never hardcodes literals derived from server config
+
+The native workspace email domain (`NATIVE_EMAIL_DOMAIN`) is configurable per-deployment and may also be overridden per-subaccount via `connectorConfig.configJson.domain`. The right shape is: `GET /api/subaccounts/:id/workspace` resolves the effective domain (per-subaccount override → env default → `'workspace.local'` last-resort) and returns it as `emailDomain`. UI components like `OnboardAgentModal` render `<localPart>@<emailDomain>` from that response — never from a literal. Same rule applies to any other config-derived display string (regions, tenants, billing addresses, etc.): the server resolves, the UI displays.
+
+### 2026-04-30 Gotcha — Lifecycle state guards belong on the server, not just in UI gating
+
+`PATCH /api/agents/:agentId/identity/email-sending` had the right permission check (`AGENTS_TOGGLE_EMAIL`) but no state check — meaning a revoked or archived identity could still have its email-sending flag flipped via a direct API call, even though the UI hides the toggle for terminal states. Pattern: every lifecycle-aware mutation should reject 409 when the entity isn't in an actionable state (`active` / `suspended` / `provisioned` for the email toggle). UI hiding is a UX courtesy, not a security boundary. Keep the allowed-status list as a `ReadonlyArray<string>` const at the route, not buried in conditionals.
+
+### 2026-04-30 Gotcha — Agent permission scope must come from the canonical actor row, not the link table
+
+`subaccount_agents` is a many-to-many link table — the same `agentId` can be linked to multiple subaccounts in the same org. Resolving `(agentId, organisationId) → subaccountId` via that table with `LIMIT 1` and no ordering is non-deterministic and can let a caller authenticate against the wrong subaccount's permissions. The canonical scope for any per-agent route (mailbox, calendar, identity lifecycle) is the agent's home actor row: `agents.workspaceActorId → workspace_actors.subaccountId` — both are single-FK columns, so the resolution is deterministic. Pattern: every `resolveAgentSubaccountId` helper goes through `agents → workspace_actors`, never through `subaccount_agents`. Fixed in `server/routes/workspace.ts`, `workspaceMail.ts`, `workspaceCalendar.ts` during PR #237 review.
+
+### [2026-04-30] Correction — chatgpt-pr-review must check PR merge state before resuming
+
+When invoked on a branch whose PR is already merged, the `chatgpt-pr-review` agent should detect that and stop rather than continuing to triage findings against a stale `git diff main...HEAD`. Today the agent only checks "does a PR exist?" via `gh pr view`, not "is it open?". On `feat/agents-are-employees`, PR #237 had been merged (state MERGED, mergedAt 2026-04-29T22:48:40Z) but the agent continued the review session because `gh pr view` still returned the PR record. The agent definition in `.claude/agents/chatgpt-pr-review.md § On Start` step 3 should filter `gh pr view --json state` and short-circuit if state is `MERGED` or `CLOSED` — surfacing "PR #N is <state>; nothing to review on this branch" and asking whether the user wants to cut a new branch.
+
+### 2026-04-30 Pattern — Soft-then-hard invariant promotion across phase boundaries
+
+When introducing a new compile-time → DB invariant (e.g. `SYSTEM_AGENT_BY_SLUG` mirror of `system_agents` rows), don't ship the hard fail-fast version on day one — ship the warn-only variant first. Pattern: a `validate*Registry()` function that diffs the two sets, logs `JSON.stringify({ codeOnly, dbOnly })` via `console.warn` if either set is non-empty, and returns early on no drift (zero per-boot log spam). Wire it next to existing boot validators so it runs after the DB is reachable but before `httpServer.listen()`. The next phase that actually depends on registry/DB parity promotes the warn to a `throw`. This avoids "deploy fails because a slug is slightly wrong" operational risk while still surfacing drift early. See `server/services/systemAgentRegistryValidator.ts` for the warn-only template; `validateSystemSkillHandlers` for the hard-fail template after the contract is locked.
+
+### 2026-04-30 Pattern — Inline column comments beat a dedicated invariant doc
+
+When two columns are easy to confuse (`auditEvents.actor_id` = auth/request principal, polymorphic; `auditEvents.workspace_actor_id` = canonical domain identity, FK to `workspace_actors`), put the guard at the column declaration in the drizzle schema, not in a separate "invariant doc". Authors writing joins read the schema; they don't grep the docs for naming policy. Two-line comments at the column site ("Do NOT join across — different identity spaces.") prevent the misuse at the point of decision and don't drift like docs do. `architecture.md § Workspace identity model` still carries the prose explanation — the inline comments are the lightweight in-code mitigation, not a replacement.
+
+### [2026-04-30] Pattern — Test-runner-API leaks survive a runner cutover; gate the new runner's contract
+
+After migrating from `node:test` to Vitest (PR #238), four integration tests still failed with `mock is not defined` because they kept calling `mock.module(...)` (the node:test global mock API) instead of `vi.mock(...)` (Vitest's API). The conversion scripts swept assertion patterns (`assert.*` → `expect()`, `node:test` imports → `vitest` imports) but did not catch global API references — `mock` is unprefixed and unimported, so a grep for `from "node:test"` doesn't find it. The same class of leak exists for `t.mock.*` (test-context mock API), `mock.timers` (only available in node:test by default), `before`/`after` hooks (Vitest names them `beforeAll`/`afterAll`), and any other top-level binding the previous runner exposed implicitly. **Detection rule:** after any test-runner cutover, the new gate must include grep checks for the OLD runner's global API surface, not just its import paths. For node:test → Vitest specifically: forbid `\bmock\.module\(`, `\bmock\.timers\b`, `\bbefore\(`/`\bafter\(` (without `All`), `t\.mock\.`. The `verify-test-quality.sh` gate currently catches handwritten-harness leftovers and forbidden imports — extending it to API-surface leaks closes the same class of post-migration silent failure. Source: ChatGPT PR #239 review round 1; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`.
+
+### [2026-04-30] Pattern — Hardcoded UUIDs in integration tests require explicit seeding, not shared assumption
+
+Multiple integration tests (`briefsArtefactsPagination.integration.test.ts`, `conversationsRouteFollowUp.integration.test.ts`) used `TEST_ORG_ID = '00000000-0000-0000-0000-000000000001'` and `STUB_USER_ID = '00000000-0000-0000-0000-000000000002'` as hardcoded constants, but no `beforeAll` / global setup seeded `organisations` or `users` rows with those IDs. Tests passed locally because dev DBs happen to have a matching seed; CI failed with `insert violates foreign key constraint` because `automation_os_test` is empty. The fix is a centralised `testBootstrap()` / `withTestDb()` helper that seeds canonical org/subaccount/user before any integration test runs (deferred to TI-005 follow-up — see `docs/superpowers/specs/2026-04-30-integration-tests-fix-brief.md`). **Rule:** any hardcoded UUID in a test that is the LHS of an FK is an implicit seed contract — either the file owns its seed (in `beforeAll` with cleanup in `afterAll`) or there is a single bootstrap helper that seeds all canonical fixtures once. Anything in between (test-author-assumed-and-never-verified) is a CI-only failure waiting to fire. Source: ChatGPT PR #239 review round 1; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`.
+
+### [2026-04-30] Decision — Gate-script regexes that match path segments must use `(^|/)segment/` to handle root-level paths
+
+`scripts/verify-test-quality.sh` Rule 1 used `grep -q "/__tests__/"` to detect test files outside the discovery directory, but the leading slash anchored to "after a directory" — root-level test files like `__tests__/foo.test.ts` failed to match and were false-flagged. The fix is `grep -qE "(^|/)__tests__/"` so the regex matches both start-of-path and after-a-slash. **Rule for any path-segment regex in shell:** when matching `segment/` anywhere in a relative path, always use `(^|/)segment/` — never bare `/segment/`. This applies to all gate scripts under `scripts/verify-*.sh` and `scripts/gates/*.sh` that match directory components. Source: ChatGPT PR #239 review round 1 + bot comment; session log `tasks/review-logs/chatgpt-pr-review-vitest-migration-2026-04-29-2026-04-30T03-25-03Z.md`.
+
+### [2026-04-30] Pattern — Drift-acknowledgment notes go stale once the underlying drift is fixed; coherent fixes touch both sides
+
+When an agent definition (or any implementation file) carries a "known drift" / "this contradicts spec X" comment to acknowledge a divergence from a spec, fixing the spec to align with the implementation must ALSO retire the drift note. Otherwise the drift note itself becomes the new inconsistency: future readers see the agent claiming a drift that no longer exists, and the next reviewer round flags it as a fresh contradiction.
+
+**Applied to:** PR #243 chatgpt-pr-review Round 2 f-001 — `docs/agentic-engineering-notes-dev-spec.md:113` was rewritten from "Same auto-detection logic as `spec-conformance`" to caller-provides-set posture; the same edit removed the obsolete "The spec § 4.2 wording... is a known drift" note from `.claude/agents/adversarial-reviewer.md` Input section. Both edits ship in one commit (c83bd8cb). Session log: `tasks/review-logs/chatgpt-pr-review-claude-agentic-engineering-notes-WL2of-2026-04-30T20-06-11Z.md`.
+
+**Generalises to:** Any review-pipeline fix where the implementation file documents an acknowledged spec divergence. The fix isn't done until both sides agree AND the divergence acknowledgment is retired. Drift notes are temporal markers — they decay into staleness as soon as the drift resolves. Same principle as removing temporary `// TODO: remove once X` comments after X ships, except for cross-file coherence rather than within-file cleanup.
+
+### [2026-05-01] Gotcha — chatgpt-pr-review automated mode must use the same diff exclusions as manual mode
+
+`chatgpt-pr-review` had two diff paths: manual mode (user provides the diff) and automated mode (agent runs `git diff main...HEAD`). The automated path had NO exclusions — it piped the raw full diff to the OpenAI API, resulting in 1,719 files / ~7.7M tokens and a rate-limit error on gpt-4.1. Manual mode already had a 15-exclusion set (`tasks/review-logs`, `tasks/builds`, `tasks/todo.md`, `KNOWLEDGE.md`, spec/docs directories, `.chatgpt-diffs`, etc.). Fix: automated mode now uses the exact same exclusion set. **Rule:** whenever you maintain two paths to the same diff (manual entry vs. automated generation), treat the exclusion set as shared state — if one path changes, both must change. Deduplication candidate: a single shell function/variable shared by all three diff invocations (round 1 automated, round 1 manual, round N+1 manual) would make future drift structurally impossible. Source: fix-doco-may2026 Phase 1; log `tasks/review-logs/pr-review-log-fix-doco-may2026-2026-05-01T00-30-00Z.md`.
+
+### [2026-05-01] Gotcha — chatgpt-pr-review manual mode must generate round N+1 diff before printing the round summary
+
+In manual mode, `chatgpt-pr-review` was printing the round summary after each round completed but NOT generating the `.chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff` file that the user needs to upload to ChatGPT for the next round. Root cause: Per-Round Loop step 9 described "upload the file to ChatGPT" but did not include the bash command to generate it first. The user discovered this after round 2 when round 3's diff was missing. Fix (commit e9012ea5): step 9 now states "Do not print the round summary until the diff file exists on disk" and "The diff link MUST appear in the same message as the round summary." **Rule:** round summary and diff link are a single atomic message in manual mode — never print one without the other. Applies to every `chatgpt-pr-review` manual session with more than one round. Source: fix-doco-may2026 review session round 3 user feedback.
+
+### [2026-05-01] Pattern — Resolver version belongs in the cache key, not as a metadata column only
+
+When a content resolver can change its normalisation logic between versions (e.g. Google Drive plain-text extraction), the cache key must include `resolver_version` as a discriminant — not just as a metadata column. Without it, a rolling deployment can have v1 and v2 resolver instances reading the same cache row, causing v2 to serve v1-normalised content. The `document_cache` table uses `UNIQUE(provider, file_id, connection_id, resolver_version)`, and the resolver's `resolverVersion` constant is exposed on the resolver object so `runContextLoader.ts` can reference it without hardcoding. **Rule:** when a cache entry's validity depends on the processing version (not just the source revision), the version is part of the cache key — not a separate migration field you can check after the fact. Source: ChatGPT PR #242 review; migration 0264.
+
+### [2026-05-01] Gotcha — CRLF line endings in gate fixture files cause grep pattern mismatch
+
+`scripts/derived-data-null-safety-fields.txt` had Windows CRLF (`\r\n`). The fixture-self-test gate reads it with `while read line` (strips LF but not CR), so each pattern becomes e.g. `utilizationByModelFamily\r` — the trailing `\r` is invisible in the shell but causes every `grep -q "$line" <source>` call to return false, making ALL fixtures appear unverified. The gate then reports a false-positive failure. **Fix:** strip CRLF before committing any fixture file on Windows (`sed -i 's/\r//' <file>` in Git Bash). **Rule:** every fixture file that feeds a shell grep loop must be LF-only. Add a `.gitattributes` rule (`scripts/*.txt text eol=lf`) if the repo is regularly edited on Windows to enforce this at checkout. Source: gate fix session during PR #242.
+
+### [2026-05-01] Gotcha — verify-integration-reference gate requires primary slugs, not taxonomy aliases
+
+`scripts/verify-integration-reference.mjs` validates that capability slugs in each integration block's `capabilities:` list appear in the taxonomy's primary slug column — not in any alias array. A slug that exists only as an alias is treated as "unknown capability" and fails the gate. In practice: `document_read` is an alias for `page_read` in the capabilities taxonomy — using `document_read` in the Google Drive integration block fails the gate even though the alias is legitimate. **Fix:** use the primary slug (`page_read`), and add any genuinely new capabilities (e.g. `spreadsheet_read`) to the taxonomy's `read_capabilities` section with their own primary slug before adding them to the integration block. **Rule:** before adding a capability slug to an integration block, confirm it is a primary slug in the taxonomy, not just an alias. Source: gate fix session during PR #242.
+
+### [2026-05-01] Gotcha — chatgpt-pr-review diff must use `origin/main`, not local `main`
+
+The `chatgpt-pr-review` agent previously used `git diff main...HEAD` to generate diffs. The local `main` pointer only advances when you explicitly `git pull` or `git fetch && merge` — it can be stale by many commits. Using stale `main` as the diff base produces a bloated diff (1,283 files vs the real 67 in PR #242) because the merge-base is computed against an old commit, dragging in work that is already on the real main.
+
+**Fix:** always use `origin/main` (the remote tracking ref, which is updated on every `git fetch`) as the diff base: `git diff origin/main...HEAD`. The remote tracking ref matches what GitHub computes for the PR diff, giving the correct scope.
+
+**Rule:** any script or agent that generates a diff for PR review must use `origin/<base-branch>`, not the local branch pointer. Applied to all 8 occurrences in `.claude/agents/chatgpt-pr-review.md`.
+
+### [2026-05-01] Correction — async handlers passed as effect deps need useCallback
+
+In React, a plain `async function` declared inside a component body creates a new function reference on every render. If that function is passed as a prop to a child component and the child's `useEffect` lists it as a dependency, the effect re-fires on every parent rerender. This pattern bit `handlePick` in `TaskModal.tsx` — passed as `onPick` to `DriveFilePicker`, whose effect called `openPicker(...)` whenever `onPick` changed reference, reopening the Google Picker SDK on rerenders while the picker was already open. **Rule:** any callback passed as a prop into a child component that has a `useEffect` depending on it must be wrapped in `useCallback` with stable dependencies. Caught in ChatGPT PR #242 review Round 1 F2.
+
+### [2026-05-01] Pattern — Token-based idempotency breaks when the token is consumed before the idempotency check runs
+
+In `agentResumeService.ts`, the first resume call cleared `integration_resume_token = NULL` as part of the blocked-state UPDATE. A retry then looked up the run by `WHERE integrationResumeToken = tokenHash` — which returned 0 rows because the column was NULL — and threw RUN_NOT_FOUND instead of the expected `already_resumed`. The code's own comment ("The idempotent check above handles the already-resumed case before reaching this point") was wrong: the idempotent check was unreachable because the SELECT that precedes it found nothing. **Rule:** when a token-based lookup is the only path to an idempotency guard, do not clear the token as part of the "success" write — preserve it so retries can reach the guard. Replay is already prevented by the state predicate in the UPDATE WHERE clause (e.g. `blocked_reason = 'integration_required'`), not by clearing the token. Fix applied in commit ecafc6c6; PR #244 R4.
+
+### [2026-05-01] Pattern — URL path params extracted in route handler must appear in every relevant WHERE clause
+
+`server/routes/conversationThreadContext.ts` declared the route as `/api/agents/:agentId/conversations/:convId/thread-context` but the ownership query only filtered by `conversationId + organisationId`, ignoring `agentId`. Within the same org, a request with a mismatched `agentId` in the path would still succeed — a subtle cross-agent data leak. **Rule:** every param in the URL path that scopes the resource (agentId, subaccountId, etc.) must appear in the DB query's WHERE clause. After any route edit, grep for `req.params` extraction and verify each param either appears in the query or is explicitly justified as unused (e.g. for routing purposes only). Fix applied in commit ecafc6c6; PR #244 R4.
+
+### [2026-05-01] Gotcha — local `main` ref is stale; always use `origin/main` for PR diffs
+
+The local `main` branch pointer only updates when you check out that branch or run `git fetch`. If you've been on a feature branch for a while, `git diff main...HEAD` uses a stale commit as the base, producing an inflated diff (e.g. 588 files instead of the real 20). `origin/main` is always fresh after `git fetch`. **Rule:** every review agent that generates a diff must (1) run `git fetch origin main` first, and (2) use `git diff origin/main...HEAD` — never the local `main` ref. Both `chatgpt-pr-review` and `chatgpt-spec-review` were updated to enforce this. Discovered during PR #246 lint-typecheck-baseline session where the code-only diff was 4.4MB/501 files vs. the correct 100KB/19 files.
+
+### [2026-05-01] Pattern — Subaccount scope guards must use null-safe checks to preserve org-level connection validity
+
+Route guards checking `conn.subaccountId !== subaccountId` wrongly reject connections where `subaccountId` is `null` (org-level connections) — `null !== 'some-uuid'` evaluates to `true`. The correct form is `if (conn.subaccountId && conn.subaccountId !== subaccountId)`. Apply this pattern to any route guard that scopes a shared resource (connection, credential, shared integration) to a subaccount while leaving org-level access open. Source: deferred-items-pre-launch spec review R2/F1.
+
+### [2026-05-01] Pattern — Spec step-shorthand ("same injection as above") silently drops side-effect writes
+
+When a spec uses shorthand like "apply the same injection (same two lines)" to describe a repeat call, implementers often copy the primary lines (build + format + prepend) but miss secondary side-effects (like writing `runMetadata.threadContextVersionAtStart`). Always enumerate every side-effect explicitly in each step — shorthand saves spec words but generates implementation bugs. Found in deferred-items-pre-launch spec review R1/F2 (§2.2 Step 3 resume path).
+
+### [2026-05-01] Correction — chatgpt-spec-review manual mode prints spec as a copy-paste payload
+
+In manual mode, `chatgpt-spec-review` prints the full spec inside a `--- Copy into ChatGPT ---` block per the agent design. If the user has already submitted the spec to ChatGPT independently, this block looks like instruction-dumping. Future sessions should briefly state "printing the ChatGPT payload" before the block so the user understands its purpose and can skip it if they submitted manually.
+
+### [2026-05-01] Pattern — Pre-submit access verification prevents silent rebind failures
+
+When a UI action binds a new credential to a resource (e.g. rebinding a broken Drive reference to a new connection), calling a lightweight access-check endpoint on connection select — rather than waiting for the full submit — surfaces failures at decision time instead of after the user commits. `ExternalDocumentRebindModal` now calls `verifyAccess(connId, fileId)` on the connection `<select>` onChange, shows an inline error, and disables the confirm button until access is confirmed. **Rule:** for any "bind credential to resource" flow, add a verify-before-confirm step using any existing lightweight probe endpoint; post-submit failures confuse users because the error arrives after they have mentally moved on. Source: ChatGPT PR #242 review Round 2 F4.
+
+### [2026-05-02] Correction — "Newest at bottom" is event order, not container alignment
+
+When designing a chronological event log that should show newest-at-bottom (matching chat conventions: terminal output, build logs, Slack), the events should flow from the top of the container downward in natural document order. Do NOT use `flex-col justify-end` to pin a short list to the bottom of the panel — that creates ugly empty space above and only "looks right" by accident when the list grows enough to overflow. **Rule:** for activity-style streams that should anchor to bottom on overflow, use a top-anchored container with `overflow-y-auto` and oldest-events-first ordering; auto-scroll-to-bottom logic handles the "show newest" requirement when events arrive. Discovered while building `prototypes/workflows/07-open-task-three-panel.html`, `08-task-progression-states.html`, `10-ask-step-runtime.html` — all three had the same wrong pattern.
+
+### [2026-05-02] Pattern — Timestamps on activity events need an "ago" suffix
+
+In an activity log where each event has a relative-time stamp, bare numbers like `38s` or `4m` are ambiguous: they read like task duration, not "time since this event." Append `ago` so the meaning is explicit: `38s ago`, `4m ago`, `1d 3h ago`. Exception: `just now` stays as-is (no `ago`). **Rule:** any relative-time label on activity-style streams uses `Xs ago` / `Xm ago` / `Xh ago` / `Xd Yh ago` format. Surfaced during workflows mockup review.
+
+### [2026-05-02] Pattern — Engine writes use state-based CAS predicates as the canonical idempotency mechanism
+
+The workflow engine's V1 execution model (declared in `docs/workflows-dev-spec.md` §4.0) is **at-least-once dispatch with idempotent handlers**. The dominant idempotency mechanism is state-based concurrency control: every state-transition write uses an `UPDATE ... WHERE status = X` predicate; 0 rows updated means "another writer already won" and the API resolves the call as either an idempotent-hit (200) or an external-transition rejection (409). The unique-constraint pattern (e.g. `UNIQUE (gate_id, deciding_user_id)` per spec §5.1.1) is used as a secondary mechanism where multi-writer per-step deduplication is required. **Why not exactly-once via global idempotency keys:** distributed exactly-once is a known impossibility outside a single transactional context; a `(run_id, task_id, step_id, attempt)` key would be redundant with the per-endpoint state-based posture and would not solve the underlying determinism problem. **Rule:** every new engine endpoint MUST declare its idempotency posture inline per `docs/spec-authoring-checklist.md` §10, and MUST verify a re-execution does not double-count or double-write. Any handler that wraps an external API call without a deduplicating key MUST surface that constraint upstream rather than silently retry.
+
+### [2026-05-02] Gotcha — Idempotent endpoint responses must distinguish race-won-by-decider from external-transition
+
+When a CAS predicate fails (`UPDATE ... WHERE status = X` returns 0 rows), the API has to determine WHY it failed before responding. Two distinct cases need different responses: (a) **race won by another decider** — the row's current status IS the next valid terminal state (e.g. `approved` or `rejected`); the API returns `200 { idempotent_hit: true, existing_review_id }` because there is a real winning decision to surface to the losing caller; (b) **external transition** — the row's current status is NOT a decision-style terminal (e.g. the run was Stopped, the parent fan-out cancelled the step); the API returns `409 { error: 'step_already_resolved', current_status }` because there is no winning decision to surface and the client needs a deterministic signal to remove the UI. Returning the same 200-idempotent-hit response for both cases creates **ghost-log entries** — approval rows recorded with no real effect, and stuck UI cards that never collapse. Codified in `docs/workflows-dev-spec.md` §5.1.1; the rule applies to every endpoint that uses a state-based CAS predicate against a row that can transition externally (Stop, fan-out cancel, timeout, admin override). Discovered during ChatGPT spec review of workflows-dev-spec, F12 round 2.
+
+### [2026-05-02] Pattern — Gate-snapshot model isolates in-flight gates from live state changes
+
+`workflow_step_gates` (per `docs/workflows-dev-spec.md` §3.3) holds a frozen `approver_pool_snapshot` (and `seen_payload`, `seen_confidence`) at gate-open time. Every gate decision evaluates membership against the snapshot column, **never against live `teams` / `team_members` / org state**. The single mutation path is the explicit `POST /api/tasks/:taskId/gates/:gateId/refresh-pool` admin endpoint (spec §5.1.2), which overwrites the snapshot in a guarded `UPDATE ... WHERE resolved_at IS NULL` predicate and emits an `approval.pool_refreshed` event so all open clients update their cards. **Asymmetry between gate kinds on refresh:** Approval gates preserve decisions already recorded against the prior snapshot (`No effect on existing reviews`); Ask gates evaluate eligibility against the current snapshot at submit time, so a user removed by `/refresh-pool` between gate-open and submit gets a 403. **Rule:** any gate-style HITL primitive in this codebase MUST use the snapshot-at-open + explicit-refresh-endpoint pattern rather than reading live state at decision time. Live reads create non-deterministic decision behaviour when org membership changes mid-flight (e.g. employee leaves a team while their approval is queued).
+
+### [2026-05-01] Pattern — Implementation spec hard stop conditions must use explicit "stop" language, not implied success
+
+When a sequencing spec has a task boundary where proceeding on failure causes wasted work (e.g. applying `!` assertions to test files while production type errors remain), the verification step must use explicit "If non-zero, stop — do not proceed to Task N" language. An implied success condition ("must return 0 lines") is insufficient — implementers in execution mode continue past soft failures. The Task 2.4 → Task 3 boundary in `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` was the canonical example: 127 test-file `!` fixes applied on top of unfixed production errors = wasted session. The corrective pattern: hard stop at each major task boundary where downstream work is invalidated by upstream failure, plus a Task-N pre-condition that re-states the same check as an entry gate.
+
+### [2026-05-01] Gotcha — ESLint flat config global rule insertion is silent if placed in the wrong position
+
+In `eslint.config.js` (flat config format), a global `{ rules: { 'no-undef': 'off' } }` object is silently overridden if placed BEFORE `js.configs.recommended` (which re-enables it). The rule must appear AFTER both `js.configs.recommended` and `...tseslint.configs.recommended` but BEFORE any `files:`-scoped override blocks. There is no warning when the placement is wrong — the rule simply has no effect and the lint output is unchanged. Verification: `npx eslint --print-config <any-file-outside-scoped-globs> | grep '"no-undef"'` must return `["off"]`. If it returns `["error"]`, the global object is in the wrong position. Source: `docs/superpowers/specs/2026-05-01-lint-typecheck-post-merge-spec.md` Task 4.2.
+
+### [2026-05-01] Pattern — Sustained-reject discipline in spec review: re-raises with no new evidence should stay rejected
+
+When a spec reviewer raises the same finding 3 consecutive rounds with the same example and no new evidence, the correct response is to maintain the rejection rather than accepting under persistence pressure. The over-assertion guard (`>3 !` threshold) and exhaustiveness guard verification step were both raised across all 3 rounds of the lint-typecheck-post-merge spec review. Accepting them would have added: (a) an arbitrary threshold that generates false positives on legitimate deep-object assertions, and (b) a "deliberately break the code to verify the guard works" step for a standard TypeScript discriminated-union pattern. Rule: when a reviewer re-raises without new evidence, add a one-line note to the session log ("Round 1 FN re-raised; rationale unchanged") and reject. Accepting re-raises for their persistence is a common way specs accumulate bureaucratic noise. The Recommendation Criteria ("stylistic preference with no functional impact", "adds complexity without necessity") are stable across rounds — new evidence changes a recommendation, repetition alone does not.
+
+### [2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision
+
+When `chatgpt-pr-review` surfaces findings in Round N (N ≥ 2) that are substantive duplicates of decided findings from prior rounds (same finding_type + same file/code area, no new evidence — even when rephrased with stronger language like "must-fix" or "not optional"), auto-apply the prior round's decision and log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT re-surface to the user via the approval gate, even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: PR #247 round 2 — user feedback "these are all technical so shouldn't be surfaced to me, go with your recommendations" after I re-presented 6 round-1 duplicates with the same recommendations.
+
+### [2026-05-01] Pattern — External reviewers misread codebase canonical RLS without architecture.md context
+
+ChatGPT consistently flags the codebase canonical RLS pattern (`current_setting('app.organisation_id', true) IS NOT NULL AND ... <> '' AND organisation_id = current_setting(...)::uuid` with `, true`) as a "silent denial bug" and recommends removing `, true` for fail-fast behaviour. The pattern is intentional and documented at `architecture.md` §Canonical org-isolation policy template (lines 1451-1474). The `true` flag (`missing_ok = true`) returns NULL when the GUC is unset; the explicit NULL / empty guards then close the policy fail-closed. Admin paths bypass RLS entirely via `SET LOCAL ROLE admin_role` (BYPASSRLS), so the `true` flag avoids throwing on legitimate admin operations that don't set `app.organisation_id`. Surfaced 3× in PR #247 review (rounds 1, 2, 3). **Rule:** when this finding appears, reject and reference the architecture.md section; do NOT change the pattern unless undertaking a codebase-wide RLS convention audit.
+
+### [2026-05-01] Pattern — Verdict-based gates need evidence-bearing verdicts, not trust-based ones
+
+When a finalisation gate enforces "for each X, declare yes/no/n/a" (doc-sync sweeps, conformance checks, security reviews), the agent can declare `no — already accurate` after a quick skim and miss issues the diff actually invalidated. The verdict format itself must require evidence: either grep terms checked against the target and found absent, or a specific reason the update trigger genuinely doesn't apply. Without an audit trail in the verdict, the gate becomes trust-based and degrades silently — the failure mode is "declared clean, actually stale" with no way to retroactively notice. **Rule:** any verdict-based gate must require the verdict to cite the evidence that justified it; bare or unsubstantiated verdicts are treated as missing. Applied to `docs/doc-sync.md` § Investigation procedure + § Verdict rule (PR #248). Source: operator-observed failure mode in PR #247 finalisation where stale `architecture.md` references were missed because the doc-sync sweep declared `no` without opening the doc.
+
+### [2026-05-01] Pattern — ChatGPT PR-review diff misreading: treat "" claims as needing grep verification
+
+ChatGPT-web reviewing a PR diff frequently treats `-foo` (removed line) and `+bar` (added line) as both present in the current file, producing "duplicate code" findings that do not exist on disk. In PR #249 (lint-typecheck-post-merge-tasks), 3 of 17 findings across 3 rounds were diff-misreadings — HelpHint double toggle (R1 F2 / R2 F1 / R3 F1), duplicate `onClick` in McpServersPage (R2 F2 / R3 F2), duplicate try/catch — each resolved to one line in the file. **Rule:** when ChatGPT claims a "duplicate" pattern in code, verify with `grep -c <pattern> <file>` or read the file before acting. If grep returns 1, the claim is a diff misreading; auto-reject and document. If grep returns ≥ 2, the duplicate is real. Cost of grep is ~1 sec; cost of "fixing" a hallucinated duplicate is unwinding it later. Source: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`.
+
+### [2026-05-01] Pattern — Post-increment on the last use of a local is a no-op; `no-useless-assignment` correctly removes it
+
+`var++` on the LAST use of a local variable inside a function passes the current value (correct semantics) and increments (unobservable, since the variable goes out of scope on the next line). The post-increment is dead — the new value is never read. `@typescript-eslint/no-useless-assignment` flags these correctly; removing the `++` does not change behavior. Reviewers may incorrectly claim "regression" or "duplicate React keys" — verify by tracing the value PASSED at the call site, not the value ASSIGNED after. PR #249 examples: `client/src/pages/AgentChatPage.tsx:80`, `client/src/pages/ConfigAssistantPage.tsx:62` — both `parts.push(...renderInlineMarkdown(remaining, keyIdx++))` → `parts.push(...renderInlineMarkdown(remaining, keyIdx))` immediately before `return parts;`. Keys still unique because `renderInlineMarkdown` namespaces by `baseKey * 10000`.
+
+### [2026-05-01] Pattern — chatgpt-pr-review session close after 2 unproductive rounds
+
+When 2 consecutive `chatgpt-pr-review` rounds produce 0 new valid findings AND the failure mode is structural (diff misreading, scope confusion, hallucination), close the session — do not push for round 3+. The model is not getting new context between rounds; persistence does not improve signal. PR #249 R2 produced 5 reject + 1 no-op + 0 implements; R3 was 4 reject (all duplicates of R1/R2) + 0 implements. Recommend operator close at end of R2 in similar cases. The chatgpt-pr-review agent definition encodes this as a stop signal — `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md` is the worked example.
+
+### [2026-05-01] Correction — Apply ready-to-merge label MUST be paired with ScheduleWakeup, not stop
+
+After `gh pr edit --add-label ready-to-merge` fires CI on this repo, the main session must immediately schedule a wake-up to poll CI status. Cadence per CLAUDE.md §12 line 172: 90-120s default (CI on this repo typically completes in 1-2 min). Stopping after applying the label and waiting for the operator to come back is wrong — it pushes the merge timeline by however long the operator is away, when the work was already CI-bound and pollable. **Rule:** `gh pr edit --add-label ready-to-merge` and `ScheduleWakeup` with `delaySeconds: 90-120` are a single atomic operation; one without the other is a process bug. After the wake-up fires, run `gh pr checks <N>` and either re-schedule (still running) or proceed (green/red). Source: PR #249 finalisation, 2026-05-01 — operator caught the miss after CI completed silently for ~3 min.
+
+### [2026-05-02] Pattern — Subaccount-scoped UI signals need both event filtering AND listener lifecycle cleanup
+
+For per-subaccount client state driven by socket events (e.g. `liveAgentCount` badge in `client/src/components/Layout.tsx`), TWO orthogonal correctness rules apply, and either alone leaves a bug class open. (1) **Event filtering at handling time**: filter by `activeClientId` at the moment each event is handled, not at subscription time — late events from a previous subaccount otherwise produce ghost counts and flicker. Use a ref or pass `activeClientId` through the handler argument list rather than closing over it. (2) **Listener lifecycle**: `useSocketRoom` (and any direct `socket.on` registration) must cleanup in the `useEffect` return — without this, every subaccount switch adds another handler for the same event, so one inbound message produces N badge increments. The event-filtering rule does NOT mask within-subaccount listener duplicates (the events are correctly scoped, just counted N times). Source: `docs/superpowers/specs/2026-05-02-pr-249-followups-spec.md` §4.4 + §4.5 (chatgpt-spec-review rounds 1 + 3, 2026-05-02). Architecture.md line 1579 already documents the lifecycle expectation ("Joins the room on mount, leaves on unmount"); the spec adds the event-filtering rule as a sibling invariant.
+
+### [2026-05-02] Pattern — Per-callsite audit tasks need explicit stop conditions to prevent drift into refactor
+
+Audit tasks (eslint-disable hygiene, `Record<string, unknown>` classification, `any` cast review, dead-code sweep) drift into refactor projects when callsite-level analysis is unbounded. Two safeguards keep an audit an audit: (1) explicit stop condition — "if classifying a single callsite takes more than 2 minutes of investigation, classify as the safe default and move on"; (2) named fallback classification — Category C "kept" for type casts; "kept with one-line justification" for eslint-disables. The 2-minute bound is empirically the point where a callsite-level decision becomes a type-design decision; the latter belongs in a separate spec. Source: `docs/superpowers/specs/2026-05-02-pr-249-followups-spec.md` §5.2 + §6.2 (chatgpt-spec-review round 1, 2026-05-02). Apply this pattern to any future audit-classification spec; do NOT pull substantive refactors into a hygiene PR.
+
+### [2026-05-02] Pattern — `Record<string, unknown>` at network or actionType boundaries should default to keeping the cast
+
+When auditing `Record<string, unknown>` casts, classify boundary values (route handler input/output, webhook payload, external API response, persisted JSONB column read, dynamic-`actionType` polymorphic structures) as "keep" by default unless the type is closed and exhaustively known and demonstrably so. **Mis-narrowing a boundary value produces RUNTIME bugs** (`undefined` access, wrong-shape calls) that typecheck cannot catch — `JSON.parse` output is `unknown` to the type system regardless of how it is annotated downstream, and dynamic-discriminator structures (e.g. ClientPulse intervention payloads keyed by `actionType`) admit shape variants the typechecker does not enforce. The narrowing is invisible at typecheck time and only surfaces at runtime. **Rule:** at a boundary, default to keep (Category C); narrow only when you can demonstrate the closed type. Source: `docs/superpowers/specs/2026-05-02-pr-249-followups-spec.md` §6.2 (chatgpt-spec-review round 1, 2026-05-02).
+
+### [2026-05-02] Pattern — JSONB column reads via Drizzle `$type<>()` must not be narrowed at the persistence layer
+
+Drizzle JSONB columns typed as `.$type<Record<string, unknown>>()` (e.g. `agentExecutionEvents.payload`, `agentRuns.runMetadata`) return `Record<string, unknown>` at read time. Do NOT add a narrowing cast at the read site — the schema's `$type<>()` declaration IS the type contract; a redundant cast adds noise without safety. Do NOT remove the `Record<string, unknown>` typing to narrow to a domain shape at the persistence layer — that narrowing belongs in the service/caller that owns the field's semantics, not at the DB boundary. Distinction: removing a *double-cast* (`(x as Record<string,unknown>) as Record<string,unknown>`) is correct cleanup (Category A); removing the single persistence-layer cast is a Category C keep. Source: F6 audit on `pr-249-followups` (2026-05-02).
+
+### [2026-05-02] Pattern — Policy expansions for a deferred refactor must defer with the refactor
+
+When a hygiene PR adds a contributor-facing policy doc (`CONTRIBUTING.md`, design principles, convention guide) that codifies *current* patterns, and a reviewer suggests adding policy *for a deferred refactor* in the same PR, defer the policy addition to land with the refactor. Concrete case: PR #251 added a lint-suppression policy section while ChatGPT recommended also adding a "React effect dependency policy" section. The React-effect refactor (`useRef`/`useCallback` migration across ~10 components) was already deferred out of the PR. Adding the policy now would document a *target* pattern not yet present in code; adding it later (with the refactor) keeps doc and code agreed at landing. **Rule:** policy describes the code state at the moment of landing. If pattern X is deferred, policy for X is deferred. If pattern X is in-tree, policy for X belongs in the same PR. Source: `tasks/review-logs/chatgpt-pr-review-pr-249-followups-2026-05-02T08-30-45Z.md` round 3 P2.4.
+
+### [2026-05-02] Pattern — Material-change thresholds combine relative AND absolute floors
+
+Threshold-based detection that uses ONLY a relative threshold (e.g. `delta / prev >= 10%`) fails on small values: `$5 → $5.50` is +10% but operationally trivial. Pure absolute thresholds fail on large values: `$1000 → $1010` is +$10 absolute but irrelevant. **Rule:** pair every relative threshold with an absolute floor; both branches must hold. For rate-based predicates (rates, percentages), additionally require a minimum supporting-count floor — a "10pp change in rate" against `total_decisions=2` is meaningless. The full pattern: `(relative_delta >= X% AND absolute_delta >= Y unit) AND (supporting_count >= Z AND supporting_count_delta >= W)`. Document the rationale per-category in a single table — see `docs/sub-account-optimiser-spec.md § Material-change thresholds` for the worked-example shape with cost / latency / rate / token predicates. The same predicate shape generalises to any threshold-driven trigger (cost breakers, alert rules, drift detectors). Source: ChatGPT spec-review subaccount-optimiser R1+R2 (R1 added relative-only; R2 surfaced the small-value failure mode and added absolute floors).
+
+### [2026-05-02] Pattern — Cap-aware priority eviction with implicit cooldown rotates the surface fairly
+
+When a finite cap is reached on a recommendation/finding/action surface, three failure modes exist: (1) silently drop new items (mainly hides important findings), (2) drop oldest first (loses recent context), (3) drop lowest-priority first (correct but oscillates if low-priority items keep getting regenerated). The full pattern: **on cap hit, compare new candidate's priority tuple to the lowest-priority open item; if higher, atomically evict the lowest and insert the new one with a short implicit cooldown (6h) on the evicted row**. Priority tuple should put `updated_at` at position 2 (after severity, before category/dedupe_key) so eviction rotates by freshness rather than alphabetical category bias — without this, alphabetically-earlier categories systematically dominate the cap forever. Plus: emit structured logs for both the drop path (`*.dropped_due_to_cap`) AND the eviction path (`*.evicted_lower_priority`) so silent suppression and displacement are both auditable in production (per the tagged-log-as-metric convention). Source: ChatGPT spec-review subaccount-optimiser R1 (initial eviction logic) + R2 (implicit cooldown + drop log) + R5 (priority-tuple position-2 fix).
+
+### [2026-05-02] Pattern — Render-cache key for LLM-rendered copy MUST include render_version
+
+When LLM-rendered copy is cached (e.g. operator-facing summary text generated from raw evidence), the cache key tuple must include a `render_version` axis alongside content keys (category, dedupe_key, evidence_hash). Without it, prompt-template tweaks silently produce stale copy in already-stored rows: the evidence hasn't changed, so the cache hit serves old prompt's output. **Rule:** export `RENDER_VERSION` as a single integer constant from `<service>/renderVersion.ts`, include it in every render cache lookup, and bump on (a) prompt-template change, (b) per-category evidence-shape contract change, (c) output-format contract change. The bump invalidates ALL cached copy across the service in one step — no migration, no partial-state risk. Source: ChatGPT spec-review subaccount-optimiser R1 (initial design) + R5 (propagation fix when stale references in §5/§13 used the 3-tuple instead of 4-tuple).
+
+### [2026-05-03] Pattern — Canonical terminal-state table prevents invariant drift across long specs
+
+In a state-machine-heavy spec, terminal state semantics get described in multiple places (state table, rules section, invariants, audit events). Without a single canonical reference, sections drift over rounds of review — one section says `succeeded` is terminal, another doesn't mention it. **Rule:** nominate one section as "Canonical Terminal State Reference" with an explicit "contradictions here are bugs" header; every other section defers to it. The table structure that worked well: four classification rows (truly-terminal, provisionally-terminal, functionally-settled, non-terminal) with a "Outbound transitions" column that makes exceptions visible. Source: `tasks/builds/agentic-commerce/spec.md §4`, added at chatgpt-spec-review round 4 after 4 rounds of incremental invariant additions created interpretation risk across §4, §9.4, and §10.
+
+### [2026-05-03] Pattern — Webhook supremacy + timeout reversibility are separate invariants that must both be named
+
+Financial state machines that use webhooks for confirmation need two distinct invariants, not one. (1) "Webhook wins over in-app completion signals" — when a worker/job and a webhook race for the same row, the external source of truth (Stripe) is authoritative. (2) "Timeout failure is reversible by webhook" — a row failed by a timeout job is a *provisional* failure; if the external system later confirms success, the override MUST be applied and MUST NOT be optimised away. These are logically distinct: (1) is about concurrent-write precedence; (2) is about post-terminal recoverability. Both need to be named explicitly in the spec because future engineers will see them as "fixes" to optimise. Source: `tasks/builds/agentic-commerce/spec.md §4 + §10 invariants 20, 7`, surfaced across chatgpt-spec-review rounds 1 and 3.
+
+### [2026-05-03] Pattern — Defense-in-depth for financial value tampering needs two independent layers
+
+A charge system with worker-mediated execution (worker fills a payment form using a token) needs two independent checks to prevent value tampering: (1) idempotency key — prevents *duplicate* charges for the same intent; (2) webhook amount/currency match — prevents *value-tampered* charges where the worker submits a different amount or currency than was approved. These are orthogonal: idempotency alone allows a worker to charge $5000 instead of $50 (different amount, not a duplicate). The webhook check catches this at confirmation time by comparing the webhook's reported amount against the ledger row's `amount_minor`. A mismatch blocks the `→ succeeded` transition and fires a critical alert instead, leaving the row in `executed` for manual reconciliation. Source: `tasks/builds/agentic-commerce/spec.md §10 invariant 24`, added at chatgpt-spec-review round 2, extended to include currency and ISO 4217 minor-unit exponent at round 3.
+
+### [2026-05-02] Pattern — Static-analysis single-writer test enforces the architectural invariant at test time
+
+A single-writer invariant ("exactly one file performs INSERT/UPDATE on table X") is normally enforced architecturally (call sites route through one service) and at runtime (`pg_advisory_xact_lock` prevents races between *concurrent* writers). Both layers leave a gap: a future contributor can copy a `db.insert(table)` into a different file, and the architectural invariant silently breaks — runtime locks won't catch it because the second writer just queues behind the first; tests pass; the behaviour stays correct on the happy path but the cooldown / cap / eviction logic now bypasses the canonical service. **Rule:** for any single-writer table, ship a static-analysis test (`*.singleWriter.test.ts`) that walks `server/**/*.ts` and greps for `INSERT INTO <table>` / `UPDATE <table>` SQL patterns and `db.insert(<schema>)` / `db.update(<schema>)` Drizzle patterns, asserting exactly one source file matches. Run as a normal unit test (no DB needed) so it surfaces in PR review locally. Pattern shipped in `agent_recommendations` (PR #250, chunk 1) — see `server/services/__tests__/agentRecommendations.singleWriter.test.ts`. Combine with: (a) `pg_advisory_xact_lock` for concurrent-writer races, (b) "Suppression is success" return-value rule for coordination losers (architecture.md § *Home dashboard live reactivity*), (c) this static check for new-writer-introduction. The three layers together make the invariant impossible to violate quietly.
+
+### [2026-05-04] Pattern — Shared register-X-schedule function for backfill + create-hook
+
+When two code paths (backfill script and a route hook) both need to register the same pg-boss schedule for a system agent, extract a single `registerXSchedule(entityId)` function that owns both the `INSERT ... ON CONFLICT DO NOTHING` for the entity-agent row and the `updateSchedule` call. Duplicating logic in two writers creates divergence risk (e.g., stagger formula changes only applied in one place).
+
+Applied in: `agentScheduleService.registerOptimiserSchedule` (Chunk 6, stream-2-optimiser-finish).
+
+### [2026-05-04] Pattern — Materialised view emptiness signals partial-mode, not failure
+
+When a cross-tenant aggregate materialised view is empty (e.g., on first deploy or before the nightly refresh runs), the consuming scan category should return an empty result and emit `optimiser.scan.partial` rather than throwing an error. The orchestrator continues with the other 7 categories. This avoids a "cold start" failure that would block recommendations for all categories just because the peer-baseline view has not been populated yet.
+
+Applied in: skillLatency category, `peerMediansViewIsPopulated()` check in runOptimiserScan (stream-2-optimiser-finish).
+
+### [2026-05-04] Pattern — median_version snapshot determinism for materialised views
+
+When a scan reads a materialised view for baselines, read `SELECT MAX(median_version)` once before the scan loop and thread it into every JOIN as `AND view.median_version = $expectedVersion`. This guards against a concurrent REFRESH bumping the version mid-scan and producing mixed-version evidence. If no rows match after the version check, emit partial-mode — same path as empty view.
+
+Applied in: runOptimiserScan + skillLatency query (stream-2-optimiser-finish, invariant 32).
+
+### [2026-05-05] Gap — renderRecommendation RENDER_VERSION invalidation is a no-op
+
+`server/services/optimiser/renderRecommendation.ts` stores `RENDER_VERSION` from `renderVersion.ts` but does NOT persist it to the DB. Bumping `RENDER_VERSION` does not auto-invalidate cached renders. To invalidate: run `UPDATE agent_recommendations SET evidence_hash = '' WHERE category LIKE 'optimiser.%'` after a prompt-template change, or add a `render_version` column (migration 0269 or later) and AND it into the cache lookup. Tracked in tasks/todo.md. Do NOT add version prefix to the stored `evidence_hash` — that column is used by `materialDelta` comparison in `agentRecommendationsService` and must remain the bare sha256.
+
+### [2026-05-05] Gap — renderRecommendation cache lookup uses bare `db` (RLS bypass)
+
+`renderRecommendation.ts` queries `agent_recommendations` using the raw `db` pool (no `app.organisation_id` session variable). With FORCE RLS enabled, this returns empty rows — the LLM render cache never hits. Workaround: pass an org-scoped tx handle from `runOptimiserScan` into `renderRecommendation`. An `organisationId` filter was added (2026-05-05) as defence-in-depth against cross-tenant copy leakage, but the root fix (org-scoped connection) is deferred. Tracked in tasks/todo.md.
+
+### [2026-05-05] Bug — backfill advisory lock is session-scoped but acquired on a pool connection
+
+`scripts/backfill-optimiser-schedules.ts` acquires `pg_try_advisory_lock` via the shared Drizzle pool. The lock is session-level and only holds for the Postgres backend that ran the `SELECT`. Subsequent `db.execute` calls may use different pool connections, so the lock provides no mutual exclusion. Use `client` (the raw postgres-js client, also exported from `server/db/index.js`) with a dedicated connection for both the lock acquisition and all subsequent queries. Pre-existing bug; not introduced by stream-2-optimiser-finish. Tracked in tasks/todo.md.
+
+### [2026-05-03] Pattern — ChatGPT diff-misreading: grep-verify every cited line before triaging
+
+When ChatGPT reviews a diff (especially a large one) and produces "critical" findings citing specific lines or symbols (e.g. `(updated as unknown as Record<string, string>).accessToken returns encrypted token`), do NOT pre-accept the verdict — grep the cited symbol against HEAD before triaging. Pattern observed on chatgpt-pr-review PR #254 round 1: 3 of 4 "critical" findings cited code that did not exist in the branch (hallucinated casts, false retry-policy claims, false ordering invariants), and the verified TRUE finding was already covered by an existing spec deferral. Net code-change-required from a "4 critical / 4 high-impact" review: 0 in round 1, 1 surgical observability commit in round 2 after a re-prompt asking for operational checks rather than line citations. **Rule:** every ChatGPT finding that names a file, line, symbol, or invariant gets a `grep` (or `Read`) verification round before going on the triage table. Mark verdicts FALSE and reject them when grep returns zero matches; mark verdicts TRUE and triage normally when the cited code actually exists. Without this gate the review loop wastes time chasing ghosts; with it, ChatGPT becomes a cheap second pair of eyes for behavioural review while you maintain code-truth as the source of truth. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 1 (3-of-4 critical findings hallucinated against HEAD).
+
+### [2026-05-03] Pattern — Observability-as-leverage: cross-provider filter field + lifecycle boundary log emits
+
+The cheapest leverage on a multi-provider integration surface is making logs filterable. Two mechanical disciplines pay off compoundingly:
+
+1. **Cross-provider filter field on every log site touching that surface.** For a GHL/HubSpot/Stripe-style fan-out, every `logger.info` / `logger.warn` / `logger.error` envelope carries `provider:'ghl'` (or equivalent). Operators filter `provider:ghl` once and see the whole subsystem. PR #254 added `provider:'ghl'` to 22 sites in one round-2 commit; the alternative is grepping by event-name patterns and missing the half that drift into different naming conventions over time.
+
+2. **Explicit lifecycle-boundary emits, not "just attempt logs".** Every state-machine transition gets its own log (e.g. `ghl.token.mint`, `ghl.token.refresh`, `ghl.token.refresh_failure`, `ghl.agency_token.revoked`). Without these, the only signal during an incident is `withBackoff.attempt_failed` — a generic library log that does not say *what state the system just transitioned to*. With them, the 3 AM trace `install → mint → refresh → failure → disconnected` is a single grep instead of an inference exercise.
+
+**Rule:** when adding any new integration / connector / external-service surface, ship the per-provider filter field AND the per-lifecycle-boundary log emits in the FIRST commit, not as a ChatGPT review-driven afterthought. The marginal cost is one helper field and N log lines; the marginal value is "operator can debug without you" the first time it breaks in production. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 2 (added 22 `provider:` sites + 3 explicit `ghl.agency_token.{refresh,refresh_failure,revoked}` events in commit `5b6368b6`).
+
+### [2026-05-03] Pattern — ChatGPT "ship with confidence" + "do NOT run another round" is the terminal close signal, regardless of remaining checklist size
+
+ChatGPT review loops do not have a deterministic stop condition; the model will happily produce another checklist round if asked. The reliable terminal signal is when ChatGPT itself opens a round with both "you're basically there / ship with confidence" framing AND closes with explicit "Do NOT run another PR review loop / past diminishing returns" instruction. When both phrases co-occur, treat as CLOSED — even if the round opens with a 6-item or 7-item checklist (those checklists are operational verification items the operator runs against staging, not blockers for code change). PR #254 round 3 opened with "ship with confidence" and a 6-item checklist; treating it as a verification + cleanup pass (rather than another find-bugs round) yielded 1 surgical fix (silent-failure logs) + 1 documentation deliverable (pre-prod validation procedure) + 0 architectural changes — and respecting the close signal saved a round-4 hallucination spiral. **Rule:** detect the dual signal in the FIRST paragraph of any ChatGPT review response; when present, the next round is a cleanup pass not a triage pass, and there will be no round-after-next regardless of model output. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 3 close.
+
+### [2026-05-04] Pattern — Trigger-enforced caller-identity GUC for state-machine transitions
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+When a state-machine table has transitions that are *only* legal when invoked by a specific subsystem (e.g. "the `failed → succeeded` post-terminal override is permitted only for the Stripe webhook", "DELETE is permitted only for the retention-purge job"), enforce the caller identity at the **DB-trigger** layer rather than (or in addition to) the application layer. Pattern:
+
+1. Define a closed enum of valid caller names: `CREATE TYPE agent_charge_transition_caller AS ENUM ('charge_router','stripe_webhook','timeout_job','worker_completion','approval_expiry_job','retention_purge')`.
+2. Application sets the caller via `SET LOCAL "app.spend_caller" = '<name>'` inside the `withOrgTx` transaction, immediately before the gated UPDATE/DELETE.
+3. A `BEFORE UPDATE` trigger reads `current_setting('app.spend_caller', true)` and raises an error when the transition shape requires a specific caller and the GUC value does not match.
+4. The GUC is **NOT** an RLS variable — it does not appear in any policy USING clause. It is a one-shot caller-identity assertion within a transaction, separate from organisation/principal context.
+
+Why this beats app-layer-only enforcement: application code paths multiply over time (new entry points, new resume paths, jobs running outside the canonical service). A trigger fails closed regardless of which file did the UPDATE — it cannot be bypassed by adding a new writer. The closed ENUM also prevents typo drift; an unknown caller value becomes a SQL error, not a silent permission grant. Pattern shipped on `agent_charges` (migration 0271). The codebase's existing append-only tables (`llm_requests`, `audit_events`, `mcp_tool_invocations`) all use app-layer-only enforcement; `agent_charges` is the first DB-trigger-enforced state-machine table and the template for any future financial / audit / regulated state machine where caller-identity gates transitions.
+
+### [2026-05-04] Pattern — Webhook `connectionStatus` allowlist (NOT exclusion-list) when secret persists across state changes
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+When a webhook handler dispatches to per-tenant business logic gated on the parent connection's status, and the per-connection signing secret persists across state transitions (revoked, error, paused), the gate MUST be expressed as an **allowlist of permitted statuses**, not an exclusion-list of forbidden ones. The danger of an exclusion-list is silent: a future migration adds a new state value (e.g. `'suspended'`, `'pending_revoke'`, `'compromised'`); the exclusion-list does not list it; behaviour silently routes the new state to the "process normally" branch. By the time the bug is found, the new state has been processed as if active for some period.
+
+Pattern: hard-code the closed set of statuses that are valid to process (`['active', 'connected']` for most surfaces; some integrations also accept `'pending'` for handshake flows) and reject every other value with an explicit log + 4xx response. New states default to "do not process" instead of "process". The webhook secret outliving connection lifecycle is a feature, not a bug — it lets late-arriving events from before a revoke land in a structured rejection rather than a 500 error — but combined with an exclusion-list gate it becomes a footgun.
+
+Shipped at `server/routes/webhooks/stripeAgentWebhook.ts:155` (adversarial-reviewer Finding 2.2 fix in PR #255). Generalises to every webhook handler where the parent connection has a status field with more than two states.
+
+### [2026-05-04] Pattern — DB-layer idempotency (partial UNIQUE + 23505 catch) beats API-layer idempotency for soft-delete-tracked uniqueness
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+For an "at most one active row per (parent, child)" invariant where past inactive rows are kept as audit history (soft-delete via `active=false` + `revoked_at`), DB-layer idempotency wins over service-layer idempotency:
+
+```sql
+CREATE UNIQUE INDEX <table>_active_unique
+  ON <table> (parent_id, child_id) WHERE active = true;
+```
+
+Paired with a service-layer `SELECT ... WHERE active = true → INSERT → catch 23505 → re-SELECT` race-handler, the partial UNIQUE provides:
+
+1. **Race-tight:** double-clicks, retries, and concurrent writers all land in either a successful INSERT or a 23505 caught and resolved against the existing active row. No app-layer locking required.
+2. **Audit-clean:** revoked rows remain in the table with `active=false` for the full audit trail; the UNIQUE only constrains the live state.
+3. **Drift-resistant:** future contributors who add a new INSERT path automatically inherit the guarantee; they cannot accidentally create a duplicate active row even if they skip the service-layer dedupe.
+
+Shipped on `org_subaccount_channel_grants` (migration 0275, chatgpt-pr-review round 1 Finding 2 fix). Pairs with the existing KNOWLEDGE.md entry `[2026-04-25] Gotcha — Partial unique index predicate must match the upsert WHERE clause exactly` — that entry covers the maintenance discipline; this entry covers the *first decision* to use the pattern. Together they form a "use this pattern by default, here's what breaks if you don't maintain it" pair. **Rule:** for any "at most one active per (X, Y) with audit history" requirement, ship the partial UNIQUE in the same migration as the table, before the service code that depends on it.
+
+### [2026-05-04] Pattern — Pre-insert + post-resolution-snapshot for state-machine rows that need to lock during creation
+
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #255 (slug: agentic-commerce)
+
+When a state-machine row's *initial* values must be derived from policy/budget/capacity data that requires advisory-lock-protected reads, two write paths exist:
+
+1. **Read-then-insert:** Read budget/policy under lock, INSERT the row, COMMIT. Problem: the row does not exist between the read and the INSERT, so a concurrent transaction reading the same budget cannot see the in-flight reservation. Capacity overruns are possible.
+2. **Insert-then-snapshot (pattern):** INSERT the row in `proposed` state with placeholder values, acquire `pg_advisory_xact_lock(budget_id)`, SELECT current capacity (which now includes this in-flight row), evaluate policy, UPDATE the row to `approved | denied | pending_approval` with the resolved snapshot of `spending_policy_id`, `policy_version`, `mode`, etc. The trigger that protects post-insert immutability of these snapshot fields carves out the `proposed → X` transition (any other UPDATE that touches the snapshot fields raises an error).
+
+Why pattern 2 wins: capacity computation sees the in-flight row, so two concurrent proposals against the same budget serialise correctly under the advisory lock. The trigger carve-out is the cost — a single well-named exception path — and it pays for itself by making the snapshot fields immutable everywhere else. Documented as the resolution to a code-vs-trigger contradiction at `tasks/builds/agentic-commerce/spec.md §305-307`. Generalises to any state-machine row whose initial state requires lock-protected reads on related tables (budget reservations, capacity grants, queue admission, license counter consumption). **Rule:** if you find yourself reaching for "lock the parent, read capacity, insert child", invert the order — insert child in placeholder state, lock parent inside the same transaction, snapshot derived values onto the child via UPDATE before COMMIT.
+
+### [2026-05-04] Rule — Do not introduce "future-use" schema columns without active invariants
+
+During workflows-v1, `workflow_step_gates.superseded_by_gate_id` was introduced as a future seam (unused in V1). Review flagged it as a lifecycle inconsistency against the enforced unique index, despite no runtime usage.
+
+**Lesson:** Unused schema fields are not neutral. They:
+- Increase cognitive load during review
+- Invite incorrect invariant assumptions
+- Create apparent contradictions with enforced constraints
+
+**Rule:** Only introduce schema fields when:
+1. The behaviour is implemented, AND
+2. The invariants governing that field are defined
+
+If future behaviour is anticipated:
+- Document it in the spec
+- Add the column in the migration that introduces the behaviour
+
+Avoid pre-emptive schema seams.
+
+---
+
+### 2026-05-04 Pattern — Version authority for parallel framework artefacts: source is canonical, deployment is a marker (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+When a repo carries the *source* of a framework AND a *deployment* of that same framework (e.g. `setup/portable/.claude/` is the canonical bundle that ships, while `.claude/` is the version currently deployed for THIS repo's sessions), the two `FRAMEWORK_VERSION` files do NOT have equal authority. Treating them as competing authorities produces ambiguous validation rules and forces drift-detection tooling (validate-setup, doctor) to ask "which one wins?" — a question that has no correct answer if both are framed as canonical.
+
+**Pattern:** declare one as canonical; declare the other as a deployment marker that may lag the canonical version transiently. Drift is bounded one-way: deployment may lag canonical, never *exceed* it. validate-setup warns only on the forbidden direction (deployment > canonical), not on lag (deployment < canonical).
+
+**Why it matters:** the parallel-artefact shape will recur every time we ship infrastructure that has a "kit" plus a "live deployment" in the same repo (frameworks, code-graph caches, capability registries that mirror to a generated file, future sync engines). Without explicit version-authority framing, every consumer downstream gets stuck in the same "which file is right?" debate. With explicit framing, the rule is short: source is canonical; deployment catches up via self-adoption.
+
+**Applied to:** `.claude/CHANGELOG.md` § *Version authority — single source of truth* and `setup/portable/.claude/CHANGELOG.md` 2.2.0 *Notes* (the latter cross-references the former). `CLAUDE.md` § *Framework version* updated to surface the canonical-vs-deployment distinction so future sessions don't re-derive it. Future drift-detection tooling reads the file relevant to scope, not as competing authorities — "what version is *deployed* here?" → root file; "what version does the artefact *ship*?" → canonical file. Generalises to any future "source + mirror" pair this codebase introduces.
+
+---
+
+### 2026-05-04 Gotcha — chatgpt-pr-review can re-flag a Round-N applied fix in Round N+1 as if it never landed (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+**Distinct from existing entries.** This is NOT the same shape as the 2026-04-23 "re-raise of Round 1 *rejections*" pattern (line 338) — that's about ChatGPT re-opening items that were rejected with rationale. And it's NOT the 2026-04-28 "external-reviewer false-positive rate" pattern (line 1261) — that's about ChatGPT misreading the codebase as it stands. The new shape: ChatGPT in Round N+1 flags an item that **was actioned and committed in Round N** as if the fix never landed. Most likely cause: the diff view ChatGPT was working from in Round N+1 was stale relative to the most recent commit, or the model dropped Round-N context between turns and re-read the original PR diff.
+
+**Concrete instance:** In PR #257 Round 2, ChatGPT listed `F4: Build script zip dependency unaddressed` as a finding. Round 1 had already added `assertZipBinaryAvailable()` preflight to `scripts/build-portable-framework.ts` (commit `5e2163ce`, lines 188–198) — verified by reading HEAD. ChatGPT was effectively working from a pre-Round-1 view.
+
+**Rules for handling:**
+
+1. **Verify the cited code at HEAD before triaging.** If `Read` of the file at the cited lines shows the fix is already present and the commit log shows it landed in a prior round, the finding is a false positive — do NOT re-implement.
+2. **Reject as false positive with evidence in the log.** Cite the round + commit hash + file:line where the fix landed. The triage row gets `**reject** (false positive)` with a one-line note. Burning a Round N+1 noise commit to "address" an already-addressed finding is worse than the false-positive log entry.
+3. **Don't extend the round to chase phantom items.** If the round produces zero net new signal once false positives are removed, that's still convergence. Close the loop on Round N+1's *real* signal; don't artificially extend rounds because half the findings were previously-addressed re-flags.
+
+**Generalises to:** any external-reviewer loop where the reviewer threads a conversation across multiple rounds (`chatgpt-pr-review`, future ChatGPT-style spec reviewers). Less applicable to walk-away reviewers like Codex (`spec-reviewer`, `dual-reviewer`) which read current file state on each iteration.
+
+---
+
+### 2026-05-04 Pattern — TDD on adversarial-reviewer findings: write the failing test from the reviewer's trace before fixing (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+When `adversarial-reviewer` reports a HOLES_FOUND verdict with concrete attack traces (path-traversal payload, race-condition timing, shell-injection vector), the right execution order is **test-from-trace → fix → confirm green**, not fix-then-test or fix-without-test.
+
+**Why this is the right order:**
+1. The trace is already structured as a failing-test specification — adversarial-reviewer hands you the inputs, the expected protective behaviour, and the failure mode if absent. Skipping the test step throws away that gift.
+2. A test written from the trace BEFORE the fix locks in the regression boundary. Future drift cannot silently re-open the hole — the test red-flags it on next CI run.
+3. The test also validates that the trace was *real* (not a hallucinated attack). If the test passes against the unfixed code, adversarial-reviewer was wrong about the hole — surface that and re-triage. Fix-without-test means you can ship a "fix" for a hole that didn't exist.
+
+**Applied to PR #257:** the `assertWithinRoot` defence picked up two rejection tests written directly from adversarial-reviewer's path-traversal trace; the `writeStateAtomic` PID-suffix race fix landed alongside a concurrent-write test that was red against the pre-fix code.
+
+**When to skip:** trivial spec-deviation findings where the "trace" is just "this string is missing from the doc" — no behaviour to test. Apply selectively to *behavioural* security findings.
+
+---
+
+### 2026-05-04 Pattern — adversarial-reviewer escalates findings that pr-reviewer treats as nits (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+`pr-reviewer` and `adversarial-reviewer` are not interchangeable. Even when both run over the same diff, they triage the same code differently:
+
+- `pr-reviewer` looks at code quality, correctness, maintainability — and tends to triage filesystem-writing-from-external-data items as "consider sanitising paths" (Strong, often deferred).
+- `adversarial-reviewer` reads the same code as a **threat model** — and triages the same items as `HOLES_FOUND` with concrete attack traces (path-traversal payload through manifest globs, shell-metacharacter injection through `execSync`, atomic-write race collision under concurrent processes).
+
+**Rule:** if the diff includes filesystem writes whose target paths are influenced by external data (manifest entries, glob patterns, user-supplied config, downloaded artefacts), run `adversarial-reviewer` even when not in the auto-trigger surface defined in `feature-coordinator §5.1.2`. The pr-reviewer "consider sanitising" pass is structurally insufficient for this shape — it produces gentle nits where the actual signal is "this code is exploitable."
+
+**Generalises to:** sync engines, build scripts, asset pipelines, downloaded-artefact processors, anything that writes to `${root}/${external-data}` paths.
+
+---
+
+### 2026-05-04 Pattern — Defence-in-depth path-containment: assert at expand time AND at write time, never just one (seen 1 time)
+**Date:** 2026-05-04
+**Source:** finalisation-coordinator finalisation pass on PR #257 (slug: framework-standalone-repo)
+
+For any module that takes a root path plus external relative-path inputs and writes files inside the root: the path-containment assertion (`resolved.startsWith(root + sep)`) MUST live in BOTH the path-expansion phase AND each writer call site. Single-site enforcement is structurally fragile.
+
+**Why both, not one:**
+- Expansion-time only: a future caller bypasses expansion (passes a pre-expanded path directly to a writer) and the assertion never fires.
+- Writer-time only: every writer must remember to call the assert; one missed call site = one hole. Adversarial-reviewer found exactly this in PR #257's pre-fix sync engine.
+- Both sites: the assertion is defence-in-depth — even if expand-time was bypassed by mistake, the writer catches it; even if a writer forgot the call, expand-time caught it. The redundancy is intentional.
+
+**Applied to PR #257:** `setup/portable/sync.js` `assertWithinRoot()` is called both in `expandGlob()` (expansion phase) and at every `fs.writeFileSync` / `fs.copyFileSync` / `fs.unlinkSync` call site that takes a derived path.
+
+**Generalises to:** any pure-function-plus-side-effect-writer pair where the pure function is "validate" and the writer is "execute." Don't trust single-site enforcement for security-critical paths. Cost is negligible (one resolved-path check); savings on a missed-bypass attack are large.
+
+### 2026-05-04 Pattern — Two-layer event-source dedup for live-projection hooks
+
+When a UI hook ingests events from both a WebSocket socket and an HTTP replay endpoint, replay-vs-socket overlap will duplicate events into the projection unless dedup is explicit. Pattern that survived chatgpt-pr-review:
+
+- **Layer A (hook boundary):** `seenEventIds: Set<string>` ref, FIFO eviction at a soft cap (~2000 entries = ~15 min at typical event rates, exceeds the full-rebuild interval). Every event-application path (socket callback, full rebuild, delta reconcile) calls `noteSeen(eventId)` first; returns false if already applied. Full rebuild resets the Set alongside resetting state.
+- **Layer B (pure reducer):** cursor short-circuit at the top of the reducer — `if ((event.taskSequence, event.eventSubsequence) <= (prev.lastEventSeq, prev.lastEventSubseq)) return prev`. Idempotent regardless of caller.
+
+Either layer alone is correctness-sufficient. Together they survive (a) reducer regressions (Set still dedups), (b) Set eviction past cap (cursor still dedups), (c) socket/replay race. See `client/src/hooks/useTaskProjection.ts` + `client/src/hooks/useTaskProjectionPure.ts:30-46`.
+
+### 2026-05-04 Gotcha — Cleanup jobs on FORCE-RLS tables MUST use withAdminConnection
+
+A pg-boss handler that runs `db.delete(...)` directly on a FORCE-RLS table silently affects 0 rows on every tick. Background handlers run outside `withOrgTx` context — `current_setting('app.organisation_id', true)` returns an empty string — and the RLS policy's `<> ''` predicate evaluates false, making every row invisible. The DELETE succeeds with rowcount 0; nothing logs an error.
+
+Pattern: cross-org maintenance sweeps MUST use `withAdminConnection({source, reason}, async tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`. Every other cleanup job (`agentRunCleanupJob`, etc.) follows this. The original `workflowDraftsCleanupJob` shipped without it and was caught by adversarial-reviewer; fixed in commit `28fb2e25`.
+
+### 2026-05-04 Pattern — Single chokepoint for INSERT into a uniqueness-protected table
+
+When a table has a partial unique index that maps to a typed API error (e.g. `workflow_runs_one_active_per_task_idx` → `TaskAlreadyHasActiveRunError → 409`), every INSERT path MUST go through one helper that catches SQLSTATE 23505 and translates. Direct `db.insert(table)` in service code surfaces the raw Postgres error as a 5xx.
+
+Pattern: extract a small module like `server/services/workflowRunInsertHelper.ts` with `insertRunRowWithUniqueGuard(tx, values, taskId)`. Place it in its own file to avoid cycles between caller services. Every service that creates rows calls the helper. CI grep gate names the helper as the only allowed match.
+
+### 2026-05-04 Gotcha — Date.now() poisons cursor-based projection delta polling
+
+Per-task event-source projection uses `(taskSequence, eventSubsequence)` as the delta cursor — client polls `?fromSeq=N&fromSubseq=M` and the reducer advances `lastEventSeq = max(prev, taskSequence)`. If any emitter passes `Date.now()` as a placeholder for `taskSequence` (≈1.7e12), the reducer pins the cursor to that value, all subsequent delta polls return empty, and live deltas are silently dead.
+
+Pattern: allocate `task_sequence` atomically inside the same transaction as the state change — `UPDATE tasks SET next_event_seq = next_event_seq + 1 WHERE id = $1 AND organisation_id = $2 RETURNING next_event_seq`. Never use `Date.now()` as a placeholder, even temporarily. See `server/services/taskEventService.ts:appendAndEmitTaskEvent`.
+
+### 2026-05-04 Pattern — Server-side validation parity via shared module
+
+Form validators live on the client for inline UX, but the client validator is NOT the contract enforcement boundary — the server is. If only the client validates, an attacker bypasses validation by hitting the API directly with malformed values.
+
+Pattern: move the pure validator to `shared/types/<feature>ValidationPure.ts`. Client re-exports via a one-line shim from its old location (preserves call sites). Server imports the shared module directly and calls it inside the submission service before any state change. On failure throw `{statusCode: 400, message, errorCode: 'invalid_form_values', fieldErrors}`. Route surfaces `field_errors` to the client; the client renders them inline alongside its own pre-submit errors. Same pure module = no contract drift. Implemented for ask-form submission in commit `7e61f350`.
+
+### 2026-05-04 Pattern — 404 (not 403) for cross-subaccount disclosure prevention
+
+Routes that resolve a resource by primary ID (no `:subaccountId` path segment) cannot use `resolveSubaccount` upfront — they need to load the resource first to know the subaccount it belongs to. After loading (org-scoped), if the caller doesn't have access to the resource's subaccount, return 404 — NOT 403. A 403 confirms the resource exists, which is itself a disclosure. A 404 is indistinguishable from "resource does not exist".
+
+Pattern: `await userCanAccessSubaccount(userId, dbRole, resource.subaccountId)` from `server/lib/userSubaccountAccess.ts`. If false, return the same 404 you'd return for "not in this org". Implemented for `workflowDrafts` route in commit `28fb2e25`.
+
+### 2026-05-04 Gotcha — agent_execution_events.run_id NOT NULL blocks task-level event persistence
+
+Workflows-v1's `appendAndEmitTaskEvent` is the emit path for non-agent-run-shaped task events: pause/resume/stop, gate transitions, orchestrator chat cards, milestones. None of these have an associated `agent_runs` row. The `agent_execution_events` table requires `run_id NOT NULL REFERENCES agent_runs(id)`. So persistence is impossible without a schema migration.
+
+Today: emit is WebSocket-only — the live socket records state, but a client opening the page after an event fired sees stale projection until the next forced refresh. The replay endpoint cannot reconstruct these events.
+
+### [2026-05-05] Pattern — System agents on a dedicated queue must be excluded from the generic schedule registrar
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #262 (slug: stream-2-optimiser-finish)
+**Pattern:** When a system agent runs on its own pg-boss queue (e.g. `optimiser-scan`) instead of the generic `agent-scheduled-run` queue, the boot-time scheduler MUST exclude that system agent from the generic registration path. `agentScheduleService.registerAllActiveSchedules` LEFT JOINs `system_agents` (or equivalent SA marker) and skips rows where the SA owns its own queue; a parallel `registerAllOptimiserSchedules` (one per dedicated-queue feature) handles boot-time self-heal for the dedicated queue. Without the exclusion, every active subaccount-agent for that SA gets registered on BOTH queues at boot, causing each scheduled run to fire twice. The self-heal path inside `registerOptimiserSchedule` MUST also do an inline DB UPDATE for the cron rather than calling the generic `updateSchedule()` which would re-register on the wrong queue.
+**Why it matters:** The double-execution failure mode is silent in dev (runs are idempotent) but doubles cost, doubles LLM-render fan-out, and pollutes the recommendations table with duplicate evidence in production. The pattern generalises to any future dedicated-queue feature: when introducing a new queue for a system agent, audit the boot-time registrar in the same PR.
+
+### [2026-05-05] Pattern — Boot-time recovery summary log carries actionable counts, not a single integer
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #262 (slug: stream-2-optimiser-finish)
+**Pattern:** When a service runs a boot-time self-heal sweep over an enabled-rows table (e.g. `registerAllOptimiserSchedules`), the summary log MUST split the total into actionable buckets — `totalEnabled`, `registered` (newly created), `skipped_duplicate` (already present), `failed` — rather than a single `Registered N optimiser schedules on startup` line. The single-integer log conflates "everything was already fine" with "we just created N rows" and hides per-row failures from the dashboard. Pattern: emit a structured `<feature>.startup.recovery_summary` event at the end of the loop, plus per-row `<feature>.schedule.{registered,skipped_duplicate}` events from the inner write path.
+**Why it matters:** A boot-time sweep failing for 1 of 200 rows shows up as "registered 199" in the integer model — operationally invisible. The split-counts model exposes the failure rate as a first-class field; partial failures fire dashboards instead of disappearing into a successful-looking log line.
+
+Required follow-up: schema migration making `agent_execution_events.run_id` nullable (or adding `workflow_run_id uuid` with at-least-one-of constraint), then plumb `persistAs: { runId, sourceService }` through `appendAndEmitTaskEvent`. Tracked in `tasks/todo.md` Tier C as deferred S1.
+
+### 2026-05-05 Resolution — task_events table (migration 0279) closes the persistence gap above
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening)
+**Resolves:** the 2026-05-04 gotcha immediately above.
+
+Pre-launch hardening D-P0-5 sidesteps the `agent_execution_events.run_id NOT NULL` problem by writing task-shaped events to a **separate** table — `task_events` (migration 0279, FORCE RLS) — keyed `(task_id, seq)` and indexed by `(task_id, seq, created_at)`. `appendAndEmitTaskEvent` now performs the seq allocation and the durable INSERT inside the same `db.transaction()`; the WebSocket emit fires only after commit so the DB row is the source of truth. Replay endpoint can now reconstruct historical task events for clients that join late.
+
+Trade-off accepted: two physically separate tables (`agent_execution_events` for run-scoped events, `task_events` for task-scoped events) instead of one. The original "make `run_id` nullable + add `workflow_run_id` with at-least-one-of" plan was heavier (schema migration on a hot table, validator changes, query path changes across the LiveAgentExecutionLog read path); the dedicated `task_events` table is additive and ships independently. Cross-table reads at the UI layer (per-task drilldown showing both event sources) remain a future optimisation; today the OpenTaskView only consumes the task_events stream.
+
+### 2026-05-05 Gotcha — db.transaction() opened from module-level pool runs WITHOUT GUC; FORCE-RLS writes silently no-op
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening). Surfaced TWICE in the same branch — `taskEventService.ts` (D-P0-5) and `workflowRunPauseStopService.ts` (migrated to `getOrgScopedDb` mid-build).
+
+The fail mode: a service imports `db` from `server/db/index.js` at module top, opens its own `await db.transaction(async (tx) => ...)`, and writes to a FORCE-RLS table. The transaction inherits no `app.organisation_id` GUC because the pooled connection was not entered via `withOrgTx` / `getOrgScopedDb`. FORCE-RLS policies fail-closed: `WITH CHECK` rejects every INSERT silently (0 rows affected, no error thrown — Postgres returns "command complete"). The read side is similarly invisible: `SELECT` returns zero rows even when rows exist.
+
+Two ways out, used in this branch:
+
+1. **Explicit GUC inside the tx** — first statement in the transaction is `await tx.execute(sql\`SELECT set_config('app.organisation_id', \${ctx.organisationId}, true)\`)`. The `true` third argument scopes the setting to the transaction so it does not leak back into the connection pool. Used by `taskEventService.appendAndEmitTaskEvent` (the service is fire-and-forget — its callers are not guaranteed to be inside an outer `withOrgTx`, so the service must own the GUC).
+2. **Migrate to `getOrgScopedDb`** — replace the module-level `db` import with a function-scope `const db = getOrgScopedDb('serviceName')`. The wrapper requires an active `withOrgTx` ALS context and throws `failure('missing_org_context')` if absent — converts the silent fail into a loud one. Used by `workflowRunPauseStopService` (callers always pass through an authenticated route or job handler that has `withOrgTx`).
+
+Choice rule: services on hot/authenticated paths use option 2 (loud fail catches caller misuse). Fire-and-forget / unauthenticated-path services use option 1 (the explicit GUC is the contract — there's no upstream context to inherit). The wrong combination — option 2 on a fire-and-forget caller, or option 1 inside a service that ALWAYS runs inside `withOrgTx` — produces either a hard crash on legitimate calls or duplicates the GUC unnecessarily.
+
+Detection heuristic: grep `db\.transaction\(` in services that touch FORCE-RLS tables. Every hit must either (a) be inside `getOrgScopedDb`'s contract, or (b) issue `SELECT set_config('app.organisation_id', ...)` as the first statement. A bare `db.transaction()` on a FORCE-RLS table is the bug.
+
+### 2026-05-05 Pattern — `app.set('trust proxy', N)` MUST be a hop count, not `true`
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), adversarial-reviewer AR-2.1.
+
+Express's `req.ip` derivation reads `X-Forwarded-For` from right-to-left and returns the leftmost address that is NOT a trusted proxy. The setting controls "how many hops to trust":
+
+- `app.set('trust proxy', 1)` — trust the FIRST upstream proxy only (the one directly fronting the app). The right-most XFF address is treated as the proxy; everything to its left is taken at face value. This is what production behind a single load balancer (Replit, Render, Vercel, AWS ALB → app) needs.
+- `app.set('trust proxy', true)` — trust ALL proxies in the chain. Any client can spoof `req.ip` by setting their own `X-Forwarded-For` header, because Express will walk the entire chain looking for a non-trusted address and find none. **Security regression** — rate limiters keyed on `req.ip` are now per-X-Forwarded-For-claim, not per-real-client.
+- `app.set('trust proxy', false)` (default) — trust no proxies. `req.ip` is always the proxy's address. Behind a load balancer, this means every client looks like the same IP — rate limiters become global locks.
+
+Rule for new app configs: pick the integer that matches the deployment's hop count. Never `true`. Never `false` if a load balancer is in front. Re-validate when the deployment topology changes (e.g. adding a CDN in front of the existing LB takes the count from 1 to 2). Implemented in `server/index.ts` (`isProduction → app.set('trust proxy', 1)`) per pre-launch S-P0-5 / AR-2.1.
+
+### 2026-05-05 Gotcha — `db.execute(sql\`...\`)` returns `QueryResult`, not a bare array
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), chatgpt-pr-review round 2 (real-bug catch in `oauthStateCleanupJob.ts`).
+
+When using Drizzle with the node-postgres driver, `await db.execute(sql\`...\`)` returns a `QueryResult` object whose row data lives on `.rows`. Treating the return as a bare array (`result.length`, `result.map(...)`, `result[0]`) silently returns wrong values — for `RETURNING`-style DELETEs the count is consistently 0 even when rows were deleted.
+
+The cleanup job ran for two months silently reporting `rowsDeleted: 0` because the `(result as unknown as Array<...>).length` cast compiled fine and produced a number, just always wrong. The bug was invisible until ChatGPT round 2 read the diff carefully.
+
+Fix shape:
+
+\`\`\`ts
+const result = await db.execute<{ ok: number }>(sql\`DELETE … RETURNING 1 AS ok\`);
+const rows = (result as unknown as { rows?: Array<{ ok: number }> }).rows ?? [];
+return { rowsDeleted: rows.length };
+\`\`\`
+
+Detection: any service / job that uses `db.execute(sql\`...\`)` and reads `.length` or indexes into the result directly is wrong. Drizzle's typed query builder (`db.select()`, `db.delete().returning()`) returns the bare array as expected — `db.execute(sql)` is the escape hatch and carries the QueryResult shape.
+
+### 2026-05-05 Pattern — Catch blocks around fire-and-forget enqueues must log; the enqueue itself does not
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), chatgpt-pr-review round 2.
+
+The pre-launch GHL onboarding migration replaced an inline call with a pg-boss enqueue (`enqueueGhlOnboarding`). Several callers wrapped the new enqueue in `try { ... } catch { /* swallow */ }` because the original inline call was best-effort and the surrounding webhook handler must always return 200. **The enqueue function itself does NOT log on internal failure** — pg-boss client errors throw raw, and the per-call context (orgId, subaccountId, webhook event id) lives only at the call site.
+
+Rule: when a fire-and-forget enqueue is wrapped in a swallow-catch, the catch block must `logger.warn(...)` with all available context BEFORE swallowing. The job-side handler will not log this failure — it never ran. The on-call engineer needs the call-site log to even know the enqueue failed.
+
+Wider rule: utility functions whose contract is "throw on failure" require their callers to either propagate the throw or log+swallow with full context. A bare `catch {}` on such a function is a silent-failure regression. Audit when introducing a new "thin wrapper around external system" function: the wrapper either logs internally and never throws, or it throws and forces every caller to choose. Mixed contracts ("sometimes I log, sometimes I throw") are the worst — callers can't reason about coverage.
+
+### 2026-05-05 Gotcha — `withOrgTx({ tx: db })` in unauthenticated callbacks fakes ALS context without setting a GUC
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), adversarial-reviewer AR-3.1 worth-confirming (deferred).
+
+Pattern in `server/routes/oauthIntegrations.ts` (and a few other unauthenticated callback paths): `withOrgTx({ tx: db, organisationId }, async () => { ... })`. Passing the module-level `db` as `tx` makes the ALS context "look right" — `getCurrentOrgContext()` returns the orgId — but no actual GUC is bound to any DB connection. Code inside the closure that uses `getOrgScopedDb()` to get a connection will receive a connection with no `app.organisation_id` set, and FORCE-RLS writes will fail-closed silently (per the gotcha above).
+
+Today this works in the OAuth callback because `autoEnrolAgencyLocations` opens its own per-location `db.transaction()` with explicit `SET set_config(...)`. The fragile invariant is "the closure body must never rely on inherited GUC". Any future refactor that introduces a `getOrgScopedDb()` call inside the closure will silently break.
+
+Fix shape (deferred to Phase 2): replace `withOrgTx({ tx: db }, ...)` with `withOrgTx({ organisationId }, ...)` (no `tx` override) so the wrapper opens a real transaction and binds the GUC properly. The current `tx: db` override exists because the callers want to defer DB-pool acquisition until per-location work — a refactor to acquire connections later still works but needs explicit GUC management at each acquisition site.
+
+Detection heuristic: grep `withOrgTx\(\{[^)]*tx:\s*db` — every hit is either a deliberate optimisation (currently 1 site in `routes/oauthIntegrations.ts`) or a misuse. Document the deliberate sites with an inline comment so future refactors don't propagate the pattern unaware.
+
+### 2026-05-04 Correction — Riley waves ship independently
+
+W1 shipped via PR #186 + migrations 0219-0222. W2 schema landed in migration 0230 out-of-band from `pre-launch-hardening`; W2 services / UI did not. W3 and W4 unstarted in code. Don't conflate the four waves when reading Riley docs — check migrations and `server/lib/tracing.ts` for actual state.
+
+### 2026-05-04 Pattern — F1 Sub-Account Baseline Artefacts (migration 0277)
+
+Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `memory_blocks.applies_to_domains` (TEXT[]), and `subaccounts.baseline_artefacts_status` (versioned JSONB). Six reserved-slug artefacts are captured at onboarding via the `baseline-artefacts-capture` workflow. Tier-1 blocks prepend to the system prompt via `memoryBlockService.getTier1Blocks` (sorted by name ASC for hash-stable prefix caching). Tier-2 blocks load when `applies_to_domains @> ARRAY[agentDomain]` matches. Tier-3 lives in `workspace_memory_entries` under `domain='baseline'`.
+
+F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
+
+JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.
+
+### 2026-05-05 Pattern — Sentinel-row dependencies are validated at boot, not caught at write time
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 2 Finding 1.
+
+When code depends on a known DB row existing (e.g. the `SECURITY_AUDIT_SENTINEL_ORG_ID` org row that anchors `auth.login.failure` events when no real org is known), validate at boot — don't catch the silent FK failure at write time. The precedent is `validateEncryptionKeyOrThrow()`; the new instance is `validateSecurityAuditSentinelOrgOrThrow()`. Both run inside `server/index.ts::start()`, both throw in production, both downgrade to `console.warn` in development.
+
+The failure mode without boot validation: the audit-write path catches the FK violation, logs it, returns. The write silently drops. The on-call engineer doesn't see the missing event until they go looking for it during an incident — by which point the original audit context (request, headers, IP) is gone. Boot validation makes the dependency visible at deploy time, when fixing it is a `psql` paste-in away.
+
+Detection heuristic: any service that imports a DB row by hard-coded UUID — sentinel orgs, system agents, well-known principal IDs — needs a boot-time validator. Grep for `'00000000-` literals; each hit either has a validator already or needs one.
+
+### 2026-05-05 Pattern — JWT `iat` invalidation comparisons must align both sides to whole seconds
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 1 Finding 2.
+
+JWTs encode `iat` (issued-at) as whole seconds. The natural way to invalidate a token after a state change (password changed, session revoked) is "if `passwordChangedAt > token.iat * 1000`, reject". This is wrong by ~1s on average: `passwordChangedAt` is millisecond-precision, `token.iat * 1000` is whole-second × 1000, so a token issued in the same wall-clock second as the state change is mistakenly revoked on first use.
+
+Fix is two-sided: floor the state field at write time (`new Date(Math.floor(now.getTime() / 1000) * 1000)`) AND compare in seconds at read time (`Math.floor(passwordChangedAt.getTime() / 1000) > token.iat` — strict greater, not `>=`). Either side alone leaves the off-by-one. Apply to: password change, signup (welcome email links), invite acceptance, any future session-revocation path.
+
+The read-side fix (`server/middleware/auth.ts`) and the write-side fix (`server/services/authService.ts::resetPassword`) ride together — neither is sufficient alone.
+
+### 2026-05-05 Pattern — Per-route body-size caps install BEFORE the global JSON parser, not after
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 1 Finding 3.
+
+Express middleware ordering matters here. The standard setup is `app.use(express.json({ limit: '10mb' }))` early in the chain. To enforce a tighter cap on a specific route (`/api/client-errors`, audit endpoints, anything where authenticated abuse can inflate downstream layers), the path-scoped tight parser must register BEFORE the global parser:
+
+```ts
+app.use('/api/client-errors', express.json({ limit: '16kb' }));  // tight, first
+app.use(express.json({ limit: '10mb' }));                          // global, second
+```
+
+Mechanism: once the tight parser populates `req._body`, the global parser short-circuits (Express `req._body` semantics — `bodyParser` skips when already set). Reverse order means the global parser fires first and accepts up to 10mb regardless of the tight registration. The tight cap returns 413 only when it runs first.
+
+Detection heuristic: grep `app.use('/api/.*express\.json` — every hit must register BEFORE the global `app.use(express.json` call. Order is enforced by source position in `server/index.ts`, not by mount path specificity.
+
+### 2026-05-05 Pattern — `logAndSwallow` is "don't propagate", not "don't observe"
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 1 Finding 5.
+
+The `logAndSwallow` helper in `client/src/lib/silentCatchHelper.ts` exists to keep best-effort client calls from breaking the page when they fail. The contract is "don't propagate the error to the render path", NOT "don't observe the error". Always emit `console.debug` (not gated on `NODE_ENV`) so support engineers can surface swallowed errors with devtools open. Never gate logging on environment for swallow helpers — production users won't see `console.debug` unless they explicitly enable it, but a support engineer investigating an issue can.
+
+Wider rule: any "swallow" helper (server or client) that gates its observability on environment is a regression magnet. `console.debug` is the right level — present, but quiet by default — and the gate, if any, lives at the caller, not in the helper.
+
+### 2026-05-05 Pattern — `leftJoin` + `isActive(table)` predicate must live in the JOIN ON clause, not the WHERE clause
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 2 Finding 5 (verify-clean confirmation).
+
+Drizzle's `leftJoin(table, condition)` preserves left-side rows even when the right side has no match. Adding a predicate on the right-side table to the `WHERE` clause silently converts LEFT semantics to INNER: rows where the right side is `NULL` (no match) are filtered out by the WHERE.
+
+For soft-deletable tables (`agents`, `systemAgents`, `subaccounts`, etc.), the soft-delete filter (`isActive(table)` from `server/lib/queryHelpers`, or raw `isNull(table.deletedAt)`) MUST live in the join's ON clause:
+
+```ts
+// CORRECT — preserves LEFT semantics
+.leftJoin(systemAgents, and(
+  eq(systemAgents.id, agents.sourceTemplateId),
+  isActive(systemAgents)  // here, not WHERE
+))
+
+// WRONG — silently converts to INNER
+.leftJoin(systemAgents, eq(systemAgents.id, agents.sourceTemplateId))
+.where(isActive(systemAgents))
+```
+
+This is now §8.27 in `DEVELOPMENT_GUIDELINES.md`. The verify-clean grep pattern: search server/ for `leftJoin` + `isActive` co-located in a `.where(...)` clause. Round 2 Finding 5 verified the only co-located instance (`subaccountAgentService.ts:522`) sits in the JOIN ON clause and is correct — but the grep is the recommended detection going forward.
+
+### 2026-05-05 Pattern — Two-layer rate-limit key normalisation is intentional defence-in-depth, not redundant
+
+**Date:** 2026-05-05
+**Source:** finalisation-coordinator finalisation pass on PR #264 (slug: pre-launch-phase-2), chatgpt-pr-review Round 2 Finding 7 (verify-clean confirmation).
+
+The rate-limit key construction has two normalisation layers:
+
+1. **Call site** — `server/routes/auth.ts` lines 26 (signup), 60 (login), 131 (forgot) call `email.trim().toLowerCase()` before building the key.
+2. **Key builder** — `server/lib/rateLimitKeys.ts:rateLimitKeys.authSignup` lowercases the email internally.
+
+ChatGPT initially flagged this as redundancy. It's not — it's defence-in-depth. If a future caller forgets the call-site normalisation, the key builder still produces a normalised key. If the key-builder implementation is refactored (e.g. switched to a hash that doesn't normalise), call-site normalisation still produces case-equivalent keys. Either layer alone is one regression away from a case-sensitivity bypass (`Foo@example.com` vs `foo@example.com` getting separate buckets, doubling the abuse budget).
+
+The pattern generalises: any "construct a key from user input" path that depends on canonical form should normalise at both the call site AND the builder, with a pure test pinning the case-equivalence invariant (`server/services/__tests__/rateLimitKeysPure.test.ts:19`). Single-layer normalisation works today but rots silently the first time someone touches either layer.
+
+### 2026-05-05 Pattern — chatgpt-pr-review meta-level Round 1 without diff visibility
+
+When ChatGPT is given only the GitHub PR summary (no diff), Round 1 produces a *meta-level pass*: generic recommendations about determinism, observability, idempotency, lifecycle drift — not pinpoint findings against actual code. The reviewer typically signals this themselves ("Right now this is a meta-level review… If you paste the actual code diff, I'll run a true deep pass").
+
+Adjudication shape for these rounds: each "concern" is a verification request, not a defect claim. Treat them as `reject` with a verification-trail rationale, not as `implement` or `defer`. The session log carries the verification (e.g. "verified by partial UNIQUE index `subaccount_baselines_active_uniq` in migration 0280") rather than a code change. Round 2 onwards (with the diff bundle uploaded) sharpens to specific findings; substantive duplicates of Round 1 concerns auto-apply the prior-round decision per the duplicate-detection rule.
+
+Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05T10-17-27Z.md` — 3 rounds, 15 rejections, 0 code changes, APPROVED verdict. Round 1 raised 6 generic concerns; Round 2 sharpened to 5 (3 new, 2 duplicates of R1); Round 3 dropped to 4 paranoia-level concerns. The verification trail in the log is the audit artifact, not the (empty) implementation diff.
+
+### 2026-05-05 Pattern — Branded type with single-constructor invariant beats grep gates for input-normalisation enforcement
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 1-3 (NormalisedEmail brand pattern).
+
+When a function depends on a string being in a normalised form (lowercase, trimmed, hashed, sanitised), the canonical enforcement is **a branded type constructed by exactly one function**, NOT a grep gate that scans for normalisation calls.
+
+Pattern shape (TypeScript):
+
+```typescript
+// In server/lib/<helper>.ts — the ONLY constructor
+export type NormalisedEmail = string & { readonly __brand: 'NormalisedEmail' };
+export function normaliseEmail(input: string): NormalisedEmail {
+  return input.trim().toLowerCase() as NormalisedEmail;
+}
+
+// In any consumer
+export function loginEmailOnlyKey(email: NormalisedEmail): string { ... }
+```
+
+Three rules make the brand load-bearing:
+
+1. **Type is structurally unconstructable from raw `string`** — the `readonly __brand` intersection means TypeScript treats the type as nominal-flavoured.
+2. **Exactly one exporter** — the single constructor is the only legitimate path; any helper that accepts the branded type must take it as input, not produce it.
+3. **Consumer signatures take the branded type, never raw string** — the type system rejects raw-string callers at the helper signature.
+
+The single escape hatch is the `as NormalisedEmail` cast. A grep gate scoped to "find this exact cast pattern outside the constructor file" is a cheap supplement to the type system — not the primary control. Data-flow tracing approaches are explicitly **rejected**: static grep cannot reliably trace value flow across a typed module boundary, and false negatives compound silently as the codebase grows.
+
+**Where it generalises.** Any normalisation gate where the cost of forgetting to normalise is silent correctness drift: rate-limit keys (case-sensitivity bypass), URL/slug builders (path injection), sanitised user input (XSS surface), hashed identifiers (lookup miss). The pattern is heavier than a grep gate AND more robust — pick it whenever the consumer set is more than one or two callers.
+
+**Anti-pattern.** Two exporters of the branded type (e.g. `normaliseEmail` AND `lowercaseEmail` both returning `NormalisedEmail`). The second exporter defeats the single-constructor invariant — adding it should be a blocking PR finding, not a nit.
+
+### 2026-05-05 Pattern — Factory const-object as the ONLY source for closed string-enum values
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 1-3 (auditEvent factory).
+
+When a closed set of string values represents a domain enum (event names, action types, error codes, audit categories), prefer a **factory const-object** as the sole source of values, with the discriminated union derived from it via `typeof`. Do NOT export the union directly without a factory.
+
+Pattern shape (TypeScript):
+
+```typescript
+// In shared/types/<domain>.ts
+export const auditEvent = {
+  auth: { loginFailed: 'auth.login_failed', loginSucceeded: 'auth.login_succeeded' },
+  oauth: { stateExpired: 'oauth.state_expired', stateConsumed: 'oauth.state_consumed' },
+  security: { crossTenantAttempt: 'security.cross_tenant_attempt' },
+} as const;
+
+type Namespace = keyof typeof auditEvent;
+type Event<N extends Namespace> = typeof auditEvent[N][keyof typeof auditEvent[N]];
+export type SecurityAuditEventName = { [N in Namespace]: Event<N> }[Namespace];
+
+// In any producer
+recordSecurityEvent(auditEvent.auth.loginFailed, ...);  // ONLY way
+```
+
+Three properties make this beat a raw union:
+
+1. **Producer ergonomics** — `auditEvent.auth.loginFailed` is autocomplete-friendly and structurally namespaced; raw `'auth.login_failed'` invites typos.
+2. **Bypass-cast detection is grep-able to a single token** — `as SecurityAuditEventName` becomes the one and only escape hatch; grep `as <UnionTypeName>` and fail on hits.
+3. **Per-event metadata is a property, not a parallel registry** — extending the factory entry to `{ name: '...', severity: '...' }` keeps name + classification co-located. Severity (or any classifier) is bound at declaration site, NOT at the call site — the recordEvent type signature reads metadata from the factory entry, callers cannot override.
+
+**Where it applies.** Any closed enum of string values used at write/emit time where (a) producers should not write raw literals and (b) downstream consumers may need per-value metadata for routing/alerting/severity tiering. Telemetry events, audit events, action types in command buses, error code registries, status enums.
+
+**Anti-pattern.** Define the union directly (`type EventName = 'a' | 'b' | 'c'`) and rely on a grep gate to forbid raw literals. The grep gate is a backstop; the structural source must be the factory. A grep-only enforcement decays the moment a developer writes `'a' as EventName` to silence a type error — the cast bypasses both the union and the grep.
+
+### 2026-05-05 Pattern — Single-writer pg-boss job: connection-scoped singletonKey + cursor in payload
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog round 1 finding F2 + round 2 finding F1 (GHL pagination).
+
+For any pg-boss job that processes a paginated upstream (cursor-based API, batched DB scan, multi-page external resource) and re-enqueues itself for the next page, the singleton key MUST be scoped to the **resource being mutated**, NOT to the page cursor. The cursor lives in the job payload.
+
+```typescript
+await pgboss.send('ghl:auto-enrol-locations-page', {
+  connectionId, runId, pageCursor, pageIndex
+}, {
+  singletonKey: `ghl-enrol:${connectionId}`,  // resource-scoped
+});
+```
+
+Why cursor-scoped is wrong: two jobs with different cursors slip past the singleton check and run concurrently against the same resource. If the upstream API's pagination is non-stable (same item appears across two pages due to a write between requests), both jobs do work for the overlapping item. DB constraints handle the data correctness via ON CONFLICT, but progress-event emission becomes non-deterministic — duplicate "enrolled X" events from two writers. Observability silently degrades.
+
+Connection-scoped singleton + cursor-in-payload gives:
+
+- **True single-writer per resource** — at most one job per connection runs at any moment, regardless of which page.
+- **Crash recovery is intentional** — if a worker crashes mid-page, the next worker picks up the chain via re-enqueue (or fresh dispatch) and resumes from `pageCursor` in payload with the SAME `runId`. Per-item idempotency (DB partial-unique constraint with ON CONFLICT DO NOTHING) backstops correctness.
+- **runId is the chain identifier** — globally unique (`crypto.randomUUID()`), preserved across re-enqueues, NEVER reused on operator-driven re-trigger.
+
+**Where it applies.** Any job pattern where (a) the work is paginated, (b) processing-per-item must be idempotent, and (c) you care about deterministic observability events. Webhook back-pressure handlers, full-table scans, large-list syncs, multi-page enrolment flows.
+
+**Anti-pattern.** `singletonKey: \`ghl-enrol:${connectionId}:${pageCursor}\`` — looks safer (stronger key) but lets concurrent cursors race on the same resource. The cursor is a position in a sequence, not an identifier — it doesn't belong in a uniqueness key.
+
+### 2026-05-05 Pattern — Three-state job chain: terminal vs non-terminal checkpoint
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 2-3 (GHL pagination state machine).
+
+A long-running job that may legitimately stop short of completion (cap reached, operator wants to resume later, scheduled boundary) needs a **third closing state** that is chain-closing but NOT terminal. Forcing every closing event to be `completed | failed` mis-classifies safety aborts as failures and inflates failure rates in post-launch monitoring.
+
+The three-state model:
+
+| State | Closes the chain? | Counted as success? | Counted as failure? | Resumable? |
+|-------|-------------------|---------------------|---------------------|------------|
+| `completed` | yes (terminal) | yes | no | no — fresh chain only |
+| `failed` | yes (terminal) | no | yes | no — fresh chain only |
+| `partial` | yes (checkpoint) | no | no | yes — fresh chain with new chain identifier |
+
+Critical invariants:
+
+1. **Terminal exclusivity AND chain-closure.** Once any of the three closing events fires for a `(resource, chainId)`, NO further events of any type may emit. Late retries are dropped at the handler. Per-item idempotency (DB constraint) is the correctness backstop; the explicit handler-level drop is the contract.
+2. **`partial` is chain-closing.** A chain that emits `partial` cannot be resumed in-place — the chain ends at the checkpoint. Resumption requires a fresh chain with a new chain identifier; the resume-trigger preserves the cursor (or other progress state) but mints a new `runId`.
+3. **`failed` is reserved for unrecoverable errors.** Auth-token revoked, API 5xx beyond retry budget, schema constraint violations not absorbed by ON CONFLICT. Safety aborts (page-cap reached, scheduled-stop window hit) emit `partial`, NEVER `failed`.
+
+**Where it applies.** Any job where the three categories — succeeded fully / failed fatally / stopped at a safe checkpoint — are operationally distinct. Pagination jobs with caps, batched migrations with maintenance windows, scheduled-pause sync jobs, multi-step workflows with operator-controlled gates.
+
+**Anti-pattern.** Re-using `failed` for both unrecoverable errors AND safety aborts. Post-launch dashboards show "failure rate spike" and waste investigation cycles on what was actually a deliberate cap. Or worse: the team starts ignoring "failure" alerts because so many are noise, and a real failure goes unnoticed.
+
+### 2026-05-05 Pattern — Audit logs are observational, not causal: chain identifiers are the only ordering source
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog rounds 2-4 (audit causality posture).
+
+A multi-writer append-only audit table (`security_audit_events`, `agent_execution_events`, anything `INSERT`-only with a `created_at` timestamp) is **NOT a source of truth for causality**. Two complementary directives are required to prevent future misuse:
+
+**Negative directive (forbid the misuse):** consumers MUST NOT infer "X happened before Y" from `created_at` timestamps across concurrent writers. Cross-writer same-millisecond ordering is undefined; clock skew between hosts compounds it; `ORDER BY created_at DESC` is a display convention, not a serialisability guarantee.
+
+**Positive directive (prescribe the alternative):** consumers requiring causal ordering MUST use explicit chain identifiers carried in the event `context` payload — `runId`, `connectionId`, transactional lock keys, FK relationships. Every event that participates in a multi-step flow MUST carry the chain identifier in `context`. Dashboards, alerting rules, and post-mortem queries query by chain identifier first, use timestamps only for display ordering within a chain.
+
+**Append-only is absolute.** Rows in the audit table MUST NEVER be UPDATEd or DELETEd post-insertion. Corrections, retractions, and amendments insert a NEW event with `context.supersedes = '<original_event_id>'`; the original row stays as-is. Forensic and observability integrity depend on this — any future feature proposing UPDATE/DELETE on the audit table is a blocking finding requiring a spec amendment.
+
+**Why both directives matter.** Without the positive directive, consumers default to the most natural query (`ORDER BY created_at DESC`) and silently produce wrong causality. Without the negative directive, future maintainers add a "fix" that uses timestamps + a tiebreaker and feel they've solved the problem. Without immutability, retention/cleanup features quietly destroy forensic capability.
+
+**Where it applies.** Any append-only event stream consumed by dashboards or post-mortems. Distinguish from transactional logs (which DO carry happens-before via the lock manager) and trace systems (which carry causality via parent-span IDs). Audit logs sit between — observable but not causal — and the documentation must say so explicitly.
+
+### 2026-05-05 Pattern — chatgpt-spec-review terminal round produces zero findings; that IS the closure signal
+
+**Date:** 2026-05-05
+**Source:** chatgpt-spec-review pre-launch-phase-3-deferred-backlog round 5 (terminal zero-findings round).
+
+A multi-round chatgpt-spec-review converges when ChatGPT produces a round with no actionable findings AND an explicit "FINAL" or "BUILD WITH CONFIDENCE" verdict. The zero-findings round is not a wasted iteration — it is the closure signal that confirms the spec is locked.
+
+Operational shape:
+
+- **Round N-1 verdict:** "APPROVED — BUILD WITH CONFIDENCE" or equivalent, with optional micro-tightenings.
+- **Round N (terminal):** ChatGPT produces zero findings, explicit "FINAL" verdict, optional non-actionable observation about post-launch evolution (e.g. "you'll likely derive a chain summary; not a spec change").
+- **Operator instruction:** "lock down" / "finalise" / "done" — finalisation triggers.
+
+The terminal round IS logged with full session-log structure (raw response, decisions table — empty, integrity-check — n/a, summary). Skipping the log for "no findings" loses the convergence signal; future audit queries can't tell whether the spec ran 4 rounds and stopped or 5 rounds and converged.
+
+**Heuristic for declaring convergence early.** If round N produces only "nice-to-have" findings already labelled optional by the reviewer, AND the verdict has stabilised at APPROVED for two consecutive rounds, AND the operator has signalled finalisation intent, run the zero-findings validation round explicitly to confirm. This prevents premature finalisation on a spec that has lurking issues the reviewer hasn't surfaced yet.
+
+**Anti-pattern.** Treating a terminal zero-findings round as "wasted" and skipping it. The convergence signal is the audit artifact — without it, the spec's "ready to build" status is operator assertion, not reviewer-confirmed.
+
+### D.6 advisory-lock scope (2026-05-06)
+
+`pg_try_advisory_xact_lock` in `workflowEngineService.ts` `tick()` is NOT in the same transaction as `pgboss.send()`. The lock runs in auto-commit mode via `db.execute` (no wrapping `db.transaction`), so it releases at statement end — it does NOT span the full tick() handler. `pgboss.send()` runs on a separate auto-commit connection. Contention detection still works (two concurrent handlers racing on the same runId will observe `got=false`), but there is no serialisation gate. A full fix (wrapping tick() in a single `db.transaction`) is deferred — tracked in `tasks/todo.md` under `## Deferred`. AR-3.1 noted in-situ in the source file.
+
+### [2026-05-06] Gotcha — GHL subaccount INSERTs that omit `external_id_namespace` bypass the partial unique index entirely
+
+Migration 0285 added a partial unique index on `subaccounts` scoped to `WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. The index only covers rows where both predicates are true. An INSERT that writes a row without `external_id_namespace` (leaving it NULL) satisfies neither predicate — the index is never consulted, and the ON CONFLICT clause that references it never fires.
+
+**Practical failure mode:** `ghlAgencyOauthService.ts` (inline enrol path) and `ghlWebhookMutationsService.ts` (`location_create` branch) originally omitted `external_id_namespace` from their INSERT column lists. Re-running either path with the same GHL location ID silently created duplicate subaccount rows instead of hitting the ON CONFLICT DO UPDATE path. The deduplication guarantee was completely inactive for these two paths despite the migration having run.
+
+**Fix:** add `external_id_namespace: 'ghl_location'` to both the INSERT VALUES list and the ON CONFLICT target:
+```sql
+INSERT INTO subaccounts (
+  id, organisation_id, name, slug, status,
+  connector_config_id, external_id, external_id_namespace, created_at, updated_at
+) VALUES (...)
+ON CONFLICT (organisation_id, external_id)
+  WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL
+DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+```
+
+**Detection rule:** any INSERT into a table with a partial unique index should include every column in the index predicate in the INSERT column list. An INSERT that omits a predicate column silently prevents the index from enforcing the invariant. Grep for `INSERT INTO subaccounts` in any new writer; confirm `external_id_namespace` is present.
+
+### [2026-05-06] Pattern — Migration RAISE EXCEPTION safety checks must be scoped to the rows the migration targets
+
+A `DO $$ ... IF remaining > 0 THEN RAISE EXCEPTION ...; END IF; $$` block in a migration is a pre-flight guard that aborts deployment if the preceding data migration (backfill) left any rows in a bad state. These blocks fail correctly only if the `WHERE` clause in the `SELECT COUNT(*)` is scoped to the exact set of rows the migration actually touched.
+
+**Failure mode:** migration 0285 originally used `WHERE external_id IS NOT NULL AND external_id_namespace IS NULL` to verify the GHL backfill. On any database with manually-created subaccounts, subaccounts from disconnected connectors, or future non-GHL subaccounts that have `external_id` set but no `external_id_namespace`, the guard fires on rows the migration never touched and never intended to fix — causing `RAISE EXCEPTION 'backfill incomplete'` for state that is entirely expected and correct.
+
+**Fix:** add `AND connector_config_id IN (SELECT id FROM connector_configs WHERE connector_type = 'ghl')` to scope the check to GHL-linked rows only:
+```sql
+SELECT COUNT(*) INTO remaining
+  FROM subaccounts
+ WHERE external_id IS NOT NULL
+   AND external_id_namespace IS NULL
+   AND connector_config_id IN (
+     SELECT id FROM connector_configs WHERE connector_type = 'ghl'
+   );
+```
+
+**Rule:** for any migration `RAISE EXCEPTION` safety check, derive the WHERE predicate from the UPDATE/backfill statement in the same migration — not from a general "this column should be set" condition. The check certifies that THIS migration's work is complete; broader conditions produce false-positive failures on rows outside the migration's scope.
+
+### E.5 setOrgGUC — canonical replacement for the withOrgTx({tx:db}) anti-pattern (2026-05-06)
+
+**Date:** 2026-05-06
+**Source:** pre-launch-phase-3-deferred-backlog Chunk E, adversarial-reviewer AR-3.1 residue.
+
+`server/lib/orgScoping.ts` exports `setOrgGUC(tx: OrgScopedTx, orgId: string): Promise<void>`. This is the canonical way to set the per-transaction organisation_id GUC for code that must open its own `db.transaction()` block outside the request middleware path (background jobs, unauthenticated callbacks, maintenance scripts).
+
+Usage pattern:
+```typescript
+await db.transaction(async (tx) => {
+  await setOrgGUC(tx, orgId);
+  // ... rest of the transaction body
+});
+```
+
+This replaces the `withOrgTx({ tx: db, organisationId }, ...)` anti-pattern (passing the module-level `db` connection as `tx`). The anti-pattern fakes ALS context without binding a GUC to any real DB connection — code inside the closure that calls `getOrgScopedDb()` receives a connection with no `app.organisation_id` set, and FORCE-RLS writes fail silently. The correct pattern either (a) uses `setOrgGUC` inside a real `db.transaction()` block, or (b) uses the standard `withOrgTx({ tx, organisationId, ... })` pattern where `tx` is the Drizzle transaction handle from an enclosing `db.transaction()` call.
+
+### Closed-enum string-grep gates need a dedicated dynamic-construction pass
+
+**Date:** 2026-05-06
+**Source:** finalisation-coordinator finalisation pass on PR #267 (slug: pre-launch-phase-3-deferred-backlog), chatgpt-pr-review round 1.
+
+When a closed-enum string set is enforced by a grep gate (e.g. "no raw `eventType: 'auth.x'` literals outside the factory"), three classes of bypass exist:
+
+1. **Raw literal at call site** — `eventType: 'auth.loginFailed'` — caught by a literal-string grep.
+2. **Type-cast bypass** — `eventType: rawString as SecurityAuditEventName` — caught by a separate cast-pattern grep.
+3. **Dynamic construction** — `eventType: \`auth.${suffix}\`` (template literal) or `eventType: 'auth.' + suffix` (string concat) — NOT caught by either of the above, because no fixed substring matches the closed-enum pattern.
+
+A robust grep gate must include a dedicated pass for class 3. Pattern shape:
+
+- Pass 4a: flag template-literal `eventType:` in single-line call expressions — match `eventType:\s*\`` followed by `\${`.
+- Pass 4b: flag string-concat `eventType:` — match `eventType:.*\+` where the right operand is non-literal.
+
+Pair the gate with a deliberately-bad fixture per pass to prove the gate trips. The TypeScript type system (closed-enum union derived from a const-object factory) remains the canonical defence; class 3 is the residual escape hatch when a developer side-steps `auditEvent.x.y` syntax. The grep gate is defence in depth.
+
+**Where it generalises.** Any closed-string-set grep gate (audit events, action types, error codes, RLS policy names, capability slugs). If your gate only checks raw literals + casts, expect a dynamic-construction bypass to land within the first few PRs after the gate ships.
+
+**Anti-pattern.** Trusting a single-pass grep ("no literal X anywhere") to enforce a closed enum. The bypass cost is one keystroke (`'` → `` ` ``); the detection cost is one extra pattern in the gate.
+
+### The "indirect constant aliasing" bypass class is doc-only enforcement, not grep-detectable
+
+**Date:** 2026-05-06
+**Source:** finalisation-coordinator finalisation pass on PR #267 (slug: pre-launch-phase-3-deferred-backlog), chatgpt-pr-review round 2.
+
+For closed-enum factories (e.g. `auditEvent.auth.loginFailed`), a fourth bypass class beyond raw-literal, cast, and dynamic-construction exists: **indirect aliasing**.
+
+```typescript
+// All grep gates pass; type system passes; the call site reads "clean".
+const e = auditEvent.auth.loginFailed;
+void recordSecurityEvent({ event: e, ... });
+```
+
+The aliased variable carries no semantic signal that grep can latch onto. A grep gate would have to perform local data-flow analysis to prove `e` originated from the factory, which is beyond the contract of a one-line grep gate. The type system already accepts this: `e` is `SecurityAuditEventName`, the call site is type-correct.
+
+**Enforcement is doc-only**, surfaced at:
+
+- `architecture.md § Layer 4 — Security audit stream` — one-line agent-facing rule per CLAUDE.md §13.
+- `docs/security-audit-namespace.md § Indirect constant aliasing is a blocking finding` — fuller explanation with worked anti-pattern.
+- Code review and ChatGPT PR review treat indirect aliasing as a blocking finding.
+
+**Where it generalises.** Any closed-enum factory where the call-site convention is "use member access". The same class will appear with `errorCode`, action types, capability slugs. Three rules carry the load instead of grep:
+
+1. Type system rejects the worse cases (raw literal, cast).
+2. Grep covers the moderate cases (raw-literal slip, cast bypass, dynamic construction).
+3. Convention + code review covers the residual aliasing class — it cannot be automated reliably.
+
+Don't over-engineer a grep gate to chase aliasing. Document, review, and accept that the type system + grep gates already shut down the worse-cost bypass classes. Rejecting an alias at PR review is cheap; building a static-analysis tool to catch them is not.

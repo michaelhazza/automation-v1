@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Home dashboard in SUB-ACCOUNT context · v3</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .annot-banner code { background: rgba(120,53,15,0.08); padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
+
+  .shell { display: flex; min-height: 100vh; }
+
+  .rail {
+    width: 56px; background: #080e1a; padding: 12px 0; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .rail .logo {
+    width: 30px; height: 30px; border-radius: 7px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 13px;
+  }
+  .rail-divider { width: 22px; height: 1px; background: #1e293b; margin: 4px 0; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .avatar.a1 { background: #4f46e5; box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #6366f1; }
+  .avatar.a2 { background: #10b981; }
+  .avatar.a3 { background: #f59e0b; }
+  .avatar.a4 { background: #ec4899; }
+  .avatar.a5 { background: #8b5cf6; }
+  .avatar.user { background: #475569; margin-top: auto; }
+  .add-btn {
+    width: 30px; height: 30px; border-radius: 7px; border: 1.5px dashed #475569;
+    color: #475569; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; line-height: 1;
+  }
+
+  /* sidebar in SUB-ACCOUNT context */
+  .nav { width: 220px; background: #0f172a; padding: 14px 0; flex-shrink: 0; }
+  .ctx { padding: 4px 16px 14px; border-bottom: 1px solid #1e293b; }
+  .ctx-title { color: #fff; font-weight: 700; font-size: 14px; }
+  .ctx-sub { color: #64748b; font-size: 11px; margin-top: 2px; }
+
+  .nav-section { padding: 14px 16px 4px; font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; display: flex; justify-content: space-between; align-items: center; }
+  .nav-section .add { color: #475569; font-size: 13px; cursor: pointer; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; justify-content: space-between;
+    padding: 6px 16px; color: #cbd5e1; font-size: 13px; border-left: 2px solid transparent;
+  }
+  .nav-item .lbl { flex: 1; }
+  .nav-item.active { background: rgba(99,102,241,0.16); color: #c7d2fe; border-left-color: #6366f1; }
+  .nav-badge {
+    background: #ef4444; color: #fff; font-size: 10px; font-weight: 700;
+    padding: 1px 6px; border-radius: 9px; min-width: 18px; text-align: center;
+  }
+  .new-brief-btn {
+    margin: 6px 16px 4px; padding: 7px 10px; background: #4f46e5; color: #fff;
+    border-radius: 6px; font-size: 12.5px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* topbar */
+  .topbar {
+    height: 42px; background: #fff; border-bottom: 1px solid #e2e8f0;
+    display: flex; align-items: center; gap: 14px; padding: 0 18px;
+    font-size: 12.5px; color: #64748b;
+  }
+  .topbar .crumb-cur { color: #0f172a; font-weight: 600; }
+  .topbar .ask {
+    margin-left: auto; display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; padding: 5px 14px; background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 16px; color: #94a3b8; min-width: 280px;
+  }
+  .topbar .search {
+    display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+    border: 1px solid #e2e8f0; border-radius: 6px; color: #94a3b8; font-size: 12px;
+  }
+  .topbar .kbd { background: #f1f5f9; border: 1px solid #e2e8f0; padding: 0px 5px; border-radius: 3px; font-size: 10.5px; color: #64748b; }
+
+  /* page content */
+  .page-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .content { padding: 24px 32px 60px; max-width: 1100px; }
+
+  .greeting { margin-bottom: 24px; }
+  .greeting h1 { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.4px; margin: 0; }
+  .greeting p { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .freshness { font-size: 11px; color: #94a3b8; margin-top: 8px; display: inline-flex; align-items: center; gap: 5px; }
+  .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 32px; }
+  .metric {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .metric .icon-box {
+    width: 34px; height: 34px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    font-size: 16px;
+  }
+  .metric .icon-box.rose { background: #fff1f2; color: #f43f5e; }
+  .metric .icon-box.amber { background: #fffbeb; color: #f59e0b; }
+  .metric .icon-box.indigo { background: #eef2ff; color: #6366f1; }
+  .metric .icon-box.emerald { background: #ecfdf5; color: #10b981; }
+  .metric .lbl { font-size: 11px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .metric .val { font-size: 22px; font-weight: 800; color: #0f172a; line-height: 1.1; margin-top: 1px; }
+  .metric .sub { font-size: 11.5px; color: #94a3b8; margin-top: 1px; }
+
+  .section { margin-bottom: 32px; }
+  .section h2 { font-size: 17px; font-weight: 700; color: #0f172a; letter-spacing: -0.2px; margin-bottom: 14px; }
+  .section .sec-link { font-size: 12.5px; font-weight: 600; color: #4f46e5; }
+  .section .sec-link:hover { text-decoration: underline; }
+  .section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+
+  .pending-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 14px 18px; display: flex; align-items: center; gap: 14px;
+  }
+  .pending-card + .pending-card { margin-top: 12px; }
+  .pending-card .lane-pill {
+    font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .pending-card .lane-pill.client { background: #fff1f2; color: #be123c; }
+  .pending-card .lane-pill.internal { background: #f1f5f9; color: #475569; }
+  .pending-card .pc-body { flex: 1; }
+  .pending-card .pc-title { font-size: 13.5px; font-weight: 600; color: #0f172a; }
+  .pending-card .pc-meta { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+  .pc-act {
+    font-size: 12px; padding: 5px 12px; border-radius: 6px;
+    background: #4f46e5; color: #fff; font-weight: 600; border: none;
+  }
+
+  /* ── suggestions section ──────────────────────────────────── */
+  .sug-section { margin-bottom: 32px; }
+  .sug-list {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+  }
+  .sug-item {
+    display: grid; grid-template-columns: 8px 1fr 18px;
+    gap: 12px; padding: 14px 18px; border-top: 1px solid #f1f5f9;
+  }
+  .sug-item:first-child { border-top: none; }
+  .sug-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; }
+  .sug-dot.high { background: #b91c1c; }
+  .sug-dot.med  { background: #d97706; }
+  .sug-dot.low  { background: #94a3b8; }
+  .sug-body .sug-title { font-size: 13.5px; font-weight: 600; color: #0f172a; }
+  .sug-body .sug-detail { font-size: 12.5px; color: #475569; margin-top: 3px; line-height: 1.5; }
+  .sug-body .sug-action { margin-top: 6px; font-size: 12px; font-weight: 600; color: #4f46e5; }
+  .sug-body .sug-action:hover { text-decoration: underline; }
+  .sug-dismiss {
+    background: transparent; border: none; cursor: pointer;
+    color: #cbd5e1; font-size: 16px; padding: 4px; border-radius: 4px;
+    align-self: start; margin-top: 2px;
+  }
+
+  .activity {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+  }
+  .act-row {
+    display: grid; grid-template-columns: 28px 1fr auto; gap: 12px;
+    padding: 12px 18px; border-top: 1px solid #f1f5f9; align-items: center;
+  }
+  .act-row:first-child { border-top: none; }
+  .act-icon { width: 24px; height: 24px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #64748b; }
+  .act-body .at { font-size: 13px; color: #1e293b; }
+  .act-body .am { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+  .act-time { font-size: 11.5px; color: #94a3b8; }
+
+  /* annotation pin */
+  .pin-wrap { position: relative; }
+  .pin {
+    position: absolute; left: -34px; top: 4px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #fbbf24; color: #78350f; font-size: 11px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid #78350f;
+  }
+  .new-tag {
+    display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.06em;
+    padding: 2px 7px; border-radius: 3px;
+    background: #fbbf24; color: #78350f; margin-left: 8px; vertical-align: middle;
+  }
+  .ctx-tag {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 2px 7px; border-radius: 3px; margin-left: 8px; vertical-align: middle;
+    background: #eef2ff; color: #4338ca;
+  }
+
+  .legend {
+    margin-top: 24px; padding: 14px 18px; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 10px; font-size: 12px; color: #78350f;
+  }
+  .legend h4 { font-size: 12px; font-weight: 800; margin-bottom: 6px; }
+  .legend ul { padding-left: 18px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  PROPOSED v3 · Same Home page <code>/</code>, viewed in <b>SUB-ACCOUNT context</b> (Smith Dental selected). Suggestions section auto-scopes.
+</div>
+
+<div class="shell">
+
+  <div class="rail">
+    <div class="logo">S</div>
+    <div class="rail-divider"></div>
+    <div class="avatar a1" title="Smith Dental">SD</div>
+    <div class="avatar a2" title="Northside Physio">NP</div>
+    <div class="avatar a3" title="Highland Fitness">HF</div>
+    <div class="avatar a4" title="Riverside Veterinary">RV</div>
+    <div class="avatar a5" title="Coastal Chiropractic">CC</div>
+    <div class="add-btn">+</div>
+    <div class="avatar user">SR</div>
+  </div>
+
+  <!-- sidebar — SUB-ACCOUNT context (Smith Dental) -->
+  <aside class="nav">
+    <div class="ctx">
+      <div class="ctx-title">Smith Dental</div>
+      <div class="ctx-sub">Company workspace</div>
+    </div>
+
+    <div class="new-brief-btn">⚡ New Brief</div>
+    <div class="nav-item active">
+      <span class="lbl">⌂  Home</span>
+      <span class="nav-badge">2</span>
+    </div>
+
+    <div class="nav-section">Work</div>
+    <div class="nav-item"><span class="lbl">Tasks</span></div>
+    <div class="nav-item"><span class="lbl">Automations</span></div>
+    <div class="nav-item"><span class="lbl">Workflows</span></div>
+    <div class="nav-item"><span class="lbl">Scheduled</span></div>
+    <div class="nav-item"><span class="lbl">Calendar</span></div>
+    <div class="nav-item"><span class="lbl">Sites</span></div>
+    <div class="nav-item"><span class="lbl">Triggers</span></div>
+    <div class="nav-item"><span class="lbl">Action Log</span></div>
+
+    <div class="nav-section">Projects <span class="add">＋</span></div>
+    <div class="nav-item"><span class="lbl">No projects yet</span></div>
+
+    <div class="nav-section">Agents <span class="add">＋</span></div>
+    <div class="nav-item"><span class="lbl">📧 Outreach Agent</span></div>
+    <div class="nav-item"><span class="lbl">📊 Reporting Agent</span></div>
+    <div class="nav-item"><span class="lbl">🧩 CRM Hygiene</span></div>
+
+    <div class="nav-section">Company</div>
+    <div class="nav-item"><span class="lbl">Goals</span></div>
+    <div class="nav-item"><span class="lbl">Org Chart</span></div>
+    <div class="nav-item"><span class="lbl">Portal</span></div>
+    <div class="nav-item"><span class="lbl">Team</span></div>
+    <div class="nav-item"><span class="lbl">Manage</span></div>
+  </aside>
+
+  <div class="page-wrap">
+
+    <div class="topbar">
+      <span class="crumb-cur">Home</span>
+      <span style="margin-left: 14px; font-size: 11.5px; color: #94a3b8;">in <b style="color: #4338ca;">Smith Dental</b></span>
+      <div class="ask">Ask anything across your agents…</div>
+      <div class="search">Search <span class="kbd">⌘K</span></div>
+    </div>
+
+    <main class="content">
+
+      <div class="greeting">
+        <h1>Good morning, Sam</h1>
+        <p>You're inside <b>Smith Dental</b>. 12 AI agents ready to work.</p>
+        <span class="freshness"><span class="pulse-dot"></span>Updated just now</span>
+      </div>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="icon-box rose">🔔</div>
+          <div>
+            <div class="lbl">Pending Approval</div>
+            <div class="val">2</div>
+            <div class="sub">in this client</div>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="icon-box amber">💡</div>
+          <div>
+            <div class="lbl">Things to look at</div>
+            <div class="val">3</div>
+            <div class="sub">2 important · 1 minor</div>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="icon-box indigo">🤖</div>
+          <div>
+            <div class="lbl">Active Agents</div>
+            <div class="val">12</div>
+            <div class="sub">all ready</div>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="icon-box emerald">▶</div>
+          <div>
+            <div class="lbl">Runs (7 days)</div>
+            <div class="val">112</div>
+            <div class="sub">all good</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 id="pending">Pending your approval</h2>
+        <div class="pending-card">
+          <span class="lane-pill client">Client</span>
+          <div class="pc-body">
+            <div class="pc-title">Send follow-up email to Jane Doe at TechCorp</div>
+            <div class="pc-meta">Outreach Agent · 8m ago</div>
+          </div>
+          <button class="pc-act">Review</button>
+        </div>
+        <div class="pending-card">
+          <span class="lane-pill internal">Internal</span>
+          <div class="pc-body">
+            <div class="pc-title">Memory block "smith-dental-positioning" updated with new messaging</div>
+            <div class="pc-meta">Knowledge Agent · 1h ago</div>
+          </div>
+          <button class="pc-act">Review</button>
+        </div>
+      </div>
+
+      <!-- ★ SUGGESTIONS SECTION — auto-scoped to Smith Dental ────── -->
+      <div class="sug-section pin-wrap">
+        <div class="pin" title="Same section as the org-context view, but auto-scoped to the selected sub-account.">★</div>
+        <div class="section-head">
+          <h2>A few things to look at <span class="ctx-tag">SMITH DENTAL ONLY</span> <span class="new-tag">NEW</span></h2>
+        </div>
+        <div class="sug-list">
+
+          <div class="sug-item">
+            <div class="sug-dot high"></div>
+            <div class="sug-body">
+              <div class="sug-title">Reporting Agent is spending more than expected</div>
+              <div class="sug-detail">It used $73 this month against a $50 budget. Same story last month.</div>
+              <a href="#" class="sug-action">Help me fix this →</a>
+            </div>
+            <button class="sug-dismiss" title="Not now">×</button>
+          </div>
+
+          <div class="sug-item">
+            <div class="sug-dot high"></div>
+            <div class="sug-body">
+              <div class="sug-title">An outreach workflow keeps needing your help</div>
+              <div class="sug-detail">8 of the last 12 runs got stuck on the email step and asked a person to step in.</div>
+              <a href="#" class="sug-action">Help me fix this →</a>
+            </div>
+            <button class="sug-dismiss" title="Not now">×</button>
+          </div>
+
+          <div class="sug-item">
+            <div class="sug-dot med"></div>
+            <div class="sug-body">
+              <div class="sug-title">Pulling contacts from GHL is slow</div>
+              <div class="sug-detail">Around 12 seconds here, around 3 seconds for your other clients.</div>
+              <a href="#" class="sug-action">Help me fix this →</a>
+            </div>
+            <button class="sug-dismiss" title="Not now">×</button>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Recent activity</h2>
+        <div class="activity">
+          <div class="act-row">
+            <div class="act-icon">▶</div>
+            <div class="act-body">
+              <div class="at">Outreach Agent finished a run</div>
+              <div class="am">3 emails drafted, 1 escalated · 12 minutes ago</div>
+            </div>
+            <div class="act-time">12m</div>
+          </div>
+          <div class="act-row">
+            <div class="act-icon">✓</div>
+            <div class="act-body">
+              <div class="at">You approved "Send weekly digest"</div>
+              <div class="am">Today 09:42</div>
+            </div>
+            <div class="act-time">1h</div>
+          </div>
+          <div class="act-row">
+            <div class="act-icon">▶</div>
+            <div class="act-body">
+              <div class="at">Reporting Agent generated monthly performance report</div>
+              <div class="am">Yesterday 17:02</div>
+            </div>
+            <div class="act-time">17h</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <h4>How this differs from the org-context view</h4>
+        <ul>
+          <li><b>Same page (<code>/</code>), same sections, same layout.</b> The only thing that changes is the <i>scope</i> of the data, driven by what's selected in the sidebar.</li>
+          <li><b>Sub-account context = Smith Dental selected in the sidebar.</b> The greeting acknowledges it ("You're inside Smith Dental"). Pending approvals, suggestions, and activity all filter to Smith Dental. The "SMITH DENTAL ONLY" pill on the section heading makes the scope visible at a glance.</li>
+          <li><b>"Things to look at" replaces "Clients Needing Attention" in the metric strip</b> when in sub-account context — that metric only makes sense at org level.</li>
+          <li><b>No new pages, no new nav.</b> Sub-account users land here naturally; agency operators see the same view by clicking a client avatar in the icon rail.</li>
+          <li><b>Open question — should suggestions show in BOTH the metric strip count AND the section?</b> Probably yes: count for at-a-glance, section for triage. Same data.</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

@@ -5,6 +5,7 @@
  *   npx tsx server/services/__tests__/agentRunHandoffServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   buildHandoff,
   extractDecisions,
@@ -15,33 +16,6 @@ import {
   HANDOFF_MAX_BLOCKERS,
   type BuildHandoffInput,
 } from '../agentRunHandoffServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  const aJson = JSON.stringify(a);
-  const bJson = JSON.stringify(b);
-  if (aJson !== bJson) {
-    throw new Error(`${label} — expected ${bJson}, got ${aJson}`);
-  }
-}
-
-function assertTrue(value: boolean, label: string) {
-  if (!value) throw new Error(`${label} — expected truthy, got ${value}`);
-}
 
 function makeBaseInput(overrides: Partial<BuildHandoffInput> = {}): BuildHandoffInput {
   return {
@@ -74,21 +48,21 @@ console.log('');
 
 test('extractDecisions — Decision: prefix', () => {
   const out = extractDecisions('Decision: deferred the migration to next sprint');
-  assertEqual(out.length, 1, 'count');
-  assertEqual(out[0].decision, 'deferred the migration to next sprint', 'decision text');
+  expect(out.length, 'count').toBe(1);
+  expect(out[0].decision, 'decision text').toBe('deferred the migration to next sprint');
 });
 
 test('extractDecisions — I chose X because Y', () => {
   const out = extractDecisions('I chose Postgres because it scales horizontally.');
-  assertEqual(out.length, 1, 'count');
-  assertEqual(out[0].decision, 'Postgres', 'decision text');
-  assertEqual(out[0].rationale, 'it scales horizontally', 'rationale text');
+  expect(out.length, 'count').toBe(1);
+  expect(out[0].decision, 'decision text').toBe('Postgres');
+  expect(out[0].rationale, 'rationale text').toBe('it scales horizontally');
 });
 
 test('extractDecisions — Going with X', () => {
   const out = extractDecisions('Going with the JSONB column approach.');
-  assertEqual(out.length, 1, 'count');
-  assertEqual(out[0].decision, 'the JSONB column approach', 'decision text');
+  expect(out.length, 'count').toBe(1);
+  expect(out[0].decision, 'decision text').toBe('the JSONB column approach');
 });
 
 test('extractDecisions — caps at HANDOFF_MAX_DECISIONS', () => {
@@ -97,37 +71,37 @@ test('extractDecisions — caps at HANDOFF_MAX_DECISIONS', () => {
     (_, i) => `Decision: choice ${i}`,
   ).join('\n');
   const out = extractDecisions(lines);
-  assertEqual(out.length, HANDOFF_MAX_DECISIONS, 'capped count');
+  expect(out.length, 'capped count').toEqual(HANDOFF_MAX_DECISIONS);
 });
 
 test('extractDecisions — empty input returns empty', () => {
-  assertEqual(extractDecisions(''), [], 'empty');
+  expect(extractDecisions(''), 'empty').toEqual([]);
 });
 
 // ── classifyBlockerSeverity ───────────────────────────────────────────────
 
 test('classifyBlockerSeverity — high severity for scope_violation', () => {
-  assertEqual(classifyBlockerSeverity('scope_violation in tool call X'), 'high', 'high');
+  expect(classifyBlockerSeverity('scope_violation in tool call X'), 'high').toBe('high');
 });
 
 test('classifyBlockerSeverity — high for permission_denied', () => {
-  assertEqual(classifyBlockerSeverity('Tool failed: permission_denied'), 'high', 'high');
+  expect(classifyBlockerSeverity('Tool failed: permission_denied'), 'high').toBe('high');
 });
 
 test('classifyBlockerSeverity — medium for budget_exceeded', () => {
-  assertEqual(classifyBlockerSeverity('budget_exceeded after 5 tool calls'), 'medium', 'medium');
+  expect(classifyBlockerSeverity('budget_exceeded after 5 tool calls'), 'medium').toBe('medium');
 });
 
 test('classifyBlockerSeverity — medium for timeout', () => {
-  assertEqual(classifyBlockerSeverity('timeout after 60s'), 'medium', 'medium');
+  expect(classifyBlockerSeverity('timeout after 60s'), 'medium').toBe('medium');
 });
 
 test('classifyBlockerSeverity — low for unknown errors', () => {
-  assertEqual(classifyBlockerSeverity('something went wrong'), 'low', 'low');
+  expect(classifyBlockerSeverity('something went wrong'), 'low').toBe('low');
 });
 
 test('classifyBlockerSeverity — low for null', () => {
-  assertEqual(classifyBlockerSeverity(null), 'low', 'low');
+  expect(classifyBlockerSeverity(null), 'low').toBe('low');
 });
 
 // ── buildHandoff — happy path ─────────────────────────────────────────────
@@ -150,17 +124,13 @@ test('happy path — counters + summary + open task', () => {
     nextOpenTask: { id: 'task-99', title: 'Follow up with GHL on the stalled invoices' },
   }));
 
-  assertTrue(handoff.accomplishments.includes('Created 3 tasks'), 'has counter line for tasks created');
-  assertTrue(handoff.accomplishments.includes('Updated 1 task'), 'has counter line for tasks updated');
-  assertEqual(handoff.decisions.length, 1, 'one decision extracted');
-  assertEqual(handoff.decisions[0].decision, 'send a follow-up to the GHL team', 'decision text');
-  assertEqual(handoff.blockers, [], 'no blockers');
-  assertEqual(
-    handoff.nextRecommendedAction,
-    'Follow up with GHL on the stalled invoices',
-    'next action is the open task',
-  );
-  assertTrue(isValidHandoffV1(handoff), 'shape is valid');
+  expect(handoff.accomplishments.includes('Created 3 tasks'), 'has counter line for tasks created').toBe(true);
+  expect(handoff.accomplishments.includes('Updated 1 task'), 'has counter line for tasks updated').toBe(true);
+  expect(handoff.decisions.length, 'one decision extracted').toBe(1);
+  expect(handoff.decisions[0].decision, 'decision text').toBe('send a follow-up to the GHL team');
+  expect(handoff.blockers, 'no blockers').toEqual([]);
+  expect(handoff.nextRecommendedAction, 'next action is the open task').toBe('Follow up with GHL on the stalled invoices');
+  expect(isValidHandoffV1(handoff), 'shape is valid').toBe(true);
 });
 
 // ── buildHandoff — failed run ─────────────────────────────────────────────
@@ -179,13 +149,10 @@ test('failed run — error message becomes the blocker', () => {
     },
   }));
 
-  assertEqual(handoff.blockers.length, 1, 'one blocker');
-  assertEqual(handoff.blockers[0].severity, 'medium', 'medium severity for budget_exceeded');
-  assertTrue(
-    handoff.nextRecommendedAction?.startsWith('Resolve blockers:') ?? false,
-    'next action starts with Resolve blockers',
-  );
-  assertTrue(isValidHandoffV1(handoff), 'shape is valid');
+  expect(handoff.blockers.length, 'one blocker').toBe(1);
+  expect(handoff.blockers[0].severity, 'medium severity for budget_exceeded').toBe('medium');
+  expect(handoff.nextRecommendedAction?.startsWith('Resolve blockers:') ?? false, 'next action starts with Resolve blockers').toBe(true);
+  expect(isValidHandoffV1(handoff), 'shape is valid').toBe(true);
 });
 
 // ── buildHandoff — counter-only run ───────────────────────────────────────
@@ -204,11 +171,11 @@ test('counter-only run — no summary text', () => {
     },
   }));
 
-  assertEqual(handoff.accomplishments, ['Created 5 tasks'], 'only counter line');
-  assertEqual(handoff.decisions, [], 'no decisions');
-  assertEqual(handoff.blockers, [], 'no blockers');
-  assertEqual(handoff.nextRecommendedAction, null, 'null next action');
-  assertTrue(isValidHandoffV1(handoff), 'shape is valid');
+  expect(handoff.accomplishments, 'only counter line').toEqual(['Created 5 tasks']);
+  expect(handoff.decisions, 'no decisions').toEqual([]);
+  expect(handoff.blockers, 'no blockers').toEqual([]);
+  expect(handoff.nextRecommendedAction, 'null next action').toBe(null);
+  expect(isValidHandoffV1(handoff), 'shape is valid').toBe(true);
 });
 
 // ── buildHandoff — duplicate artefacts deduplicated ───────────────────────
@@ -222,7 +189,7 @@ test('duplicate artefacts — same task in tasksTouched twice is deduped', () =>
     ],
   }));
 
-  assertEqual(handoff.keyArtefacts.length, 2, 'deduplicated to 2');
+  expect(handoff.keyArtefacts.length, 'deduplicated to 2').toBe(2);
 });
 
 // ── buildHandoff — caps enforced ──────────────────────────────────────────
@@ -245,10 +212,7 @@ test('cap enforcement — accomplishments capped at HANDOFF_MAX_ACCOMPLISHMENTS'
     },
   }));
 
-  assertTrue(
-    handoff.accomplishments.length <= HANDOFF_MAX_ACCOMPLISHMENTS,
-    'capped at the max',
-  );
+  expect(handoff.accomplishments.length <= HANDOFF_MAX_ACCOMPLISHMENTS, 'capped at the max').toBe(true);
 });
 
 test('cap enforcement — blockers capped at HANDOFF_MAX_BLOCKERS', () => {
@@ -270,7 +234,7 @@ test('cap enforcement — blockers capped at HANDOFF_MAX_BLOCKERS', () => {
     })),
   }));
 
-  assertEqual(handoff.blockers.length, HANDOFF_MAX_BLOCKERS, 'capped at the max');
+  expect(handoff.blockers.length, 'capped at the max').toEqual(HANDOFF_MAX_BLOCKERS);
 });
 
 // ── buildHandoff — high-severity error ────────────────────────────────────
@@ -289,7 +253,7 @@ test('high-severity error — scope_violation', () => {
     },
   }));
 
-  assertEqual(handoff.blockers[0].severity, 'high', 'high severity');
+  expect(handoff.blockers[0].severity, 'high severity').toBe('high');
 });
 
 // ── buildHandoff — partial result with no error ───────────────────────────
@@ -308,15 +272,14 @@ test('partial result — no errorMessage but runResultStatus=partial', () => {
     },
   }));
 
-  assertEqual(handoff.blockers.length, 1, 'one synthetic blocker');
-  assertEqual(handoff.blockers[0].severity, 'medium', 'medium severity');
+  expect(handoff.blockers.length, 'one synthetic blocker').toBe(1);
+  expect(handoff.blockers[0].severity, 'medium severity').toBe('medium');
 });
 
 // ── isValidHandoffV1 — guards ─────────────────────────────────────────────
 
 test('validator — rejects wrong version', () => {
-  assertEqual(
-    isValidHandoffV1({
+  expect(isValidHandoffV1({
       version: 2,
       accomplishments: [],
       decisions: [],
@@ -326,19 +289,15 @@ test('validator — rejects wrong version', () => {
       generatedAt: '2026-04-11',
       runStatus: 'completed',
       durationMs: null,
-    }),
-    false,
-    'wrong version',
-  );
+    }), 'wrong version').toBe(false);
 });
 
 test('validator — rejects missing field', () => {
-  assertEqual(isValidHandoffV1({ version: 1 }), false, 'missing fields');
+  expect(isValidHandoffV1({ version: 1 }), 'missing fields').toBe(false);
 });
 
 test('validator — rejects invalid blocker severity', () => {
-  assertEqual(
-    isValidHandoffV1({
+  expect(isValidHandoffV1({
       version: 1,
       accomplishments: [],
       decisions: [],
@@ -348,16 +307,9 @@ test('validator — rejects invalid blocker severity', () => {
       generatedAt: '2026-04-11',
       runStatus: 'completed',
       durationMs: null,
-    }),
-    false,
-    'invalid severity',
-  );
+    }), 'invalid severity').toBe(false);
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

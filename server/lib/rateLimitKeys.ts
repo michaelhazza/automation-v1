@@ -18,14 +18,31 @@
  */
 const KEY_VERSION = 'v1';
 
+// Branded type — only normaliseEmail() may construct this
+export type NormalisedEmail = string & { readonly __brand: 'NormalisedEmail' };
+
+export function normaliseEmail(input: string): NormalisedEmail {
+  return input.trim().toLowerCase() as NormalisedEmail;
+}
+
+export const loginEmailOnlyKey = (email: NormalisedEmail): string =>
+  `rl:${KEY_VERSION}:auth:login:email:${email}`;
+
+export const loginEmailOnlyKeyBurst = (email: NormalisedEmail): string =>
+  `rl:${KEY_VERSION}:auth:login:email:burst:${email}`;
+
 export const rateLimitKeys = {
   // ---------------- auth (Phase 2D) ----------------
+  // Short window: 10 / 60s — burst protection
   authLogin: (ip: string, email: string): string =>
-    `rl:${KEY_VERSION}:auth:login:${ip}:${email.toLowerCase()}`,
-  authSignup: (ip: string): string =>
-    `rl:${KEY_VERSION}:auth:signup:${ip}`,
-  authForgot: (ip: string): string =>
-    `rl:${KEY_VERSION}:auth:forgot:${ip}`,
+    `rl:${KEY_VERSION}:auth:login:short:${ip}:${email.toLowerCase()}`,
+  // Long window: 50 / 3600s — credential-stuffing prevention
+  authLoginLong: (ip: string, email: string): string =>
+    `rl:${KEY_VERSION}:auth:login:long:${ip}:${email.toLowerCase()}`,
+  authSignup: (ip: string, email: string): string =>
+    `rl:${KEY_VERSION}:auth:signup:${ip}:${email.toLowerCase()}`,
+  authForgot: (ip: string, email: string): string =>
+    `rl:${KEY_VERSION}:auth:forgot:${ip}:${email.toLowerCase()}`,
   authReset: (ip: string): string =>
     `rl:${KEY_VERSION}:auth:reset:${ip}`,
 
@@ -44,4 +61,14 @@ export const rateLimitKeys = {
   // ---------------- session message (Phase 6) ----------------
   sessionMessage: (userId: string): string =>
     `rl:${KEY_VERSION}:session:message:user:${userId}`,
+
+  // ---------------- workspace email ----------------
+  workspaceEmailIdentity: (identityId: string): string =>
+    `rl:${KEY_VERSION}:workspace:email:identity:${identityId}`,
+  workspaceEmailOrg: (organisationId: string): string =>
+    `rl:${KEY_VERSION}:workspace:email:org:${organisationId}`,
+
+  // ---------------- client errors (Phase 2) ----------------
+  clientError: (userId: string): string =>
+    `rl:${KEY_VERSION}:client:error:user:${userId}`,
 };

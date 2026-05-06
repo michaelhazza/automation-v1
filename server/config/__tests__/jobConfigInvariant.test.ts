@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import { JOB_CONFIG } from '../jobConfig.js';
 
 test('every JOB_CONFIG entry declares a deadLetter queue', () => {
@@ -10,8 +9,7 @@ test('every JOB_CONFIG entry declares a deadLetter queue', () => {
       missing.push(name);
     }
   }
-  assert.deepEqual(missing, [],
-    `Queues without deadLetter — every entry MUST declare one to be visible to dlqMonitorService:\n${missing.join('\n')}`);
+  expect(missing, `Queues without deadLetter — every entry MUST declare one to be visible to dlqMonitorService:\n${missing.join('\n')}`).toEqual([]);
 });
 
 test('every deadLetter follows the <queue>__dlq convention', () => {
@@ -24,6 +22,5 @@ test('every deadLetter follows the <queue>__dlq convention', () => {
       violations.push({ queue: name, deadLetter: dlq });
     }
   }
-  assert.deepEqual(violations, [],
-    `Queues with deadLetter that doesn't match <queue>__dlq:\n${violations.map(v => `${v.queue} → ${v.deadLetter}`).join('\n')}`);
+  expect(violations, `Queues with deadLetter that doesn't match <queue>__dlq:\n${violations.map(v => `${v.queue} → ${v.deadLetter}`).join('\n')}`).toEqual([]);
 });

@@ -2,6 +2,7 @@ import { pgTable, uuid, text, integer, boolean, real, jsonb, timestamp, index, u
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { systemAgents } from './systemAgents';
+import { workspaceActors } from './workspaceActors';
 
 export const agents = pgTable(
   'agents',
@@ -65,6 +66,7 @@ export const agents = pgTable(
     // NULL = auto-detect from heuristics; 'complex' = always plan first;
     // 'simple' = never plan (even if heuristics trigger).
     complexityHint: text('complexity_hint').$type<'simple' | 'complex'>(),
+    workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

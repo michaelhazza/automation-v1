@@ -108,7 +108,7 @@ export default function ConfigUpdateToolResult({ result }: { result: unknown }) 
     case 'unknown':
       // Defence-in-depth fallback per spec §6.7 res 1 — render raw JSON rather
       // than a blank card when the shape drifts. Logged so we catch shape drift.
-      // eslint-disable-next-line no-console
+       
       console.warn('[ConfigUpdateToolResult] unrecognised tool-result shape', result);
       return (
         <pre className="bg-slate-100 rounded p-2 text-[11px] text-slate-600 font-mono overflow-auto">

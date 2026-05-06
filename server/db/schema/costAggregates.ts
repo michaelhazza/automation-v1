@@ -12,6 +12,10 @@ export const costAggregates = pgTable(
   'cost_aggregates',
   {
     id:                      uuid('id').defaultRandom().primaryKey(),
+    // Added by migration 0272: org-isolation RLS anchor.
+    // platform/provider rows use sentinel UUID 00000000-0000-0000-0000-000000000001.
+    organisationId:          uuid('organisation_id')
+                               .notNull(),
     entityType:              text('entity_type').notNull(),
     // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider' |
     // 'platform' | 'execution_phase' | 'source_type' | 'feature_tag'

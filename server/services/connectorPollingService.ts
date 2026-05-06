@@ -1,6 +1,8 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { connectorConfigs, canonicalAccounts } from '../db/schema/index.js';
+import { createEvent } from '../lib/tracing.js';
 import { adapters } from '../adapters/index.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { connectorConfigService } from './connectorConfigService.js';
@@ -285,6 +287,31 @@ export const connectorPollingService = {
       // Transition sync phase if in backfill and first successful sync
       if (config.syncPhase === 'backfill' && syncStatus !== 'error') {
         await connectorConfigService.update(config.id, config.organisationId, { syncPhase: 'live' });
+      }
+
+      // F3 §4 — bump poll counter and stamp first qualifying poll.
+      if (syncStatus === 'success') {
+        const orgDb = getOrgScopedDb('connectorPollingService.bumpPollMetrics');
+        await orgDb.execute(sql`
+          UPDATE connector_configs
+          SET successful_poll_count_total = successful_poll_count_total + 1,
+              first_qualifying_poll_at = COALESCE(first_qualifying_poll_at, now())
+          WHERE id = ${config.id}
+            AND organisation_id = ${config.organisationId}
+        `);
+
+        createEvent('connector.sync.complete', {
+          organisation_id: config.organisationId,
+          subaccount_id: config.subaccountId,
+          connector_config_id: config.id,
+          connector_type: config.connectorType,
+        });
+
+        if (config.subaccountId) {
+          const { baselineSubscriberService } = await import('./baselineSubscriberService.js');
+          await baselineSubscriberService
+            .onSyncCompleteEvaluateReadiness(config.subaccountId, config.organisationId);
+        }
       }
 
       return { success: errors.length === 0, accountsSynced, errors };

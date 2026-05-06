@@ -3,8 +3,7 @@
  * Run via: npx tsx server/services/__tests__/ruleConflictDetectorPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   parseConflictReportPure,
 } from '../ruleConflictDetectorServicePure.js';
@@ -32,18 +31,18 @@ const INPUT: RuleConflictInput = {
 
 test('fails open on null input', () => {
   const result = parseConflictReportPure(null, INPUT);
-  assert.deepEqual(result.conflicts, []);
-  assert.ok(result.checkedAt);
+  expect(result.conflicts).toEqual([]);
+  expect(result.checkedAt).toBeTruthy();
 });
 
 test('fails open on non-object input', () => {
   const result = parseConflictReportPure('invalid', INPUT);
-  assert.deepEqual(result.conflicts, []);
+  expect(result.conflicts).toEqual([]);
 });
 
 test('fails open when conflicts field is missing', () => {
   const result = parseConflictReportPure({ other: 'stuff' }, INPUT);
-  assert.deepEqual(result.conflicts, []);
+  expect(result.conflicts).toEqual([]);
 });
 
 test('parses a valid conflict', () => {
@@ -59,10 +58,10 @@ test('parses a valid conflict', () => {
     ],
   };
   const result = parseConflictReportPure(raw, INPUT);
-  assert.equal(result.conflicts.length, 1);
-  assert.equal(result.conflicts[0].existingRuleId, 'rule-1');
-  assert.equal(result.conflicts[0].conflictKind, 'direct_contradiction');
-  assert.equal(result.conflicts[0].confidence, 0.9);
+  expect(result.conflicts.length).toBe(1);
+  expect(result.conflicts[0].existingRuleId).toBe('rule-1');
+  expect(result.conflicts[0].conflictKind).toBe('direct_contradiction');
+  expect(result.conflicts[0].confidence).toBe(0.9);
 });
 
 test('rejects conflict with unknown existingRuleId', () => {
@@ -77,7 +76,7 @@ test('rejects conflict with unknown existingRuleId', () => {
     ],
   };
   const result = parseConflictReportPure(raw, INPUT);
-  assert.deepEqual(result.conflicts, []);
+  expect(result.conflicts).toEqual([]);
 });
 
 test('rejects conflict with invalid conflictKind', () => {
@@ -92,7 +91,7 @@ test('rejects conflict with invalid conflictKind', () => {
     ],
   };
   const result = parseConflictReportPure(raw, INPUT);
-  assert.deepEqual(result.conflicts, []);
+  expect(result.conflicts).toEqual([]);
 });
 
 test('rejects conflict with out-of-range confidence', () => {
@@ -107,7 +106,7 @@ test('rejects conflict with out-of-range confidence', () => {
     ],
   };
   const result = parseConflictReportPure(raw, INPUT);
-  assert.deepEqual(result.conflicts, []);
+  expect(result.conflicts).toEqual([]);
 });
 
 test('accepts multiple valid conflicts', () => {
@@ -128,7 +127,7 @@ test('accepts multiple valid conflicts', () => {
     ],
   };
   const result = parseConflictReportPure(raw, INPUT);
-  assert.equal(result.conflicts.length, 2);
+  expect(result.conflicts.length).toBe(2);
 });
 
 test('scope is derived from candidatePool when existingText absent', () => {
@@ -143,5 +142,5 @@ test('scope is derived from candidatePool when existingText absent', () => {
     ],
   };
   const result = parseConflictReportPure(raw, INPUT);
-  assert.equal(result.conflicts[0].existingScope.kind, 'org');
+  expect(result.conflicts[0].existingScope.kind).toBe('org');
 });

@@ -77,7 +77,7 @@ test('timeout → no-op (terminal)', () => {
 });
 
 test('budget_exceeded → no-op (terminal)', () => {
-  assert(shouldNoOp(AGENT_RUN_STATUS.BUDGET_EXCEEDED), 'budget_exceeded must be no-op');
+  assert(shouldNoOp(AGENT_RUN_STATUS.COMPUTE_BUDGET_EXCEEDED), 'budget_exceeded must be no-op');
 });
 
 test('loop_detected → no-op (terminal)', () => {
@@ -173,7 +173,7 @@ test('cancellable status set matches in-flight non-cancelling statuses', () => {
       IN_FLIGHT_RUN_STATUSES.includes(s as any),
       `${s} must be in IN_FLIGHT_RUN_STATUSES`,
     );
-    assert(s !== 'cancelling', `${s} must not be 'cancelling'`);
+    assert((s as string) !== 'cancelling', `${s} must not be 'cancelling'`);
   }
 });
 

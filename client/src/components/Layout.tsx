@@ -5,6 +5,7 @@ import GlobalAskBar from './global-ask-bar/GlobalAskBar';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import {
   removeToken, removeUserRole,
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
@@ -77,13 +78,16 @@ const SEG: Record<string, string | null> = {
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
-  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Briefs',
+  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Tasks', tasks: 'Tasks',
   'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
   'agent-templates': 'Subaccount Blueprints',
   'admin-settings': 'Settings',
   usage: 'Usage & Costs',
   'mcp-servers': 'Integrations',
   'llm-pnl': 'LLM P&L',
+  'spending-budgets': 'Spending Budgets',
+  'spend-ledger': 'Spend Ledger',
+  'approval-channels': 'Approval Channels',
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -217,24 +221,16 @@ function TrialCountdown() {
   if (msLeft <= 0) return null;
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
 
-  let label = '';
-  let cls = 'text-slate-500';
-  if (daysLeft > 7) {
-    label = `${daysLeft} days left in trial`;
-    cls = 'text-slate-500';
-  } else if (daysLeft > 2) {
-    label = `${daysLeft} days left in trial`;
-    cls = 'text-amber-400';
-  } else if (daysLeft === 2) {
-    label = 'Trial ends in 2 days';
-    cls = 'text-red-400';
-  } else if (daysLeft === 1) {
-    label = 'Trial ends tomorrow';
-    cls = 'text-red-400';
-  } else {
-    label = 'Trial ends today';
-    cls = 'text-red-400';
-  }
+  const label =
+    daysLeft > 7 ? `${daysLeft} days left in trial` :
+    daysLeft > 2 ? `${daysLeft} days left in trial` :
+    daysLeft === 2 ? 'Trial ends in 2 days' :
+    daysLeft === 1 ? 'Trial ends tomorrow' :
+    'Trial ends today';
+  const cls =
+    daysLeft > 7 ? 'text-slate-500' :
+    daysLeft > 2 ? 'text-amber-400' :
+    'text-red-400';
 
   return (
     <div className={`flex items-center gap-2 px-3 py-[6px] mx-1.5 my-px text-[11.5px] font-medium ${cls}`}>
@@ -366,6 +362,10 @@ export default function Layout({ user, children }: LayoutProps) {
       setSubaccounts([]);
       if (activeClientId) { removeActiveClient(); setActiveClientIdState(null); setActiveClientNameState(null); }
     }
+    // activeClientId is intentionally excluded — this effect is an org-change effect.
+    // Including it would refetch subaccounts on every client switch, which is wasteful
+    // and incorrect (subaccount list is org-scoped, not client-scoped).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasOrgContext, activeOrgId]);
 
   // Fetch org permissions
@@ -408,7 +408,7 @@ export default function Layout({ user, children }: LayoutProps) {
   // Incident badge — system admin only, initial load
   useEffect(() => {
     if (!isSystemAdmin) return;
-    api.get('/api/system/incidents/badge-count').then(({ data }) => setIncidentCount(data.count ?? 0)).catch(() => {});
+    api.get('/api/system/incidents/badge-count').then(({ data }) => setIncidentCount(data.count ?? 0)).catch(logAndSwallow('Layout: incident badge refresh', { severity: 'critical' }));
   }, [isSystemAdmin]);
 
   // Live agent badge — initial load + WebSocket updates
@@ -571,7 +571,7 @@ export default function Layout({ user, children }: LayoutProps) {
       setNewBriefTitle('');
       setNewBriefDesc('');
       setNewBriefPriority('normal');
-      navigate(`/admin/briefs/${res.data.briefId}`);
+      navigate(`/admin/tasks/${res.data.briefId}`);
     } catch (err) {
       console.error('[Layout] Failed to create brief:', err);
     } finally {
@@ -745,7 +745,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
               >
                 <span><Icons.bolt /></span>
-                <span className="flex-1">New Brief</span>
+                <span className="flex-1">New Task</span>
               </button>
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
                 <NavItem to="/" icon={<Icons.inbox />} label="Home" badge={reviewCount} />
@@ -853,7 +853,14 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasSidebarItem('clientpulse') && (
             <>
               <NavSection label="ClientPulse" />
-              <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
+              <NavItem
+                to="/clientpulse"
+                exact
+                icon={<Icons.dashboard />}
+                label="Dashboard"
+                badge={liveAgentCount > 0 ? liveAgentCount : undefined}
+                badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined}
+              />
               {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
               <NavItem to="/clientpulse/settings" icon={<Icons.settings />} label="ClientPulse Settings" />
             </>
@@ -877,8 +884,17 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasSidebarItem('workflows') && hasOrgPerm('org.automations.view') && <NavItem to="/admin/automations" icon={<Icons.automations />} label="Automations" />}
               {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
               {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
+              {hasSidebarItem('team') && hasOrgPerm('org.teams.manage') && <NavItem to="/admin/teams" icon={<Icons.team />} label="Teams" />}
               {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
               {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage" />}
+              {/* Agentic Commerce — Spending Budgets (admin edit) or read-only (spend_approver) */}
+              {(hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver')) && (
+                <NavItem to="/admin/spending-budgets" icon={<Icons.usage />} label="Spending Budgets" />
+              )}
+              {/* Agentic Commerce — Spend Ledger (spend_approver or admin) */}
+              {activeClientId && (hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver') || hasClientPerm('spend_approver')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/spend-ledger`} icon={<Icons.diagnostic />} label="Spend Ledger" />
+              )}
             </>
           )}
 
@@ -1219,7 +1235,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 setSubaccounts(prev => [...prev, newEntry]);
                 handleSelectClient(newEntry);
                 // Refresh list in background to sync any server-side changes
-                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(() => {});
+                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(logAndSwallow('Layout: subaccounts background refresh', { severity: 'critical' }));
               } catch (err: unknown) {
                 const e = err as { response?: { status?: number; data?: { error?: string } } };
                 const msg = e.response?.data?.error;
@@ -1251,7 +1267,7 @@ export default function Layout({ user, children }: LayoutProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Brief</h2>
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Task</h2>
               <button onClick={() => setShowNewBrief(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
             <form onSubmit={(e) => { void handleNewBriefSubmit(e); }} className="p-6 flex flex-col gap-4">
@@ -1324,7 +1340,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
               <div className="flex gap-2 justify-end pt-1">
                 <button type="button" onClick={() => setShowNewBrief(false)} className="btn btn-secondary">Cancel</button>
-                <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="btn btn-primary">{newBriefLoading ? 'Creating...' : 'Create Brief'}</button>
+                <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="btn btn-primary">{newBriefLoading ? 'Creating...' : 'Create Task'}</button>
               </div>
             </form>
           </div>

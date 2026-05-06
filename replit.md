@@ -1,5 +1,34 @@
 # Automation OS
 
+## Agent quick-start
+
+> Read this first if you are an automated agent. The rest of this document is human-shaped reference.
+
+**Boot the dev environment:**
+
+```bash
+npm install && npm run dev
+```
+
+This runs the Vite client (default port 5000) and the Express server (default port 3000) via `concurrently`.
+
+**Required environment variables:** see [`docs/env-manifest.json`](docs/env-manifest.json) for the canonical manifest. Replit auto-provides `DATABASE_URL`; the rest must be set in the Replit secrets pane (`JWT_SECRET`, `EMAIL_FROM`, `PORT`, `NODE_ENV`).
+
+**Verify the build is healthy:**
+
+```bash
+npx tsc --noEmit && npx tsc -p server/tsconfig.json --noEmit
+```
+
+The repo has two TypeScript projects. The root `tsconfig.json` covers `client/src/`; `server/tsconfig.json` covers `server/` and `shared/`. The one-liner above exercises both. There is no `npm run typecheck` script.
+
+**Where to look next:**
+
+- [`architecture.md`](architecture.md) — backend conventions, route patterns, three-tier agent model, skill system, all repo-specific patterns.
+- [`scripts/README.md`](scripts/README.md) — index of executable tooling (DB, audits, imports, code-graph).
+- [`docs/README.md`](docs/README.md) — spec-corpus index ("if you're working on X, read Y").
+- [`CLAUDE.md`](CLAUDE.md) — Claude Code playbook applied to this repo (planning, review pipeline, agent fleet).
+
 ## Overview
 Automation OS is a multi-tenant workflow automation platform. It provides task management, execution tracking, permission groups, file handling, and user authentication for organizations.
 

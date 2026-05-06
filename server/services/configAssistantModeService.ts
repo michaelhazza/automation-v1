@@ -71,7 +71,7 @@ export function resolveMode(mode: ConfigAssistantMode): ConfigAssistantModeResol
   const filename = MODE_PROMPT_FILES[mode];
   const promptPath = resolve(PROMPT_DIR, filename);
 
-  let promptContents = '';
+  let promptContents: string;
   try {
     promptContents = readFileSync(promptPath, 'utf-8');
   } catch {

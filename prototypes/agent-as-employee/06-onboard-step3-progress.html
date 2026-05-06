@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>06 — Onboard step 3: progress · Riley</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 06 / 16 · <span class="muted">Onboard modal step 3 of 3 — provisioning</span> · <a href="05-onboard-step2-confirm.html">← Step 2</a> · <a href="07-onboard-success.html">Next: success →</a></div>
+
+<div class="appbar" style="opacity: 0.55;">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Subaccounts / Acme Client Co. / Agents</span></span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+<div class="tabs" style="opacity: 0.55;"><a href="#" class="active">Agents</a></div>
+<div class="page" style="opacity: 0.55;"></div>
+
+<div class="modal-overlay">
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1080px; width: 100%;">
+
+    <!-- Left: native -->
+    <div class="modal" style="max-width: 100%;">
+      <div class="modal-head">
+        <div>
+          <h2>Onboarding Riley…</h2>
+          <div class="step">Backend: Synthetos-native</div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="step-bar">
+          <span class="step done"></span>
+          <span class="step done"></span>
+          <span class="step current"></span>
+        </div>
+        <ul class="prov-list">
+          <li class="done">
+            <span class="icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            <span class="label">Reserved riley@acme.synthetos.io</span>
+          </li>
+          <li class="done">
+            <span class="icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            <span class="label">Mailbox &amp; calendar created</span>
+          </li>
+          <li class="run">
+            <span class="icon"><span class="spinner"></span></span>
+            <span class="label">Updating seat count…</span>
+          </li>
+        </ul>
+        <div class="callout callout-info" style="margin-top: 14px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <div>Onboarding is idempotent. If something fails partway, you can retry without creating duplicates.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Google -->
+    <div class="modal" style="max-width: 100%;">
+      <div class="modal-head">
+        <div>
+          <h2>Onboarding Riley…</h2>
+          <div class="step">Backend: Google Workspace · clientco.com</div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="step-bar">
+          <span class="step done"></span>
+          <span class="step done"></span>
+          <span class="step current"></span>
+        </div>
+        <ul class="prov-list">
+          <li class="done">
+            <span class="icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            <span class="label">Reserved riley@clientco.com</span>
+          </li>
+          <li class="done">
+            <span class="icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            <span class="label">Created Google Workspace user</span>
+          </li>
+          <li class="run">
+            <span class="icon"><span class="spinner"></span></span>
+            <span class="label">Waiting for Google to settle account…</span>
+            <span class="sub">typically 30–90s</span>
+          </li>
+          <li class="pending">
+            <span class="icon">○</span>
+            <span class="label">Activating Gmail / Calendar / Drive scopes</span>
+          </li>
+          <li class="pending">
+            <span class="icon">○</span>
+            <span class="label">Updating seat count</span>
+          </li>
+        </ul>
+        <div class="callout callout-warn" style="margin-top: 14px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="14"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          <div>Google account settling can take up to 90 seconds. Closing this modal won't cancel the operation — it continues as a background job.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: white; border: 1px solid var(--sl-200); border-radius: 10px; box-shadow: 0 4px 12px rgba(15,23,42,0.08); z-index: 200;">
+  <span class="text-sm muted">Two backends shown side-by-side for review.</span>
+  <a href="07-onboard-success.html" class="btn btn-primary btn-sm">View success state →</a>
+</div>
+
+</body>
+</html>

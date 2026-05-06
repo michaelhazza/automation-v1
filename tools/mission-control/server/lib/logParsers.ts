@@ -15,6 +15,7 @@ export type ReviewKind =
   | 'spec-review'
   | 'spec-review-final'
   | 'codebase-audit'
+  | 'adversarial-review'
   | 'chatgpt-pr-review'
   | 'chatgpt-spec-review';
 
@@ -53,14 +54,14 @@ export interface BuildProgress {
 const VERDICT_LINE = /^\*\*Verdict:\*\*\s+([A-Z_]+)\b/m;
 
 // Three filename shapes are accepted:
-//   <agent>-log-<slug>-<timestamp>.md         (README convention — pr-review, spec-conformance, dual-review, spec-review, codebase-audit)
+//   <agent>-log-<slug>-<timestamp>.md         (README convention — pr-review, spec-conformance, dual-review, spec-review, codebase-audit, adversarial-review)
 //   spec-review-final-<slug>-<timestamp>.md   (spec-reviewer's final report — no `-log-` infix)
 //   chatgpt-(pr|spec)-review-<slug>-<timestamp>.md (chatgpt agents — no `-log-` infix; predates the convention)
 // Slug allows mixed case because real-world session slugs include suffixes like `BgLlY`.
 const TS_RE = '(\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}Z)';
 const SLUG_RE = '([A-Za-z0-9-]+?)';
 const FILENAME_REGEX_STD = new RegExp(
-  `^(pr-review|spec-conformance|dual-review|spec-review|codebase-audit)-log-${SLUG_RE}-${TS_RE}\\.md$`,
+  `^(pr-review|spec-conformance|dual-review|spec-review|codebase-audit|adversarial-review)-log-${SLUG_RE}-${TS_RE}\\.md$`,
 );
 const FILENAME_REGEX_FINAL = new RegExp(
   `^(spec-review-final)-${SLUG_RE}-${TS_RE}\\.md$`,

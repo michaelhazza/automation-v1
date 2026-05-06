@@ -159,6 +159,14 @@ export const CONFLICT_CONFIDENCE_GAP = 0.2;
  */
 export const BLOCK_RELEVANCE_THRESHOLD = 0.65;
 
+/**
+ * Score boost added to Tier-2 baseline artefact candidates relative to
+ * BLOCK_RELEVANCE_THRESHOLD. Tier-2 blocks match by domain, not by
+ * embedding similarity — this puts them just above the threshold floor.
+ * F1 spec §4.
+ */
+export const MEMORY_BLOCK_TIER2_BOOST = 0.15;
+
 /** Default top-K blocks returned by relevance scoring. (§5.2) */
 export const BLOCK_RELEVANCE_TOP_K = 5;
 
@@ -671,6 +679,14 @@ export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
  * keyed on userId. See spec §4.8 for Phase 2 Redis migration notes.
  */
 export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
+
+// ── Pre-launch Phase 3 D.4/D.5 — GHL agency enrolment caps ────────────────
+
+/** Maximum GHL locations enrolled inline before deferring to the background pagination job. */
+export const MAX_GHL_LOCATIONS_TO_ENROL = 250;
+
+/** Maximum pages the background pagination job may process in a single run. */
+export const MAX_GHL_PAGES_PER_RUN = 200;
 
 // ── ClientPulse Session 2 — apiAdapter dispatch ────────────────────────────
 

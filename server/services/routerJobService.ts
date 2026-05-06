@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { llmRequests, budgetReservations, costAggregates } from '../db/schema/index.js';
+import { llmRequests, computeReservations, costAggregates } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { costAggregateService } from './costAggregateService.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
@@ -65,8 +65,8 @@ export async function reconcileReservations(): Promise<void> {
   // 1. Find all active reservations
   const activeReservations = await db
     .select()
-    .from(budgetReservations)
-    .where(eq(budgetReservations.status, 'active'));
+    .from(computeReservations)
+    .where(eq(computeReservations.status, 'active'));
 
   for (const reservation of activeReservations) {
     // Check if the llm_request has been written with success
@@ -79,22 +79,22 @@ export async function reconcileReservations(): Promise<void> {
     if (request && (request.status === 'success' || request.status === 'partial')) {
       // Request succeeded but reservation wasn't committed — commit it now
       await db
-        .update(budgetReservations)
+        .update(computeReservations)
         .set({ status: 'committed', actualCostCents: request.costWithMarginCents })
-        .where(eq(budgetReservations.id, reservation.id));
+        .where(eq(computeReservations.id, reservation.id));
     } else if (request && !['success', 'partial'].includes(request.status)) {
       // Request failed — release
       await db
-        .update(budgetReservations)
+        .update(computeReservations)
         .set({ status: 'released' })
-        .where(eq(budgetReservations.id, reservation.id));
+        .where(eq(computeReservations.id, reservation.id));
     } else if (reservation.expiresAt < now) {
       // No request found and expired — release with warning
       console.warn(`[routerJobService] Releasing expired reservation id=${reservation.id} key=${reservation.idempotencyKey}`);
       await db
-        .update(budgetReservations)
+        .update(computeReservations)
         .set({ status: 'released' })
-        .where(eq(budgetReservations.id, reservation.id));
+        .where(eq(computeReservations.id, reservation.id));
     }
     // else: not expired and no request yet — leave active (call may be in-flight)
   }

@@ -1,5 +1,4 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 import { isManagerAllowlisted } from '../middleware/managerGuardPure.js';
 import type { ActionDefinition } from '../../config/actionRegistry.js';
 
@@ -19,13 +18,13 @@ function makeDef(overrides: Partial<ActionDefinition> = {}): ActionDefinition {
 test('non-manager role returns allowed: true regardless of def', () => {
   const def = makeDef({ managerAllowlistMember: false });
   const result = isManagerAllowlisted(def, 'worker', [], 'some_tool');
-  assert.deepEqual(result, { allowed: true });
+  expect(result).toEqual({ allowed: true });
 });
 
 test('null agentRole returns allowed: true', () => {
   const def = makeDef({ managerAllowlistMember: false });
   const result = isManagerAllowlisted(def, null, [], 'some_tool');
-  assert.deepEqual(result, { allowed: true });
+  expect(result).toEqual({ allowed: true });
 });
 
 // Test 2: manager + managerAllowlistMember: true + sideEffectClass: 'none' + directExternalSideEffect: false → allowed
@@ -36,7 +35,7 @@ test('manager + globally allowlisted + no side effects → allowed', () => {
     directExternalSideEffect: false,
   });
   const result = isManagerAllowlisted(def, 'manager', [], 'allowed_tool');
-  assert.deepEqual(result, { allowed: true });
+  expect(result).toEqual({ allowed: true });
 });
 
 // Test 3: manager + NOT on allowlist → manager_role_violation
@@ -47,7 +46,7 @@ test('manager + not on allowlist → manager_role_violation', () => {
     directExternalSideEffect: false,
   });
   const result = isManagerAllowlisted(def, 'manager', [], 'restricted_tool');
-  assert.deepEqual(result, { allowed: false, reason: 'manager_role_violation' });
+  expect(result).toEqual({ allowed: false, reason: 'manager_role_violation' });
 });
 
 // Test 4: manager + allowlisted + directExternalSideEffect: true → manager_direct_external_side_effect
@@ -58,7 +57,7 @@ test('manager + allowlisted + directExternalSideEffect: true → manager_direct_
     directExternalSideEffect: true,
   });
   const result = isManagerAllowlisted(def, 'manager', [], 'send_email');
-  assert.deepEqual(result, { allowed: false, reason: 'manager_direct_external_side_effect' });
+  expect(result).toEqual({ allowed: false, reason: 'manager_direct_external_side_effect' });
 });
 
 // Test 5: manager + allowlisted + sideEffectClass: 'write' + directExternalSideEffect: false → manager_indirect_side_effect_class
@@ -69,7 +68,7 @@ test('manager + allowlisted + sideEffectClass: write → manager_indirect_side_e
     directExternalSideEffect: false,
   });
   const result = isManagerAllowlisted(def, 'manager', [], 'mutate_canonical');
-  assert.deepEqual(result, { allowed: false, reason: 'manager_indirect_side_effect_class' });
+  expect(result).toEqual({ allowed: false, reason: 'manager_indirect_side_effect_class' });
 });
 
 // Test 6: manager + NOT on global allowlist BUT IS in perManagerDeclaredSlugs + sideEffectClass: 'none' → allowed
@@ -80,13 +79,13 @@ test('manager + in perManagerDeclaredSlugs (not global) + sideEffectClass: none 
     directExternalSideEffect: false,
   });
   const result = isManagerAllowlisted(def, 'manager', ['per_manager_tool'], 'per_manager_tool');
-  assert.deepEqual(result, { allowed: true });
+  expect(result).toEqual({ allowed: true });
 });
 
 // Test 7: undefined def + manager → manager_role_violation (not allowlisted)
 test('undefined def + manager → manager_role_violation', () => {
   const result = isManagerAllowlisted(undefined, 'manager', [], 'unknown_tool');
-  assert.deepEqual(result, { allowed: false, reason: 'manager_role_violation' });
+  expect(result).toEqual({ allowed: false, reason: 'manager_role_violation' });
 });
 
 // Test 8 (S9): manager + per-manager declared READ skill (e.g. read_revenue, read_crm)
@@ -101,7 +100,7 @@ test('manager + per-manager declared READ skill + directExternalSideEffect: fals
     directExternalSideEffect: false,
   });
   const result = isManagerAllowlisted(def, 'manager', ['read_revenue'], 'read_revenue');
-  assert.deepEqual(result, { allowed: true });
+  expect(result).toEqual({ allowed: true });
 });
 
 // Test 9 (S9): per-manager declared READ that hits an external API
@@ -116,7 +115,7 @@ test('manager + per-manager declared external-API read → manager_direct_extern
     directExternalSideEffect: true,
   });
   const result = isManagerAllowlisted(def, 'manager', ['read_campaigns'], 'read_campaigns');
-  assert.deepEqual(result, { allowed: false, reason: 'manager_direct_external_side_effect' });
+  expect(result).toEqual({ allowed: false, reason: 'manager_direct_external_side_effect' });
 });
 
 // Test 10 (S9): manager + globally allowlisted + sideEffectClass: 'read'
@@ -128,5 +127,5 @@ test('manager + globally allowlisted + sideEffectClass: read → allowed', () =>
     directExternalSideEffect: false,
   });
   const result = isManagerAllowlisted(def, 'manager', [], 'allowlisted_read');
-  assert.deepEqual(result, { allowed: true });
+  expect(result).toEqual({ allowed: true });
 });

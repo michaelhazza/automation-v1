@@ -7,6 +7,10 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import AgentRunCancelButton from '../components/AgentRunCancelButton';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 import { toast } from 'sonner';
+import { WorkspaceTabContent } from '../components/workspace/WorkspaceTabContent';
+import { BaselineStatusBadge } from '../components/baseline/BaselineStatusBadge';
+import { ManualBaselineForm } from '../components/baseline/ManualBaselineForm';
+import { AdminBaselineResetButton } from '../components/baseline/AdminBaselineResetButton';
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
@@ -18,11 +22,11 @@ interface Subaccount { id: string; name: string; slug: string; status: string; i
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'integrations' | 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'memory' | 'usage' | 'admin';
+type ActiveTab = 'integrations' | 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'memory' | 'usage' | 'admin' | 'workspace';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   integrations: 'Integrations', onboarding: 'Onboarding', engines: 'Engines', workflows: 'Workflows', agents: 'Agents', beliefs: 'Beliefs',
-  categories: 'Categories', tags: 'Tags', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
+  categories: 'Categories', tags: 'Tags', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -40,7 +44,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [searchParams] = useSearchParams();
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['integrations', 'board', 'categories']
-    : ['integrations', 'onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'memory', 'usage', 'admin'];
+    : ['integrations', 'onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'memory', 'usage', 'workspace', 'admin'];
   const initialTab = (() => {
     const t = searchParams.get('tab') as ActiveTab | null;
     return t && visibleTabs.includes(t) ? t : visibleTabs[0];
@@ -65,20 +69,24 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [boardSaving, setBoardSaving] = useState(false);
   const [boardMsg, setBoardMsg] = useState('');
 
+  const [baselineStatus, setBaselineStatus] = useState<{ status: string; confidence?: string } | null>(null);
+
   const load = async () => {
     if (!subaccountId) return;
     try {
-      const [saRes, catRes, processRes, boardRes] = await Promise.all([
+      const [saRes, catRes, processRes, boardRes, baselineRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
         api.get(`/api/subaccounts/${subaccountId}/automations`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
         api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err: { response?: { status?: number } }) => { if (err?.response?.status !== 404) console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
+        api.get(`/api/subaccounts/${subaccountId}/baseline`).catch(() => ({ data: null })),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);
       setLinkedProcesses(processRes.data.linkedProcesses ?? []);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status, timezone: saRes.data.settings?.timezone ?? 'UTC', includeInOrgInbox: saRes.data.includeInOrgInbox ?? true, runRetentionDays: saRes.data.runRetentionDays != null ? String(saRes.data.runRetentionDays) : '' });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
+      if (baselineRes?.data) setBaselineStatus({ status: baselineRes.data.status, confidence: baselineRes.data.confidence });
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to load subaccount');
@@ -208,7 +216,12 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       <h1 className="text-[26px] font-bold text-slate-800 mb-1">
         {mode === 'client' ? `${sa.name} Settings` : sa.name}
       </h1>
-      {mode === 'admin' && <div className="font-mono text-[13px] text-slate-400 mb-6">{sa.slug}</div>}
+      {mode === 'admin' && (
+        <div className="flex items-center gap-3 mb-6">
+          <span className="font-mono text-[13px] text-slate-400">{sa.slug}</span>
+          {subaccountId && <BaselineStatusBadge subaccountId={subaccountId} />}
+        </div>
+      )}
       {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage connections, board config, and categories</div>}
 
       {/* Tabs */}
@@ -515,6 +528,31 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
           {/* Dev Execution Context */}
           <DevContextConfig subaccountId={subaccountId} />
+
+          {/* Baseline metrics manual entry */}
+          {baselineStatus && (
+            baselineStatus.status === 'failed' ||
+            (baselineStatus.status === 'captured' && baselineStatus.confidence === 'partial')
+          ) && (
+            <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[640px]">
+              <h2 className="text-[18px] font-semibold text-slate-800 mb-2">Baseline metrics</h2>
+              <p className="text-[13px] text-slate-500 mb-5">
+                {baselineStatus.status === 'failed'
+                  ? "We couldn't capture the baseline automatically. You can enter values manually."
+                  : "Some metrics weren't available. Add them manually below."}
+              </p>
+              <ManualBaselineForm subaccountId={subaccountId} onSaved={load} />
+            </div>
+          )}
+
+          {/* Admin baseline reset */}
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
+            <h2 className="text-[18px] font-semibold text-slate-800 mb-2">Baseline reset</h2>
+            <p className="text-[13px] text-slate-500 mb-4">
+              Reset the baseline to allow a fresh automatic capture. Sysadmin only.
+            </p>
+            <AdminBaselineResetButton subaccountId={subaccountId} user={_user} onReset={load} />
+          </div>
         </div>
       )}
 
@@ -536,6 +574,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading usage data...</div>}>
           <UsagePage user={_user as any} embedded />
         </Suspense>
+      )}
+
+      {/* Workspace */}
+      {activeTab === 'workspace' && subaccountId && (
+        <WorkspaceTabContent subaccountId={subaccountId} />
       )}
     </div>
   );
@@ -1282,6 +1325,7 @@ function OnboardingTab({ subaccountId }: { subaccountId: string }) {
 
   useEffect(() => {
     void load();
+    // reason: `load` is an inline async function that closes over state setters; only the trigger key (subaccountId) should re-run this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 

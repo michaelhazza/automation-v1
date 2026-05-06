@@ -8,8 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type PgBoss from 'pg-boss';
-import { sql } from 'drizzle-orm';
-import { db, client } from '../db.js';
+import { client } from '../db.js';
 import { logger } from '../logger.js';
 
 const QUEUE = 'iee-cost-rollup-daily';

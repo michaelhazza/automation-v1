@@ -285,6 +285,39 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'payload-key' as const, // pageId + action
   },
 
+  // ── Agentic Commerce — IEE worker round-trip (Chunk 11) ─────────────
+  // Three queues: request (worker→main), response (main→worker), completion (worker→main).
+  // agent-spend-request: worker emits; main app processes via proposeCharge.
+  //   payload-key: correlationId is the per-request dedup token.
+  // agent-spend-response: main app emits; worker picks up by correlationId.
+  //   Consumed by worker — no main-app handler. payload-key: correlationId.
+  // agent-spend-completion: worker emits after merchant form-fill; main app processes.
+  //   one-shot: one completion per executed row (idempotent via trigger + WHERE status='executed').
+  'agent-spend-request': {
+    retryLimit: 2,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 45, // Must be processed within 30s deadline + margin
+    deadLetter: 'agent-spend-request__dlq',
+    idempotencyStrategy: 'payload-key' as const, // correlationId
+  },
+  'agent-spend-response': {
+    retryLimit: 1,
+    retryDelay: 2,
+    retryBackoff: false,
+    expireInSeconds: 35, // Response must reach worker within 30s window
+    deadLetter: 'agent-spend-response__dlq',
+    idempotencyStrategy: 'payload-key' as const, // correlationId
+  },
+  'agent-spend-completion': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120, // Completion is async from the 30s round-trip
+    deadLetter: 'agent-spend-completion__dlq',
+    idempotencyStrategy: 'one-shot' as const, // one per executed row
+  },
+
   // ── IEE — Integrated Execution Environment (rev 6) ──────────────
   // Spec refs: §3.1, §3.4, §11.5.5, §13.2 (reservation interplay).
   // expireInSeconds is the hard pg-boss ceiling. The worker enforces a
@@ -368,6 +401,19 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const,
   },
 
+  // ── Workflows V1 — gate stall notifications (spec §5.3) ─────────
+  // Three delayed jobs per gate (24h, 72h, 7d). singletonKey deduplicates
+  // re-enqueues for the same gate+cadence. stale-fire guard in the handler
+  // provides durable safety even if cancel races.
+  'workflow-gate-stall-notify': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'workflow-gate-stall-notify__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: stall-notify-{gateId}-{cadence}
+  },
+
   // ── Workflows engine (multi-step automation, migration 0076) ────
   // Spec: tasks/workflows-spec.md §5.6 (concurrency) + §5.7 (watchdog).
   // Tick jobs are enqueued with singletonKey: runId so multiple step
@@ -436,6 +482,35 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const,
   },
 
+  // ── Workspace seat rollup (agents-as-employees D9) ──────────────
+  // Hourly sweep: counts active workspace identities per org and writes
+  // the result to org_subscriptions.consumed_seats. Each tick re-reads
+  // the current DB state so duplicate deliveries are a no-op.
+  'seat-rollup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'seat-rollup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Workspace identity migration (agents-as-employees E1) ────────
+  // Per-identity job dispatched by workspaceMigrationService.start().
+  // Provisions on the target backend, activates the new identity, then
+  // archives the source. retryLimit 5 with exponential backoff handles
+  // transient Google / SMTP failures. payload-key: migrationRequestId
+  // combined with actorId forms a deterministic idempotency token at
+  // the provisioning layer (provisioningRequestId = migrationRequestId:actorId).
+  'workspace.migrate-identity': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'workspace.migrate-identity__dlq',
+    idempotencyStrategy: 'payload-key' as const, // migrationRequestId:actorId
+  },
+
   // ── System monitoring (G3: system-monitor-ingest queue) ─────────
   'system-monitor-ingest': {
     retryLimit: 3,
@@ -444,6 +519,46 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'system-monitor-ingest__dlq',
     idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Subaccount Optimiser (F2) — daily per-subaccount scan ────────
+  // Runs the full 8-category optimiser scan for one subaccount. Scan
+  // re-reads current DB state each tick so retries are idempotent.
+  // expireInSeconds is a hard circuit-breaker; the handler has its own
+  // circuit-breaker at SCAN_FAILURE_CIRCUIT_BREAKER_THRESHOLD.
+  'optimiser-scan': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'optimiser-scan__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Pre-launch hardening D-P0-1 — GHL auto-start onboarding ─────
+  // Enqueued after subaccount creation from webhook/OAuth callback.
+  // singletonKey deduplicates on (organisationId, subaccountId) within
+  // a 5-minute window so webhook replay cannot double-start onboarding.
+  'ghl:auto-start-onboarding': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'ghl:auto-start-onboarding__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+
+  // ── Pre-launch hardening C-P0-2 — OAuth resume restart ───────────
+  // Enqueued after a successful OAuth token exchange when a pendingRunId
+  // was stored on the state nonce. singletonKey on runId deduplicates
+  // within a 60s window so double-click / callback retry cannot double-resume.
+  'run:resumeAfterOAuth': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'run:resumeAfterOAuth__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
   },
 } as const;
 

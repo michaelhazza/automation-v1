@@ -5,22 +5,8 @@
  *   npx tsx server/services/__tests__/delegationGraphServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { assembleGraphPure, MAX_DEPTH_BOUND, type RunRow } from '../delegationGraphServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(a: T, b: T, label: string) {
   const aJson = JSON.stringify(a);
@@ -28,14 +14,6 @@ function assertEqual<T>(a: T, b: T, label: string) {
   if (aJson !== bJson) {
     throw new Error(`${label} — expected ${bJson}, got ${aJson}`);
   }
-}
-
-function assertTrue(value: boolean, label: string) {
-  if (!value) throw new Error(`${label} — expected truthy, got ${String(value)}`);
-}
-
-function assertFalse(value: boolean, label: string) {
-  if (value) throw new Error(`${label} — expected falsy, got ${String(value)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +46,7 @@ test('truncated=true when any row reaches MAX_DEPTH_BOUND', () => {
   const deep = makeRow({ runId: 'deep', hierarchyDepth: MAX_DEPTH_BOUND, parentRunId: 'root' });
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root, deep], truncated: true });
-  assertTrue(result.truncated, 'truncated should be true when truncated: true is passed');
+  expect(result.truncated, 'truncated should be true when truncated: true is passed').toBe(true);
 });
 
 test('truncated=false when all rows are below MAX_DEPTH_BOUND', () => {
@@ -76,7 +54,7 @@ test('truncated=false when all rows are below MAX_DEPTH_BOUND', () => {
   const child = makeRow({ runId: 'child', hierarchyDepth: 1, parentRunId: 'root' });
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root, child], truncated: false });
-  assertFalse(result.truncated, 'truncated should be false when truncated: false is passed');
+  expect(result.truncated, 'truncated should be false when truncated: false is passed').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -89,9 +67,9 @@ test('parentRunId pointer produces a spawn edge', () => {
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root, child], truncated: false });
   const spawnEdges = result.edges.filter((e) => e.kind === 'spawn');
-  assertEqual(spawnEdges.length, 1, 'spawn edge count');
-  assertEqual(spawnEdges[0]!.parentRunId, 'root', 'spawn edge parentRunId');
-  assertEqual(spawnEdges[0]!.childRunId, 'child', 'spawn edge childRunId');
+  expect(spawnEdges.length, 'spawn edge count').toBe(1);
+  expect(spawnEdges[0]!.parentRunId, 'spawn edge parentRunId').toBe('root');
+  expect(spawnEdges[0]!.childRunId, 'spawn edge childRunId').toBe('child');
 });
 
 // ---------------------------------------------------------------------------
@@ -104,9 +82,9 @@ test('handoffSourceRunId pointer produces a handoff edge', () => {
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root, handoffChild], truncated: false });
   const handoffEdges = result.edges.filter((e) => e.kind === 'handoff');
-  assertEqual(handoffEdges.length, 1, 'handoff edge count');
-  assertEqual(handoffEdges[0]!.parentRunId, 'root', 'handoff edge parentRunId');
-  assertEqual(handoffEdges[0]!.childRunId, 'handoff-child', 'handoff edge childRunId');
+  expect(handoffEdges.length, 'handoff edge count').toBe(1);
+  expect(handoffEdges[0]!.parentRunId, 'handoff edge parentRunId').toBe('root');
+  expect(handoffEdges[0]!.childRunId, 'handoff edge childRunId').toBe('handoff-child');
 });
 
 // ---------------------------------------------------------------------------
@@ -129,15 +107,15 @@ test('run with both parentRunId and handoffSourceRunId produces 2 edges and 1 no
   });
 
   const dualNodes = result.nodes.filter((n) => n.runId === 'dual');
-  assertEqual(dualNodes.length, 1, 'dual-parent run appears exactly once in nodes');
+  expect(dualNodes.length, 'dual-parent run appears exactly once in nodes').toBe(1);
 
   const edgesToDual = result.edges.filter((e) => e.childRunId === 'dual');
-  assertEqual(edgesToDual.length, 2, 'dual-parent run should have 2 inbound edges');
+  expect(edgesToDual.length, 'dual-parent run should have 2 inbound edges').toBe(2);
 
   const spawnToDual = edgesToDual.find((e) => e.kind === 'spawn');
   const handoffToDual = edgesToDual.find((e) => e.kind === 'handoff');
-  assertTrue(!!spawnToDual, 'should have a spawn edge to dual');
-  assertTrue(!!handoffToDual, 'should have a handoff edge to dual');
+  expect(!!spawnToDual, 'should have a spawn edge to dual').toBe(true);
+  expect(!!handoffToDual, 'should have a handoff edge to dual').toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -154,7 +132,7 @@ test('delegationDirection on child row is preserved in the node', () => {
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root, child], truncated: false });
   const childNode = result.nodes.find((n) => n.runId === 'child');
-  assertEqual(childNode?.delegationDirection, 'down', 'direction should be down');
+  expect(childNode?.delegationDirection, 'direction should be down').toBe('down');
 });
 
 // ---------------------------------------------------------------------------
@@ -174,9 +152,9 @@ test('dedup by runId — same runId referenced by two children appears once in n
   });
 
   const matchingNodes = result.nodes.filter((n) => n.runId === 'shared');
-  assertEqual(matchingNodes.length, 1, 'dedup: shared runId appears once in nodes');
+  expect(matchingNodes.length, 'dedup: shared runId appears once in nodes').toBe(1);
   // Last write wins — should be 'Agent B'
-  assertEqual(matchingNodes[0]!.agentName, 'Agent B', 'last-write-wins for dedup');
+  expect(matchingNodes[0]!.agentName, 'last-write-wins for dedup').toBe('Agent B');
 });
 
 // ---------------------------------------------------------------------------
@@ -195,8 +173,8 @@ test('root run has no inbound edge', () => {
   });
 
   const edgesToRoot = result.edges.filter((e) => e.childRunId === 'root');
-  assertEqual(edgesToRoot.length, 0, 'root run has no inbound edges');
-  assertEqual(result.rootRunId, 'root', 'rootRunId is correct');
+  expect(edgesToRoot.length, 'root run has no inbound edges').toBe(0);
+  expect(result.rootRunId, 'rootRunId is correct').toBe('root');
 });
 
 // ---------------------------------------------------------------------------
@@ -207,9 +185,9 @@ test('single root run — no edges, 1 node, truncated=false', () => {
   const root = makeRow({ runId: 'root', hierarchyDepth: 0 });
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root], truncated: false });
-  assertEqual(result.nodes.length, 1, 'nodes count for single root');
-  assertEqual(result.edges.length, 0, 'no edges for single root');
-  assertFalse(result.truncated, 'truncated false for single root');
+  expect(result.nodes.length, 'nodes count for single root').toBe(1);
+  expect(result.edges.length, 'no edges for single root').toBe(0);
+  expect(result.truncated, 'truncated false for single root').toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -222,8 +200,8 @@ test('parentRunId with isSubAgent=false does NOT produce a spawn edge', () => {
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root, nonSubAgentChild], truncated: false });
   const spawnEdges = result.edges.filter((e) => e.kind === 'spawn');
-  assertEqual(spawnEdges.length, 0, 'no spawn edge when isSubAgent=false');
-  assertEqual(result.nodes.length, 2, 'both nodes still present');
+  expect(spawnEdges.length, 'no spawn edge when isSubAgent=false').toBe(0);
+  expect(result.nodes.length, 'both nodes still present').toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -235,13 +213,10 @@ test('root with handoffSourceRunId does NOT produce an inbound handoff edge', ()
 
   const result = assembleGraphPure({ rootRunId: 'root', rows: [root], truncated: false });
   const edgesToRoot = result.edges.filter((e) => e.childRunId === 'root');
-  assertEqual(edgesToRoot.length, 0, 'no inbound edge to root');
-  assertEqual(result.nodes.length, 1, 'only root node');
+  expect(edgesToRoot.length, 'no inbound edge to root').toBe(0);
+  expect(result.nodes.length, 'only root node').toBe(1);
 });
 
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

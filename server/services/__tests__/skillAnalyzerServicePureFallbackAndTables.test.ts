@@ -4,6 +4,7 @@
  *   npx tsx server/services/__tests__/skillAnalyzerServicePureFallbackAndTables.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   buildRuleBasedMerge,
   remediateTables,
@@ -14,25 +15,6 @@ import {
   DEFAULT_WARNING_TIER_MAP,
 } from '../skillAnalyzerServicePure.js';
 import type { ProposedMerge, MergeWarning } from '../skillAnalyzerServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEq<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -68,9 +50,9 @@ test('buildRuleBasedMerge: merges unique H2 headings from non-dominant', () => {
     candidate: { name: 'c', description: '', definition: null, instructions: dominantInstr },
     library:   { name: 'l', description: '', definition: null, instructions: secondaryInstr },
   });
-  assert(merge.instructions!.includes('Section A'), 'preserves Section A');
-  assert(merge.instructions!.includes('Section B'), 'preserves Section B');
-  assert(merge.instructions!.includes('Section C'), 'appends Section C from secondary');
+  expect(merge.instructions!.includes('Section A'), 'preserves Section A').toBeTruthy();
+  expect(merge.instructions!.includes('Section B'), 'preserves Section B').toBeTruthy();
+  expect(merge.instructions!.includes('Section C'), 'appends Section C from secondary').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -88,7 +70,7 @@ test('remediateTables: recovers missing row with [SOURCE: library] marker', () =
   assertEq(out.autoRecoveredRows, 1, 'should recover 1 row');
   // withSourceMarker always includes the sourceKey (heading-qualified headerKey),
   // so the marker is the extended form '[SOURCE: library "..."]' not bare '[SOURCE: library]'.
-  assert(out.instructions.includes('[SOURCE: library'), 'should mark recovered row');
+  expect(out.instructions.includes('[SOURCE: library'), 'should mark recovered row').toBeTruthy();
 });
 
 test('remediateTables: does not match tables with different headers', () => {
@@ -128,7 +110,7 @@ test('remediateTables: aborts when growth ratio exceeded on large inputs', () =>
     incomingInstructions: null,
     maxGrowthRatio: 1.5,
   });
-  assert(out.growthRatioExceeded, 'should flag growth');
+  expect(out.growthRatioExceeded, 'should flag growth').toBeTruthy();
   assertEq(out.autoRecoveredRows, 0, 'should NOT mutate instructions on abort');
 });
 
@@ -144,7 +126,7 @@ test('detectNameMismatch: top-level != schema emits mismatch', () => {
     instructions: null,
   };
   const mm = detectNameMismatch(merged);
-  assert(mm !== null, 'should detect mismatch');
+  expect(mm !== null, 'should detect mismatch').toBeTruthy();
   assertEq(mm!.schemaName, 'library_name', 'schemaName extracted');
 });
 
@@ -258,7 +240,7 @@ Replace {{first_name}} with contact data.`,
     excludedId: null,
     threshold: 0.30,
   });
-  assert(result.some(c => c.collidingSlug === 'draft-sequence'), 'should flag draft-sequence');
+  expect(result.some(c => c.collidingSlug === 'draft-sequence'), 'should flag draft-sequence').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -314,6 +296,3 @@ test('checkConcurrencyStamp: invalid stamps return stale (not crash)', () => {
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

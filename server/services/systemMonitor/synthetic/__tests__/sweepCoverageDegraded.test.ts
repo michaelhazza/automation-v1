@@ -5,35 +5,15 @@
  *   npx tsx server/services/systemMonitor/synthetic/__tests__/sweepCoverageDegraded.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { sweepCoverageDegraded } from '../sweepCoverageDegraded.js';
 import { recordSweepTick, _resetSweepTickHistory } from '../sweepTickHistory.js';
 import type { HeuristicContext } from '../../heuristics/types.js';
 
 // Six lookback ticks at 0.95 threshold ⇒ at most 0 ticks can be limit-reached
 // before the rate drops below 0.95 (5/6 ≈ 0.833 → fires).
-process.env.SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS = '6';
-process.env.SYSTEM_MONITOR_COVERAGE_THRESHOLD = '0.95';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  return Promise.resolve()
-    .then(fn)
-    .then(() => {
-      passed++;
-      console.log(`  PASS  ${name}`);
-    })
-    .catch((err) => {
-      failed++;
-      console.log(`  FAIL  ${name}`);
-      console.log(`        ${err instanceof Error ? err.message : err}`);
-    });
-}
-
-function assert(condition: boolean, label: string): void {
-  if (!condition) throw new Error(label);
-}
+process.env.SYSTEM_MONITOR_COVERAGE_LOOKBACK_TICKS ??= '6';
+process.env.SYSTEM_MONITOR_COVERAGE_THRESHOLD ??= '0.95';
 
 const NOW = new Date('2026-04-25T14:00:00.000Z');
 const stubCtx = (): HeuristicContext => ({
@@ -62,21 +42,21 @@ async function main(): Promise<void> {
   await test('cold-start: empty history → does not fire', async () => {
     _resetSweepTickHistory();
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(!r.fired, 'should not fire with no history');
+    expect(!r.fired, 'should not fire with no history').toBeTruthy();
   });
 
   await test('cold-start: fewer than lookback ticks → does not fire', async () => {
     _resetSweepTickHistory();
     pushTicks(3, { limitReached: true });
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(!r.fired, 'should not fire under lookback floor');
+    expect(!r.fired, 'should not fire under lookback floor').toBeTruthy();
   });
 
   await test('healthy: all 6 ticks under cap → does not fire', async () => {
     _resetSweepTickHistory();
     pushTicks(6, { limitReached: false });
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(!r.fired, 'should not fire when all ticks healthy');
+    expect(!r.fired, 'should not fire when all ticks healthy').toBeTruthy();
   });
 
   await test('degraded: 1 of 6 ticks limit-reached → fires (rate 0.83 < 0.95)', async () => {
@@ -84,11 +64,11 @@ async function main(): Promise<void> {
     pushTicks(5, { limitReached: false });
     pushTicks(1, { limitReached: true });
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(r.fired, 'should fire — 1/6 limit-reached drops rate below 0.95');
+    expect(r.fired, 'should fire — 1/6 limit-reached drops rate below 0.95').toBeTruthy();
     if (r.fired) {
-      assert(r.severity === 'high', 'severity should be high');
-      assert(r.resourceId === 'system-monitor-sweep', 'resource id should be the sweep job');
-      assert((r.metadata as { limitReachedCount: number }).limitReachedCount === 1, 'metadata should record 1 limit-reached tick');
+      expect(r.severity === 'high', 'severity should be high').toBeTruthy();
+      expect(r.resourceId === 'system-monitor-sweep', 'resource id should be the sweep job').toBeTruthy();
+      expect((r.metadata as { limitReachedCount: number }).limitReachedCount === 1, 'metadata should record 1 limit-reached tick').toBeTruthy();
     }
   });
 
@@ -96,7 +76,7 @@ async function main(): Promise<void> {
     _resetSweepTickHistory();
     pushTicks(6, { limitReached: true });
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(r.fired, 'should fire — full degraded window');
+    expect(r.fired, 'should fire — full degraded window').toBeTruthy();
   });
 
   await test('degraded: 1 of 6 ticks load-failed → fires (rate 0.83 < 0.95)', async () => {
@@ -104,9 +84,9 @@ async function main(): Promise<void> {
     pushTicks(5, { limitReached: false });
     pushTicks(1, { loadFailed: true });
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(r.fired, 'should fire — 1/6 load-failed counts as zero coverage');
+    expect(r.fired, 'should fire — 1/6 load-failed counts as zero coverage').toBeTruthy();
     if (r.fired) {
-      assert((r.metadata as { loadFailedCount: number }).loadFailedCount === 1, 'metadata should record 1 load-failed tick');
+      expect((r.metadata as { loadFailedCount: number }).loadFailedCount === 1, 'metadata should record 1 load-failed tick').toBeTruthy();
     }
   });
 
@@ -114,11 +94,8 @@ async function main(): Promise<void> {
     _resetSweepTickHistory();
     pushTicks(6, { loadFailed: true });
     const r = await sweepCoverageDegraded.run(stubCtx());
-    assert(r.fired, 'should fire — sustained load failure');
+    expect(r.fired, 'should fire — sustained load failure').toBeTruthy();
   });
-
-  console.log(`\n${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
 }
 
 main();

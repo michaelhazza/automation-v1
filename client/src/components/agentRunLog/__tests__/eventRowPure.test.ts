@@ -11,6 +11,7 @@
  *   - prefix-based slug fallback for emitters that haven't migrated yet
  */
 
+import { expect, test } from 'vitest';
 import type { AgentExecutionEvent } from '../../../../../shared/types/agentExecutionLog';
 import { buildAutomationSkillCompletedPayload } from '../../../../../shared/types/agentExecutionLog';
 import {
@@ -21,25 +22,6 @@ import {
   FALLBACK_WARN_CODES,
   type WarnSink,
 } from '../eventRowPure';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -74,32 +56,32 @@ console.log('\n── isAutomationSkillFailure ──');
 
 test('structured skillType=automation + status=error → true', () => {
   const ok = isAutomationSkillFailure({ skillType: 'automation', status: 'error', skillSlug: 'whatever' });
-  assert(ok, 'should detect via structured skillType');
+  expect(ok, 'should detect via structured skillType').toBeTruthy();
 });
 
 test('structured skillType=automation + status=ok → false', () => {
   const ok = isAutomationSkillFailure({ skillType: 'automation', status: 'ok', skillSlug: 'whatever' });
-  assert(!ok, 'must require status=error');
+  expect(!ok, 'must require status=error').toBeTruthy();
 });
 
 test('legacy slug "invoke_automation" + status=error → true (transitional fallback)', () => {
   const ok = isAutomationSkillFailure({ skillSlug: 'invoke_automation', status: 'error' });
-  assert(ok, 'must fall back to slug shape for un-migrated emitters');
+  expect(ok, 'must fall back to slug shape for un-migrated emitters').toBeTruthy();
 });
 
 test('legacy slug "automation.foo" prefix + status=error → true', () => {
   const ok = isAutomationSkillFailure({ skillSlug: 'automation.send_email', status: 'error' });
-  assert(ok, 'must fall back to prefix shape');
+  expect(ok, 'must fall back to prefix shape').toBeTruthy();
 });
 
 test('non-automation skill (e.g. crm_query) → false', () => {
   const ok = isAutomationSkillFailure({ skillSlug: 'crm.query', status: 'error', skillType: 'other' });
-  assert(!ok, 'must not match unrelated skills');
+  expect(!ok, 'must not match unrelated skills').toBeTruthy();
 });
 
 test('null/undefined payload → false (defensive)', () => {
-  assert(!isAutomationSkillFailure(null), 'null payload');
-  assert(!isAutomationSkillFailure(undefined), 'undefined payload');
+  expect(!isAutomationSkillFailure(null), 'null payload').toBeTruthy();
+  expect(!isAutomationSkillFailure(undefined), 'undefined payload').toBeTruthy();
 });
 
 // ── mapInvokeAutomationFailedViewModel ─────────────────────────────────────
@@ -112,7 +94,7 @@ test('prefers structured provider over regex parse', () => {
     resultSummary: 'The Gmail connection is not configured.',
   });
   const vm = mapInvokeAutomationFailedViewModel(ev);
-  assertEqual(vm.provider, 'mailchimp', 'structured wins');
+  expect(vm.provider, 'structured wins').toBe('mailchimp');
 });
 
 test('falls back to regex when provider absent — "The Mailchimp connection..."', () => {
@@ -120,13 +102,13 @@ test('falls back to regex when provider absent — "The Mailchimp connection..."
     resultSummary: "The Mailchimp connection isn't set up for this subaccount.",
   });
   const vm = mapInvokeAutomationFailedViewModel(ev);
-  assertEqual(vm.provider, 'Mailchimp', 'parsed from resultSummary');
+  expect(vm.provider, 'parsed from resultSummary').toBe('Mailchimp');
 });
 
 test('returns provider undefined when neither structured nor regex matches', () => {
   const ev = makeSkillCompletedEvent({ resultSummary: 'Something went wrong.' });
   const vm = mapInvokeAutomationFailedViewModel(ev);
-  assertEqual(vm.provider, undefined, 'no provider');
+  expect(vm.provider, 'no provider').toBe(undefined);
 });
 
 test('passes through structured connectionKey, idempotent, errorCode', () => {
@@ -136,9 +118,9 @@ test('passes through structured connectionKey, idempotent, errorCode', () => {
     errorCode: 'automation_missing_connection',
   });
   const vm = mapInvokeAutomationFailedViewModel(ev);
-  assertEqual(vm.connectionKey, 'mailchimp_account', 'connectionKey');
-  assertEqual(vm.idempotent, false, 'idempotent');
-  assertEqual(vm.errorCode, 'automation_missing_connection', 'errorCode');
+  expect(vm.connectionKey, 'connectionKey').toBe('mailchimp_account');
+  expect(vm.idempotent, 'idempotent').toBe(false);
+  expect(vm.errorCode, 'errorCode').toBe('automation_missing_connection');
 });
 
 test('uses linkedEntity.label as stepName when present', () => {
@@ -148,13 +130,13 @@ test('uses linkedEntity.label as stepName when present', () => {
     linkedEntity: { kind: 'workflow_step', id: 's1', label: 'Send welcome email' },
   } as unknown as AgentExecutionEvent;
   const vm = mapInvokeAutomationFailedViewModel(evWithEntity);
-  assertEqual(vm.stepName, 'Send welcome email', 'linkedEntity wins');
+  expect(vm.stepName, 'linkedEntity wins').toBe('Send welcome email');
 });
 
 test('falls back to skillName then skillSlug for stepName', () => {
   const ev = makeSkillCompletedEvent({ skillName: 'My Automation' });
   const vm = mapInvokeAutomationFailedViewModel(ev);
-  assertEqual(vm.stepName, 'My Automation', 'skillName fallback');
+  expect(vm.stepName, 'skillName fallback').toBe('My Automation');
 });
 
 // ── mapEventToViewModel ────────────────────────────────────────────────────
@@ -164,19 +146,19 @@ console.log('\n── mapEventToViewModel ──');
 test('automation failure → invoke_automation_failed kind', () => {
   const ev = makeSkillCompletedEvent({ skillType: 'automation' });
   const vm = mapEventToViewModel(ev);
-  assertEqual(vm.kind, 'invoke_automation_failed', 'kind');
+  expect(vm.kind, 'kind').toBe('invoke_automation_failed');
 });
 
 test('automation success → default kind (don\'t use the failure row)', () => {
   const ev = makeSkillCompletedEvent({ skillType: 'automation', status: 'ok' });
   const vm = mapEventToViewModel(ev);
-  assertEqual(vm.kind, 'default', 'success → default row');
+  expect(vm.kind, 'success → default row').toBe('default');
 });
 
 test('non-skill event → default kind', () => {
   const ev = { ...makeSkillCompletedEvent({}), eventType: 'run.started' as const, payload: {} };
   const vm = mapEventToViewModel(ev as unknown as AgentExecutionEvent);
-  assertEqual(vm.kind, 'default', 'unrelated event');
+  expect(vm.kind, 'unrelated event').toBe('default');
 });
 
 // ── retryNeedsConfirmation (F3 option A safety contract) ───────────────────
@@ -184,15 +166,15 @@ test('non-skill event → default kind', () => {
 console.log('\n── retryNeedsConfirmation (F3-A safety) ──');
 
 test('idempotent=true → no confirm needed', () => {
-  assert(!retryNeedsConfirmation(true), 'true → false');
+  expect(!retryNeedsConfirmation(true), 'true → false').toBeTruthy();
 });
 
 test('idempotent=false → confirm needed', () => {
-  assert(retryNeedsConfirmation(false), 'false → true');
+  expect(retryNeedsConfirmation(false), 'false → true').toBeTruthy();
 });
 
 test('idempotent=undefined (unknown) → confirm needed (safer default)', () => {
-  assert(retryNeedsConfirmation(undefined), 'undefined → true');
+  expect(retryNeedsConfirmation(undefined), 'undefined → true').toBeTruthy();
 });
 
 // ── R2-1: Fallback warn-sink contract ──────────────────────────────────────
@@ -208,36 +190,36 @@ function makeCapturingWarn(): { sink: WarnSink; calls: Array<{ code: string; ctx
 test('isAutomationSkillFailure: structured path does NOT warn', () => {
   const { sink, calls } = makeCapturingWarn();
   isAutomationSkillFailure({ skillType: 'automation', status: 'error', skillSlug: 'whatever' }, sink);
-  assertEqual(calls.length, 0, 'no warn for structured path');
+  expect(calls.length, 'no warn for structured path').toBe(0);
 });
 
 test('isAutomationSkillFailure: legacy slug fallback emits warn with stable code', () => {
   const { sink, calls } = makeCapturingWarn();
   isAutomationSkillFailure({ skillSlug: 'invoke_automation', status: 'error' }, sink);
-  assertEqual(calls.length, 1, 'one warn');
-  assertEqual(calls[0].code, FALLBACK_WARN_CODES.legacySkillSlugDetection, 'stable code');
-  assertEqual(calls[0].ctx.skillSlug, 'invoke_automation', 'context includes slug');
+  expect(calls.length, 'one warn').toBe(1);
+  expect(calls[0].code, 'stable code').toEqual(FALLBACK_WARN_CODES.legacySkillSlugDetection);
+  expect(calls[0].ctx.skillSlug, 'context includes slug').toBe('invoke_automation');
 });
 
 test('isAutomationSkillFailure: non-match does NOT warn (we only warn on actual fallback hits)', () => {
   const { sink, calls } = makeCapturingWarn();
   isAutomationSkillFailure({ skillSlug: 'crm.query', status: 'error' }, sink);
-  assertEqual(calls.length, 0, 'no warn for non-match');
+  expect(calls.length, 'no warn for non-match').toBe(0);
 });
 
 test('mapInvokeAutomationFailedViewModel: structured provider does NOT warn', () => {
   const { sink, calls } = makeCapturingWarn();
   const ev = makeSkillCompletedEvent({ provider: 'mailchimp', resultSummary: 'The Gmail connection is not configured.' });
   mapInvokeAutomationFailedViewModel(ev, sink);
-  assertEqual(calls.length, 0, 'no warn for structured provider');
+  expect(calls.length, 'no warn for structured provider').toBe(0);
 });
 
 test('mapInvokeAutomationFailedViewModel: regex fallback emits warn with stable code', () => {
   const { sink, calls } = makeCapturingWarn();
   const ev = makeSkillCompletedEvent({ resultSummary: 'The Mailchimp connection is missing.' });
   mapInvokeAutomationFailedViewModel(ev, sink);
-  assertEqual(calls.length, 1, 'one warn');
-  assertEqual(calls[0].code, FALLBACK_WARN_CODES.legacyProviderRegex, 'stable code');
+  expect(calls.length, 'one warn').toBe(1);
+  expect(calls[0].code, 'stable code').toEqual(FALLBACK_WARN_CODES.legacyProviderRegex);
 });
 
 test('mapEventToViewModel: threads warn sink to both inner functions', () => {
@@ -248,9 +230,9 @@ test('mapEventToViewModel: threads warn sink to both inner functions', () => {
     resultSummary: 'The Mailchimp connection is missing.',
   });
   mapEventToViewModel(ev, sink);
-  assertEqual(calls.length, 2, 'two warns — slug + regex');
+  expect(calls.length, 'two warns — slug + regex').toBe(2);
   const codes = calls.map((c) => c.code).sort();
-  assertEqual(codes, [FALLBACK_WARN_CODES.legacyProviderRegex, FALLBACK_WARN_CODES.legacySkillSlugDetection].sort(), 'both codes');
+  expect(codes, 'both codes').toEqual([FALLBACK_WARN_CODES.legacyProviderRegex, FALLBACK_WARN_CODES.legacySkillSlugDetection].sort());
 });
 
 // ── R2-4: Strict payload builder ───────────────────────────────────────────
@@ -268,11 +250,11 @@ test('builder produces a payload that satisfies the strict contract', () => {
     provider: 'mailchimp',
     connectionKey: 'mailchimp_account',
   });
-  assertEqual(p.eventType, 'skill.completed', 'eventType set');
-  assertEqual(p.critical, false, 'critical false');
-  assertEqual(p.skillType, 'automation', 'skillType pinned');
-  assertEqual(p.errorCode, 'automation_missing_connection', 'errorCode passed');
-  assertEqual(p.idempotent, false, 'idempotent passed');
+  expect(p.eventType, 'eventType set').toBe('skill.completed');
+  expect(p.critical, 'critical false').toBe(false);
+  expect(p.skillType, 'skillType pinned').toBe('automation');
+  expect(p.errorCode, 'errorCode passed').toBe('automation_missing_connection');
+  expect(p.idempotent, 'idempotent passed').toBe(false);
 });
 
 test('builder output flows through mapEventToViewModel without any warns', () => {
@@ -289,13 +271,13 @@ test('builder output flows through mapEventToViewModel without any warns', () =>
   });
   const ev = { ...makeSkillCompletedEvent({}), payload } as unknown as AgentExecutionEvent;
   const vm = mapEventToViewModel(ev, sink);
-  assertEqual(calls.length, 0, 'strict-builder output bypasses ALL fallback paths');
-  assertEqual(vm.kind, 'invoke_automation_failed', 'maps to failure row');
+  expect(calls.length, 'strict-builder output bypasses ALL fallback paths').toBe(0);
+  expect(vm.kind, 'maps to failure row').toBe('invoke_automation_failed');
   if (vm.kind === 'invoke_automation_failed') {
-    assertEqual(vm.provider, 'mailchimp', 'provider from structured field');
-    assertEqual(vm.connectionKey, 'mailchimp_account', 'connectionKey from structured field');
-    assertEqual(vm.idempotent, false, 'idempotent from structured field');
-    assertEqual(vm.errorCode, 'automation_missing_connection', 'errorCode from structured field');
+    expect(vm.provider, 'provider from structured field').toBe('mailchimp');
+    expect(vm.connectionKey, 'connectionKey from structured field').toBe('mailchimp_account');
+    expect(vm.idempotent, 'idempotent from structured field').toBe(false);
+    expect(vm.errorCode, 'errorCode from structured field').toBe('automation_missing_connection');
   }
 });
 
@@ -311,8 +293,8 @@ test('structured emitter with provider:null → no regex fallback, no warn (R3-5
     resultSummary: 'The Mailchimp connection is missing.',
   });
   const vm = mapInvokeAutomationFailedViewModel(ev, sink);
-  assertEqual(vm.provider, undefined, 'null provider stays undefined — emitter said "unknown", we trust them');
-  assertEqual(calls.length, 0, 'NO warn — structured emitter is authoritative even when fields are null');
+  expect(vm.provider, 'null provider stays undefined — emitter said "unknown", we trust them').toBe(undefined);
+  expect(calls.length, 'NO warn — structured emitter is authoritative even when fields are null').toBe(0);
 });
 
 test('structured emitter with provider:undefined and matching resultSummary → no regex fallback', () => {
@@ -323,8 +305,8 @@ test('structured emitter with provider:undefined and matching resultSummary → 
     resultSummary: 'The Mailchimp connection is missing.',
   });
   const vm = mapInvokeAutomationFailedViewModel(ev, sink);
-  assertEqual(vm.provider, undefined, 'no regex parse despite resultSummary matching');
-  assertEqual(calls.length, 0, 'NO warn');
+  expect(vm.provider, 'no regex parse despite resultSummary matching').toBe(undefined);
+  expect(calls.length, 'NO warn').toBe(0);
 });
 
 test('structured emitter with connectionKey:null → null becomes undefined in view model', () => {
@@ -335,9 +317,9 @@ test('structured emitter with connectionKey:null → null becomes undefined in v
     errorCode: 'automation_missing_connection',
   });
   const vm = mapInvokeAutomationFailedViewModel(ev, sink);
-  assertEqual(vm.connectionKey, undefined, 'null normalised to undefined');
-  assertEqual(vm.errorCode, 'automation_missing_connection', 'errorCode passes through');
-  assertEqual(calls.length, 0, 'NO warn');
+  expect(vm.connectionKey, 'null normalised to undefined').toBe(undefined);
+  expect(vm.errorCode, 'errorCode passes through').toBe('automation_missing_connection');
+  expect(calls.length, 'NO warn').toBe(0);
 });
 
 test('LEGACY emitter (no skillType) with matching resultSummary → DOES regex-fall-back and DOES warn', () => {
@@ -350,9 +332,9 @@ test('LEGACY emitter (no skillType) with matching resultSummary → DOES regex-f
     resultSummary: 'The Mailchimp connection is missing.',
   });
   const vm = mapInvokeAutomationFailedViewModel(ev, sink);
-  assertEqual(vm.provider, 'Mailchimp', 'regex fallback fires for legacy emitter');
-  assertEqual(calls.length, 1, 'ONE warn (regex fallback hit)');
-  assertEqual(calls[0].code, FALLBACK_WARN_CODES.legacyProviderRegex, 'stable warn code');
+  expect(vm.provider, 'regex fallback fires for legacy emitter').toBe('Mailchimp');
+  expect(calls.length, 'ONE warn (regex fallback hit)').toBe(1);
+  expect(calls[0].code, 'stable warn code').toEqual(FALLBACK_WARN_CODES.legacyProviderRegex);
 });
 
 // ── R3-3: Warn-code namespace verification ─────────────────────────────────
@@ -362,12 +344,9 @@ console.log('\n── R3-3: Dot-namespaced warn codes ──');
 test('warn codes use dot-namespaced surface.signal format', () => {
   // R3-3: confirms the rename from underscore_only to dot-separated landed.
   // Future callers can rely on event_row.* prefix matching for log filters.
-  assertEqual(FALLBACK_WARN_CODES.legacySkillSlugDetection, 'event_row.legacy_skill_slug_detection', 'slug code namespaced');
-  assertEqual(FALLBACK_WARN_CODES.legacyProviderRegex, 'event_row.legacy_provider_regex', 'regex code namespaced');
-  assertEqual(FALLBACK_WARN_CODES.legacySkillSlugDetection.startsWith('event_row.'), true, 'shared prefix for log filtering');
+  expect(FALLBACK_WARN_CODES.legacySkillSlugDetection, 'slug code namespaced').toBe('event_row.legacy_skill_slug_detection');
+  expect(FALLBACK_WARN_CODES.legacyProviderRegex, 'regex code namespaced').toBe('event_row.legacy_provider_regex');
+  expect(FALLBACK_WARN_CODES.legacySkillSlugDetection.startsWith('event_row.'), 'shared prefix for log filtering').toBe(true);
 });
 
-// ── Summary ────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+// ── Summary ────────────────────────────────────────────────────────────────

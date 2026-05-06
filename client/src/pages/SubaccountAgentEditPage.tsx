@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -7,6 +7,19 @@ import TestPanel from '../components/runs/TestPanel';
 import Modal from '../components/Modal';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
+import { IdentityCard } from '../components/workspace/IdentityCard';
+import type { IdentityCardAction } from '../components/workspace/IdentityCard';
+import AgentActivityTab from '../components/agent/AgentActivityTab';
+import { SuspendIdentityDialog } from '../components/workspace/SuspendIdentityDialog';
+import { RevokeIdentityDialog } from '../components/workspace/RevokeIdentityDialog';
+import {
+  getAgentIdentity,
+  suspendAgentIdentity,
+  resumeAgentIdentity,
+  revokeAgentIdentity,
+  archiveAgentIdentity,
+  toggleAgentEmailSending,
+} from '../lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -42,10 +55,19 @@ interface LinkDetail {
     modelProvider: string;
     modelId: string;
     defaultSkillSlugs: string[];
+    workspaceActorId: string | null;
   };
 }
 
-type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs';
+type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity' | 'activity';
+
+interface AgentIdentity {
+  identityId: string;
+  emailAddress: string;
+  emailSendingEnabled: boolean;
+  status: string;
+  displayName: string;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,12 +90,49 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function SubaccountAgentEditPage({ user: _user }: { user: User }) {
   const { subaccountId, linkId } = useParams<{ subaccountId: string; linkId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [link, setLink] = useState<LinkDetail | null>(null);
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('skills');
+  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'skills';
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+  const [showOnboardedBanner, setShowOnboardedBanner] = useState(
+    searchParams.get('newlyOnboarded') === '1',
+  );
+
+  // Identity tab state
+  const [identity, setIdentity] = useState<AgentIdentity | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [suspendOpen, setSuspendOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  const [identityPending, setIdentityPending] = useState<IdentityCardAction | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+
+  function extractApiError(e: unknown, fallback: string): string {
+    const err = e as { response?: { data?: { error?: { message?: string } | string; message?: string } }; message?: string };
+    const apiErr = err.response?.data?.error;
+    return (typeof apiErr === 'string' ? apiErr : apiErr?.message)
+      ?? err.response?.data?.message
+      ?? err.message
+      ?? fallback;
+  }
+
+  async function runIdentityAction(action: IdentityCardAction, fn: () => Promise<unknown>) {
+    if (!link) return;
+    setIdentityPending(action);
+    setIdentityError(null);
+    try {
+      await fn();
+      const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+      setIdentity(updated);
+    } catch (e: unknown) {
+      setIdentityError(extractApiError(e, 'Action failed'));
+    } finally {
+      setIdentityPending(null);
+    }
+  }
 
   // Per-section form state
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
@@ -125,6 +184,15 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     }
     load();
   }, [subaccountId, linkId]);
+
+  useEffect(() => {
+    if (activeTab !== 'identity' || !link) return;
+    setIdentityLoading(true);
+    getAgentIdentity(link.agentId)
+      .then((data: AgentIdentity) => setIdentity(data))
+      .catch(() => setIdentity(null))
+      .finally(() => setIdentityLoading(false));
+  }, [activeTab, link]);
 
   async function patch(tab: Tab, payload: Record<string, unknown>) {
     setSaving(tab);
@@ -180,6 +248,8 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     { id: 'budget', label: 'Budget' },
     { id: 'scheduling', label: 'Scheduling' },
     { id: 'beliefs', label: 'Beliefs' },
+    { id: 'identity', label: 'Identity' },
+    { id: 'activity', label: 'Activity' },
   ];
 
   return (
@@ -475,6 +545,82 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       {/* ── Beliefs tab ── */}
       {activeTab === 'beliefs' && subaccountId && linkId && (
         <BeliefsTab subaccountId={subaccountId} linkId={linkId} />
+      )}
+
+      {/* ── Identity tab ── */}
+      {activeTab === 'identity' && (
+        <>
+          {showOnboardedBanner && (
+            <div className="flex items-start justify-between gap-3 mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded-lg text-[13px] text-green-800">
+              <span>Identity provisioned. Confirm signature and channel preferences below.</span>
+              <button
+                onClick={() => setShowOnboardedBanner(false)}
+                className="flex-shrink-0 text-green-600 hover:text-green-900 bg-transparent border-0 cursor-pointer p-0 leading-none"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {identityLoading && <div className="text-[13px] text-slate-400">Loading…</div>}
+          {!identityLoading && !identity && (
+            <div className="text-[13px] text-slate-500">
+              This agent has not been onboarded to the workplace yet.
+            </div>
+          )}
+          {!identityLoading && identity && link && (
+            <>
+              <IdentityCard
+                identity={{ ...identity, id: identity.identityId }}
+                actor={{ displayName: link.agent.name, agentRole: null }}
+                pendingAction={identityPending}
+                actionError={identityError}
+                onSuspend={() => { setIdentityError(null); setSuspendOpen(true); }}
+                onResume={() => runIdentityAction('resume', () => resumeAgentIdentity(link.agentId))}
+                onRevoke={() => { setIdentityError(null); setRevokeOpen(true); }}
+                onArchive={() => runIdentityAction('archive', () => archiveAgentIdentity(link.agentId))}
+                onToggleEmail={(enabled) => runIdentityAction('toggleEmail', () => toggleAgentEmailSending(link.agentId, enabled))}
+              />
+              <SuspendIdentityDialog
+                open={suspendOpen}
+                agentId={link.agentId}
+                agentName={identity.displayName}
+                onClose={() => setSuspendOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+              <RevokeIdentityDialog
+                open={revokeOpen}
+                agentId={link.agentId}
+                agentName={link.agent?.name ?? identity.displayName}
+                onClose={() => setRevokeOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+            </>
+          )}
+        </>
+      )}
+      {/* ── Activity tab ── */}
+      {activeTab === 'activity' && (
+        link?.agent.workspaceActorId && subaccountId
+          ? (
+            <AgentActivityTab
+              agentId={link.agentId}
+              actorId={link.agent.workspaceActorId}
+              subaccountId={subaccountId}
+              agentName={link.agent.name}
+            />
+          )
+          : (
+            <div className="text-[13px] text-slate-500">
+              This agent has no workspace identity.
+            </div>
+          )
       )}
     </div>{/* end main content */}
 

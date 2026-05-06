@@ -11,27 +11,13 @@
  *   npx tsx server/services/__tests__/skillAnalyzerServicePureMergePrompt.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   buildClassifyPromptWithMerge,
   parseClassificationResponseWithMerge,
   type LibrarySkillSummary,
 } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEq<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -254,5 +240,3 @@ test('parseClassificationResponseWithMerge: extracts JSON from markdown code blo
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`skillAnalyzerServicePureMergePrompt: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

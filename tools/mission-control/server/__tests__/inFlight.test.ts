@@ -70,6 +70,14 @@ test('derivePhaseFromVerdict FAIL → REVIEWING', () => {
   eq(derivePhaseFromVerdict('FAIL'), 'REVIEWING', 'phase');
 });
 
+test('derivePhaseFromVerdict NO_HOLES_FOUND → MERGE_READY (adversarial-reviewer clean pass)', () => {
+  eq(derivePhaseFromVerdict('NO_HOLES_FOUND'), 'MERGE_READY', 'phase');
+});
+
+test('derivePhaseFromVerdict HOLES_FOUND → REVIEWING (adversarial-reviewer found issues)', () => {
+  eq(derivePhaseFromVerdict('HOLES_FOUND'), 'REVIEWING', 'phase');
+});
+
 test('derivePhaseFromVerdict unknown verdict string → REVIEWING (review exists, content unknown)', () => {
   eq(derivePhaseFromVerdict('SOMETHING_NEW'), 'REVIEWING', 'phase');
 });

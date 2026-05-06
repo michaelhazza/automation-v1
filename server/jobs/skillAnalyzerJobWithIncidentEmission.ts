@@ -9,7 +9,7 @@
  * (i.e. this throw IS the final attempt failing — no more retries are
  * scheduled). Earlier-attempt failures rethrow without emitting so that
  * transient errors that succeed on retry don't create high-severity
- * false-positive incidents. The fingerprint `skill_analyzer:terminal_failure`
+ * false-positive incidents. The fingerprint `job:skill_analyzer:terminal_failure`
  * names this contract explicitly.
  */
 
@@ -38,13 +38,13 @@ export async function runSkillAnalyzerJobWithIncidentEmission(
     const retryLimit = getJobConfig('skill-analyzer').retryLimit ?? 0;
     const isTerminalAttempt = retryCount >= retryLimit;
     if (isTerminalAttempt) {
-      recordIncident({
+      await recordIncident({
         source: 'job',
         severity: 'high',
         summary: `Skill analyzer terminal failure for job ${jobId}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
         errorCode: 'skill_analyzer_failed',
         stack: err instanceof Error ? err.stack : undefined,
-        fingerprintOverride: 'skill_analyzer:terminal_failure',
+        fingerprintOverride: 'job:skill_analyzer:terminal_failure',
         errorDetail: { jobId, retryCount },
       });
     }

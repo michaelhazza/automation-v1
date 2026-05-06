@@ -1,0 +1,9 @@
+The changed planning docs introduce contradictions with the baseline-capture state machine that would break fallback capture and retry handling if implemented as written. These should be corrected before treating the plan/spec update as reliable.
+
+Full review comments:
+
+- [P2] Keep fallback cron from skipping pending baselines — C:/Files/Projects/automation-v1/tasks/builds/stream-1-onboarding-scope/plan.md:132-132
+  For pending or retryable baselines, the existing non-reset row is the row the fallback job is supposed to evaluate/capture; exiting whenever any non-reset baseline exists would make the daily fallback no-op for exactly the `pending`/`ready` rows it is meant to recover after missed events or retries. Narrow this guard to terminal already-handled states such as `captured`/`manual`, or apply it only when creating the initial pending row.
+
+- [P2] Use the declared retry status in runtime invariant — C:/Files/Projects/automation-v1/tasks/builds/stream-1-onboarding-scope/plan.md:128-128
+  The baseline schema and capture flow use `ready` for retryable rows, not `retrying`; if the implementation follows this invariant and asserts `pending` or `retrying`, every retry row with `status='ready'` will fail fast instead of being captured. Update this to match the status enum and acquisition query (`pending`/`ready`).

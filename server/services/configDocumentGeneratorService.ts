@@ -72,7 +72,7 @@ export async function generateConfigurationDocument(input: GenerateInput): Promi
 
   // DOCX path — uses the `docx` npm package. Imported dynamically so test
   // runs don't need the package installed.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // @ts-expect-error — optional peer dep, not declared in this project's deps
   const docx = await (import('docx') as Promise<any>).catch(() => null) as Record<string, any> | null;
   if (!docx) {

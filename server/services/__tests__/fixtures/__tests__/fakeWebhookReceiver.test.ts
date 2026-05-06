@@ -11,29 +11,14 @@
  *   npx tsx server/services/__tests__/fixtures/__tests__/fakeWebhookReceiver.test.ts
  */
 
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { startFakeWebhookReceiver } from '../fakeWebhookReceiver.js';
-
-let passed = 0;
-let failed = 0;
-
-async function test(name: string, fn: () => Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.stack ?? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('FakeWebhookReceiver self-test:');
 
 // ─── Case 1: basic POST records method, path, headers, body ─────────────────
-await test('records POST with normalised lowercase headers', async () => {
+test('records POST with normalised lowercase headers', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     const body = { hello: 'world', n: 42 };
@@ -45,22 +30,22 @@ await test('records POST with normalised lowercase headers', async () => {
       },
       body: JSON.stringify(body),
     });
-    assert.equal(res.status, 200);
-    assert.equal(receiver.callCount, 1);
+    expect(res.status).toBe(200);
+    expect(receiver.callCount).toBe(1);
     const call = receiver.calls[0];
-    assert.equal(call.method, 'POST');
-    assert.equal(call.path, '/anything');
+    expect(call.method).toBe('POST');
+    expect(call.path).toBe('/anything');
     // Header normalisation invariant — keys are lowercased.
-    assert.equal(call.headers['x-signature'], 'abc');
-    assert.equal(call.headers['X-Signature' as 'x-signature'], undefined);
-    assert.deepStrictEqual(call.body, body);
+    expect(call.headers['x-signature']).toBe('abc');
+    expect(call.headers['X-Signature' as 'x-signature']).toBe(undefined);
+    expect(call.body).toEqual(body);
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 2: body-fully-read invariant — recorded body matches sent bytes ───
-await test('records the fully-read body (no truncation)', async () => {
+test('records the fully-read body (no truncation)', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     // Use a payload large enough to span multiple chunks on the wire.
@@ -71,15 +56,15 @@ await test('records the fully-read body (no truncation)', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    assert.equal(receiver.callCount, 1);
-    assert.deepStrictEqual(receiver.calls[0].body, body);
+    expect(receiver.callCount).toBe(1);
+    expect(receiver.calls[0].body).toEqual(body);
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 2b: malformed JSON under application/json falls back to raw buffer
-await test('malformed JSON body with application/json content-type is recorded as raw bytes (no harness mask)', async () => {
+test('malformed JSON body with application/json content-type is recorded as raw bytes (no harness mask)', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     // Deliberately malformed JSON. The harness must NOT throw or skip
@@ -92,48 +77,44 @@ await test('malformed JSON body with application/json content-type is recorded a
       headers: { 'Content-Type': 'application/json' },
       body: malformed,
     });
-    assert.equal(res.status, 200, 'receiver still responds even when JSON is malformed');
-    assert.equal(receiver.callCount, 1);
+    expect(res.status).toBe(200);
+    expect(receiver.callCount).toBe(1);
     const recorded = receiver.calls[0].body;
-    assert.ok(Buffer.isBuffer(recorded), 'malformed JSON falls back to raw Buffer');
-    assert.equal(
-      (recorded as Buffer).toString('utf8'),
-      malformed,
-      'recorded raw bytes match the deliberately-malformed payload exactly',
-    );
+    expect(Buffer.isBuffer(recorded)).toBeTruthy();
+    expect((recorded as Buffer).toString('utf8')).toBe(malformed);
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 3: setStatusCode causes subsequent responses to use that status ───
-await test('setStatusCode(500) makes the next response 500', async () => {
+test('setStatusCode(500) makes the next response 500', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     receiver.setStatusCode(500);
     const res = await fetch(`${receiver.url}/err`, { method: 'POST', body: '{}' });
-    assert.equal(res.status, 500);
+    expect(res.status).toBe(500);
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 4: setLatencyMs delays responses ──────────────────────────────────
-await test('setLatencyMs(150) causes the response to take >= 150ms', async () => {
+test('setLatencyMs(150) causes the response to take >= 150ms', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     receiver.setLatencyMs(150);
     const start = Date.now();
     await fetch(`${receiver.url}/slow`, { method: 'POST', body: '{}' });
     const elapsed = Date.now() - start;
-    assert.ok(elapsed >= 140, `expected >= 140ms, got ${elapsed}ms`);
+    expect(elapsed >= 140).toBeTruthy();
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 5: setDropConnection records the call but rejects fetch ───────────
-await test('setDropConnection(true) records the call AND rejects the client', async () => {
+test('setDropConnection(true) records the call AND rejects the client', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     receiver.setDropConnection(true);
@@ -148,60 +129,56 @@ await test('setDropConnection(true) records the call AND rejects the client', as
     } catch {
       threw = true;
     }
-    assert.ok(threw, 'fetch should reject when the connection is dropped');
-    assert.equal(receiver.callCount, 1, 'call should still be recorded');
-    assert.deepStrictEqual(
-      receiver.calls[0].body,
-      body,
-      'recorded body must reflect the fully-read request body, even when the response was dropped',
-    );
+    expect(threw).toBeTruthy();
+    expect(receiver.callCount).toBe(1);
+    expect(receiver.calls[0].body).toEqual(body);
 
     // Toggle off → next request returns normally.
     receiver.setDropConnection(false);
     const res = await fetch(`${receiver.url}/ok`, { method: 'POST', body: '{}' });
-    assert.equal(res.status, 200);
-    assert.equal(receiver.callCount, 2);
+    expect(res.status).toBe(200);
+    expect(receiver.callCount).toBe(2);
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 6: reset() clears calls AND drop flag ─────────────────────────────
-await test('reset() clears calls and reverts overrides', async () => {
+test('reset() clears calls and reverts overrides', async () => {
   const receiver = await startFakeWebhookReceiver();
   try {
     await fetch(`${receiver.url}/a`, { method: 'POST', body: '{}' });
     await fetch(`${receiver.url}/b`, { method: 'POST', body: '{}' });
-    assert.equal(receiver.callCount, 2);
+    expect(receiver.callCount).toBe(2);
     receiver.setStatusCode(418);
     receiver.setLatencyMs(100);
     receiver.setDropConnection(true);
     receiver.reset();
-    assert.equal(receiver.callCount, 0, 'calls must be cleared');
+    expect(receiver.callCount).toBe(0);
     // After reset, response is 200 with default body and no latency, no drop.
     const start = Date.now();
     const res = await fetch(`${receiver.url}/c`, { method: 'POST', body: '{}' });
     const elapsed = Date.now() - start;
-    assert.equal(res.status, 200);
-    assert.ok(elapsed < 100, `expected fast response after reset, got ${elapsed}ms`);
-    assert.equal(receiver.callCount, 1);
+    expect(res.status).toBe(200);
+    expect(elapsed < 100).toBeTruthy();
+    expect(receiver.callCount).toBe(1);
   } finally {
     await receiver.close();
   }
 });
 
 // ─── Case 7: concurrent receivers each get a different OS-assigned port ────
-await test('multiple concurrent receivers get distinct ports', async () => {
+test('multiple concurrent receivers get distinct ports', async () => {
   const a = await startFakeWebhookReceiver();
   const b = await startFakeWebhookReceiver();
   try {
-    assert.notEqual(a.url, b.url, 'two receivers must bind to different ports');
+    expect(a.url).not.toBe(b.url);
     await fetch(`${a.url}/x`, { method: 'POST', body: '{}' });
     await fetch(`${b.url}/y`, { method: 'POST', body: '{}' });
-    assert.equal(a.callCount, 1);
-    assert.equal(b.callCount, 1);
-    assert.equal(a.calls[0].path, '/x');
-    assert.equal(b.calls[0].path, '/y');
+    expect(a.callCount).toBe(1);
+    expect(b.callCount).toBe(1);
+    expect(a.calls[0].path).toBe('/x');
+    expect(b.calls[0].path).toBe('/y');
   } finally {
     await a.close();
     await b.close();
@@ -209,17 +186,15 @@ await test('multiple concurrent receivers get distinct ports', async () => {
 });
 
 // ─── Case 8: close() resolves without unhandled-promise warnings ────────────
-await test('close() releases the port', async () => {
+test('close() releases the port', async () => {
   const receiver = await startFakeWebhookReceiver();
   await fetch(`${receiver.url}/once`, { method: 'POST', body: '{}' });
   await receiver.close();
   // Subsequent receiver acquisition must succeed (the port is freed).
   const next = await startFakeWebhookReceiver();
-  assert.ok(next.url.startsWith('http://127.0.0.1:'));
+  expect(next.url.startsWith('http://127.0.0.1:')).toBeTruthy();
   await next.close();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

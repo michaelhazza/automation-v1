@@ -290,6 +290,11 @@ export const proposeActionMiddleware: PreToolMiddleware = {
       toolCall.name,
     );
 
+    // Agentic Commerce Chunk 8: tag spend-enabled actions so the HITL
+    // renderer can route them to renderSpendPayload.
+    const spendMeta: Record<string, unknown> | undefined =
+      definition?.spendsMoney === true ? { category: 'spend' } : undefined;
+
     try {
       const proposed = await actionService.proposeAction({
         organisationId,
@@ -300,10 +305,14 @@ export const proposeActionMiddleware: PreToolMiddleware = {
         idempotencyKey,
         payload: toolCall.input,
         toolIntentConfidence,
+        metadata: spendMeta,
       });
 
       // Blocked by policy engine or gate resolution
       if (proposed.status === 'blocked') {
+        // Chunk 7: spend-enabled actions that block get a distinct audit reason
+        // so spend-policy holds are distinguishable from generic policy blocks.
+        const blockReason = definition?.spendsMoney === true ? 'spend_block' : 'policy_block';
         await writeSecurityEvent({
           organisationId,
           subaccountId,
@@ -311,12 +320,12 @@ export const proposeActionMiddleware: PreToolMiddleware = {
           toolCallId: toolCall.id,
           toolSlug: toolCall.name,
           decision: 'deny',
-          reason: 'policy_block',
+          reason: blockReason,
           argsHash,
         });
         const decision: PreToolDecision = {
           action: 'block',
-          reason: 'policy_block',
+          reason: blockReason,
         };
         ctx.preToolDecisions.set(toolCall.id, decision);
         return decision;

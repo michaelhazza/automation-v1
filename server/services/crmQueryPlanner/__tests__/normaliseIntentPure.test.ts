@@ -4,22 +4,8 @@
  * Runnable via:
  *   npx tsx server/services/crmQueryPlanner/__tests__/normaliseIntentPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { normaliseIntent } from '../normaliseIntentPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -27,120 +13,85 @@ function assertEqual<T>(a: T, b: T, label = '') {
   }
 }
 
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
-
 // ── Identity / stable output ──────────────────────────────────────────────
 
 test('same input produces same hash (identity 1)', () => {
-  assertEqual(normaliseIntent('stale contacts').hash, normaliseIntent('stale contacts').hash);
+  expect(normaliseIntent('stale contacts').hash).toEqual(normaliseIntent('stale contacts').hash);
 });
 
 test('rawIntent is preserved verbatim', () => {
   const raw = 'Show Me Stale Contacts!';
-  assertEqual(normaliseIntent(raw).rawIntent, raw);
+  expect(normaliseIntent(raw).rawIntent).toEqual(raw);
 });
 
 test('hash is 16 hex characters', () => {
-  assert(/^[0-9a-f]{16}$/.test(normaliseIntent('inactive contacts').hash), 'hash length/format');
+  expect(/^[0-9a-f]{16}$/.test(normaliseIntent('inactive contacts').hash), 'hash length/format').toBeTruthy();
 });
 
 // ── Whitespace / casing variants → identical hash ──────────────────────────
 
 test('extra whitespace collapses to same hash', () => {
-  assertEqual(
-    normaliseIntent('inactive  contacts').hash,
-    normaliseIntent('inactive contacts').hash,
-    'whitespace',
-  );
+  expect(normaliseIntent('inactive  contacts').hash, 'whitespace').toEqual(normaliseIntent('inactive contacts').hash);
 });
 
 test('uppercase input → same hash as lowercase', () => {
-  assertEqual(
-    normaliseIntent('Inactive Contacts').hash,
-    normaliseIntent('inactive contacts').hash,
-    'casing',
-  );
+  expect(normaliseIntent('Inactive Contacts').hash, 'casing').toEqual(normaliseIntent('inactive contacts').hash);
 });
 
 test('trailing punctuation stripped → same hash', () => {
-  assertEqual(
-    normaliseIntent('inactive contacts!').hash,
-    normaliseIntent('inactive contacts').hash,
-    'punctuation',
-  );
+  expect(normaliseIntent('inactive contacts!').hash, 'punctuation').toEqual(normaliseIntent('inactive contacts').hash);
 });
 
 // ── Synonym replacements ──────────────────────────────────────────────────
 
 test('synonym: "leads" → "contacts"', () => {
-  assertEqual(
-    normaliseIntent('stale leads').hash,
-    normaliseIntent('stale contacts').hash,
-    'leads synonym',
-  );
+  expect(normaliseIntent('stale leads').hash, 'leads synonym').toEqual(normaliseIntent('stale contacts').hash);
 });
 
 test('synonym: "deals" → "opportunities"', () => {
-  assertEqual(
-    normaliseIntent('stale deals').hash,
-    normaliseIntent('stale opportunities').hash,
-    'deals synonym',
-  );
+  expect(normaliseIntent('stale deals').hash, 'deals synonym').toEqual(normaliseIntent('stale opportunities').hash);
 });
 
 test('synonym: "clients" → "contacts"', () => {
-  assertEqual(
-    normaliseIntent('stale clients').hash,
-    normaliseIntent('stale contacts').hash,
-    'clients synonym',
-  );
+  expect(normaliseIntent('stale clients').hash, 'clients synonym').toEqual(normaliseIntent('stale contacts').hash);
 });
 
 // ── Stop-word stripping ───────────────────────────────────────────────────
 
 test('stop word "the" stripped', () => {
-  assertEqual(
-    normaliseIntent('the stale contacts').hash,
-    normaliseIntent('stale contacts').hash,
-    '"the" stop word',
-  );
+  expect(normaliseIntent('the stale contacts').hash, '"the" stop word').toEqual(normaliseIntent('stale contacts').hash);
 });
 
 test('stop word "list" stripped', () => {
   const { tokens } = normaliseIntent('list inactive contacts');
-  assert(!tokens.includes('list'), '"list" must not be in tokens');
+  expect(!tokens.includes('list'), '"list" must not be in tokens').toBeTruthy();
 });
 
 test('stop word "show" stripped', () => {
   const { tokens } = normaliseIntent('show stale contacts');
-  assert(!tokens.includes('show'), '"show" must not be in tokens');
+  expect(!tokens.includes('show'), '"show" must not be in tokens').toBeTruthy();
 });
 
 // ── Date-literal canonicalisation ─────────────────────────────────────────
 
 test('date: "last 30 days" → last_30d token', () => {
   const { tokens } = normaliseIntent('contacts inactive last 30 days');
-  assert(tokens.includes('last_30d'), 'last_30d token expected');
+  expect(tokens.includes('last_30d'), 'last_30d token expected').toBeTruthy();
 });
 
 test('date: "30 days ago" → last_30d token', () => {
   const { tokens } = normaliseIntent('contacts inactive 30 days ago');
-  assert(tokens.includes('last_30d'), 'last_30d token expected');
+  expect(tokens.includes('last_30d'), 'last_30d token expected').toBeTruthy();
 });
 
 test('date: "past month" → last_30d token', () => {
   const { tokens } = normaliseIntent('stale contacts past month');
-  assert(tokens.includes('last_30d'), 'last_30d token expected');
+  expect(tokens.includes('last_30d'), 'last_30d token expected').toBeTruthy();
 });
 
 test('date: "this week" → this_week token', () => {
   const { tokens } = normaliseIntent('upcoming appointments this week');
-  assert(tokens.includes('this_week'), 'this_week token expected');
+  expect(tokens.includes('this_week'), 'this_week token expected').toBeTruthy();
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

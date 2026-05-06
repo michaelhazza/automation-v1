@@ -1,5 +1,4 @@
-import { test } from 'node:test';
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { shouldEmitLaelLifecycle } from '../llmRouterLaelPure.js';
 
 // Pure unit tests for the shouldEmitLaelLifecycle gating predicate.
@@ -23,11 +22,7 @@ test('shouldEmitLaelLifecycle — exhaustive 4×2×5 matrix', () => {
           runId != null &&
           !BLOCKED_STATUSES.has(terminalStatus);
         const actual = shouldEmitLaelLifecycle({ sourceType, runId }, terminalStatus);
-        assert.strictEqual(
-          actual,
-          expected,
-          `shouldEmitLaelLifecycle({ sourceType: '${sourceType}', runId: ${runId ? "'run-uuid'" : 'null'} }, '${terminalStatus}') should be ${expected}`,
-        );
+        expect(actual, `shouldEmitLaelLifecycle({ sourceType: '${sourceType}', runId: ${runId ? "'run-uuid'" : 'null'} }, '${terminalStatus}') should be ${expected}`).toBe(expected);
       }
     }
   }

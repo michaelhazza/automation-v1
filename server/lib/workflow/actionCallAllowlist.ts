@@ -1,11 +1,14 @@
-﻿/**
+﻿import { SPEND_ACTION_ALLOWED_SLUGS } from '../../config/actionRegistry.js';
+
+/**
  * Allowlist of slugs callable from `action_call` Workflow steps.
  *
  * Spec: docs/onboarding-Workflows-spec.md §4.3.
  *
- * Only the Configuration Assistant's 28 `config_*` skills are callable from
- * `action_call` steps in v1. Expansions require editing this file, writing
- * down why, and passing spec-review — not a silent runtime override.
+ * Originally scoped to the Configuration Assistant's 28 `config_*` skills.
+ * Extended in Agentic Commerce (Chunk 6) to include spend-enabled skills.
+ * Expansions require editing this file, writing down why, and passing
+ * spec-review — not a silent runtime override.
  *
  * Phase G (§11.6) will add two new portal/email skills:
  *   - `config_publish_workflow_output_to_portal`
@@ -67,6 +70,9 @@ export const ACTION_CALL_ALLOWED_SLUGS: ReadonlySet<string> = new Set([
   // ── Memory & Briefings Phase 3 — ship with weekly-digest ───────────────────
   'config_weekly_digest_gather',
   'config_deliver_workflow_output',
+  // ── Agentic Commerce — Spend Skills (Chunk 6) ────────────────────────────
+  // Spec: tasks/builds/agentic-commerce/spec.md §7.1, §7.3
+  ...SPEND_ACTION_ALLOWED_SLUGS,
 ]);
 
 /**

@@ -15,8 +15,8 @@ Every finding is triaged into one of the two buckets. Every triage decision, eve
 
 ## Configuration
 
-**MODE** — set per invocation, not per session.
-- `manual` — you copy the diff into the ChatGPT UI and paste the response back. No API key required.
+**MODE** — set per invocation, not per session. Default is `manual` — only use `automated` if the user explicitly says "automated".
+- `manual` (default) — you copy the diff into the ChatGPT UI and paste the response back. No API key required.
 - `automated` — the agent calls the OpenAI API via `scripts/chatgpt-review.ts`. Requires `OPENAI_API_KEY`.
 
 **HUMAN_IN_LOOP: yes** — default for automated sessions only. Has no effect in manual mode (the user is already in the loop by definition).
@@ -42,9 +42,8 @@ When the user says "run chatgpt-pr-review" (or equivalent):
 
 **First: determine MODE from the invocation.**
 
-- If the invocation contains "manual" → MODE = manual
 - If the invocation contains "automated" → MODE = automated
-- If neither → ask: "Manual (you copy the diff into ChatGPT UI and paste the response back — no API cost) or automated (calls OpenAI API, requires OPENAI_API_KEY)? Reply: manual or automated." Wait for reply before proceeding.
+- Otherwise (invocation contains "manual", or neither keyword appears) → MODE = manual. Do NOT ask — default silently to manual. Only invoke automated mode when the user explicitly says "automated".
 
 MODE is recorded in the session log Session Info block and restored on resume.
 
@@ -57,10 +56,17 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 - If no log exists: run the full On Start sequence below.
 
 1. Run `git branch --show-current` to get the current branch name
-2. Run `git diff main...HEAD` to get the full diff
-3. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
+2. Run `git fetch origin main` to ensure the local `origin/main` ref is current — the local `main` pointer may be stale if you have not switched to that branch recently.
+3. Run `git diff origin/main...HEAD` to get the full diff (always use `origin/main`, never the local `main` ref)
+4. Run `gh pr view --json number,url,title 2>/dev/null` to check for an existing PR
    - If the command returns nothing (no PR): run `gh pr create --fill` to create one
-4. Always print the PR URL — whether just created or already existing
+4. Always print the PR URL as a prominent standalone line — whether just created or already existing:
+
+   ```
+   PR: https://github.com/.../<number>
+   ```
+
+   Print this BEFORE any other output. It must be the first visible line the user sees.
 5. Create the session log at `tasks/review-logs/chatgpt-pr-review-<branch-slug>-<YYYY-MM-DDThh-mm-ssZ>.md` and write the Session Info header (see Log Format)
 6. [AUTOMATED] **Verify `OPENAI_API_KEY` is set.** If not, print:
 
@@ -70,10 +76,22 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 
    [MANUAL] Skip this step.
 
-7. [AUTOMATED] **Run round 1 immediately** by invoking the ChatGPT review CLI with the diff piped to stdin:
+7. [AUTOMATED] **Run round 1 immediately** by invoking the ChatGPT review CLI with the
+   code-only diff piped to stdin (same exclusions as manual mode — spec/plan/log files
+   already reviewed by other agents are excluded to reduce token cost):
 
    ```bash
-   git diff main...HEAD | npx tsx scripts/chatgpt-review.ts --mode pr
+   git diff origin/main...HEAD -- . \
+     ':(exclude)tasks/review-logs' \
+     ':(exclude)tasks/builds' \
+     ':(exclude)tasks/todo.md' \
+     ':(exclude)tasks/lessons.md' \
+     ':(exclude)tasks/current-focus.md' \
+     ':(exclude,glob)docs/*spec*.md' \
+     ':(exclude)docs/specs' \
+     ':(exclude)docs/superpowers/specs' \
+     ':(exclude)KNOWLEDGE.md' \
+     ':(exclude).chatgpt-diffs' | npx tsx scripts/chatgpt-review.ts --mode pr
    ```
 
    Capture the stdout JSON — it conforms to the `ChatGPTReviewResult` contract at `docs/superpowers/specs/2026-04-28-dev-mission-control-spec.md § C1`. The fields you will use:
@@ -83,37 +101,84 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 
    If the CLI exits non-zero, print its stderr and stop. Do NOT retry — the user resolves the issue (likely missing key or API error) and re-runs the agent.
 
-7. [MANUAL] **Prepare Round 1 for the user to paste into ChatGPT:**
+7. [MANUAL] **Prepare Round 1 for the user to upload to ChatGPT:**
 
-   a. Run `git diff main...HEAD` and capture the diff.
-   b. Print the following block so the user can copy-paste it into ChatGPT:
+   The user uploads diff files to ChatGPT (no copy-paste of giant diff blocks).
+   Round 1 produces TWO files: a recommended code-only diff (excludes spec /
+   plan / review-log files that were already reviewed by `spec-reviewer`,
+   `spec-conformance`, `architect`, etc.) and a full diff for completeness.
+   Rounds 2+ produce only the code-only diff (per step 9 of the per-round
+   loop) — spec files were reviewed in round 1 and don't change in scope.
 
-   ```
-   --- Copy into ChatGPT ---
-   Review this PR diff. List your findings as numbered items, each with:
-   - Title
-   - Severity: critical / high / medium / low
-   - Category: bug / improvement / style / architecture
-   - Brief explanation
+   a. Ensure `.chatgpt-diffs/` exists at repo root: `mkdir -p .chatgpt-diffs`.
+      Add `.chatgpt-diffs/` to `.gitignore` if not already present.
 
-   End with an overall verdict: APPROVED, CHANGES_REQUESTED, or NEEDS_DISCUSSION.
+   b. Generate the **code-only** diff (recommended). The exclusion set covers
+      anything that has already been reviewed by another agent or is project
+      memory rather than core code:
 
-   [diff output here]
-   --- End ---
-   ```
+      ```bash
+      git diff origin/main...HEAD -- . \
+        ':(exclude)tasks/review-logs' \
+        ':(exclude)tasks/builds' \
+        ':(exclude)tasks/todo.md' \
+        ':(exclude)tasks/lessons.md' \
+        ':(exclude)tasks/current-focus.md' \
+        ':(exclude,glob)docs/*spec*.md' \
+        ':(exclude)docs/specs' \
+        ':(exclude)docs/superpowers/specs' \
+        ':(exclude)KNOWLEDGE.md' \
+        ':(exclude).chatgpt-diffs' \
+        > .chatgpt-diffs/pr<N>-round1-code-diff.diff
+      ```
 
-   c. Print: `Paste the ChatGPT response here to begin Round 1.`
-   d. Wait for the user to paste the response.
-   e. Treat the pasted text as `raw_response`. Extract `findings[]` by parsing the numbered list in the response:
+   c. Generate the **full** diff (round 1 only — every subsequent round skips
+      this step):
+
+      ```bash
+      git diff origin/main...HEAD > .chatgpt-diffs/pr<N>-round1-diff.diff
+      ```
+
+   d. Compute size (`du -h <file> | cut -f1`) and file count
+      (`git diff origin/main...HEAD --name-only [same exclusions] | wc -l` for the
+      code-only count, `git diff origin/main...HEAD --name-only | wc -l` for the
+      full count) for each file.
+
+   e. Print the kickoff message (link both files so the user can click to
+      open them in their editor):
+
+      ```
+      PR #<N> created: <url>     [or "found:" if the PR already existed]
+      The chatgpt-pr-review agent is set up and waiting. Two diff files are ready to upload to ChatGPT:
+
+        - **Recommended:** [.chatgpt-diffs/pr<N>-round1-code-diff.diff](.chatgpt-diffs/pr<N>-round1-code-diff.diff) — <size>, code-only (<file-count> files)
+        - **Full:** [.chatgpt-diffs/pr<N>-round1-diff.diff](.chatgpt-diffs/pr<N>-round1-diff.diff) — <size>, includes specs/plan/logs (<file-count> files)
+
+      Use the **full** diff when the PR changes both code and spec files that are
+      load-bearing context for the code (e.g. an agent definition alongside its
+      spec, or a capabilities doc update alongside the feature it describes).
+      The code-only diff is sufficient when specs/plans are background-only.
+      ```
+
+   f. Print: `Upload the recommended diff to ChatGPT, then paste the response here to begin Round 1.`
+   g. Wait for the user to paste the response.
+   h. Treat the pasted text as `raw_response`. Extract `findings[]` by parsing the numbered list in the response:
       - For each item: assign `id` (F1, F2, …), `title`, `severity` (from text), `category` (from text), `finding_type` (infer from enum: null_check / idempotency / naming / architecture / error_handling / test_coverage / security / performance / scope / other), `rationale` (the explanation), `evidence` (file/line reference if present, else empty).
       - Infer `verdict` from the overall tone or explicit verdict line.
 
 8. [AUTOMATED] Print the ready message:
 
-   `Ready. PR #<N>: <url> — Round 1 results received.`
+   ```
+   PR: <url>
+   Ready — Round 1 results received.
+   ```
    If HUMAN_IN_LOOP is `yes`, add: `Raw response will be shown before triage begins — type yes to proceed.`
 
-8. [MANUAL] Print: `Ready. PR #<N>: <url> — Round 1 response received. Proceeding to triage.`
+8. [MANUAL] Print:
+   ```
+   PR: <url>
+   Ready — Round 1 response received. Proceeding to triage.
+   ```
 
 ---
 
@@ -121,22 +186,12 @@ Run: `ls tasks/review-logs/chatgpt-pr-review-*.md 2>/dev/null | sort | tail -1`
 
 **[AUTOMATED]** Trigger: user says "next round", "another round", "go again", or equivalent — no paste required. Round 1 fires automatically on agent start; subsequent rounds fire on user signal.
 
-The agent runs `git diff main...HEAD | npx tsx scripts/chatgpt-review.ts --mode pr` to fetch fresh feedback against the latest diff (including any code changes made in earlier rounds). If the CLI exits non-zero, print stderr and stop. Do not guess or retry.
+The agent runs the same code-only diff command as round 1 (with identical exclusions) piped to `npx tsx scripts/chatgpt-review.ts --mode pr` to fetch fresh feedback against the latest diff (including any code changes made in earlier rounds). If the CLI exits non-zero, print stderr and stop. Do not guess or retry.
 
-**[MANUAL]** Trigger: user pastes a ChatGPT response as their next message. Round 1 fires after the initial paste (per On Start §7-manual above); subsequent rounds begin after each round summary when the agent prints the updated diff block and waits.
+**[MANUAL]** Trigger: user pastes a ChatGPT response as their next message. Round 1 fires after the initial paste (per On Start §7-manual above). Subsequent rounds fire when the user pastes ChatGPT's response to the round-N code-only diff file generated by step 9 of the previous round's per-round loop.
 
-At the start of each manual round (rounds 2+):
-a. Run `git diff main...HEAD` to get the updated diff (including changes from earlier rounds).
-b. Print:
-   ```
-   --- Copy into ChatGPT for Round <N> ---
-   The PR diff has been updated since the last round. Please review it again, focusing on remaining issues and any new ones introduced by the latest changes.
-
-   [updated diff output here]
-   --- End ---
-   ```
-c. Print: `Paste the ChatGPT response here to continue.`
-d. Wait for paste. Extract findings from the pasted text as described in On Start §7-manual.
+When the user pastes for round N (N ≥ 2):
+a. Treat the pasted text as `raw_response` and extract findings as described in On Start §7-manual.h.
 
 Session state: every finding gets a user decision in the round it appears. No
 "pending across rounds" concept — if the user says "defer", the item is routed
@@ -174,6 +229,8 @@ For each round:
    Edge cases:
    - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and ask the user whether to finalise or run another round.
    - Verdict `NEEDS_DISCUSSION` → surface the `raw_response` to the user and ask how they want to proceed (no auto-actions on NEEDS_DISCUSSION).
+
+1a. **Duplicate detection (rounds 2+).** Before triage, check whether each finding is a substantive duplicate of a decided finding from a prior round in this session. Substantive duplicate = same `finding_type` AND same file/code area (or same global concern), no new evidence — even when rephrased with stronger language ("must-fix", "not optional", "blocking"). For duplicates: auto-apply the prior round's decision regardless of triage; log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT proceed to step 2 (triage) and do NOT escalate to step 3b for this finding even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: KNOWLEDGE.md `[2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision`.
 
 2. Triage each finding into one of two buckets:
 
@@ -299,7 +356,7 @@ For each round:
     for explicit approval before continuing. Reverts to the default triage
     behaviour on the next round.
 
-4. Scope check — run `git diff main...HEAD --stat`. If cumulative diff exceeds
+4. Scope check — run `git diff origin/main...HEAD --stat`. If cumulative diff exceeds
    20 files or +500 lines, print a visible warning:
 
      ⚠ Scope warning: +N lines across M files.
@@ -358,9 +415,9 @@ For each round:
       If you cannot fix it in one attempt, stop and surface the error to the
       user rather than blocking progress.
 
-9. Print the round summary and updated diff. The summary MUST break down the
-    decision source so the user sees exactly what was auto-applied without
-    their input:
+9. Print the round summary, then prepare round N+1's input. The summary MUST
+    break down the decision source so the user sees exactly what was
+    auto-applied without their input:
 
   Round <N> done.
   Auto-accepted (technical): <A_implement> implemented, <A_reject> rejected, <A_defer> deferred.
@@ -368,13 +425,83 @@ For each round:
   Committed as <short sha> and pushed to <branch>. (omit this line if no files
   changed this round)
 
-  --- UPDATED DIFF ---
-  <git diff main...HEAD output>
+  Then prepare round <N+1>'s input:
 
-**After printing the round summary: WAIT. Do not finalize.**
+  [AUTOMATED] Print the updated diff inline (the next round's CLI call will
+  use a fresh `git diff origin/main...HEAD` anyway; this is for the user's eyes):
+
+    --- UPDATED DIFF ---
+    <git diff origin/main...HEAD output>
+
+  **[MANUAL — MANDATORY, NO EXCEPTIONS]** Generate the round N+1 code-only diff
+  immediately after the commit in step 8. Do not print the round summary until
+  the diff file exists on disk. Rounds 2+ skip the full diff — spec / plan / log
+  files were reviewed in round 1:
+
+    ```bash
+    git diff origin/main...HEAD -- . \
+      ':(exclude)tasks/review-logs' \
+      ':(exclude)tasks/builds' \
+      ':(exclude)tasks/todo.md' \
+      ':(exclude)tasks/lessons.md' \
+      ':(exclude)tasks/current-focus.md' \
+      ':(exclude,glob)docs/*spec*.md' \
+      ':(exclude)docs/specs' \
+      ':(exclude)docs/superpowers/specs' \
+      ':(exclude)KNOWLEDGE.md' \
+      ':(exclude).chatgpt-diffs' \
+      > .chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff
+    ```
+
+  Compute size and file count, then print the round summary (step 9 above)
+  followed immediately by:
+
+    ```
+    Round <N+1> diff ready for upload to ChatGPT:
+
+      - [.chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff](.chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff) — <size>, code-only (<file-count> files)
+
+    Upload the file to ChatGPT (focus on remaining issues and any new ones
+    introduced by the latest changes), then paste the response here to continue.
+    Or say 'done' to finalise.
+    ```
+
+  The diff link MUST appear in the same message as the round summary. A round
+  summary without the diff link is incomplete — the user cannot proceed without it.
+
+  **Format rules — MANDATORY for every round, every diff reference:**
+
+  - Use markdown link syntax `[.chatgpt-diffs/<filename>](.chatgpt-diffs/<filename>)`
+    with a **repo-relative path** (begins with `.chatgpt-diffs/`).
+  - Render to VSCode as a clickable link. The user opens the file by clicking it.
+  - This is non-negotiable — see the "VSCode Extension Context / Code References
+    in Text" guidance in CLAUDE.md.
+
+  **DO NOT** (these formats break VSCode click-to-open and are forbidden):
+
+  - Absolute paths (`c:\Files\Projects\...\.chatgpt-diffs\pr264-round2-code-diff.diff`).
+  - Backslash separators on any platform.
+  - Backtick-wrapped paths without the markdown link wrapper
+    (`` `.chatgpt-diffs/pr264-round2-code-diff.diff` ``).
+  - Listing the file under a heading like "Absolute paths:" instead of inline
+    in the round-summary block.
+
+  **Worked example — round 2 summary, exactly this shape:**
+
+  ```
+  Round 2 diff ready for upload to ChatGPT:
+
+    - [.chatgpt-diffs/pr264-round2-code-diff.diff](.chatgpt-diffs/pr264-round2-code-diff.diff) — 8.2K, code-only (7 files)
+
+  Upload the file to ChatGPT (focus on remaining issues and any new ones
+  introduced by the latest changes), then paste the response here to continue.
+  Or say 'done' to finalise.
+  ```
+
+**After printing the round summary and round N+1 diff link: WAIT. Do not finalize.**
 Every round ends with the mode-appropriate line:
   [Automated] "Say 'next round' to fetch another automated review, or 'done' to finalise."
-  [Manual] "Updated diff printed above — paste it into ChatGPT, then paste the response here. Or say 'done' to finalise."
+  [Manual] "Round <N+1> diff ready at .chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff — upload it to ChatGPT, paste the response here. Or say 'done' to finalise."
 
 Finalization ONLY triggers when the user explicitly says "done", "finished",
 "we're done", "that's it", or equivalent. Never auto-finalize after a round,
@@ -420,6 +547,27 @@ how the user reviews what happened without needing to be prompted at each step.
 ## Finalization
 
 Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
+
+### TodoWrite contract — MANDATORY
+
+Before performing any finalisation work, write the following 14 items to `TodoWrite` as **separate** todos. Bundling steps (e.g. "doc-sync + KNOWLEDGE.md + commit") is a known failure mode — the bundled item gets partially completed and the missed sub-step is never caught. Each step MUST be its own todo, marked `in_progress` before work and `completed` immediately after — never batch completions.
+
+1. Consistency check across all rounds (step 1)
+2. Final Summary block + Verdict header (step 2)
+3. KNOWLEDGE.md pattern extraction — grep + update or skip with rationale (step 3)
+4. Append findings to `tasks/review-logs/_index.jsonl` (step 4)
+5. Append deferred items to `tasks/todo.md` (step 5)
+6. **Doc-sync sweep — assess ALL 6 reference docs in `docs/doc-sync.md` against the FULL PR diff vs main (NOT just this session's per-round edits). Each doc gets a logged verdict: `yes (sections X, Y)` / `no — <rationale>` / `n/a`. A bare `no` is a missing verdict and BLOCKS finalisation.** (step 6) — `docs/spec-context.md` is spec-review-only; the 6 are: `architecture.md`, `docs/capabilities.md`, `docs/integration-reference.md`, `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` (treated as one verdict), `docs/frontend-design-principles.md`, `KNOWLEDGE.md`.
+7. Print full session summary to screen (step 7)
+8. Print "Ready to merge — PR #N: <url>" (step 8)
+9. Auto-commit-and-push finalisation artifacts (step 9)
+10. **`git fetch origin main` + `git merge origin/main` into the feature branch — resolve any conflicts and push BEFORE adding the ready-to-merge label, so CI validates the merged state, not the branch in isolation.** (step 10)
+11. Add `ready-to-merge` label via `gh pr edit` (step 11)
+12. CI Monitor and Auto-Merge Loop (step 12)
+13. Print session-complete (step 13)
+14. Remove per-round diff files from `.chatgpt-diffs/` (step 14)
+
+Steps 6 and 10 in particular have historically been bundled into broader "finalise" todos and silently skipped — write them as their own todos or do not start finalisation. The explicit-todo discipline is the enforcement; the spec language below describes WHAT each step does.
 
 1. Consistency check: scan all final decisions (both auto-applied and user-
    decided) for contradictions — same finding type implemented in one round
@@ -480,8 +628,39 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    Before each item scan for a similar existing entry (same finding_type OR
    same leading ~5 words) — skip if already present.
    Do NOT write to tasks/review-logs/_deferred.md.
-6. Check whether structural changes should update architecture.md or
-   capabilities.md — update if yes, skip if no.
+6. **Doc sync sweep — MANDATORY, per-doc verdicts required.** For EACH reference
+   doc in `docs/doc-sync.md` (excluding `docs/spec-context.md` which is spec-
+   review-only), follow the **Investigation procedure** in that file: read the
+   doc, derive a candidate-stale-reference set from the FULL PR diff vs
+   `origin/main` (file paths, symbols, behaviours, new names introduced — NOT
+   just per-round edits), grep the doc for each candidate, and fix any stale
+   references in this same finalisation commit. The PR is the unit of merge —
+   finalisation must verify the entire merge unit, not only what the PR review
+   session itself wrote.
+
+   The 6 docs that MUST get a verdict (one each):
+   - `architecture.md`
+   - `docs/capabilities.md`
+   - `docs/integration-reference.md`
+   - `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` (single combined verdict)
+   - `docs/frontend-design-principles.md`
+   - `KNOWLEDGE.md`
+
+   For each doc, record verdict per the **Verdict rule** in `docs/doc-sync.md`:
+   - `yes (sections X, Y)` — doc was updated; cite headings from the actual
+     doc, not vague descriptors.
+   - `no — <grep terms checked OR scope-not-touched rationale>` — scope
+     touched but already accurate. A bare `no` (no rationale) is a MISSING
+     verdict and BLOCKS finalisation.
+   - `n/a` — scope of this doc was not touched by the PR.
+
+   Failure to update a doc whose scope IS touched is a blocker — escalate to
+   the user, do not auto-defer. Stale docs are a blocking issue per `CLAUDE.md
+   § 11`.
+
+   The Final Summary block (step 2) MUST contain all 6 verdicts in the exact
+   format above — no abbreviation, no consolidation into a single line.
+
 7. Print the full session summary to screen. Break the totals down by decision
    source so the user sees what was auto-applied versus what they were asked
    about — this is the primary accountability surface of the new triage model:
@@ -506,15 +685,211 @@ Triggered by: "done", "finished", "we're done", "that's it", or equivalent.
    - tasks/review-logs/_index.jsonl
    - tasks/todo.md (deferred items)
    - KNOWLEDGE.md (if new/updated entries)
-   - CLAUDE.md / architecture.md (if [missing-doc] >2 or structural
-     changes triggered an update)
+   - CLAUDE.md / architecture.md / docs/capabilities.md /
+     docs/integration-reference.md / DEVELOPMENT_GUIDELINES.md /
+     docs/frontend-design-principles.md (if Doc sync sweep triggered updates)
 
    Commit message: `chore(review): finalize PR #<N> ChatGPT review session`
    followed by a short body summarising rounds + final counts (auto vs user)
    + deferred count + KNOWLEDGE.md entry count. Push after commit. If nothing
    changed (rare — only if finalize produced zero edits), skip.
 
-10. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
+10. **Merge `main` into the feature branch — MANDATORY, must run BEFORE step 11
+    (ready-to-merge label).** This ensures CI validates the merged state, not the
+    branch in isolation. Skipping this step is a known failure mode: a green CI
+    on the unmerged branch can hide conflicts that surface only after merge.
+
+    ```bash
+    git fetch origin main
+    git merge origin/main
+    ```
+
+    If `git merge` exits with conflicts:
+    - Read each conflicted file (`git status` lists them).
+    - For every conflict: keep the version that is correct given the PR's intent.
+      When the feature branch added something that `main` doesn't have, keep the
+      feature branch version. When `main` has a fix the feature branch missed,
+      take `main`.
+    - Stage resolved files and commit: `git commit -m "chore: merge main into <branch> — resolve conflicts"`.
+    - Push: `git push`.
+
+    If `git merge` is clean (fast-forward or no conflicts), push: `git push`.
+
+    Print: "main merged into <branch>. Branch is up-to-date — ready to label."
+
+11. Add the `ready-to-merge` label to trigger CI:
+    ```bash
+    gh pr edit <N> --add-label "ready-to-merge"
+    ```
+    This fires CI on the final committed state. If the label is already present
+    (e.g. re-running finalization), the command is a no-op — that is fine.
+    If the command fails (network, permissions), print a warning and the manual
+    equivalent so the user can run it themselves — do NOT block finalization.
+
+12. CI Monitor and Auto-Merge Loop — starts immediately after the label is applied.
+
+    **Goal:** poll CI status, auto-fix failures iteratively (max 3 remedy attempts),
+    then merge when all checks pass. If 3 remedies all fail, stop and surface a
+    structured failure report for the user to investigate manually.
+
+    **Cadence:** poll every ~90s. CI on this repo typically completes in 1-2 min,
+    so 60s is too tight (poll-during-queuing waste) and 4-5 min is too loose
+    (pushes past a full cycle, delays merge). 90s catches a fast CI pass in ~1
+    poll without burning the prompt cache more than necessary. Use
+    `ScheduleWakeup` (Claude Code) or `Monitor` for the wait — long synchronous
+    `sleep` is runtime-blocked. See `CLAUDE.md § Async polling cadence`.
+
+    **State:** `REMEDY_ATTEMPTS = 0`  `POLL_COUNT = 0`  `REMEDY_LOG = []`
+
+    **Initial wait** — GitHub Actions needs ~60-90 seconds to pick up the label
+    event, queue new runs, and let early checks complete. Avoid a spurious "still
+    queuing" read:
+    ```
+    Schedule a wakeup ~60s out (ScheduleWakeup delaySeconds=60), or `sleep 60`
+    if running outside a Claude Code session.
+    ```
+
+    **Poll loop** — repeat until resolved. Hard cap: 30 polls (~45 minutes total
+    at 90s cadence).
+
+    a. Increment `POLL_COUNT`. Query the PR's current check status:
+       ```bash
+       gh pr view <N> --json statusCheckRollup --jq '
+         (.statusCheckRollup // []) as $checks |
+         if ($checks | length) == 0 then "pending"
+         elif ($checks | all(.status == "COMPLETED")) then
+           if ($checks | all(
+               .conclusion == "SUCCESS" or
+               .conclusion == "NEUTRAL" or
+               .conclusion == "SKIPPED")) then "passed"
+           else "failed"
+           end
+         else "pending"
+         end'
+       ```
+
+    b. **`passed`** → all CI checks succeeded. Proceed to **Auto-Merge** below.
+
+    c. **`pending`** → CI is still running. Print:
+       > CI in progress — <POLL_COUNT> polls elapsed. Next poll in 90s...
+       ```
+       Schedule a wakeup ~90s out (ScheduleWakeup delaySeconds=90), or
+       `sleep 90` if running outside a Claude Code session.
+       ```
+       Return to (a). If `POLL_COUNT >= 30` without conclusion, print:
+       > CI has not concluded after 30 minutes — stopping monitor.
+       > PR #<N>: <url>
+       > Check status manually and merge when ready.
+       Then continue to step 13 (session-complete print).
+
+    d. **`failed`** → enter **Remedy Cycle** below.
+
+    ---
+
+    **Remedy Cycle** — entered when a check fails. Gate: `REMEDY_ATTEMPTS < 3`.
+
+    i.   Increment `REMEDY_ATTEMPTS`. Print:
+         > CI failure — remedy attempt <REMEDY_ATTEMPTS>/3. Fetching logs...
+
+    ii.  Identify failed run IDs:
+         ```bash
+         gh run list --head-branch <branch> --json databaseId,name,status,conclusion \
+           --limit 10 --jq '.[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .databaseId'
+         ```
+
+    iii. For each failed run ID, retrieve failure logs:
+         ```bash
+         gh run view <run-id> --log-failed
+         ```
+         Read the output. Identify root cause (lint error, TypeScript error, test
+         failure, migration failure, etc.). Note the specific file and line if present.
+
+    iv.  Fix the code using Edit, Write, and Bash. Apply targeted fixes only — do not
+         scope-creep into unrelated areas. Run `npm run lint && npm run typecheck` to
+         confirm the local fix before committing. If the fix requires a schema change
+         (`npm run db:generate`) run that too.
+
+    v.   Commit and push:
+         ```bash
+         git add <changed files>
+         git commit -m "fix(ci): remedy <REMEDY_ATTEMPTS>/3 — <short root-cause description>
+
+         Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+         git push
+         ```
+         Append `{attempt: <N>, sha: <short-sha>, description: <root-cause>}` to
+         `REMEDY_LOG`.
+
+    vi.  Print:
+         > Remedy <REMEDY_ATTEMPTS>/3 pushed (<sha>). Waiting 60s for CI to queue...
+         ```
+         Schedule a wakeup ~60s out (ScheduleWakeup delaySeconds=60), or
+         `sleep 60` if running outside a Claude Code session.
+         ```
+         Reset `POLL_COUNT = 0`. Return to poll loop step (a).
+
+    **If `REMEDY_ATTEMPTS >= 3` AND CI still fails** — retrieve final failure logs
+    then print the failure report and continue to step 13:
+
+    ```
+    ✗ CI failed after 3 remedy attempts — manual investigation required.
+    PR #<N>: <url>
+    Branch: <branch>
+
+    Remedies applied:
+      1. <description from REMEDY_LOG[0]> — <sha>
+      2. <description from REMEDY_LOG[1]> — <sha>
+      3. <description from REMEDY_LOG[2]> — <sha>
+
+    Last failure log:
+    <gh run view <last-run-id> --log-failed output, truncated to ~50 lines>
+
+    Hypothesis: <one-sentence root-cause guess based on the logs>
+    Suggested next step: <specific command or action to investigate>
+    ```
+
+    ---
+
+    **Auto-Merge** — entered when all CI checks pass.
+
+    ```bash
+    gh pr merge <N> --merge --delete-branch --yes
+    ```
+
+    If `--merge` is rejected (branch protection, required reviews), try squash:
+    ```bash
+    gh pr merge <N> --squash --delete-branch --yes
+    ```
+
+    On success, print:
+    ```
+    ✓ PR #<N> merged into main. Branch deleted.
+    ```
+
+    On any merge failure, print the error and continue to step 13 — the review
+    session is complete regardless of whether auto-merge succeeded:
+    ```
+    ✗ Auto-merge failed: <error>
+    Merge manually: <url>
+    ```
+
+13. Print: "Session complete: <N> rounds. Auto-accepted: <A_impl>/<A_rej>/<A_def>. User-decided: <U_impl>/<U_rej>/<U_def>."
+
+14. [MANUAL] Remove the per-round diff files generated during the session:
+
+    ```bash
+    rm -f .chatgpt-diffs/pr<N>-round*-code-diff.diff .chatgpt-diffs/pr<N>-round*-diff.diff
+    rmdir .chatgpt-diffs 2>/dev/null  # remove the dir if empty after cleanup
+    ```
+
+    These files are transient — the audit trail lives in the session log
+    (`tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md`), not the diff
+    bundles. The git history captures what changed; the diff files were only a
+    copy-paste convenience for ChatGPT input. Skip silently if the directory
+    or files do not exist (e.g. session finalised mid-bootstrap before the
+    first diff was written).
+
+    [AUTOMATED] No-op (no diff files in automated mode).
 
 ---
 
@@ -566,9 +941,17 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
     - [auto|user] <item> — <reason>
   - Architectural items surfaced to screen (user decisions):
     - <item> — <recommendation>
-  - KNOWLEDGE.md updated: yes (<N> entries) | no
-  - architecture.md updated: yes | no
+  - KNOWLEDGE.md updated: yes (<N> entries) | no — <rationale>
+  - architecture.md updated: yes (sections X, Y) | no — <rationale> | n/a
+  - capabilities.md updated: yes (sections X) | no — <rationale> | n/a
+  - integration-reference.md updated: yes (slug X) | no — <rationale> | n/a
+  - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes (sections X) | no — <rationale> | n/a
+  - frontend-design-principles.md updated: yes | no — <rationale> | n/a
+  - main merged into branch: yes (<sha>) | yes (clean fast-forward) | no — <reason>
   - PR: #<N> — ready to merge at <url>
+
+ALL 6 doc verdicts above are MANDATORY — a missing or malformed verdict blocks
+finalisation. A bare `no` (no rationale) is treated as missing.
 
 ---
 
@@ -616,3 +999,7 @@ File: tasks/review-logs/chatgpt-pr-review-<slug>-<timestamp>.md
   the CLAUDE.md "no auto-commits or auto-pushes" user preference within this
   flow only. The user has explicitly opted in for ChatGPT review sessions so
   each round's state lands on the PR before the next round starts.
+- **Doc sync is mandatory at finalisation.** Every reference doc listed in the
+  Doc sync sweep step must have a yes / no / n/a verdict in the Final Summary.
+  A missing field blocks finalisation; a `no` verdict requires a one-line
+  rationale. Stale docs are a blocking issue per `CLAUDE.md § 11`.

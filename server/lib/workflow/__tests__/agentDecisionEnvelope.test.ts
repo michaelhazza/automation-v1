@@ -10,28 +10,10 @@
  * Spec: docs/playbook-agent-decision-step-spec.md §17.
  */
 
+import { expect, test } from 'vitest';
 import { renderAgentDecisionEnvelope } from '../agentDecisionEnvelope.js';
 import type { EnvelopeRenderContext } from '../agentDecisionEnvelope.js';
 import type { AgentDecisionBranch } from '../types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   const a = JSON.stringify(actual);
@@ -64,44 +46,44 @@ console.log('\n--- renderAgentDecisionEnvelope: structure ---');
 
 test('envelope: contains ## Decision Required heading', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(out.includes('## Decision Required'), 'heading present');
+  expect(out.includes('## Decision Required'), 'heading present').toBeTruthy();
 });
 
 test('envelope: contains the decision prompt text', () => {
   const out = renderAgentDecisionEnvelope(makeCtx({ decisionPrompt: 'Unique prompt text XYZ' }));
-  assert(out.includes('Unique prompt text XYZ'), 'decision prompt included');
+  expect(out.includes('Unique prompt text XYZ'), 'decision prompt included').toBeTruthy();
 });
 
 test('envelope: contains branch ids', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(out.includes('branch_a'), 'branch_a id present');
-  assert(out.includes('branch_b'), 'branch_b id present');
+  expect(out.includes('branch_a'), 'branch_a id present').toBeTruthy();
+  expect(out.includes('branch_b'), 'branch_b id present').toBeTruthy();
 });
 
 test('envelope: contains branch labels and descriptions', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(out.includes('Path A'), 'label A present');
-  assert(out.includes('Take path A'), 'description A present');
+  expect(out.includes('Path A'), 'label A present').toBeTruthy();
+  expect(out.includes('Take path A'), 'description A present').toBeTruthy();
 });
 
 test('envelope: contains JSON schema example with chosenBranchId', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(out.includes('chosenBranchId'), 'chosenBranchId in schema');
-  assert(out.includes('rationale'), 'rationale in schema');
-  assert(out.includes('confidence'), 'confidence in schema');
+  expect(out.includes('chosenBranchId'), 'chosenBranchId in schema').toBeTruthy();
+  expect(out.includes('rationale'), 'rationale in schema').toBeTruthy();
+  expect(out.includes('confidence'), 'confidence in schema').toBeTruthy();
 });
 
 test('envelope: instructs agent to respond with only JSON', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
   // Updated instruction post-fix: no prose, no code fences, raw JSON
-  assert(out.includes('no prose') || out.includes('nothing else') || out.includes('raw JSON'), 'raw JSON instruction present');
+  expect(out.includes('no prose') || out.includes('nothing else') || out.includes('raw JSON'), 'raw JSON instruction present').toBeTruthy();
 });
 
 test('envelope: deterministic — same input produces same output', () => {
   const ctx = makeCtx();
   const out1 = renderAgentDecisionEnvelope(ctx);
   const out2 = renderAgentDecisionEnvelope(ctx);
-  assertEqual(out1, out2, 'deterministic');
+  expect(out1, 'deterministic').toEqual(out2);
 });
 
 // ---------------------------------------------------------------------------
@@ -112,24 +94,24 @@ console.log('\n--- renderAgentDecisionEnvelope: minConfidence ---');
 
 test('envelope: no minConfidence → no confidence threshold section', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(!out.includes('Confidence threshold'), 'no confidence section when omitted');
+  expect(!out.includes('Confidence threshold'), 'no confidence section when omitted').toBeTruthy();
 });
 
 test('envelope: minConfidence present → confidence threshold section included', () => {
   const out = renderAgentDecisionEnvelope(makeCtx({ minConfidence: 0.7 }));
-  assert(out.includes('Confidence threshold'), 'confidence section present');
-  assert(out.includes('0.7'), 'threshold value present');
+  expect(out.includes('Confidence threshold'), 'confidence section present').toBeTruthy();
+  expect(out.includes('0.7'), 'threshold value present').toBeTruthy();
 });
 
 test('envelope: minConfidence = 0 → section included with 0', () => {
   const out = renderAgentDecisionEnvelope(makeCtx({ minConfidence: 0 }));
-  assert(out.includes('Confidence threshold'), 'section present for 0');
+  expect(out.includes('Confidence threshold'), 'section present for 0').toBeTruthy();
 });
 
 test('envelope: minConfidence = 1 → section included with 1', () => {
   const out = renderAgentDecisionEnvelope(makeCtx({ minConfidence: 1 }));
-  assert(out.includes('Confidence threshold'), 'section present for 1');
-  assert(out.includes('1'), '1 in section');
+  expect(out.includes('Confidence threshold'), 'section present for 1').toBeTruthy();
+  expect(out.includes('1'), '1 in section').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -140,7 +122,7 @@ console.log('\n--- renderAgentDecisionEnvelope: retry ---');
 
 test('envelope: no priorAttempt → no retry block', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(!out.includes('previous response'), 'no retry block without priorAttempt');
+  expect(!out.includes('previous response'), 'no retry block without priorAttempt').toBeTruthy();
 });
 
 test('envelope: priorAttempt → retry block included', () => {
@@ -150,8 +132,8 @@ test('envelope: priorAttempt → retry block included', () => {
       rawOutput: '{"chosenBranchId":"wrong","rationale":"bad"}',
     },
   }));
-  assert(out.includes('previous response'), 'retry block present');
-  assert(out.includes('chosenBranchId was not a known branch'), 'error message present');
+  expect(out.includes('previous response'), 'retry block present').toBeTruthy();
+  expect(out.includes('chosenBranchId was not a known branch'), 'error message present').toBeTruthy();
 });
 
 test('envelope: retry rawOutput is inside a code fence (spec §22.3)', () => {
@@ -161,7 +143,7 @@ test('envelope: retry rawOutput is inside a code fence (spec §22.3)', () => {
   }));
   // The rawOutput must be inside a ``` fence so it is treated as literal text.
   const fenceIdx = out.indexOf('```\n' + rawOutput);
-  assert(fenceIdx !== -1, 'rawOutput inside code fence');
+  expect(fenceIdx !== -1, 'rawOutput inside code fence').toBeTruthy();
 });
 
 test('envelope: retry block does not interpret content as markdown instructions', () => {
@@ -176,7 +158,7 @@ test('envelope: retry block does not interpret content as markdown instructions'
   const fenceStart = out.indexOf('```\n');
   const fenceEnd = out.lastIndexOf('\n```');
   const topLevelHeadingAfterRetryBlock = out.slice(fenceEnd + 4).includes('## IGNORE');
-  assert(!topLevelHeadingAfterRetryBlock, 'injected ## heading must not appear outside the code fence');
+  expect(!topLevelHeadingAfterRetryBlock, 'injected ## heading must not appear outside the code fence').toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -190,7 +172,7 @@ test('escape: triple backticks in decisionPrompt are escaped', () => {
     decisionPrompt: 'Run ```shell code``` here',
   }));
   // The raw triple-backtick sequence must not appear unescaped.
-  assert(!out.includes('```shell code```'), 'raw triple backtick escaped in prompt');
+  expect(!out.includes('```shell code```'), 'raw triple backtick escaped in prompt').toBeTruthy();
 });
 
 test('escape: ## heading in decisionPrompt is escaped', () => {
@@ -199,7 +181,7 @@ test('escape: ## heading in decisionPrompt is escaped', () => {
   }));
   // Must not have a bare ## at the start of a line in the prompt portion.
   // The escaped form is \## which won't render as a heading.
-  assert(out.includes('\\## Injected Heading'), 'heading escaped');
+  expect(out.includes('\\## Injected Heading'), 'heading escaped').toBeTruthy();
 });
 
 test('escape: multiple branches render without conflict', () => {
@@ -211,13 +193,10 @@ test('escape: multiple branches render without conflict', () => {
   }));
   const out = renderAgentDecisionEnvelope(makeCtx({ branches }));
   for (let i = 0; i < 8; i++) {
-    assert(out.includes(`b${i}`), `branch b${i} present`);
+    expect(out.includes(`b${i}`), `branch b${i} present`).toBeTruthy();
   }
 });
 
 // ---------------------------------------------------------------------------
 // Summary
-// ---------------------------------------------------------------------------
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+// ---------------------------------------------------------------------------

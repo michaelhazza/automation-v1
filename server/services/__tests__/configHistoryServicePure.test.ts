@@ -7,26 +7,9 @@
  * The retry loop handles Postgres 23505 (unique violation) errors by re-reading
  * maxVersion and retrying the insert. This is a pure simulation — no DB required.
  */
+import { expect, test } from 'vitest';
+
 export {};
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -72,8 +55,8 @@ test('succeeds on first attempt when no conflict', () => {
     () => 0,
     (_v) => { inserted = true; },
   );
-  assertEqual(version, 1, 'version');
-  assert(inserted, 'insert called');
+  expect(version, 'version').toBe(1);
+  expect(inserted, 'insert called').toBeTruthy();
 });
 
 test('succeeds on second attempt after 23505 unique violation', () => {
@@ -95,8 +78,8 @@ test('succeeds on second attempt after 23505 unique violation', () => {
     },
   );
 
-  assertEqual(version, 2, 'should insert version 2 after retry');
-  assertEqual(attempts, 2, 'should attempt insert exactly twice');
+  expect(version, 'should insert version 2 after retry').toBe(2);
+  expect(attempts, 'should attempt insert exactly twice').toBe(2);
 });
 
 test('succeeds on third attempt after two 23505 conflicts', () => {
@@ -117,8 +100,8 @@ test('succeeds on third attempt after two 23505 conflicts', () => {
     },
   );
 
-  assertEqual(version, 3, 'should insert version 3 after two retries');
-  assertEqual(attempts, 3, 'should attempt insert exactly three times');
+  expect(version, 'should insert version 3 after two retries').toBe(3);
+  expect(attempts, 'should attempt insert exactly three times').toBe(3);
 });
 
 test('throws after MAX_RETRIES (3) exhausted on continuous 23505', () => {
@@ -139,8 +122,8 @@ test('throws after MAX_RETRIES (3) exhausted on continuous 23505', () => {
     threw = true;
   }
 
-  assert(threw, 'should throw after MAX_RETRIES exhausted');
-  assertEqual(attempts, 3, 'should have attempted 3 times total');
+  expect(threw, 'should throw after MAX_RETRIES exhausted').toBeTruthy();
+  expect(attempts, 'should have attempted 3 times total').toBe(3);
 });
 
 test('does not catch non-23505 errors — throws immediately', () => {
@@ -157,8 +140,8 @@ test('does not catch non-23505 errors — throws immediately', () => {
     caughtMessage = (err as Error).message;
   }
 
-  assert(threw, 'should throw immediately on non-23505 error');
-  assertEqual(caughtMessage, 'connection refused', 'should preserve original error');
+  expect(threw, 'should throw immediately on non-23505 error').toBeTruthy();
+  expect(caughtMessage, 'should preserve original error').toBe('connection refused');
 });
 
 test('does not catch errors without a code property', () => {
@@ -173,10 +156,7 @@ test('does not catch errors without a code property', () => {
     threw = true;
   }
 
-  assert(threw, 'should throw on TypeError without code property');
+  expect(threw, 'should throw on TypeError without code property').toBeTruthy();
 });
 
 // ── Summary ──
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);

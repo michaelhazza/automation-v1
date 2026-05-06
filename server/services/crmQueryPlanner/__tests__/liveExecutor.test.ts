@@ -9,27 +9,9 @@
 // We test translateToProviderQuery from liveExecutorPure (pure — no axios dependency).
 // For the full executeLive path, adapter calls are mocked at the service level.
 
+import { expect, test } from 'vitest';
 import { translateToProviderQuery, detectDroppedContactFilters } from '../executors/liveExecutorPure.js';
 import type { QueryPlan, ExecutorContext } from '../../../../shared/types/crmQueryPlanner.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, label: string) {
-  if (!cond) throw new Error(label);
-}
 
 function assertEqual<T>(a: T, b: T, label = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -60,34 +42,34 @@ function makePlan(overrides: Partial<QueryPlan>): QueryPlan {
 test('contacts plan → listContacts endpoint', () => {
   const plan = makePlan({ primaryEntity: 'contacts', limit: 30 });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.endpoint, 'listContacts');
-  assertEqual(t.params.limit, 30);
+  expect(t.endpoint).toBe('listContacts');
+  expect(t.params.limit).toBe(30);
 });
 
 test('opportunities plan → listOpportunities endpoint', () => {
   const plan = makePlan({ primaryEntity: 'opportunities', limit: 25 });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.endpoint, 'listOpportunities');
-  assertEqual(t.params.limit, 25);
+  expect(t.endpoint).toBe('listOpportunities');
+  expect(t.params.limit).toBe(25);
 });
 
 test('appointments plan → listAppointments endpoint', () => {
   const plan = makePlan({ primaryEntity: 'appointments', limit: 10 });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.endpoint, 'listAppointments');
-  assertEqual(t.params.limit, 10);
+  expect(t.endpoint).toBe('listAppointments');
+  expect(t.params.limit).toBe(10);
 });
 
 test('conversations plan → listConversations endpoint', () => {
   const plan = makePlan({ primaryEntity: 'conversations', limit: 20 });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.endpoint, 'listConversations');
+  expect(t.endpoint).toBe('listConversations');
 });
 
 test('tasks plan → listTasks endpoint', () => {
   const plan = makePlan({ primaryEntity: 'tasks', limit: 15 });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.endpoint, 'listTasks');
+  expect(t.endpoint).toBe('listTasks');
 });
 
 test('dateContext from/to populate startDate/endDate for appointments', () => {
@@ -96,8 +78,8 @@ test('dateContext from/to populate startDate/endDate for appointments', () => {
     dateContext: { kind: 'absolute', from: '2026-04-01', to: '2026-04-30' },
   });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.params.startDate, '2026-04-01');
-  assertEqual(t.params.endDate,   '2026-04-30');
+  expect(t.params.startDate).toBe('2026-04-01');
+  expect(t.params.endDate).toBe('2026-04-30');
 });
 
 test('status filter extracted for opportunities', () => {
@@ -106,7 +88,7 @@ test('status filter extracted for opportunities', () => {
     filters: [{ field: 'status', operator: 'eq', value: 'open', humanLabel: 'Status: open' }],
   });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.params.status, 'open');
+  expect(t.params.status).toBe('open');
 });
 
 test('status filter extracted for conversations', () => {
@@ -115,7 +97,7 @@ test('status filter extracted for conversations', () => {
     filters: [{ field: 'status', operator: 'eq', value: 'unread', humanLabel: 'Status: unread' }],
   });
   const t = translateToProviderQuery(plan);
-  assertEqual(t.params.status, 'unread');
+  expect(t.params.status).toBe('unread');
 });
 
 test('non-live plan: translateToProviderQuery still maps entity correctly (guard is in executeLive)', () => {
@@ -124,27 +106,27 @@ test('non-live plan: translateToProviderQuery still maps entity correctly (guard
   // (the guard check in executeLive is integration-tested via crmQueryPlannerService.test.ts).
   const plan = makePlan({ source: 'canonical', primaryEntity: 'contacts', limit: 10 });
   const t = translateToProviderQuery(plan);
-  assert(t.endpoint === 'listContacts', `expected listContacts, got ${t.endpoint}`);
+  expect(t.endpoint === 'listContacts', `expected listContacts, got ${t.endpoint}`).toBeTruthy();
 });
 
 // ── Filter-composition drop diagnostics (spec §13.2 — chatgpt-pr-review #7) ──
 
 test('detectDroppedContactFilters: no email/firstName/lastName → nothing dropped', () => {
   const r = detectDroppedContactFilters([{ field: 'status' }, { field: 'city' }]);
-  assertEqual(r.picked, null);
-  assertEqual(r.dropped.length, 0);
+  expect(r.picked).toBe(null);
+  expect(r.dropped.length).toBe(0);
 });
 
 test('detectDroppedContactFilters: single name-like filter → picked, nothing dropped', () => {
   const r = detectDroppedContactFilters([{ field: 'email' }, { field: 'status' }]);
-  assertEqual(r.picked, 'email');
-  assertEqual(r.dropped.length, 0);
+  expect(r.picked).toBe('email');
+  expect(r.dropped.length).toBe(0);
 });
 
 test('detectDroppedContactFilters: email + firstName → picks email, drops firstName', () => {
   const r = detectDroppedContactFilters([{ field: 'firstName' }, { field: 'email' }]);
-  assertEqual(r.picked, 'email');
-  assertEqual(r.dropped, ['firstName']);
+  expect(r.picked).toBe('email');
+  expect(r.dropped).toEqual(['firstName']);
 });
 
 test('detectDroppedContactFilters: all three present → picks email, drops firstName + lastName in precedence order', () => {
@@ -153,11 +135,8 @@ test('detectDroppedContactFilters: all three present → picks email, drops firs
     { field: 'firstName' },
     { field: 'email' },
   ]);
-  assertEqual(r.picked, 'email');
-  assertEqual(r.dropped, ['firstName', 'lastName']);
+  expect(r.picked).toBe('email');
+  expect(r.dropped).toEqual(['firstName', 'lastName']);
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

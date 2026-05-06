@@ -704,7 +704,7 @@ if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
     .filter(([code, tier]) => tier === 'informational' && !FORMATTING_WARNING_CODES.has(code))
     .map(([code]) => code);
   if (unclassifiedInformational.length > 0) {
-    // eslint-disable-next-line no-console
+     
     console.warn(
       '[MergeReviewBlock] Informational warning codes not classified into '
         + 'FORMATTING_WARNING_CODES — will render in the primary list. '

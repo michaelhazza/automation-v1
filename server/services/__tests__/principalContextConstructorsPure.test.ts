@@ -6,30 +6,12 @@
  *   npx tsx server/services/__tests__/principalContextConstructorsPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   buildUserPrincipal,
   buildServicePrincipal,
   buildDelegatedPrincipal,
 } from '../principal/principalContext.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -45,32 +27,32 @@ console.log('buildUserPrincipal');
 
 test('returns correct type field', () => {
   const p = buildUserPrincipal({ userId: 'u1', organisationId: 'org1', subaccountId: 'sub1', teamIds: ['t1'] });
-  assertEqual(p.type, 'user', 'type');
+  expect(p.type, 'type').toBe('user');
 });
 
 test('carries organisationId', () => {
   const p = buildUserPrincipal({ userId: 'u1', organisationId: 'org-abc', subaccountId: null, teamIds: [] });
-  assertEqual(p.organisationId, 'org-abc', 'organisationId');
+  expect(p.organisationId, 'organisationId').toBe('org-abc');
 });
 
 test('maps userId to id', () => {
   const p = buildUserPrincipal({ userId: 'u-42', organisationId: 'org1', subaccountId: null, teamIds: [] });
-  assertEqual(p.id, 'u-42', 'id should equal userId');
+  expect(p.id, 'id should equal userId').toBe('u-42');
 });
 
 test('carries subaccountId when non-null', () => {
   const p = buildUserPrincipal({ userId: 'u1', organisationId: 'org1', subaccountId: 'sub-99', teamIds: [] });
-  assertEqual(p.subaccountId, 'sub-99', 'subaccountId');
+  expect(p.subaccountId, 'subaccountId').toBe('sub-99');
 });
 
 test('carries null subaccountId', () => {
   const p = buildUserPrincipal({ userId: 'u1', organisationId: 'org1', subaccountId: null, teamIds: [] });
-  assertEqual(p.subaccountId, null, 'subaccountId should be null');
+  expect(p.subaccountId, 'subaccountId should be null').toBe(null);
 });
 
 test('carries teamIds', () => {
   const p = buildUserPrincipal({ userId: 'u1', organisationId: 'org1', subaccountId: null, teamIds: ['t1', 't2'] });
-  assertEqual(p.teamIds, ['t1', 't2'], 'teamIds');
+  expect(p.teamIds, 'teamIds').toEqual(['t1', 't2']);
 });
 
 // ---------------------------------------------------------------------------
@@ -82,37 +64,37 @@ console.log('buildServicePrincipal');
 
 test('returns correct type field', () => {
   const p = buildServicePrincipal({ organisationId: 'org1', subaccountId: null, serviceId: 'svc:test' });
-  assertEqual(p.type, 'service', 'type');
+  expect(p.type, 'type').toBe('service');
 });
 
 test('carries organisationId', () => {
   const p = buildServicePrincipal({ organisationId: 'org-xyz', subaccountId: null, serviceId: 'svc:test' });
-  assertEqual(p.organisationId, 'org-xyz', 'organisationId');
+  expect(p.organisationId, 'organisationId').toBe('org-xyz');
 });
 
 test('maps serviceId to id', () => {
   const p = buildServicePrincipal({ organisationId: 'org1', subaccountId: null, serviceId: 'svc:polling' });
-  assertEqual(p.id, 'svc:polling', 'id should equal serviceId');
+  expect(p.id, 'id should equal serviceId').toBe('svc:polling');
 });
 
 test('carries serviceId', () => {
   const p = buildServicePrincipal({ organisationId: 'org1', subaccountId: null, serviceId: 'svc:polling' });
-  assertEqual(p.serviceId, 'svc:polling', 'serviceId');
+  expect(p.serviceId, 'serviceId').toBe('svc:polling');
 });
 
 test('defaults teamIds to empty array when not provided', () => {
   const p = buildServicePrincipal({ organisationId: 'org1', subaccountId: null, serviceId: 'svc:test' });
-  assertEqual(p.teamIds, [], 'teamIds should default to []');
+  expect(p.teamIds, 'teamIds should default to []').toEqual([]);
 });
 
 test('carries explicit teamIds when provided', () => {
   const p = buildServicePrincipal({ organisationId: 'org1', subaccountId: null, serviceId: 'svc:test', teamIds: ['t1'] });
-  assertEqual(p.teamIds, ['t1'], 'teamIds');
+  expect(p.teamIds, 'teamIds').toEqual(['t1']);
 });
 
 test('carries subaccountId', () => {
   const p = buildServicePrincipal({ organisationId: 'org1', subaccountId: 'sub-1', serviceId: 'svc:test' });
-  assertEqual(p.subaccountId, 'sub-1', 'subaccountId');
+  expect(p.subaccountId, 'subaccountId').toBe('sub-1');
 });
 
 // ---------------------------------------------------------------------------
@@ -127,7 +109,7 @@ test('returns correct type field', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'g1', allowedTables: ['canonical_accounts'], allowedActions: ['read'],
   });
-  assertEqual(p.type, 'delegated', 'type');
+  expect(p.type, 'type').toBe('delegated');
 });
 
 test('carries organisationId', () => {
@@ -135,7 +117,7 @@ test('carries organisationId', () => {
     organisationId: 'org-d1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'g1', allowedTables: [], allowedActions: [],
   });
-  assertEqual(p.organisationId, 'org-d1', 'organisationId');
+  expect(p.organisationId, 'organisationId').toBe('org-d1');
 });
 
 test('maps delegatingUserId to id', () => {
@@ -143,7 +125,7 @@ test('maps delegatingUserId to id', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'del-user-7',
     grantId: 'g1', allowedTables: [], allowedActions: [],
   });
-  assertEqual(p.id, 'del-user-7', 'id should equal delegatingUserId');
+  expect(p.id, 'id should equal delegatingUserId').toBe('del-user-7');
 });
 
 test('carries grantId', () => {
@@ -151,7 +133,7 @@ test('carries grantId', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'grant-42', allowedTables: [], allowedActions: [],
   });
-  assertEqual(p.grantId, 'grant-42', 'grantId');
+  expect(p.grantId, 'grantId').toBe('grant-42');
 });
 
 test('carries allowedTables', () => {
@@ -159,7 +141,7 @@ test('carries allowedTables', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'g1', allowedTables: ['canonical_accounts', 'canonical_contacts'], allowedActions: [],
   });
-  assertEqual(p.allowedTables, ['canonical_accounts', 'canonical_contacts'], 'allowedTables');
+  expect(p.allowedTables, 'allowedTables').toEqual(['canonical_accounts', 'canonical_contacts']);
 });
 
 test('carries allowedActions', () => {
@@ -167,7 +149,7 @@ test('carries allowedActions', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'g1', allowedTables: [], allowedActions: ['read', 'write'],
   });
-  assertEqual(p.allowedActions, ['read', 'write'], 'allowedActions');
+  expect(p.allowedActions, 'allowedActions').toEqual(['read', 'write']);
 });
 
 test('defaults teamIds to empty array when not provided', () => {
@@ -175,7 +157,7 @@ test('defaults teamIds to empty array when not provided', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'g1', allowedTables: [], allowedActions: [],
   });
-  assertEqual(p.teamIds, [], 'teamIds should default to []');
+  expect(p.teamIds, 'teamIds should default to []').toEqual([]);
 });
 
 test('carries explicit teamIds when provided', () => {
@@ -183,7 +165,7 @@ test('carries explicit teamIds when provided', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'u1',
     grantId: 'g1', allowedTables: [], allowedActions: [], teamIds: ['t1', 't2'],
   });
-  assertEqual(p.teamIds, ['t1', 't2'], 'teamIds');
+  expect(p.teamIds, 'teamIds').toEqual(['t1', 't2']);
 });
 
 test('carries delegatingUserId field', () => {
@@ -191,9 +173,7 @@ test('carries delegatingUserId field', () => {
     organisationId: 'org1', subaccountId: null, delegatingUserId: 'del-u-5',
     grantId: 'g1', allowedTables: [], allowedActions: [],
   });
-  assertEqual(p.delegatingUserId, 'del-u-5', 'delegatingUserId');
+  expect(p.delegatingUserId, 'delegatingUserId').toBe('del-u-5');
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

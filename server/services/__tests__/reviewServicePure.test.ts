@@ -11,24 +11,9 @@
  *   npx tsx server/services/__tests__/reviewServicePure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { checkIdempotency } from '../reviewServicePure.js';
 import type { ReviewStatus, RequestedAction } from '../reviewServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('reviewServicePure — idempotency decision helper (spec §6.2.1)');
@@ -37,65 +22,65 @@ console.log('');
 // ─── pending items: should always proceed ────────────────────────────────────
 
 test('pending + approve → proceed', () => {
-  assert.equal(checkIdempotency('pending', 'approve'), 'proceed');
+  expect(checkIdempotency('pending', 'approve')).toBe('proceed');
 });
 
 test('pending + reject → proceed', () => {
-  assert.equal(checkIdempotency('pending', 'reject'), 'proceed');
+  expect(checkIdempotency('pending', 'reject')).toBe('proceed');
 });
 
 test('edited_pending + approve → proceed', () => {
-  assert.equal(checkIdempotency('edited_pending', 'approve'), 'proceed');
+  expect(checkIdempotency('edited_pending', 'approve')).toBe('proceed');
 });
 
 test('edited_pending + reject → proceed', () => {
-  assert.equal(checkIdempotency('edited_pending', 'reject'), 'proceed');
+  expect(checkIdempotency('edited_pending', 'reject')).toBe('proceed');
 });
 
 // ─── double-approve: idempotent replay ───────────────────────────────────────
 
 test('already approved + approve → idempotent (second call returns existing row)', () => {
   // This is the "double-approve" case — no re-audit, no re-enqueue
-  assert.equal(checkIdempotency('approved', 'approve'), 'idempotent');
+  expect(checkIdempotency('approved', 'approve')).toBe('idempotent');
 });
 
 test('completed (post-execution) + approve → idempotent', () => {
   // Items move to "completed" after execution succeeds; a late retry must
   // still be treated as idempotent, not a conflict.
-  assert.equal(checkIdempotency('completed', 'approve'), 'idempotent');
+  expect(checkIdempotency('completed', 'approve')).toBe('idempotent');
 });
 
 // ─── double-reject: idempotent replay ────────────────────────────────────────
 
 test('already rejected + reject → idempotent (second call returns existing row)', () => {
-  assert.equal(checkIdempotency('rejected', 'reject'), 'idempotent');
+  expect(checkIdempotency('rejected', 'reject')).toBe('idempotent');
 });
 
 // ─── cross-terminal conflicts: 409 ITEM_CONFLICT ─────────────────────────────
 
 test('already rejected + approve → conflict', () => {
   // Caller is requesting approve on a rejected item → 409 ITEM_CONFLICT
-  assert.equal(checkIdempotency('rejected', 'approve'), 'conflict');
+  expect(checkIdempotency('rejected', 'approve')).toBe('conflict');
 });
 
 test('already approved + reject → conflict', () => {
   // Caller is requesting reject on an approved item → 409 ITEM_CONFLICT
-  assert.equal(checkIdempotency('approved', 'reject'), 'conflict');
+  expect(checkIdempotency('approved', 'reject')).toBe('conflict');
 });
 
 test('completed + reject → conflict', () => {
   // Item executed successfully (completed); rejecting it now is a conflict
-  assert.equal(checkIdempotency('completed', 'reject'), 'conflict');
+  expect(checkIdempotency('completed', 'reject')).toBe('conflict');
 });
 
 // ─── not_found ────────────────────────────────────────────────────────────────
 
 test('undefined status + approve → not_found', () => {
-  assert.equal(checkIdempotency(undefined, 'approve'), 'not_found');
+  expect(checkIdempotency(undefined, 'approve')).toBe('not_found');
 });
 
 test('undefined status + reject → not_found', () => {
-  assert.equal(checkIdempotency(undefined, 'reject'), 'not_found');
+  expect(checkIdempotency(undefined, 'reject')).toBe('not_found');
 });
 
 // ─── exhaustive cross-product spot-check ─────────────────────────────────────
@@ -119,17 +104,11 @@ const statusActionMatrix: Array<[ReviewStatus | undefined, RequestedAction, stri
 test('full status × action matrix', () => {
   for (const [status, action, expected] of statusActionMatrix) {
     const actual = checkIdempotency(status, action);
-    assert.equal(
-      actual,
-      expected,
-      `status=${String(status)} action=${action} → expected ${expected}, got ${actual}`,
-    );
+    expect(actual).toBe(expected);
   }
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

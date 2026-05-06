@@ -1,5 +1,6 @@
 ﻿import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
+import { isActive } from '../lib/queryHelpers.js';
 import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -95,6 +96,16 @@ import {
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 // Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
 import { validateArtefactForPersistence } from './briefArtefactValidator.js';
+// Integration block service — pauses runs waiting for OAuth connections
+import { checkRequiredIntegration } from './integrationBlockService.js';
+import { agentMessages } from '../db/schema/index.js';
+import { buildThreadContextReadModel } from './conversationThreadContextService.js';
+import { formatThreadContextBlock, prependThreadContextToBasePrompt } from './conversationThreadContextServicePure.js';
+import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
+import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServicePure.js';
+import { spendingBudgets } from '../db/schema/spendingBudgets.js';
+import { spendingPolicies } from '../db/schema/spendingPolicies.js';
+import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -261,6 +272,14 @@ export interface AgentRunRequest {
    */
   delegationScope?: DelegationScope;
   delegationDirection?: DelegationDirection;
+  /**
+   * When the run is triggered from a conversation context (e.g. chat panel
+   * test-run), the caller passes the conversationId here so that integration
+   * card messages can be persisted to agent_messages.
+   */
+  conversationId?: string;
+  /** Workflow nesting depth — propagated from parent run via workflow.run.start skill. Top-level orchestrator runs set this to 1. */
+  workflowRunDepth?: number;
 }
 
 export interface AgentRunResult {
@@ -271,7 +290,9 @@ export interface AgentRunResult {
   // iee-run-completed event handler. Callers that need a terminal result
   // must subscribe to WebSocket `agent:run:completed` or poll the agent
   // run status until it leaves 'delegated'.
-  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+  // 'blocked_awaiting_integration' — run is paused waiting for the user to
+  // connect an OAuth integration. Not terminal; completedAt is NOT written.
+  status: 'delegated' | 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'blocked_awaiting_integration';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -610,6 +631,9 @@ export const agentExecutionService = {
         subaccountAgentId: request.subaccountAgentId ?? null,
         taskId: request.taskId ?? null,
         triggerContext: request.triggerContext,
+        subaccountId: request.subaccountId ?? null,
+        runId: run.id,
+        tokenBudget,
       });
 
       // Only eager sources flagged includedInPrompt: true are rendered into
@@ -793,9 +817,64 @@ export const agentExecutionService = {
         effectiveMasterPrompt,
         dataSourceContents,
         orgProcesses,
+        undefined,
+        runContextData.externalDocumentBlocks,
       );
 
-      const systemPromptParts = [basePrompt];
+      // ── Thread context injection (A-D1) ─────────────────────────────────────
+      // Prepended first — before external docs, memory blocks, and all other
+      // augmentation. Spec §2.2 ordering invariant. Fail-open: a build error
+      // skips injection rather than aborting the run.
+      let effectiveBasePrompt = basePrompt;
+      const THREAD_CTX_TIMEOUT = Symbol('timeout');
+      const runConvId =
+        request.conversationId ??
+        (request.triggerContext?.conversationId as string | undefined) ??
+        undefined;
+      if (runConvId) {
+        const _threadCtxStart = Date.now();
+        let threadCtx: ThreadContextReadModel | null = null;
+        try {
+          let _threadCtxTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+          const ctxResult = await Promise.race<ThreadContextReadModel | typeof THREAD_CTX_TIMEOUT>([
+            buildThreadContextReadModel(runConvId, request.organisationId),
+            new Promise<typeof THREAD_CTX_TIMEOUT>((resolve) => {
+              _threadCtxTimeoutHandle = setTimeout(() => resolve(THREAD_CTX_TIMEOUT), 500);
+            }),
+          ]);
+          if (_threadCtxTimeoutHandle !== undefined) clearTimeout(_threadCtxTimeoutHandle);
+          if (ctxResult === THREAD_CTX_TIMEOUT) {
+            logger.warn('thread_ctx.timeout', { runId: run.id });
+          } else {
+            threadCtx = ctxResult;
+          }
+        } catch (err) {
+          logger.warn('thread_ctx.build_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        logger.debug('thread_ctx.build_ms', { ms: Date.now() - _threadCtxStart, runId: run.id });
+        if (threadCtx && typeof threadCtx.version === 'number') {
+          const threadBlock = formatThreadContextBlock(threadCtx);
+          if (threadBlock) {
+            effectiveBasePrompt = prependThreadContextToBasePrompt(threadBlock, basePrompt);
+            // Persist version for drift detection — fire-and-forget, best-effort
+            void db
+              .update(agentRuns)
+              .set({
+                runMetadata: {
+                  ...(run.runMetadata ?? {}),
+                  threadContextVersionAtStart: threadCtx.version,
+                },
+              })
+              .where(eq(agentRuns.id, run.id))
+              .catch(() => {});
+          }
+        }
+      }
+
+      const systemPromptParts = [effectiveBasePrompt];
 
       // Layer 1b: System skill instructions
       if (systemSkillInstructions.length > 0) {
@@ -815,18 +894,59 @@ export const agentExecutionService = {
       // (e.g., smart-board runs), the workspace-context string derived above
       // acts as the query text. Explicit attachments always pass through and
       // ensure zero regression for agents configured with pinned blocks.
+
+      // Derive agent domain early — needed for tier-2 block filtering (F1 §4)
+      // and for workspace memory retrieval below.
+      const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
+
+      // Tier-1 baseline artefacts: pinned, hash-stable, always present when captured.
+      // Spec: docs/sub-account-baseline-artefacts-spec.md §4.
+      const tier1Blocks = await memoryBlockService.getTier1Blocks(
+        request.organisationId,
+        request.subaccountId ?? null,
+      );
+
       const memoryBlocksForPrompt = await memoryBlockService.getBlocksForInjection({
         agentId: request.agentId,
         subaccountId: request.subaccountId ?? null,
         organisationId: request.organisationId,
         taskContext: workspaceContext,
+        agentDomain,
       });
-      const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(memoryBlocksForPrompt);
+
+      // Prepend tier-1 ahead of the relevance/explicit set.
+      // Dedupe: if a tier-1 block also appears via explicit attachment, tier-1 entry wins.
+      const tier1BlockIds = new Set(tier1Blocks.map((b) => b.id));
+      const composedBlocks = [
+        ...tier1Blocks.map((b) => ({ ...b, permission: 'read' as const })),
+        ...memoryBlocksForPrompt.filter((b) => !tier1BlockIds.has(b.id)),
+      ];
+
+      // F1 §4 — emit one telemetry event per tier-1 and tier-2 baseline block injected.
+      for (const block of composedBlocks) {
+        const blockTier: 1 | 2 | null = tier1BlockIds.has(block.id)
+          ? 1
+          : (block as { tier?: 1 | 2 | null }).tier === 2
+          ? 2
+          : null;
+        if (blockTier === 1 || blockTier === 2) {
+          createEvent('baseline_artefact.tier_loaded', {
+            organisation_id: request.organisationId,
+            subaccount_id: request.subaccountId ?? null,
+            agent_role: agent.agentRole,
+            tier: blockTier,
+            block_slug: block.name,
+            token_count: approxTokens(block.content),
+          });
+        }
+      }
+
+      const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(composedBlocks);
       if (memoryBlocksSection) {
         systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
       }
       // Phase 8 / W3c — log injected block IDs for provenance trail
-      const injectedBlockIds = memoryBlocksForPrompt.map((b) => b.id);
+      const injectedBlockIds = composedBlocks.map((b) => b.id);
       if (injectedBlockIds.length > 0) {
         void db
           .update(agentRuns)
@@ -924,7 +1044,6 @@ export const agentExecutionService = {
         ? `${targetItem.title ?? ''}${targetItem.description ? ' ' + targetItem.description : ''}`
         : undefined;
 
-      const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
       let memory: string | null = null;
       // Phase 2 S12: track injected memory entries for the citation detector
       // hook at run completion.
@@ -1360,6 +1479,22 @@ export const agentExecutionService = {
       const durationMs = Date.now() - startTime;
       let finalStatus = (loopResult.finalStatus ?? 'completed') as
         'completed' | 'completed_with_uncertainty' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded' | 'cancelled';
+
+      if (loopResult.finalStatus === 'blocked_awaiting_integration') {
+        // Run is paused — do NOT write completedAt or trigger finalisation.
+        // The blocked state has already been persisted inside the loop.
+        return {
+          runId: run.id,
+          status: 'blocked_awaiting_integration' as AgentRunResult['status'],
+          summary: null,
+          totalToolCalls: loopResult.totalToolCalls,
+          totalTokens: loopResult.totalTokens,
+          durationMs,
+          tasksCreated: loopResult.tasksCreated,
+          tasksUpdated: loopResult.tasksUpdated,
+          deliverablesCreated: loopResult.deliverablesCreated,
+        };
+      }
 
       // Pre-fetch runMetadata once — consumed by both the Reporting Agent
       // finalize hook and Phase B's runResultStatus derivation (which reads
@@ -2212,11 +2347,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     timeoutMs,
     taskId: request.taskId,
     isTestRun: request.isTestRun ?? false,
+    conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? undefined,
     _mcpClients: mcpClients ?? undefined,
     _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
     runContextData,
     readDataSourceCallCount: 0,
     hierarchy: hierarchyContext,
+    workflowRunDepth: request.workflowRunDepth,
   };
 
   // Throttle trace events to prevent event floods (max 2/sec)
@@ -2319,9 +2456,52 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           const planSummary = plan.actions
             .map((a, i) => `${i + 1}. ${a.tool}${a.reason ? ` — ${a.reason}` : ''}`)
             .join('\n');
+
+          // Chunk 7: advisory spend-policy preview (fail-open, never blocks)
+          let spendPreviewNote = '';
+          try {
+            const spendActions = plan.actions.filter((a) =>
+              (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(a.tool),
+            );
+            if (spendActions.length > 0 && request.subaccountId) {
+              const [budgetRow] = await db
+                .select({ policy: spendingPolicies })
+                .from(spendingBudgets)
+                .innerJoin(spendingPolicies, eq(spendingPolicies.spendingBudgetId, spendingBudgets.id))
+                .where(
+                  and(
+                    eq(spendingBudgets.organisationId, request.organisationId),
+                    eq(spendingBudgets.subaccountId, request.subaccountId),
+                  ),
+                )
+                .limit(1);
+
+              if (budgetRow) {
+                const parsedPlan = {
+                  steps: spendActions.map((a) => ({
+                    amountMinor: 1,
+                    currency: 'USD',
+                    merchant: { id: null, descriptor: '' },
+                    intent: a.reason ?? a.tool,
+                  })),
+                };
+                const previews = previewSpendForPlan(parsedPlan, budgetRow.policy as unknown as SpendingPolicy);
+                const nonAuto = previews.filter((p) => p.verdict !== 'would_auto');
+                if (nonAuto.length > 0) {
+                  const notes = nonAuto
+                    .map((p) => `  step ${p.stepIndex + 1} (${spendActions[p.stepIndex]?.tool ?? '?'}): ${p.verdict}`)
+                    .join('\n');
+                  spendPreviewNote = `\nSpend policy advisory:\n${notes}`;
+                }
+              }
+            }
+          } catch (previewErr) {
+            console.warn('[P4.3] Spend preview failed (non-blocking):', previewErr);
+          }
+
           messages.push({
             role: 'user',
-            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}\n</system-reminder>`,
+            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}${spendPreviewNote}\n</system-reminder>`,
           });
 
           // Track token usage from the planning call
@@ -2666,6 +2846,136 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       }
 
       if (skipTool) continue;
+
+      // ── Integration block check ───────────────────────────────────────────
+      // Determine if this tool requires an OAuth integration that is not yet
+      // connected. In v1 checkRequiredIntegration always returns shouldBlock:false;
+      // the full block path is wired and ready to activate when ACTION_REGISTRY
+      // entries begin declaring requiredIntegration fields.
+      {
+        // Read current runMetadata for block-sequence tracking
+        const [runMeta] = await db
+          .select({ runMetadata: agentRuns.runMetadata })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, runId))
+          .limit(1);
+        const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
+        const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
+
+        const blockDecision = await checkRequiredIntegration(
+          toolCall.name,
+          toolCall.input as Record<string, unknown>,
+          {
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            runId,
+            agentId: request.agentId,
+            currentBlockSequence: newBlockSeq,
+          },
+        );
+
+        if ('code' in blockDecision && blockDecision.code === 'TOOL_NOT_RESUMABLE') {
+          // Cancel the run — this tool cannot be safely paused mid-execution.
+          await db.update(agentRuns).set({
+            status: 'cancelled',
+            runResultStatus: 'failed',
+            runMetadata: {
+              ...currentRunMeta,
+              cancelReason: 'tool_not_resumable',
+            },
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.error('tool_not_resumable', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            toolName: toolCall.name,
+            action: 'tool_not_resumable',
+          });
+
+          finalStatus = 'failed';
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
+        }
+
+        if (blockDecision.shouldBlock) {
+          const plaintext = blockDecision.plaintext;
+          const tokenHash = blockDecision.tokenHash;
+          const appBase = process.env.APP_BASE_URL ?? '';
+          const blockConversationId = request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '';
+          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
+
+          const cardContent = {
+            ...blockDecision.card,
+            actionUrl,
+            resumeToken: plaintext,
+            expiresAt: blockDecision.expiresAt.toISOString(),
+            schemaVersion: 1 as const,
+          };
+
+          // Persist blocked state on run
+          await db.update(agentRuns).set({
+            blockedReason: 'integration_required',
+            blockedExpiresAt: blockDecision.expiresAt,
+            integrationResumeToken: tokenHash,
+            integrationDedupKey: blockDecision.integrationDedupKey,
+            runMetadata: {
+              ...currentRunMeta,
+              currentBlockSequence: newBlockSeq,
+              blockedToolCall: {
+                toolName: toolCall.name,
+                toolArgs: toolCall.input,
+                dedupKey: blockDecision.integrationDedupKey,
+              },
+            },
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.info('run_blocked', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            integrationId: blockDecision.integrationId,
+            blockSequence: newBlockSeq,
+            action: 'run_blocked',
+          });
+
+          // Persist the integration card as an assistant message in the conversation.
+          // Skip insert if conversationId is empty — guard prevents a DB error when no conversation is associated.
+          const _integrationConvId =
+            request.conversationId ??
+            (request.triggerContext?.conversationId as string | undefined) ??
+            '';
+          if (_integrationConvId) {
+            await db.insert(agentMessages).values({
+              conversationId: _integrationConvId,
+              role: 'assistant',
+              content: `Integration required: ${cardContent.integrationId}`,
+              meta: cardContent as any,
+              createdAt: new Date(),
+            });
+            logger.info('integration_card_emitted', {
+              runId,
+              conversationId: _integrationConvId,
+              integrationId: cardContent.integrationId,
+              blockSequence: cardContent.blockSequence,
+              action: 'integration_card_emitted',
+            });
+          }
+
+          // Break out of the agent loop — run stays in 'running' status
+          // with blocked_reason set. The expiry sweep will cancel it if
+          // the user never connects.
+          finalStatus = 'blocked_awaiting_integration';
+          // Note: emitLoopTermination only accepts its fixed union — use
+          // the closest structural match and log the actual reason separately.
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
+        }
+      }
 
       totalToolCalls++;
       const toolStart = Date.now();
@@ -3054,13 +3364,12 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
       agentDescription: agents.description,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, subaccountId),
         eq(subaccountAgents.isActive, true),
         eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
       )
     );
 

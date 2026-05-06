@@ -19,7 +19,7 @@
 //                                             adapter calls (NODE_ENV='test')
 // ---------------------------------------------------------------------------
 
-const ROUTER_FRAME_PATTERN = /server[\/\\]services[\/\\]llmRouter\./;
+const ROUTER_FRAME_PATTERN = /server[/\\]services[/\\]llmRouter\./;
 
 export function assertCalledFromRouter(): void {
   // In test mode, adapters are legitimately called directly — every adapter

@@ -1,7 +1,7 @@
 /**
  * Unified company import script.
  *
- * Reads a Paperclip-compatible company folder (COMPANY.md + agents/*/AGENTS.md + ...)
+ * Reads a Paperclip-compatible company folder (COMPANY.md + agents/{slug}/AGENTS.md + ...)
  * and imports it into one of two targets:
  *
  *   --target system-agents   → upserts into system_agents table (platform-level agent defs)
@@ -18,7 +18,7 @@ import 'dotenv/config';
 import { resolve } from 'path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { systemAgents } from '../server/db/schema/index.js';
 import {
   parseCompanyFolder,

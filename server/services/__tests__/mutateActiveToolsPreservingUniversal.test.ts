@@ -6,27 +6,9 @@
  * of docs/improvements-roadmap-spec.md.
  */
 
+import { expect, test } from 'vitest';
 import { mutateActiveToolsPreservingUniversal } from '../agentExecutionServicePure.js';
 import type { ProviderTool } from '../providers/types.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (actual !== expected) {
@@ -51,10 +33,10 @@ test('re-injects universal tools removed by the transform', () => {
   );
 
   const names = result.map((t) => t.name);
-  assert(names.includes('send_email'), 'should contain send_email');
-  assert(names.includes('ask_clarifying_question'), 'should re-inject ask_clarifying_question');
-  assert(names.includes('web_search'), 'should re-inject web_search');
-  assert(names.includes('read_workspace'), 'should re-inject read_workspace');
+  expect(names.includes('send_email'), 'should contain send_email').toBeTruthy();
+  expect(names.includes('ask_clarifying_question'), 'should re-inject ask_clarifying_question').toBeTruthy();
+  expect(names.includes('web_search'), 'should re-inject web_search').toBeTruthy();
+  expect(names.includes('read_workspace'), 'should re-inject read_workspace').toBeTruthy();
 });
 
 test('does not duplicate tools that the transform kept', () => {
@@ -70,7 +52,7 @@ test('does not duplicate tools that the transform kept', () => {
 
   const names = result.map((t) => t.name);
   const uniqueNames = new Set(names);
-  assertEqual(uniqueNames.size, names.length, 'no duplicates');
+  expect(uniqueNames.size, 'no duplicates').toEqual(names.length);
 });
 
 test('handles empty transform result', () => {
@@ -84,13 +66,11 @@ test('handles empty transform result', () => {
   );
 
   const names = result.map((t) => t.name);
-  assert(names.includes('ask_clarifying_question'), 'should contain ask_clarifying_question');
-  assert(names.includes('web_search'), 'should contain web_search');
-  assert(names.includes('read_workspace'), 'should contain read_workspace');
-  assert(!names.includes('send_email'), 'should not contain send_email');
+  expect(names.includes('ask_clarifying_question'), 'should contain ask_clarifying_question').toBeTruthy();
+  expect(names.includes('web_search'), 'should contain web_search').toBeTruthy();
+  expect(names.includes('read_workspace'), 'should contain read_workspace').toBeTruthy();
+  expect(!names.includes('send_email'), 'should not contain send_email').toBeTruthy();
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

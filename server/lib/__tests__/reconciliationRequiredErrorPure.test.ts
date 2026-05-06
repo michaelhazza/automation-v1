@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   ReconciliationRequiredError,
   isReconciliationRequiredError,
@@ -13,29 +12,29 @@ import {
 
 test('ReconciliationRequiredError carries code=RECONCILIATION_REQUIRED', () => {
   const err = new ReconciliationRequiredError({ idempotencyKey: 'v1:org:run:...' });
-  assert.equal(err.code, 'RECONCILIATION_REQUIRED');
-  assert.equal(err.statusCode, 409);
-  assert.equal(err.name, 'ReconciliationRequiredError');
-  assert.ok(err instanceof Error);
+  expect(err.code).toBe('RECONCILIATION_REQUIRED');
+  expect(err.statusCode).toBe(409);
+  expect(err.name).toBe('ReconciliationRequiredError');
+  expect(err instanceof Error).toBeTruthy();
 });
 
 test('ReconciliationRequiredError carries idempotencyKey and optional runtimeKey', () => {
   const err1 = new ReconciliationRequiredError({ idempotencyKey: 'k_1' });
-  assert.equal(err1.idempotencyKey, 'k_1');
-  assert.equal(err1.existingRuntimeKey, null);
+  expect(err1.idempotencyKey).toBe('k_1');
+  expect(err1.existingRuntimeKey).toBe(null);
 
   const err2 = new ReconciliationRequiredError({
     idempotencyKey:     'k_2',
     existingRuntimeKey: 'rt_xyz',
   });
-  assert.equal(err2.idempotencyKey, 'k_2');
-  assert.equal(err2.existingRuntimeKey, 'rt_xyz');
+  expect(err2.idempotencyKey).toBe('k_2');
+  expect(err2.existingRuntimeKey).toBe('rt_xyz');
 });
 
 test('ReconciliationRequiredError default message calls out double-bill risk', () => {
   const err = new ReconciliationRequiredError({ idempotencyKey: 'k_1' });
-  assert.match(err.message, /double-bill/, 'message must explain the risk');
-  assert.match(err.message, /provisional 'started' row/);
+  expect(err.message).toMatch(/double-bill/);
+  expect(err.message).toMatch(/provisional 'started' row/);
 });
 
 test('ReconciliationRequiredError accepts custom message override', () => {
@@ -43,18 +42,18 @@ test('ReconciliationRequiredError accepts custom message override', () => {
     idempotencyKey: 'k_1',
     message:        'custom',
   });
-  assert.equal(err.message, 'custom');
+  expect(err.message).toBe('custom');
 });
 
 test('isReconciliationRequiredError — positive case', () => {
   const err = new ReconciliationRequiredError({ idempotencyKey: 'k' });
-  assert.equal(isReconciliationRequiredError(err), true);
+  expect(isReconciliationRequiredError(err)).toBe(true);
 });
 
 test('isReconciliationRequiredError — negative cases', () => {
-  assert.equal(isReconciliationRequiredError(new Error('other')), false);
-  assert.equal(isReconciliationRequiredError('string'), false);
-  assert.equal(isReconciliationRequiredError(null), false);
-  assert.equal(isReconciliationRequiredError(undefined), false);
-  assert.equal(isReconciliationRequiredError({ code: 'RECONCILIATION_REQUIRED' }), false);  // duck-type not enough
+  expect(isReconciliationRequiredError(new Error('other'))).toBe(false);
+  expect(isReconciliationRequiredError('string')).toBe(false);
+  expect(isReconciliationRequiredError(null)).toBe(false);
+  expect(isReconciliationRequiredError(undefined)).toBe(false);
+  expect(isReconciliationRequiredError({ code: 'RECONCILIATION_REQUIRED' })).toBe(false);  // duck-type not enough
 });

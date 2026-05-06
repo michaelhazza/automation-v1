@@ -19,6 +19,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions, agents, systemAgents } from '../db/schema/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import type { Action } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { skillExecutor, type SkillExecutionContext } from './skillExecutor.js';
@@ -71,10 +72,11 @@ export async function resolveConfigurationAssistantAgentId(
   const rows = await db
     .select({ agentId: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
     .where(
       and(
         eq(agents.organisationId, orgId),
+        isActive(agents),
         eq(systemAgents.slug, 'configuration-assistant'),
       ),
     );
@@ -386,6 +388,12 @@ export async function resumeActionCallAfterApproval(
 
   // Engine is imported dynamically to avoid a service-graph cycle
   const { WorkflowEngineService } = await import('./workflowEngineService.js');
+
+  // Workflow-driven action_call steps always carry an agentId. System-initiated
+  // actions (e.g. spend-promotion) never reach the workflow executor.
+  if (!action.agentId) {
+    return { stepRunId, runId, status: 'failed', error: 'missing_agent_id' };
+  }
 
   const context: SkillExecutionContext = {
     runId,

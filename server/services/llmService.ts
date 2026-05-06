@@ -261,11 +261,12 @@ export function buildSystemPrompt(
   masterPrompt: string,
   dataSourceContents: Array<{ name: string; description: string | null; content: string; contentType: string }>,
   orgTasks: Array<{ id: string; name: string; description: string | null }>,
-  maxDataTokens = 60000
+  maxDataTokens = 60000,
+  externalDocBlocks: string[] = [],
 ): string {
   const parts: string[] = [masterPrompt.trim()];
 
-  if (dataSourceContents.length > 0) {
+  if (dataSourceContents.length > 0 || externalDocBlocks.length > 0) {
     parts.push('\n\n---\n## Your Knowledge Base\n');
     parts.push('The following data has been provided for your context. Use it to answer questions accurately.\n');
 
@@ -281,6 +282,10 @@ export function buildSystemPrompt(
       const truncated = truncateToTokenBudget(ds.content, available - approxTokens(header + footer));
       parts.push(header + truncated + footer);
       usedTokens += approxTokens(header + truncated + footer);
+    }
+
+    if (externalDocBlocks.length > 0) {
+      parts.push('\n' + externalDocBlocks.join('\n\n'));
     }
   }
 

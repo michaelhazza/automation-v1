@@ -1,0 +1,584 @@
+<!doctype html>
+<!--
+  Workflow Studio · 04 — Four A's: per-step-type inspector showcase
+  =================================================================
+  Replaces the description-card version of mock 04.
+
+  One page, four state-switch buttons at the top (matches the
+  preview-state pattern used in brief-endtoend.html). Each state
+  shows the same workflow canvas but with a different step
+  selected, and the inspector pane on the right showing the actual
+  fields specific to that step type.
+
+  States:
+    Agent     → step 3 (Classify by fit) selected, Agent inspector
+    Action    → step 2 (Find stale leads) selected, Action inspector
+    Ask       → step 1 (Confirm campaign target) selected, Ask inspector
+    Approval  → step 5 (Marketing review) selected, Approval inspector
+
+  Implementation: pure CSS state switching via hidden radio inputs +
+  sibling selectors. No JS needed.
+
+  Approver picker (Approval state): humans-only by design, four
+  realistic options that map to existing schema + minimum new build:
+    - Specific people (uses users table)
+    - A team (uses existing teams + team_members tables)
+    - Task requester (uses tasks.created_by_user_id)
+    - Org admin (uses existing role)
+  Quorum field (N approvers required).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Four A's — step type inspectors</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#fafafa; color:#1e293b; margin:0; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .a-agent    { --aaccent:#4f46e5; --abg:#eef2ff; --aborder:#c7d2fe; --atext:#3730a3; }
+  .a-action   { --aaccent:#059669; --abg:#ecfdf5; --aborder:#a7f3d0; --atext:#047857; }
+  .a-ask      { --aaccent:#d97706; --abg:#fffbeb; --aborder:#fde68a; --atext:#92400e; }
+  .a-approval { --aaccent:#ea580c; --abg:#fff7ed; --aborder:#fed7aa; --atext:#9a3412; }
+
+  .step-card {
+    width: 360px; background:white; border:1px solid #e5e7eb; border-radius:10px;
+    padding: 12px 14px; display:flex; align-items:center; gap:12px;
+    cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .step-card:hover { border-color:#cbd5e1; }
+  .icn-wrap { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative; background:var(--abg); color:var(--aaccent); }
+  .a-pill { display:inline-flex; align-items:center; padding:1px 7px; border-radius:999px; background:var(--abg); color:var(--atext); font-size:9.5px; font-weight:600; border:1px solid var(--aborder); text-transform:uppercase; letter-spacing:.04em; }
+  .flag-irreversible { position:absolute; top:-3px; right:-3px; width:10px; height:10px; border-radius:999px; background:#dc2626; border:2px solid white; }
+
+  .connector { width: 1.5px; background: #cbd5e1; margin: 0 auto; }
+  .branch-chip { display:inline-flex; align-items:center; gap:6px; padding: 3px 10px; border-radius: 999px; background: #f8fafc; border: 1px dashed #cbd5e1; font-size: 11px; color: #475569; }
+
+  /* Inspector */
+  .inspector { background: white; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; height: 100%; }
+  .insp { flex-direction: column; background: white; border-left: 1px solid #e5e7eb; }
+  .field-edit { border:1px solid #cbd5e1; border-radius:6px; padding:6px 10px; font-size:13px; width:100%; background:white; outline:none; }
+  .field-edit:focus { border-color:#6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+  .scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+
+  /* State switching — pure CSS */
+  input[name="step-state"] { display: none; }
+  .state-btn { padding: 7px 14px; border-radius:6px; font-size:12.5px; font-weight:500; cursor:pointer; color:#475569; background:#f1f5f9; border:1px solid #e2e8f0; }
+  .state-btn:hover { background:#e2e8f0; }
+  #state-agent:checked    ~ .controls label[for="state-agent"],
+  #state-action:checked   ~ .controls label[for="state-action"],
+  #state-ask:checked      ~ .controls label[for="state-ask"],
+  #state-approval:checked ~ .controls label[for="state-approval"] { background:white; color:#0f172a; border-color:#0f172a; box-shadow: 0 1px 2px rgba(15,23,42,0.06); }
+
+  /* Selected step highlight per state */
+  .step-card[data-step] { transition: border-color .12s ease, box-shadow .12s ease; }
+  #state-agent:checked    ~ .body .step-card[data-step="agent"],
+  #state-action:checked   ~ .body .step-card[data-step="action"],
+  #state-ask:checked      ~ .body .step-card[data-step="ask"],
+  #state-approval:checked ~ .body .step-card[data-step="approval"] {
+    border-color: var(--aaccent); box-shadow: 0 0 0 3px rgba(99,102,241,0.10);
+  }
+
+  /* Show only the matching inspector */
+  .insp { display: none; }
+  #state-agent:checked    ~ .body .insp.insp-agent,
+  #state-action:checked   ~ .body .insp.insp-action,
+  #state-ask:checked      ~ .body .insp.insp-ask,
+  #state-approval:checked ~ .body .insp.insp-approval { display: flex; }
+
+  /* Approver-type radio styling */
+  .opt-radio { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; cursor:pointer; font-size:12.5px; }
+  .opt-radio:hover { background:#f8fafc; }
+  .opt-radio input { accent-color: #4f46e5; }
+  .opt-radio.is-selected { border-color: #4f46e5; background:#eef2ff; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Hidden state radios -->
+<input type="radio" name="step-state" id="state-agent" checked>
+<input type="radio" name="step-state" id="state-action">
+<input type="radio" name="step-state" id="state-ask">
+<input type="radio" name="step-state" id="state-approval">
+
+<!-- App bar -->
+<div class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3 text-[13px]">
+  <div class="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-indigo-700 text-white text-[11px] font-bold flex items-center justify-center">A</div>
+  <div class="font-semibold text-slate-900">Automation OS</div>
+  <div class="text-slate-400">/</div>
+  <span class="text-slate-900 font-medium">Step type inspectors · the four A's</span>
+</div>
+
+<!-- State controls -->
+<div class="controls bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-2">
+  <span class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mr-2">Click to view step type</span>
+  <label for="state-agent"    class="state-btn"><span style="color:#4f46e5;">●</span> Agent</label>
+  <label for="state-action"   class="state-btn"><span style="color:#059669;">●</span> Action</label>
+  <label for="state-ask"      class="state-btn"><span style="color:#d97706;">●</span> Ask</label>
+  <label for="state-approval" class="state-btn"><span style="color:#ea580c;">●</span> Approval</label>
+  <span class="ml-auto text-[11px] text-slate-400 italic">Mockup controls — not part of the real UI</span>
+</div>
+
+<!-- Body: canvas + inspector -->
+<div class="body flex" style="height: calc(100vh - 110px); min-height: 720px;">
+
+  <!-- Canvas -->
+  <div class="flex-1 min-w-0 overflow-y-auto px-6 py-10">
+    <div class="mx-auto" style="max-width: 720px;">
+
+      <!-- Step 1 — Ask -->
+      <div class="flex justify-center">
+        <div class="step-card a-ask" data-step="ask">
+          <div class="icn-wrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[14px] font-medium text-slate-900 truncate">Confirm campaign target</div>
+            <div class="text-[12px] text-slate-500 truncate">Operator picks audience segment + tone</div>
+          </div>
+          <span class="a-pill a-ask">Ask</span>
+          <div class="text-[10.5px] text-slate-400 num ml-1">1</div>
+        </div>
+      </div>
+      <div class="connector" style="height:24px;"></div>
+
+      <!-- Step 2 — Action -->
+      <div class="flex justify-center">
+        <div class="step-card a-action" data-step="action">
+          <div class="icn-wrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[14px] font-medium text-slate-900 truncate">Find stale leads</div>
+            <div class="text-[12px] text-slate-500 truncate">GHL · contacts.search · last contacted &gt; 30d</div>
+          </div>
+          <span class="a-pill a-action">Action</span>
+          <div class="text-[10.5px] text-slate-400 num ml-1">2</div>
+        </div>
+      </div>
+      <div class="connector" style="height:24px;"></div>
+
+      <!-- Step 3 — Agent -->
+      <div class="flex justify-center">
+        <div class="step-card a-agent" data-step="agent">
+          <div class="icn-wrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v1H7a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a3 3 0 0 0-3-3z"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg></div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[14px] font-medium text-slate-900 truncate">Classify by fit</div>
+            <div class="text-[12px] text-slate-500 truncate">Copywriter · returns <code class="text-[11px] bg-slate-100 px-1 rounded">tier</code></div>
+          </div>
+          <span class="a-pill a-agent">Agent</span>
+          <div class="text-[10.5px] text-slate-400 num ml-1">3</div>
+        </div>
+      </div>
+
+      <!-- Branch chip -->
+      <div class="flex justify-center mt-2">
+        <div class="branch-chip">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 3 6 15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+          Branch on <code class="text-[11px] bg-white border border-slate-200 px-1 rounded ml-0.5 font-medium text-slate-700">tier</code>
+        </div>
+      </div>
+
+      <!-- Branches -->
+      <div class="grid grid-cols-2 gap-6 mt-3">
+        <div class="flex flex-col items-center gap-2">
+          <span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[10.5px] font-semibold">tier = "hot"</span>
+          <div class="connector" style="height:14px;"></div>
+          <div class="step-card a-agent" style="width: 280px;">
+            <div class="icn-wrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
+            <div class="flex-1 min-w-0"><div class="text-[13.5px] font-medium text-slate-900 truncate">Draft personal email</div></div>
+            <span class="a-pill a-agent">Agent</span>
+            <div class="text-[10.5px] text-slate-400 num ml-1">4</div>
+          </div>
+        </div>
+        <div class="flex flex-col items-center gap-2">
+          <span class="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[10.5px] font-semibold">tier = "cold"</span>
+          <div class="connector" style="height:14px;"></div>
+          <div class="step-card a-action" style="width: 280px;">
+            <div class="icn-wrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div class="flex-1 min-w-0"><div class="text-[13.5px] font-medium text-slate-900 truncate">Add to nurture list</div></div>
+            <span class="a-pill a-action">Action</span>
+            <div class="text-[10.5px] text-slate-400 num ml-1">4b</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 mt-1">
+        <div class="flex flex-col items-center"><div class="connector" style="height:24px;"></div></div>
+        <div class="flex flex-col items-center"><span class="text-[11px] text-slate-400 italic mt-2">— ends —</span></div>
+      </div>
+
+      <!-- Step 5 — Approval -->
+      <div class="grid grid-cols-2 gap-6">
+        <div class="flex flex-col items-center">
+          <div class="step-card a-approval" data-step="approval" style="width: 280px;">
+            <div class="icn-wrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13.5px] font-medium text-slate-900 truncate">Marketing review</div>
+              <div class="text-[11.5px] text-slate-500 truncate">2 approvers · on reject → step 4</div>
+            </div>
+            <span class="a-pill a-approval">Approval</span>
+            <div class="text-[10.5px] text-slate-400 num ml-1">5</div>
+          </div>
+        </div>
+        <div></div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6"><div class="flex flex-col items-center"><div class="connector" style="height:24px;"></div></div><div></div></div>
+
+      <!-- Step 6 — Action irreversible -->
+      <div class="grid grid-cols-2 gap-6">
+        <div class="flex flex-col items-center">
+          <div class="step-card a-action" style="width: 280px;">
+            <div class="icn-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              <span class="flag-irreversible" title="Irreversible"></span>
+            </div>
+            <div class="flex-1 min-w-0"><div class="text-[13.5px] font-medium text-slate-900 truncate">Send via Mailchimp</div></div>
+            <span class="a-pill a-action">Action</span>
+            <div class="text-[10.5px] text-slate-400 num ml-1">6</div>
+          </div>
+        </div>
+        <div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inspector — AGENT -->
+  <div class="insp insp-agent" style="width: 380px; flex-shrink: 0;">
+    <div class="px-5 py-3.5 border-l border-b border-slate-200 bg-white flex items-start justify-between">
+      <div>
+        <div class="flex items-center gap-2"><span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 3</span><span class="a-pill a-agent">Agent</span></div>
+        <div class="text-[15px] font-semibold text-slate-900 mt-0.5">Classify by fit</div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto scroll px-5 py-4 space-y-4 text-[13px] border-l border-slate-200 bg-white">
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Name</label>
+        <input class="field-edit" value="Classify by fit">
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Agent</label>
+        <div class="field-edit flex items-center justify-between cursor-pointer">
+          <div class="flex items-center gap-2">
+            <div class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center">C</div>
+            <span class="text-slate-800">Copywriter</span>
+            <span class="text-[10.5px] text-slate-500">· system agent</span>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Instruction</label>
+        <textarea class="field-edit" rows="4">Classify each lead as 'hot' or 'cold' based on their last interaction, company size, and stage in the pipeline. Return a `tier` field per lead.</textarea>
+        <div class="text-[10.5px] text-slate-500 mt-1">The agent decides which skills to use. Available context: outputs of all previous steps.</div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Branch on output</label>
+        <div class="border border-slate-200 rounded-md bg-slate-50 p-2.5 space-y-2">
+          <div class="flex items-center gap-2 text-[12px]">
+            <span class="text-slate-500">Branch on</span>
+            <code class="text-[11.5px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-medium text-slate-700">output.tier</code>
+          </div>
+          <div class="bg-white rounded p-2 space-y-1">
+            <div class="flex items-center gap-2 text-[11.5px]"><span class="px-1.5 py-px rounded text-amber-800 bg-amber-100 font-semibold">hot</span> <span class="text-slate-500">→ step 4 (Draft personal email)</span></div>
+            <div class="flex items-center gap-2 text-[11.5px]"><span class="px-1.5 py-px rounded text-slate-700 bg-slate-100 font-semibold">cold</span> <span class="text-slate-500">→ step 4b (Add to nurture list)</span></div>
+          </div>
+          <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium">+ Add a branch</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Side effect</label>
+        <select class="field-edit">
+          <option>None — pure decision, no external change</option>
+          <option>Reversible</option>
+          <option>Irreversible</option>
+        </select>
+      </div>
+
+      <!-- v2 · Mark critical toggle (isCritical) -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input type="checkbox" style="margin-top: 2px; accent-color: #dc2626;">
+          <div>
+            <div style="font-size: 12.5px; font-weight: 600; color: #0f172a;">Mark as critical</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; line-height: 1.45;">Auto-routes this Agent step to Approval before execution. Useful for high-stakes decisions you want a human to glance at, even when the agent is confident. <strong>v2 addition.</strong></div>
+          </div>
+        </label>
+      </div>
+
+      <details class="border-t border-slate-100 pt-3">
+        <summary class="text-[12px] font-medium text-slate-600 cursor-pointer">Advanced — raw definition</summary>
+        <pre class="mt-2 text-[10.5px] leading-snug bg-slate-900 text-slate-100 rounded p-2.5 overflow-x-auto"><code>{ "id":"classify_by_fit", "type":"agent",
+  "agentRef": { "kind":"system", "slug":"copywriter" },
+  "instruction": "Classify each lead…",
+  "branches": [
+    { "when":"output.tier == 'hot'",  "goto":"draft_personal_email" },
+    { "when":"output.tier == 'cold'", "goto":"add_to_nurture_list"  }
+  ]
+}</code></pre>
+      </details>
+    </div>
+    <div class="px-5 py-3 border-l border-t border-slate-200 bg-white flex items-center justify-between">
+      <button class="text-[12px] text-red-600 hover:text-red-800 font-medium">Remove step</button>
+      <button class="text-[12px] text-slate-600 hover:text-slate-900 font-medium">Test in isolation</button>
+    </div>
+  </div>
+
+  <!-- Inspector — ACTION -->
+  <div class="insp insp-action" style="width: 380px; flex-shrink: 0;">
+    <div class="px-5 py-3.5 border-l border-b border-slate-200 bg-white flex items-start justify-between">
+      <div>
+        <div class="flex items-center gap-2"><span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 2</span><span class="a-pill a-action">Action</span></div>
+        <div class="text-[15px] font-semibold text-slate-900 mt-0.5">Find stale leads</div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto scroll px-5 py-4 space-y-4 text-[13px] border-l border-slate-200 bg-white">
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Name</label>
+        <input class="field-edit" value="Find stale leads">
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Type</label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="opt-radio is-selected"><input type="radio" name="action-kind" checked><span><strong>Skill</strong> — internal capability</span></label>
+          <label class="opt-radio"><input type="radio" name="action-kind"><span><strong>External automation</strong> — n8n / Make / Zapier / GHL flow</span></label>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Skill</label>
+        <div class="field-edit flex items-center justify-between cursor-pointer">
+          <span class="text-slate-800">GHL · contacts.search</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="text-[10.5px] text-slate-500 mt-1">Searches GHL contacts with the supplied filter.</div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Inputs</label>
+        <div class="space-y-2">
+          <div>
+            <div class="text-[11.5px] text-slate-600 mb-1">Filter</div>
+            <input class="field-edit" value="lastContactedDays > 30">
+          </div>
+          <div>
+            <div class="text-[11.5px] text-slate-600 mb-1">Limit</div>
+            <input class="field-edit" value="500">
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">On failure</label>
+        <select class="field-edit">
+          <option>Fail the run</option>
+          <option>Continue (skip downstream)</option>
+          <option>Branch to step…</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Side effect</label>
+        <select class="field-edit">
+          <option>Idempotent — same input → same output, safe to retry</option>
+          <option>None</option>
+          <option>Reversible</option>
+          <option>Irreversible</option>
+        </select>
+      </div>
+
+      <!-- v2 · Mark critical toggle (isCritical) -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input type="checkbox" style="margin-top: 2px; accent-color: #dc2626;">
+          <div>
+            <div style="font-size: 12.5px; font-weight: 600; color: #0f172a;">Mark as critical</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; line-height: 1.45;">Auto-routes this step to Approval regardless of side-effect class. Use for irreversible side effects, high-cost operations, or regulated actions. <strong>v2 addition.</strong></div>
+          </div>
+        </label>
+      </div>
+
+    </div>
+    <div class="px-5 py-3 border-l border-t border-slate-200 bg-white flex items-center justify-between">
+      <button class="text-[12px] text-red-600 hover:text-red-800 font-medium">Remove step</button>
+      <button class="text-[12px] text-slate-600 hover:text-slate-900 font-medium">Test in isolation</button>
+    </div>
+  </div>
+
+  <!-- Inspector — ASK -->
+  <div class="insp insp-ask" style="width: 380px; flex-shrink: 0;">
+    <div class="px-5 py-3.5 border-l border-b border-slate-200 bg-white flex items-start justify-between">
+      <div>
+        <div class="flex items-center gap-2"><span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 1</span><span class="a-pill a-ask">Ask</span></div>
+        <div class="text-[15px] font-semibold text-slate-900 mt-0.5">Confirm campaign target</div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto scroll px-5 py-4 space-y-4 text-[13px] border-l border-slate-200 bg-white">
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Name</label>
+        <input class="field-edit" value="Confirm campaign target">
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Prompt to user</label>
+        <textarea class="field-edit" rows="3">Confirm this week's campaign target before we kick off the lead pull.</textarea>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Form fields</label>
+        <div class="border border-slate-200 rounded-md bg-slate-50 divide-y divide-slate-200">
+          <div class="p-2.5 space-y-1.5">
+            <div class="flex items-center gap-2">
+              <code class="text-[11.5px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-medium text-slate-700">audience</code>
+              <span class="text-[10.5px] px-1.5 py-px rounded bg-slate-200 text-slate-700">text</span>
+              <span class="text-[10.5px] px-1.5 py-px rounded bg-amber-100 text-amber-800 font-semibold">required</span>
+            </div>
+            <div class="text-[11.5px] text-slate-600">Label: "Audience segment"</div>
+          </div>
+          <div class="p-2.5 space-y-1.5">
+            <div class="flex items-center gap-2">
+              <code class="text-[11.5px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-medium text-slate-700">tone</code>
+              <span class="text-[10.5px] px-1.5 py-px rounded bg-slate-200 text-slate-700">select</span>
+              <span class="text-[10.5px] px-1.5 py-px rounded bg-amber-100 text-amber-800 font-semibold">required</span>
+            </div>
+            <div class="text-[11.5px] text-slate-600">Label: "Tone" · options: Professional warm / Friendly / Direct</div>
+          </div>
+        </div>
+        <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium mt-2">+ Add a field</button>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Who can submit</label>
+        <select class="field-edit">
+          <option>Task requester (whoever started this task)</option>
+          <option>Anyone in the organisation</option>
+          <option>Specific people…</option>
+          <option>A team…</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Auto-fill from</label>
+        <select class="field-edit">
+          <option>Last completed run (re-use answers)</option>
+          <option>Don't auto-fill</option>
+        </select>
+      </div>
+
+    </div>
+    <div class="px-5 py-3 border-l border-t border-slate-200 bg-white flex items-center justify-between">
+      <button class="text-[12px] text-red-600 hover:text-red-800 font-medium">Remove step</button>
+      <button class="text-[12px] text-slate-600 hover:text-slate-900 font-medium">Preview the form</button>
+    </div>
+  </div>
+
+  <!-- Inspector — APPROVAL -->
+  <div class="insp insp-approval" style="width: 380px; flex-shrink: 0;">
+    <div class="px-5 py-3.5 border-l border-b border-slate-200 bg-white flex items-start justify-between">
+      <div>
+        <div class="flex items-center gap-2"><span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 5</span><span class="a-pill a-approval">Approval</span></div>
+        <div class="text-[15px] font-semibold text-slate-900 mt-0.5">Marketing review</div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto scroll px-5 py-4 space-y-4 text-[13px] border-l border-slate-200 bg-white">
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Name</label>
+        <input class="field-edit" value="Marketing review">
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">What approvers see</label>
+        <textarea class="field-edit" rows="2">Drafted email body from step 4, plus the recipient list (count + sample of 5).</textarea>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Approvers</label>
+          <span class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">humans only</span>
+        </div>
+        <div class="space-y-1.5">
+          <label class="opt-radio"><input type="radio" name="approver-type"><span><strong>Specific people</strong> — pick one or more users</span></label>
+          <label class="opt-radio is-selected"><input type="radio" name="approver-type" checked><span><strong>A team</strong> — anyone in the team can approve</span></label>
+          <label class="opt-radio"><input type="radio" name="approver-type"><span><strong>Task requester</strong> — whoever started this task</span></label>
+          <label class="opt-radio"><input type="radio" name="approver-type"><span><strong>Org admin</strong> — anyone with admin role</span></label>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
+          <div>
+            <div class="text-[11.5px] text-slate-600 mb-1">Team</div>
+            <div class="field-edit flex items-center justify-between cursor-pointer">
+              <span class="text-slate-800">Marketing team</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="text-[10.5px] text-slate-500 mt-1">8 members · manage in Org settings</div>
+          </div>
+          <div>
+            <div class="text-[11.5px] text-slate-600 mb-1">Quorum (approvers required)</div>
+            <input class="field-edit num" value="2" type="number" min="1" max="8" style="width:80px;">
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">If approved</label>
+        <select class="field-edit">
+          <option>Continue to step 6 (Send via Mailchimp)</option>
+          <option>Continue to specific step…</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">If rejected</label>
+        <div class="field-edit flex items-center justify-between cursor-pointer" style="border-color:#fed7aa; background:#fff7ed;">
+          <span class="text-orange-900 font-medium">Loop back to step 4 (Draft personal email)</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-orange-700"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="text-[11px] text-orange-800 mt-1.5 flex items-center gap-1.5">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          Approval is the only step that can route backward.
+        </div>
+      </div>
+
+      <!-- v2 · Confidence preview (read-only · author sees what runtime will surface) -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Confidence preview <span style="text-transform: none; letter-spacing: 0; color: #94a3b8; font-weight: 500;">(read-only · v2)</span></label>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: #fef3c7; color: #92400e; font-size: 10.5px; font-weight: 700;">Medium</span>
+          <span style="font-size: 11.5px; color: #475569;">the next step can't be undone, worth a careful look</span>
+        </div>
+        <div style="font-size: 10.5px; color: #64748b; margin-top: 6px; line-height: 1.5;">
+          Runtime computes and snapshots the chip and reason on each Approval card. V1 uses heuristics; V2 swaps in a calibrated model once <code style="font-size: 10px; background: #f1f5f9; padding: 1px 3px; border-radius: 3px;">workflow_step_reviews</code> data accumulates. Reason copy is plain operator language, not the algorithm description.
+        </div>
+      </div>
+
+      <!-- v2 · Audit fields footnote -->
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        <label class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Audit on decision <span style="text-transform: none; letter-spacing: 0; color: #94a3b8; font-weight: 500;">(automatic · v2)</span></label>
+        <ul style="font-size: 11.5px; color: #475569; padding-left: 16px; margin: 0; list-style: disc;">
+          <li>who approved (<code style="font-size: 10px;">approved_by</code>) and when (<code style="font-size: 10px;">approved_at</code>)</li>
+          <li>snapshot of what they saw (<code style="font-size: 10px;">seen_payload</code>), not what later ran</li>
+          <li>confidence chip and reason at decision time (<code style="font-size: 10px;">seen_confidence</code>)</li>
+          <li>optional decision reason free-text (<code style="font-size: 10px;">decision_reason</code>)</li>
+        </ul>
+      </div>
+
+    </div>
+    <div class="px-5 py-3 border-l border-t border-slate-200 bg-white flex items-center justify-between">
+      <button class="text-[12px] text-red-600 hover:text-red-800 font-medium">Remove step</button>
+      <button class="text-[12px] text-slate-600 hover:text-slate-900 font-medium">Send a test approval</button>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

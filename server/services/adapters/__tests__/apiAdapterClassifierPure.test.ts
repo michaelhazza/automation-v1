@@ -1,66 +1,65 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import { classifyAdapterOutcome } from '../apiAdapterClassifierPure.js';
 
 test('2xx → terminal_success', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 200 }), { kind: 'terminal_success' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 201 }), { kind: 'terminal_success' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 204 }), { kind: 'terminal_success' });
+  expect(classifyAdapterOutcome({ status: 200 })).toEqual({ kind: 'terminal_success' });
+  expect(classifyAdapterOutcome({ status: 201 })).toEqual({ kind: 'terminal_success' });
+  expect(classifyAdapterOutcome({ status: 204 })).toEqual({ kind: 'terminal_success' });
 });
 
 test('429 → retryable:rate_limit', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 429 }), {
+  expect(classifyAdapterOutcome({ status: 429 })).toEqual({
     kind: 'retryable',
     reason: 'rate_limit',
   });
 });
 
 test('502 / 503 → retryable:gateway', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 502 }), { kind: 'retryable', reason: 'gateway' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 503 }), { kind: 'retryable', reason: 'gateway' });
+  expect(classifyAdapterOutcome({ status: 502 })).toEqual({ kind: 'retryable', reason: 'gateway' });
+  expect(classifyAdapterOutcome({ status: 503 })).toEqual({ kind: 'retryable', reason: 'gateway' });
 });
 
 test('network timeout → retryable:network_timeout', () => {
-  assert.deepEqual(classifyAdapterOutcome({ networkError: true, timedOut: true }), {
+  expect(classifyAdapterOutcome({ networkError: true, timedOut: true })).toEqual({
     kind: 'retryable',
     reason: 'network_timeout',
   });
 });
 
 test('network error (non-timeout) → retryable:network_timeout', () => {
-  assert.deepEqual(classifyAdapterOutcome({ networkError: true, timedOut: false }), {
+  expect(classifyAdapterOutcome({ networkError: true, timedOut: false })).toEqual({
     kind: 'retryable',
     reason: 'network_timeout',
   });
 });
 
 test('401 / 403 → terminal_failure:auth', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 401 }), { kind: 'terminal_failure', reason: 'auth' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 403 }), { kind: 'terminal_failure', reason: 'auth' });
+  expect(classifyAdapterOutcome({ status: 401 })).toEqual({ kind: 'terminal_failure', reason: 'auth' });
+  expect(classifyAdapterOutcome({ status: 403 })).toEqual({ kind: 'terminal_failure', reason: 'auth' });
 });
 
 test('404 → terminal_failure:not_found', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 404 }), {
+  expect(classifyAdapterOutcome({ status: 404 })).toEqual({
     kind: 'terminal_failure',
     reason: 'not_found',
   });
 });
 
 test('422 → terminal_failure:validation', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 422 }), {
+  expect(classifyAdapterOutcome({ status: 422 })).toEqual({
     kind: 'terminal_failure',
     reason: 'validation',
   });
 });
 
 test('other 5xx → retryable:server_error (retry cap enforced by outer loop)', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 500 }), { kind: 'retryable', reason: 'server_error' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 504 }), { kind: 'retryable', reason: 'server_error' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 599 }), { kind: 'retryable', reason: 'server_error' });
+  expect(classifyAdapterOutcome({ status: 500 })).toEqual({ kind: 'retryable', reason: 'server_error' });
+  expect(classifyAdapterOutcome({ status: 504 })).toEqual({ kind: 'retryable', reason: 'server_error' });
+  expect(classifyAdapterOutcome({ status: 599 })).toEqual({ kind: 'retryable', reason: 'server_error' });
 });
 
 test('other 4xx → terminal_failure:other', () => {
-  assert.deepEqual(classifyAdapterOutcome({ status: 400 }), { kind: 'terminal_failure', reason: 'other' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 409 }), { kind: 'terminal_failure', reason: 'other' });
-  assert.deepEqual(classifyAdapterOutcome({ status: 418 }), { kind: 'terminal_failure', reason: 'other' });
+  expect(classifyAdapterOutcome({ status: 400 })).toEqual({ kind: 'terminal_failure', reason: 'other' });
+  expect(classifyAdapterOutcome({ status: 409 })).toEqual({ kind: 'terminal_failure', reason: 'other' });
+  expect(classifyAdapterOutcome({ status: 418 })).toEqual({ kind: 'terminal_failure', reason: 'other' });
 });

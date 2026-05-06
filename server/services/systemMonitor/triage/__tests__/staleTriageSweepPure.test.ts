@@ -4,22 +4,8 @@
  * Runnable via:
  *   npx tsx server/services/systemMonitor/triage/__tests__/staleTriageSweepPure.test.ts
  */
+import { expect, test } from 'vitest';
 import { parseStaleAfterMinutesEnv, staleCutoff } from '../staleTriageSweepPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
@@ -75,6 +61,3 @@ test('cutoff: row exactly at cutoff is NOT stale (not < cutoff)', () => {
   const rowAt = new Date(cutoff.getTime());
   check(!(rowAt < cutoff), 'row exactly at cutoff should not be stale');
 });
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

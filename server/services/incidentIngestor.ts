@@ -64,7 +64,7 @@ let _testMode = false;
 
 /** Reset internal state between tests. Only callable in test environments. */
 export function __resetForTest(): void {
-  if (process.env.NODE_ENV !== 'test') return;
+  if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'integration') return;
   processLocalFailureCounter.length = 0;
   _testMode = false;
 }
@@ -119,8 +119,15 @@ export async function recordIncident(
     }
   } catch (err) {
     recordFailure();
+    // drizzle wraps postgres-js errors as `Error: Failed query: <sql>` and
+    // attaches the underlying postgres error on `.cause`. The cause carries
+    // the actual `code` / `detail` / `constraint_name` we need to triage —
+    // logging only `err.message` flies blind.
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause : null;
     logger.error('incident_ingest_failed', {
       error: err instanceof Error ? err.message : String(err),
+      cause: cause ? cause.message : null,
+      causeCode: cause ? (cause as Error & { code?: string }).code ?? null : null,
       source: input.source,
       summary: input.summary?.slice(0, 100),
     });
@@ -165,15 +172,18 @@ export async function ingestInline(
 
   // 1. Suppression check
   const now = new Date();
+  const orgClause = input.organisationId
+    ? sql`(${systemIncidentSuppressions.organisationId} = ${input.organisationId}::uuid
+        OR ${systemIncidentSuppressions.organisationId} IS NULL)`
+    : sql`${systemIncidentSuppressions.organisationId} IS NULL`;
   const suppression = await db
     .select()
     .from(systemIncidentSuppressions)
     .where(
       sql`${systemIncidentSuppressions.fingerprint} = ${fingerprint}
-        AND (${systemIncidentSuppressions.organisationId} = ${input.organisationId ?? null}::uuid
-          OR ${systemIncidentSuppressions.organisationId} IS NULL)
+        AND ${orgClause}
         AND (${systemIncidentSuppressions.expiresAt} IS NULL
-          OR ${systemIncidentSuppressions.expiresAt} > ${now})`
+          OR ${systemIncidentSuppressions.expiresAt} > ${now.toISOString()})`
     )
     .limit(1);
 

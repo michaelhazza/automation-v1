@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   buildEventId,
   computeDurationSinceRunStartMs,
@@ -39,11 +38,7 @@ test('every AgentExecutionEventType has a criticality entry', () => {
     'run.completed',
   ];
   for (const t of allTypes) {
-    assert.equal(
-      typeof AGENT_EXECUTION_EVENT_CRITICALITY[t],
-      'boolean',
-      `missing criticality for ${t}`,
-    );
+    expect(typeof AGENT_EXECUTION_EVENT_CRITICALITY[t], `missing criticality for ${t}`).toBe('boolean');
   }
 });
 
@@ -58,8 +53,8 @@ test('critical event types are exactly the spec §5.3 set', () => {
   ]);
   for (const [type, crit] of Object.entries(AGENT_EXECUTION_EVENT_CRITICALITY)) {
     const expected = expectedCritical.has(type as AgentExecutionEventType);
-    assert.equal(crit, expected, `${type}: expected critical=${expected}, got ${crit}`);
-    assert.equal(isCriticalEventType(type as AgentExecutionEventType), expected);
+    expect(crit, `${type}: expected critical=${expected}, got ${crit}`).toBe(expected);
+    expect(isCriticalEventType(type as AgentExecutionEventType)).toBe(expected);
   }
 });
 
@@ -68,16 +63,16 @@ test('critical event types are exactly the spec §5.3 set', () => {
 // ---------------------------------------------------------------------------
 
 test('isNonCriticalCapHit: below cap → false', () => {
-  assert.equal(isNonCriticalCapHit(0, 10), false);
-  assert.equal(isNonCriticalCapHit(9, 10), false);
+  expect(isNonCriticalCapHit(0, 10)).toBe(false);
+  expect(isNonCriticalCapHit(9, 10)).toBe(false);
 });
 test('isNonCriticalCapHit: at or above cap → true', () => {
-  assert.equal(isNonCriticalCapHit(10, 10), true);
-  assert.equal(isNonCriticalCapHit(11, 10), true);
+  expect(isNonCriticalCapHit(10, 10)).toBe(true);
+  expect(isNonCriticalCapHit(11, 10)).toBe(true);
 });
 test('isNonCriticalCapHit: invalid cap → false (no cap enforced)', () => {
-  assert.equal(isNonCriticalCapHit(100, 0), false);
-  assert.equal(isNonCriticalCapHit(100, -5), false);
+  expect(isNonCriticalCapHit(100, 0)).toBe(false);
+  expect(isNonCriticalCapHit(100, -5)).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -86,7 +81,7 @@ test('isNonCriticalCapHit: invalid cap → false (no cap enforced)', () => {
 
 test('buildEventId: deterministic shape', () => {
   const id = buildEventId('r-1', 7, 'memory.retrieved');
-  assert.equal(id, 'r-1:7:memory.retrieved');
+  expect(id).toBe('r-1:7:memory.retrieved');
 });
 
 test('buildEventId: components must be part of the unique key', () => {
@@ -94,9 +89,9 @@ test('buildEventId: components must be part of the unique key', () => {
   const b = buildEventId('r-2', 1, 'run.started');
   const c = buildEventId('r-1', 2, 'run.started');
   const d = buildEventId('r-1', 1, 'run.completed');
-  assert.notEqual(a, b);
-  assert.notEqual(a, c);
-  assert.notEqual(a, d);
+  expect(a).not.toBe(b);
+  expect(a).not.toBe(c);
+  expect(a).not.toBe(d);
 });
 
 // ---------------------------------------------------------------------------
@@ -104,17 +99,17 @@ test('buildEventId: components must be part of the unique key', () => {
 // ---------------------------------------------------------------------------
 
 test('computeDurationSinceRunStartMs: normal case', () => {
-  assert.equal(computeDurationSinceRunStartMs(1000, 2500), 1500);
+  expect(computeDurationSinceRunStartMs(1000, 2500)).toBe(1500);
 });
 test('computeDurationSinceRunStartMs: negative (clock skew) → 0', () => {
-  assert.equal(computeDurationSinceRunStartMs(2000, 1000), 0);
+  expect(computeDurationSinceRunStartMs(2000, 1000)).toBe(0);
 });
 test('computeDurationSinceRunStartMs: NaN → 0', () => {
-  assert.equal(computeDurationSinceRunStartMs(NaN, 1000), 0);
-  assert.equal(computeDurationSinceRunStartMs(1000, NaN), 0);
+  expect(computeDurationSinceRunStartMs(NaN, 1000)).toBe(0);
+  expect(computeDurationSinceRunStartMs(1000, NaN)).toBe(0);
 });
 test('computeDurationSinceRunStartMs: always integer', () => {
-  assert.equal(computeDurationSinceRunStartMs(0, 1.9), 1);
+  expect(computeDurationSinceRunStartMs(0, 1.9)).toBe(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -133,19 +128,19 @@ test('isValidLinkedEntityType: accepts canonical types', () => {
     'llm_request',
     'action',
   ]) {
-    assert.equal(isValidLinkedEntityType(t), true);
+    expect(isValidLinkedEntityType(t)).toBe(true);
   }
 });
 test('isValidLinkedEntityType: rejects unknown + falsy', () => {
-  assert.equal(isValidLinkedEntityType('rule'), false);
-  assert.equal(isValidLinkedEntityType(''), false);
-  assert.equal(isValidLinkedEntityType(undefined), false);
+  expect(isValidLinkedEntityType('rule')).toBe(false);
+  expect(isValidLinkedEntityType('')).toBe(false);
+  expect(isValidLinkedEntityType(undefined)).toBe(false);
 });
 
 test('isValidSourceService: canonical list', () => {
-  assert.equal(isValidSourceService('agentExecutionService'), true);
-  assert.equal(isValidSourceService('llmRouter'), true);
-  assert.equal(isValidSourceService('bogusService'), false);
+  expect(isValidSourceService('agentExecutionService')).toBe(true);
+  expect(isValidSourceService('llmRouter')).toBe(true);
+  expect(isValidSourceService('bogusService')).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -154,33 +149,33 @@ test('isValidSourceService: canonical list', () => {
 
 test('validateLinkedEntity: undefined → normalised null', () => {
   const res = validateLinkedEntity(undefined);
-  assert.equal(res.ok, true);
-  if (res.ok) assert.equal(res.normalised, null);
+  expect(res.ok).toBe(true);
+  if (res.ok) expect(res.normalised).toBe(null);
 });
 
 test('validateLinkedEntity: null → normalised null', () => {
   const res = validateLinkedEntity(null);
-  assert.equal(res.ok, true);
-  if (res.ok) assert.equal(res.normalised, null);
+  expect(res.ok).toBe(true);
+  if (res.ok) expect(res.normalised).toBe(null);
 });
 
 test('validateLinkedEntity: both populated', () => {
   const res = validateLinkedEntity({ type: 'memory_entry', id: 'm-1' });
-  assert.equal(res.ok, true);
+  expect(res.ok).toBe(true);
   if (res.ok && res.normalised) {
-    assert.equal(res.normalised.type, 'memory_entry');
-    assert.equal(res.normalised.id, 'm-1');
+    expect(res.normalised.type).toBe('memory_entry');
+    expect(res.normalised.id).toBe('m-1');
   }
 });
 
 test('validateLinkedEntity: partial (type only) rejected', () => {
   const res = validateLinkedEntity({ type: 'memory_entry', id: '' });
-  assert.equal(res.ok, false);
+  expect(res.ok).toBe(false);
 });
 
 test('validateLinkedEntity: invalid type rejected', () => {
   const res = validateLinkedEntity({ type: 'bogus' as 'memory_entry', id: 'x' });
-  assert.equal(res.ok, false);
+  expect(res.ok).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -200,9 +195,9 @@ function make<T extends AgentExecutionEventType>(
 
 test('validateEventPayload: run.started happy + bad', () => {
   const ok = make('run.started', { agentId: 'a-1', runType: 'manual', triggeredBy: 'user' });
-  assert.equal(validateEventPayload('run.started', ok).ok, true);
+  expect(validateEventPayload('run.started', ok).ok).toBe(true);
   const bad = make('run.started', { agentId: 'a-1' });
-  assert.equal(validateEventPayload('run.started', bad).ok, false);
+  expect(validateEventPayload('run.started', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: run.completed happy + bad', () => {
@@ -213,9 +208,9 @@ test('validateEventPayload: run.completed happy + bad', () => {
     totalDurationMs: 1234,
     eventCount: 7,
   });
-  assert.equal(validateEventPayload('run.completed', ok).ok, true);
+  expect(validateEventPayload('run.completed', ok).ok).toBe(true);
   const bad = make('run.completed', { finalStatus: 'completed' });
-  assert.equal(validateEventPayload('run.completed', bad).ok, false);
+  expect(validateEventPayload('run.completed', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: prompt.assembled happy + bad layer tokens', () => {
@@ -225,7 +220,7 @@ test('validateEventPayload: prompt.assembled happy + bad layer tokens', () => {
     totalTokens: 500,
     layerTokens: { master: 100, orgAdditional: 0, memoryBlocks: 50, skillInstructions: 200, taskContext: 150 },
   });
-  assert.equal(validateEventPayload('prompt.assembled', ok).ok, true);
+  expect(validateEventPayload('prompt.assembled', ok).ok).toBe(true);
 
   const bad = make('prompt.assembled', {
     assemblyNumber: 1,
@@ -233,7 +228,7 @@ test('validateEventPayload: prompt.assembled happy + bad layer tokens', () => {
     totalTokens: 500,
     layerTokens: { master: 100 },
   });
-  assert.equal(validateEventPayload('prompt.assembled', bad).ok, false);
+  expect(validateEventPayload('prompt.assembled', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: memory.retrieved happy + bad top entry', () => {
@@ -243,14 +238,14 @@ test('validateEventPayload: memory.retrieved happy + bad top entry', () => {
     topEntries: [{ id: 'm-1', score: 0.9, excerpt: 'bar' }],
     totalRetrieved: 1,
   });
-  assert.equal(validateEventPayload('memory.retrieved', ok).ok, true);
+  expect(validateEventPayload('memory.retrieved', ok).ok).toBe(true);
   const bad = make('memory.retrieved', {
     queryText: 'foo',
     retrievalMs: 42,
     topEntries: [{ id: 'm-1', score: 'high' }],
     totalRetrieved: 1,
   });
-  assert.equal(validateEventPayload('memory.retrieved', bad).ok, false);
+  expect(validateEventPayload('memory.retrieved', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: rule.evaluated rejects invalid decision', () => {
@@ -259,7 +254,7 @@ test('validateEventPayload: rule.evaluated rejects invalid decision', () => {
     decision: 'yolo',
     guidanceInjected: true,
   });
-  assert.equal(validateEventPayload('rule.evaluated', bad).ok, false);
+  expect(validateEventPayload('rule.evaluated', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: skill.completed rejects unknown status', () => {
@@ -269,7 +264,7 @@ test('validateEventPayload: skill.completed rejects unknown status', () => {
     status: 'perhaps',
     resultSummary: '',
   });
-  assert.equal(validateEventPayload('skill.completed', bad).ok, false);
+  expect(validateEventPayload('skill.completed', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: llm.requested happy + bad', () => {
@@ -281,7 +276,7 @@ test('validateEventPayload: llm.requested happy + bad', () => {
     featureTag: 'agent',
     payloadPreviewTokens: 500,
   });
-  assert.equal(validateEventPayload('llm.requested', ok).ok, true);
+  expect(validateEventPayload('llm.requested', ok).ok).toBe(true);
   const bad = make('llm.requested', {
     provider: 'anthropic',
     model: 'claude-sonnet-4',
@@ -289,7 +284,7 @@ test('validateEventPayload: llm.requested happy + bad', () => {
     featureTag: 'agent',
     payloadPreviewTokens: 500,
   });
-  assert.equal(validateEventPayload('llm.requested', bad).ok, false);
+  expect(validateEventPayload('llm.requested', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: handoff.decided happy + bad depth', () => {
@@ -299,27 +294,27 @@ test('validateEventPayload: handoff.decided happy + bad depth', () => {
     depth: 1,
     parentRunId: 'r-0',
   });
-  assert.equal(validateEventPayload('handoff.decided', ok).ok, true);
+  expect(validateEventPayload('handoff.decided', ok).ok).toBe(true);
   const bad = make('handoff.decided', {
     targetAgentId: 'a-2',
     reasonText: 'delegated',
     depth: -1,
     parentRunId: 'r-0',
   });
-  assert.equal(validateEventPayload('handoff.decided', bad).ok, false);
+  expect(validateEventPayload('handoff.decided', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: run.event_limit_reached critical bit', () => {
   const ok = make('run.event_limit_reached', { eventCountAtLimit: 9999, cap: 10000 });
   const result = validateEventPayload('run.event_limit_reached', ok);
-  assert.equal(result.ok, true);
+  expect(result.ok).toBe(true);
   // If the critical bit is wrong the validator rejects.
   const bad = { ...ok, critical: false } as AgentExecutionEventPayload;
-  assert.equal(validateEventPayload('run.event_limit_reached', bad).ok, false);
+  expect(validateEventPayload('run.event_limit_reached', bad).ok).toBe(false);
 });
 
 test('validateEventPayload: payload_type_mismatch when header differs', () => {
   const p = make('run.started', { agentId: 'a', runType: 'm', triggeredBy: 'u' });
   const result = validateEventPayload('run.completed', p);
-  assert.equal(result.ok, false);
+  expect(result.ok).toBe(false);
 });

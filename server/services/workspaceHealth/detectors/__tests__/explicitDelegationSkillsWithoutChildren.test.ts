@@ -6,29 +6,11 @@
  *   npx tsx server/services/workspaceHealth/detectors/__tests__/explicitDelegationSkillsWithoutChildren.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   findAgentsWithExplicitDelegationButNoChildren,
   type SubaccountAgentDelegationRow,
 } from '../explicitDelegationSkillsWithoutChildrenPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 function assertEqual<T>(actual: T, expected: T, msg?: string) {
   const a = JSON.stringify(actual);
@@ -59,8 +41,8 @@ test('agent with all three slugs + no children → emits finding', () => {
     }),
   ];
   const result = findAgentsWithExplicitDelegationButNoChildren(rows);
-  assertEqual(result.length, 1);
-  assert(result[0].id === 'saa-1', 'wrong row returned');
+  expect(result.length).toBe(1);
+  expect(result[0].id === 'saa-1', 'wrong row returned').toBeTruthy();
 });
 
 test('agent with children → emits nothing (normal manager)', () => {
@@ -72,7 +54,7 @@ test('agent with children → emits nothing (normal manager)', () => {
     }),
   ];
   const result = findAgentsWithExplicitDelegationButNoChildren(rows);
-  assertEqual(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('agent with only one delegation slug attached → emits nothing', () => {
@@ -84,7 +66,7 @@ test('agent with only one delegation slug attached → emits nothing', () => {
     }),
   ];
   const result = findAgentsWithExplicitDelegationButNoChildren(rows);
-  assertEqual(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('agent with no delegation slugs → emits nothing', () => {
@@ -96,7 +78,7 @@ test('agent with no delegation slugs → emits nothing', () => {
     }),
   ];
   const result = findAgentsWithExplicitDelegationButNoChildren(rows);
-  assertEqual(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 test('agent with all three derived but none attached → emits nothing (derived-only does NOT trip)', () => {
@@ -117,11 +99,9 @@ test('agent with all three derived but none attached → emits nothing (derived-
     }),
   ];
   const result = findAgentsWithExplicitDelegationButNoChildren(rows);
-  assertEqual(result.length, 0);
+  expect(result.length).toBe(0);
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`[explicitDelegationSkillsWithoutChildren] ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

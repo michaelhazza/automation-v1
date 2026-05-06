@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { db } from '../db/index.js';
 import {
   subaccounts,
@@ -27,6 +28,7 @@ import {
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc, gte, lte, inArray } from 'drizzle-orm';
 import { WorkflowRunService } from '../services/workflowRunService.js';
+import { taskService } from '../services/taskService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 
@@ -59,17 +61,6 @@ router.get('/api/portal/my-subaccounts', authenticate, asyncHandler(async (req, 
   res.json(rows);
 }));
 
-// ─── Helper: resolve subaccount (not deleted) ─────────────────────────────────
-
-async function resolveSubaccount(subaccountId: string) {
-  const [sa] = await db
-    .select()
-    .from(subaccounts)
-    .where(and(eq(subaccounts.id, subaccountId), isNull(subaccounts.deletedAt)));
-  if (!sa) throw { statusCode: 404, message: 'Subaccount not found' };
-  return sa;
-}
-
 // ─── Helper: check if user has a specific subaccount permission ───────────────
 
 async function hasSubaccountPerm(userId: string, subaccountId: string, key: string): Promise<boolean> {
@@ -98,7 +89,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW),
   asyncHandler(async (req, res) => {
-    const sa = await resolveSubaccount(req.params.subaccountId);
+    const sa = await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
     if (sa.status !== 'active') {
       res.status(403).json({ error: 'This subaccount is not currently active' });
@@ -194,7 +185,7 @@ router.post(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE),
   asyncHandler(async (req, res) => {
-    const sa = await resolveSubaccount(req.params.subaccountId);
+    const sa = await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
     if (sa.status !== 'active') {
       res.status(403).json({ error: 'This subaccount is not currently active' });
@@ -330,7 +321,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId);
+    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
     const canViewAll = await hasSubaccountPerm(
       req.user!.id,
@@ -383,7 +374,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId);
+    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
     const [execution] = await db
       .select()
@@ -436,7 +427,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId);
+    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
     const { agentId, status, limit, offset } = req.query;
 
@@ -457,7 +448,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId);
+    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
     const { sinceDays } = req.query;
     const stats = await agentActivityService.getStats({
@@ -485,7 +476,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccount(subaccountId);
+    const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
 
     // Load visible runs newest-first.
     const runs = await db
@@ -563,7 +554,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccount(subaccountId);
+    const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
 
     const DAILY_BRIEF_SLUG = 'intelligence-briefing';
 
@@ -632,7 +623,7 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
     const { subaccountId, runId } = req.params;
-    const sa = await resolveSubaccount(subaccountId);
+    const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
 
     // Load the source run to extract orgId + templateVersionId.
     const [sourceRun] = await db
@@ -660,12 +651,18 @@ router.post(
 
     let startResult: { runId: string; status: string };
     if (orgVer) {
+      const task = await taskService.createTask(sourceRun.organisationId, subaccountId, {
+        title: `Workflow run`,
+        status: 'inbox',
+        brief: JSON.stringify({}),
+      }, req.user!.id);
       startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
         templateId: orgVer.templateId,
         initialInput: {},
         startedByUserId: req.user!.id,
+        taskId: task.id,
         runMode: 'auto',
         isPortalVisible: true,
       });
@@ -674,12 +671,18 @@ router.post(
         res.status(422).json({ error: 'Cannot replay: workflowSlug not set on source run' });
         return;
       }
+      const task = await taskService.createTask(sourceRun.organisationId, subaccountId, {
+        title: `System workflow run`,
+        status: 'inbox',
+        brief: JSON.stringify({}),
+      }, req.user!.id);
       startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
         systemTemplateSlug: sourceRun.workflowSlug,
         initialInput: {},
         startedByUserId: req.user!.id,
+        taskId: task.id,
         runMode: 'auto',
         isPortalVisible: true,
       });
