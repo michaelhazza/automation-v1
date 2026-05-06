@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<!--
+  org-knowledge.html — Round 7b-8
+  Org-level Knowledge page: Memory + Documents tabs
+  Mode: org, active sidebar: Knowledge
+  Shows items as source (editable), with "Used by N workspaces" indicators.
+  Drawer includes inheritance panel (toggle per subaccount, override link).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge | Org | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Filter chips ── */
+  .filter-chip {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600);
+    background: white; cursor: pointer; transition: all 0.12s;
+  }
+  .filter-chip:hover { border-color: var(--indigo-400); color: var(--indigo-600); }
+  .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* ── Type / tier chips ── */
+  .chip-type {
+    display: inline-flex; align-items: center;
+    background: var(--slate-100); color: var(--slate-600);
+    border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600;
+    border: 1px solid var(--slate-200);
+  }
+  .chip-entry {
+    background: var(--indigo-50); color: var(--indigo-700);
+    border-color: var(--indigo-200);
+  }
+  .chip-block {
+    background: #f0fdf4; color: #15803d;
+    border-color: #bbf7d0;
+  }
+  .chip-tier {
+    display: inline-flex; align-items: center;
+    border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600;
+  }
+  .chip-tier-1 { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .chip-tier-2 { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .chip-tier-3 { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+
+  /* ── Used-by indicator ── */
+  .used-by {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--slate-500); font-weight: 500;
+    cursor: pointer;
+  }
+  .used-by:hover { color: var(--indigo-600); }
+  .used-by-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald-500); flex-shrink: 0; }
+  .used-by-partial .used-by-dot { background: var(--amber-500); }
+
+  /* ── Memory list items ── */
+  .memory-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 13px 16px; border-bottom: 1px solid var(--slate-100);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .memory-item:last-child { border-bottom: none; }
+  .memory-item:hover { background: var(--slate-50); }
+  .memory-item-icon {
+    width: 34px; height: 34px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .memory-item-icon.entry { background: var(--indigo-50); color: var(--indigo-500); }
+  .memory-item-icon.block { background: #f0fdf4; color: #16a34a; }
+  .memory-item-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 3px; }
+  .memory-item-preview { font-size: 12px; color: var(--slate-500); line-height: 1.45; margin-bottom: 5px; }
+  .memory-item-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .memory-item-timestamp { font-size: 11px; color: var(--slate-400); }
+
+  /* ── Section separator ── */
+  .section-sep {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--slate-400);
+    padding: 8px 16px 4px;
+    background: var(--slate-50); border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  /* ── Document cards (2-col grid) ── */
+  .doc-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
+  }
+  .doc-card {
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    padding: 14px 16px; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .doc-card:hover { box-shadow: var(--shadow-md); border-color: var(--slate-300); }
+  .doc-card-header { display: flex; align-items: flex-start; gap: 10px; }
+  .doc-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 11px; font-weight: 700;
+  }
+  .doc-icon-pdf { background: #fef2f2; color: #dc2626; }
+  .doc-icon-md  { background: #f0fdf4; color: #16a34a; }
+  .doc-icon-doc { background: #eff6ff; color: #2563eb; }
+  .doc-icon-txt { background: var(--slate-100); color: var(--slate-500); }
+  .doc-name { font-size: 13px; font-weight: 600; color: var(--slate-800); line-height: 1.35; }
+  .doc-meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .doc-source { font-size: 11px; color: var(--slate-400); }
+  .doc-size { font-size: 11px; color: var(--slate-400); }
+  .doc-actions { display: flex; gap: 5px; }
+
+  /* ── Rich-text editor ── */
+  .rte-toolbar {
+    display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+    padding: 6px 10px; background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-200);
+  }
+  .rte-btn {
+    padding: 4px 7px; border-radius: 5px; border: 1px solid transparent;
+    background: none; cursor: pointer; font-size: 12px; color: var(--slate-600);
+    transition: background 0.1s; line-height: 1.4; font-family: inherit;
+  }
+  .rte-btn:hover { background: var(--slate-200); }
+  .rte-btn.active { background: var(--indigo-100); border-color: var(--indigo-300); color: var(--indigo-700); }
+  .rte-sep { width: 1px; height: 18px; background: var(--slate-200); margin: 0 4px; flex-shrink: 0; }
+  .rte-body {
+    min-height: 200px; padding: 14px 16px;
+    font-size: 13.5px; line-height: 1.7; color: var(--slate-700);
+    outline: none;
+  }
+  .rte-body:empty:before { content: attr(data-placeholder); color: var(--slate-400); pointer-events: none; }
+  .rte-body h2 { font-size: 16px; font-weight: 700; margin: 12px 0 6px; }
+  .rte-body h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
+  .rte-body ul, .rte-body ol { padding-left: 18px; margin: 6px 0; }
+  .rte-body blockquote { border-left: 3px solid var(--indigo-300); padding-left: 12px; color: var(--slate-500); margin: 8px 0; font-style: italic; }
+  .rte-body code { background: var(--slate-100); border-radius: 4px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+  /* ── Drawer ── */
+  .drawer-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.35); z-index: 200;
+  }
+  .drawer-overlay.open { display: block; }
+  .drawer {
+    position: fixed; top: 0; right: -660px; width: 640px; height: 100vh;
+    background: white; z-index: 201; box-shadow: -4px 0 32px rgba(0,0,0,0.13);
+    display: flex; flex-direction: column;
+    transition: right 0.22s cubic-bezier(0.22,0.61,0.36,1);
+  }
+  .drawer.open { right: 0; }
+  .drawer-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--slate-200); flex-shrink: 0;
+  }
+  .drawer-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+  .drawer-close {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: var(--slate-100); cursor: pointer; font-size: 16px; color: var(--slate-500);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .drawer-close:hover { background: var(--slate-200); }
+  .drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+  .drawer-footer {
+    padding: 14px 20px; border-top: 1px solid var(--slate-200);
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+
+  /* ── Inheritance panel ── */
+  .inherit-panel {
+    border: 1px solid var(--slate-200); border-radius: 10px;
+    overflow: hidden; margin-top: 20px;
+  }
+  .inherit-panel-header {
+    padding: 10px 14px; background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-200);
+    font-size: 12px; font-weight: 700; color: var(--slate-600);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .inherit-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    font-size: 13px;
+  }
+  .inherit-row:last-child { border-bottom: none; }
+  .inherit-row-name { font-weight: 600; color: var(--slate-800); }
+  .inherit-row-status { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+  .inherit-row-actions { display: flex; align-items: center; gap: 10px; }
+  .inherit-override-link {
+    font-size: 11.5px; color: var(--indigo-600); text-decoration: none; font-weight: 500;
+    cursor: pointer;
+  }
+  .inherit-override-link:hover { text-decoration: underline; }
+
+  /* ── Toggle switch ── */
+  .toggle-wrap { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .toggle-input { display: none; }
+  .toggle-track {
+    width: 34px; height: 19px; background: var(--slate-300); border-radius: 10px;
+    position: relative; cursor: pointer; transition: background 0.15s; flex-shrink: 0;
+  }
+  .toggle-input:checked + .toggle-track { background: var(--indigo-600); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: white; transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  }
+  .toggle-input:checked + .toggle-track::after { left: 17px; }
+
+  /* ── Modal overlay ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 300;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: white; border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+    width: 500px; max-width: 96vw; padding: 28px 28px 22px;
+  }
+  .modal-title { font-size: 16px; font-weight: 700; color: var(--slate-900); margin-bottom: 6px; }
+  .modal-sub { font-size: 13px; color: var(--slate-500); margin-bottom: 20px; }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+  /* ── Upload drop zone ── */
+  .drop-zone {
+    border: 2px dashed var(--slate-300); border-radius: 10px;
+    padding: 32px 20px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s; margin-bottom: 16px;
+  }
+  .drop-zone:hover { border-color: var(--indigo-400); background: var(--indigo-50); }
+
+  /* ── Overflow menu ── */
+  .overflow-menu { position: relative; display: inline-block; }
+  .overflow-dropdown {
+    display: none; position: absolute; right: 0; top: 100%;
+    background: white; border: 1px solid var(--slate-200); border-radius: 8px;
+    box-shadow: var(--shadow-md); z-index: 50; min-width: 160px; padding: 4px 0;
+  }
+  .overflow-dropdown.open { display: block; }
+  .overflow-item {
+    display: block; width: 100%; text-align: left;
+    padding: 7px 14px; background: none; border: none;
+    font-size: 12.5px; color: var(--slate-700); cursor: pointer;
+    transition: background 0.1s;
+  }
+  .overflow-item:hover { background: var(--slate-50); }
+  .overflow-item.danger { color: var(--red-500); }
+
+  /* ── Delete confirm modal ── */
+  .delete-warning {
+    background: var(--red-50); border: 1px solid #fecaca;
+    border-radius: 8px; padding: 12px 14px;
+    font-size: 13px; color: var(--red-700); line-height: 1.55; margin-bottom: 16px;
+  }
+
+  /* ── Form fields ── */
+  .form-label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--slate-600);
+    margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .form-input {
+    width: 100%; border: 1px solid var(--slate-200); border-radius: 7px;
+    padding: 8px 12px; font-size: 13.5px; color: var(--slate-800);
+    font-family: inherit; outline: none; transition: border-color 0.12s;
+  }
+  .form-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+  .form-select {
+    width: 100%; border: 1px solid var(--slate-200); border-radius: 7px;
+    padding: 8px 12px; font-size: 13.5px; color: var(--slate-800);
+    font-family: inherit; outline: none; background: white;
+    appearance: none; cursor: pointer;
+  }
+  .form-select:focus { border-color: var(--indigo-400); }
+
+  /* ── Version history ── */
+  .version-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border: 1px solid var(--slate-200);
+    border-radius: 7px; font-size: 12px; margin-bottom: 5px;
+  }
+  .version-row.current { border-color: var(--indigo-200); background: var(--indigo-50); }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 500;
+    background: var(--slate-900); color: white;
+    padding: 10px 18px; border-radius: 8px; font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.22); opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar('org', 'org-knowledge.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Acme Corp</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Knowledge</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Replaces callout -->
+      <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:8px 14px;margin-bottom:18px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        New surface: org-level Knowledge (replaces OrgMemoryPage + scattered org-scope document management). Round 7b-8.
+        <a href="before-org-knowledge.html" style="color:var(--indigo-700);font-weight:600;margin-left:2px;">View before state</a>
+      </div>
+
+      <!-- Page header -->
+      <div class="page-header" style="margin-bottom:8px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+          <div>
+            <h1>Knowledge</h1>
+            <div style="font-size:12.5px;color:var(--slate-400);margin-top:4px;">Acme Corp organisation · org-level memory and documents shared across all 4 client workspaces</div>
+          </div>
+          <!-- Primary action: changes per active tab -->
+          <div id="page-primary-action">
+            <div id="memory-header-actions" style="display:flex;gap:8px;">
+              <div class="overflow-menu" id="new-memory-menu">
+                <button class="btn btn-sm btn-primary" onclick="toggleMenu('new-memory-menu')">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                  New entry
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:2px;"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="overflow-dropdown" id="dropdown-new-memory-menu">
+                  <button class="overflow-item" onclick="closeMenu('new-memory-menu');openDrawer('new-entry')">New entry</button>
+                  <button class="overflow-item" onclick="closeMenu('new-memory-menu');openDrawer('new-block')">New block</button>
+                </div>
+              </div>
+            </div>
+            <div id="docs-header-actions" style="display:none;gap:8px;">
+              <button class="btn btn-sm btn-secondary" onclick="showToast('Connect Drive: stub')">Connect Drive</button>
+              <button class="btn btn-sm btn-primary" onclick="openModal('upload-modal')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                Upload document
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top-level tabs: Memory / Documents -->
+      <div class="tabs" id="k-tabs" style="margin-bottom:20px;">
+        <button class="tab-btn active" onclick="switchKTab('memory', this)" id="tab-memory">Memory <span class="tab-count">12</span></button>
+        <button class="tab-btn" onclick="switchKTab('documents', this)" id="tab-documents">Documents <span class="tab-count">7</span></button>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════
+           TAB: MEMORY (default active)
+      ════════════════════════════════════════════════════════════ -->
+      <div class="tab-panel active" id="tab-panel-memory">
+
+        <!-- Filter bar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button class="filter-chip active" onclick="setFilter(this)">All (12)</button>
+            <button class="filter-chip" onclick="setFilter(this)">Authored entries (5)</button>
+            <button class="filter-chip" onclick="setFilter(this)">Memory blocks (7)</button>
+            <button class="filter-chip" onclick="setFilter(this)">Tier 1</button>
+            <button class="filter-chip" onclick="setFilter(this)">Tier 2</button>
+            <button class="filter-chip" onclick="setFilter(this)">Tier 3</button>
+          </div>
+          <div class="search-wrap" style="width:220px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="search" placeholder="Search org memory...">
+          </div>
+        </div>
+
+        <div class="card" id="memory-list">
+
+          <!-- ── Tier 1 blocks ── -->
+          <div class="section-sep">
+            Tier 1 — System-level
+            <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);">Brand identity, voice, operating constraints</span>
+          </div>
+
+          <!-- Block 1 -->
+          <div class="memory-item" onclick="openDrawer('view-block-brand')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Brand identity — Acme Inc</div>
+              <div class="memory-item-preview">We help agencies scale client output without scaling headcount. Lead with efficiency ROI, not technical complexity. Avoid describing ourselves as "AI" in first contact. Full positioning in the brand guide.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-1">Tier 1 · brand_identity</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated May 1 · Sarah C.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Block 2 -->
+          <div class="memory-item" onclick="openDrawer('view-block-voice')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Voice and tone standards</div>
+              <div class="memory-item-preview">Professional but warm. Avoid jargon and sports metaphors. Use "we" when referring to the agency. Lead with outcomes before features. Max 3 paragraphs per outbound email. Never use passive voice in subject lines.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-1">Tier 1 · voice_tone</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 28 · Sarah C.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Tier 2 blocks ── -->
+          <div class="section-sep">
+            Tier 2 — Org positioning
+            <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);">Offer, ICP, competitive</span>
+          </div>
+
+          <!-- Block 3 -->
+          <div class="memory-item" onclick="openDrawer('view-block-offer')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Offer positioning — enterprise tier</div>
+              <div class="memory-item-preview">Enterprise tier includes dedicated onboarding, SLA guarantees, custom workflow templates, and quarterly business reviews. Price anchor: $1,500/mo. Do not discount more than 20% without VP approval.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-2">Tier 2 · offer_positioning</span>
+                <span class="used-by used-by-partial" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group. Opted out: Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 3 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 20 · Mike L.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Block 4 -->
+          <div class="memory-item" onclick="openDrawer('view-block-icp')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">ICP — mid-market SaaS</div>
+              <div class="memory-item-preview">Primary ICP: B2B SaaS companies, 50-500 employees, Series B+, primarily North America. Key pain points: GTM bandwidth, inconsistent customer comms, manual reporting. Champion persona: Head of RevOps or VP Sales Ops.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-2">Tier 2 · audience_icp</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 15 · Carlos D.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Tier 3 blocks ── -->
+          <div class="section-sep">
+            Tier 3 — Operational
+            <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);">Constraints, proof, procedures</span>
+          </div>
+
+          <!-- Block 5 -->
+          <div class="memory-item" onclick="openDrawer('view-block-compliance')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Operating constraints — compliance</div>
+              <div class="memory-item-preview">No cold outreach before 8am or after 6pm local time. HITL response SLA: 2 business hours. Commitments above $10k require VP sign-off. GDPR: no PII stored outside EU data residency zone without consent.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-3">Tier 3 · operating_constraints</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 10 · Sarah C.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Block 6 -->
+          <div class="memory-item" onclick="openDrawer('view-block-proof')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Proof library — case studies</div>
+              <div class="memory-item-preview">TechBridge (SaaS, 3x lead velocity), Meridian Health (compliance automation, 60% SLA improvement), Logan Capital (reporting automation, 14 hrs/week saved). Use the "Before/After" frame when presenting in discovery calls.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-3">Tier 3 · proof_library</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated May 3 · Marcus D.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Block 7 -->
+          <div class="memory-item" onclick="openDrawer('view-block-escalation')">
+            <div class="memory-item-icon block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Operating procedures — escalation policy</div>
+              <div class="memory-item-preview">Tier 1: agent self-resolve. Tier 2: flag in Inbox for operator review within 2h. Tier 3: page on-call lead (PagerDuty). Client-facing escalations always copied to Account Executive. Never escalate directly to engineering.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-block">Block</span>
+                <span class="chip-tier chip-tier-3">Tier 3 · operating_constraints</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 25 · Sarah C.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Authored entries ── -->
+          <div class="section-sep">
+            Authored entries
+            <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);">Freeform reference notes</span>
+          </div>
+
+          <!-- Entry 1 -->
+          <div class="memory-item" onclick="openDrawer('view-entry-vendors')">
+            <div class="memory-item-icon entry">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Approved vendor list</div>
+              <div class="memory-item-preview">Technology: AWS, Vercel, Supabase, Twilio. Legal: Morrison Foerster (IP), Wilson Sonsini (contracts). Finance: KPMG (audit), Rippling (payroll). All new vendor requests must go through procurement.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-entry">Entry</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 18 · Jordan K.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Entry 2 -->
+          <div class="memory-item" onclick="openDrawer('view-entry-contracts')">
+            <div class="memory-item-icon entry">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Standard contract terms</div>
+              <div class="memory-item-preview">Net-30 payment. 90-day termination notice for enterprise accounts. Liability cap: 12 months of fees paid. Auto-renewal clause included by default; must be removed manually on request. Data processing addendum required for EU customers.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-entry">Entry</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Mar 30 · Mike L.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Entry 3 -->
+          <div class="memory-item" onclick="openDrawer('view-entry-pricing')">
+            <div class="memory-item-icon entry">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Pricing guidelines</div>
+              <div class="memory-item-preview">Starter: $299/mo, Pro: $799/mo, Enterprise: $1,500+/mo negotiated. Annual plans: 15% discount. Multi-workspace bundles: 10% off per additional workspace after 3. No public discounts below Starter pricing floor.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-entry">Entry</span>
+                <span class="used-by used-by-partial" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group. Opted out: Globex Industries (uses custom pricing)')">
+                  <span class="used-by-dot"></span>Inherited by 3 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 5 · Carlos D.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Entry 4 -->
+          <div class="memory-item" onclick="openDrawer('view-entry-escalation-contacts')">
+            <div class="memory-item-icon entry">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Internal escalation contacts</div>
+              <div class="memory-item-preview">CTO: James Watt (james@acme.io). VP Ops: Sarah Chen (sarah@acme.io). Finance lead: Marcus Hill (marcus@acme.io). On-call rotation in PagerDuty: escalation-tier-3. Legal: legal@acme.io for all contract queries.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-entry">Entry</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated May 2 · Sarah C.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Entry 5 -->
+          <div class="memory-item" onclick="openDrawer('view-entry-comms-style')">
+            <div class="memory-item-icon entry">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="memory-item-title">Communication style guide</div>
+              <div class="memory-item-preview">Slack: 48h response window. Email: same-business-day. Loom for async demos preferred over live meetings. Meeting recordings in Notion. Executive summaries: max 3 bullets. Never cc entire org on operational updates.</div>
+              <div class="memory-item-meta">
+                <span class="chip-type chip-entry">Entry</span>
+                <span class="used-by" onclick="event.stopPropagation();showToast('Inherited by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                  <span class="used-by-dot"></span>Inherited by 4 of 4 workspaces
+                </span>
+                <span class="memory-item-timestamp">Updated Apr 12 · Jordan K.</span>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /memory-list -->
+      </div><!-- /tab-panel-memory -->
+
+      <!-- ════════════════════════════════════════════════════════════
+           TAB: DOCUMENTS
+      ════════════════════════════════════════════════════════════ -->
+      <div class="tab-panel" id="tab-panel-documents">
+
+        <!-- Filter bar -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <select class="form-select" style="width:auto;padding:5px 10px;font-size:12.5px;" onchange="">
+              <option>All types</option>
+              <option>PDF</option>
+              <option>Markdown</option>
+              <option>DOC</option>
+              <option>TXT</option>
+              <option>Image</option>
+            </select>
+            <select class="form-select" style="width:auto;padding:5px 10px;font-size:12.5px;" onchange="">
+              <option>All sources</option>
+              <option>Manual</option>
+              <option>Drive</option>
+              <option>Notion</option>
+            </select>
+            <select class="form-select" style="width:auto;padding:5px 10px;font-size:12.5px;" onchange="">
+              <option>All workspaces</option>
+              <option>Used by all workspaces</option>
+              <option>Used by some</option>
+              <option>Unused</option>
+            </select>
+          </div>
+          <div class="search-wrap" style="width:220px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="search" placeholder="Search documents...">
+          </div>
+        </div>
+
+        <div class="doc-grid">
+
+          <!-- Doc 1 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-brand-guide')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-pdf">PDF</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Acme Inc Brand Guide</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">3.4 MB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v4</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                <span class="used-by-dot"></span>Used by 4 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated May 1</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-1')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-1">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-1');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-1');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-1');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Doc 2 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-voice-tone')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-md">MD</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Voice and Tone Standards</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">18 KB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v2</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                <span class="used-by-dot"></span>Used by 4 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated Apr 28</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-2')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-2">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-2');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-2');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-2');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Doc 3 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-ops-manual')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-doc">DOC</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Operating Procedures Manual</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">1.1 MB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v6</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                <span class="used-by-dot"></span>Used by 4 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated Apr 15</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-3')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-3">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-3');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-3');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-3');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Doc 4 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-vendor-list')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-pdf">PDF</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Approved Vendor List</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">84 KB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v3</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                <span class="used-by-dot"></span>Used by 4 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated Apr 18</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-4')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-4">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-4');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-4');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-4');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Doc 5 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-compliance')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-pdf">PDF</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Compliance Standards 2026</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">2.7 MB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v1</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by used-by-partial" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners, Revel Group. Opted out: Globex Industries')">
+                <span class="used-by-dot"></span>Used by 3 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated Apr 10</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-5')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-5">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-5');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-5');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-5');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Doc 6 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-comms-templates')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-md">MD</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Internal Communication Templates</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">44 KB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v2</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners, Revel Group, Globex Industries')">
+                <span class="used-by-dot"></span>Used by 4 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated Apr 12</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-6')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-6">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-6');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-6');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-6');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Doc 7 -->
+          <div class="doc-card" onclick="openDocDrawer('doc-sales-playbook')">
+            <div class="doc-card-header">
+              <div class="doc-icon doc-icon-doc">DOC</div>
+              <div style="flex:1;min-width:0;">
+                <div class="doc-name">Sales Playbook v3 Master</div>
+                <div class="doc-meta-row">
+                  <span class="doc-source">Manual upload</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">890 KB</span>
+                  <span style="color:var(--slate-300);font-size:10px;">|</span>
+                  <span class="doc-size">v3</span>
+                </div>
+              </div>
+            </div>
+            <div class="doc-meta-row">
+              <span class="used-by used-by-partial" onclick="event.stopPropagation();showToast('Used by: Acme Corp, TerraForm Partners. Opted out: Revel Group, Globex Industries')">
+                <span class="used-by-dot"></span>Used by 2 of 4 workspaces
+              </span>
+            </div>
+            <div class="doc-meta-row" style="justify-content:space-between;">
+              <span class="doc-source" style="color:var(--slate-400);">Updated Mar 22</span>
+              <div class="doc-actions">
+                <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();showToast('Edit metadata')">Edit</button>
+                <div class="overflow-menu">
+                  <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();toggleMenu('doc-overflow-7')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+                  </button>
+                  <div class="overflow-dropdown" id="dropdown-doc-overflow-7">
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-7');showToast('Replace file')">Replace</button>
+                    <button class="overflow-item" onclick="closeMenu('doc-overflow-7');showToast('View inheritance')">View inheritance</button>
+                    <button class="overflow-item danger" onclick="closeMenu('doc-overflow-7');showToast('Archive document')">Archive</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /doc-grid -->
+      </div><!-- /tab-panel-documents -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ════════════════════════════════════════════════════════════
+     MEMORY DRAWER (640px, right slide-in)
+════════════════════════════════════════════════════════════ -->
+<div class="drawer-overlay" id="memory-drawer-overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="memory-drawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="drawer-title">Brand identity — Acme Inc</div>
+      <div style="margin-top:3px;display:flex;align-items:center;gap:6px;" id="drawer-chips">
+        <span class="chip-type chip-block">Block</span>
+        <span class="chip-tier chip-tier-1">Tier 1 · brand_identity</span>
+      </div>
+    </div>
+    <button class="drawer-close" onclick="closeDrawer()">&#215;</button>
+  </div>
+  <div class="drawer-body" id="drawer-body">
+
+    <!-- View mode -->
+    <div id="drawer-view-mode">
+      <div style="font-size:13.5px;line-height:1.7;color:var(--slate-700);margin-bottom:20px;" id="drawer-content-preview">
+        We help agencies scale client output without scaling headcount. Lead with efficiency ROI, not technical complexity. Avoid describing ourselves as "AI" in first contact. Full positioning in the brand guide.
+      </div>
+      <button class="btn btn-sm btn-secondary" onclick="switchDrawerMode('edit')">Edit</button>
+    </div>
+
+    <!-- Edit mode -->
+    <div id="drawer-edit-mode" style="display:none;">
+      <div style="margin-bottom:14px;">
+        <label class="form-label">Title</label>
+        <input class="form-input" type="text" id="drawer-title-input" value="Brand identity — Acme Inc">
+      </div>
+      <div style="margin-bottom:14px;" id="drawer-tier-row">
+        <label class="form-label">Tier</label>
+        <select class="form-select" id="drawer-tier-select">
+          <option value="tier-1-brand">Tier 1 · brand_identity</option>
+          <option value="tier-1-voice">Tier 1 · voice_tone</option>
+          <option value="tier-1-constraints">Tier 1 · operating_constraints</option>
+          <option value="tier-2-offer">Tier 2 · offer_positioning</option>
+          <option value="tier-2-icp">Tier 2 · audience_icp</option>
+          <option value="tier-3-ops">Tier 3 · operating_constraints</option>
+          <option value="tier-3-proof">Tier 3 · proof_library</option>
+        </select>
+      </div>
+      <div style="margin-bottom:4px;">
+        <label class="form-label">Content</label>
+      </div>
+      <div style="border:1px solid var(--slate-200);border-radius:8px;overflow:hidden;margin-bottom:20px;">
+        <div class="rte-toolbar">
+          <button class="rte-btn" onclick="execCmd('bold')" title="Bold"><strong>B</strong></button>
+          <button class="rte-btn" onclick="execCmd('italic')" title="Italic"><em>I</em></button>
+          <button class="rte-btn" onclick="execCmd('underline')" title="Underline"><u>U</u></button>
+          <button class="rte-btn" onclick="execCmd('strikeThrough')" title="Strikethrough"><s>S</s></button>
+          <span class="rte-sep"></span>
+          <button class="rte-btn" onclick="execCmd('formatBlock','h2')" title="Heading 2">H2</button>
+          <button class="rte-btn" onclick="execCmd('formatBlock','h3')" title="Heading 3">H3</button>
+          <span class="rte-sep"></span>
+          <button class="rte-btn" onclick="execCmd('insertUnorderedList')" title="Bullet list">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
+          </button>
+          <button class="rte-btn" onclick="execCmd('insertOrderedList')" title="Numbered list">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+          </button>
+          <button class="rte-btn" onclick="execCmd('createLink',prompt('URL:'))" title="Link">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+          <span class="rte-sep"></span>
+          <button class="rte-btn" onclick="execCmd('formatBlock','pre')" title="Code block">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </button>
+          <button class="rte-btn" onclick="execCmd('formatBlock','blockquote')" title="Quote">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
+          </button>
+        </div>
+        <div class="rte-body" id="rte-content" contenteditable="true" data-placeholder="Write the content for this item...">
+          We help agencies scale client output without scaling headcount. Lead with efficiency ROI, not technical complexity. Avoid describing ourselves as "AI" in first contact. Full positioning in the brand guide.
+        </div>
+      </div>
+
+      <!-- Inheritance panel -->
+      <div class="inherit-panel">
+        <div class="inherit-panel-header">
+          Inheritance
+          <span style="font-size:11px;color:var(--slate-500);font-weight:500;text-transform:none;letter-spacing:0;">Workspaces that use this org-level item</span>
+        </div>
+        <div class="inherit-row">
+          <div>
+            <div class="inherit-row-name">Acme Corp</div>
+            <div class="inherit-row-status">Active, no override</div>
+          </div>
+          <div class="inherit-row-actions">
+            <a class="inherit-override-link" onclick="showToast('Opens Acme Corp knowledge page')" href="#">Override at workspace level</a>
+            <label class="toggle-wrap" onclick="event.stopPropagation()">
+              <input type="checkbox" class="toggle-input" checked onchange="showToast('Inheritance toggled for Acme Corp')">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="inherit-row">
+          <div>
+            <div class="inherit-row-name">TerraForm Partners</div>
+            <div class="inherit-row-status">Active, no override</div>
+          </div>
+          <div class="inherit-row-actions">
+            <a class="inherit-override-link" onclick="showToast('Opens TerraForm Partners knowledge page')" href="#">Override at workspace level</a>
+            <label class="toggle-wrap" onclick="event.stopPropagation()">
+              <input type="checkbox" class="toggle-input" checked onchange="showToast('Inheritance toggled for TerraForm Partners')">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="inherit-row">
+          <div>
+            <div class="inherit-row-name">Revel Group</div>
+            <div class="inherit-row-status">Active, no override</div>
+          </div>
+          <div class="inherit-row-actions">
+            <a class="inherit-override-link" onclick="showToast('Opens Revel Group knowledge page')" href="#">Override at workspace level</a>
+            <label class="toggle-wrap" onclick="event.stopPropagation()">
+              <input type="checkbox" class="toggle-input" checked onchange="showToast('Inheritance toggled for Revel Group')">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="inherit-row">
+          <div>
+            <div class="inherit-row-name">Globex Industries</div>
+            <div class="inherit-row-status">Active, no override</div>
+          </div>
+          <div class="inherit-row-actions">
+            <a class="inherit-override-link" onclick="showToast('Opens Globex Industries knowledge page')" href="#">Override at workspace level</a>
+            <label class="toggle-wrap" onclick="event.stopPropagation()">
+              <input type="checkbox" class="toggle-input" checked onchange="showToast('Inheritance toggled for Globex Industries')">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /drawer-edit-mode -->
+
+  </div><!-- /drawer-body -->
+  <div class="drawer-footer" id="memory-drawer-footer" style="display:none;">
+    <button class="btn btn-sm btn-primary" onclick="showToast('Saved');closeDrawer()">Save</button>
+    <button class="btn btn-sm btn-secondary" onclick="switchDrawerMode('view')">Cancel</button>
+    <button class="btn btn-sm btn-secondary" style="margin-left:auto;color:var(--red-600);border-color:var(--red-200);" onclick="openModal('delete-confirm-modal')">Delete</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     DOCUMENT DRAWER (640px, right slide-in)
+════════════════════════════════════════════════════════════ -->
+<div class="drawer-overlay" id="doc-drawer-overlay" onclick="closeDocDrawer()"></div>
+<div class="drawer" id="doc-drawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="doc-drawer-title">Acme Inc Brand Guide</div>
+      <div style="font-size:11.5px;color:var(--slate-400);margin-top:3px;">PDF · 3.4 MB · v4 · Manual upload</div>
+    </div>
+    <button class="drawer-close" onclick="closeDocDrawer()">&#215;</button>
+  </div>
+  <div class="drawer-body">
+
+    <!-- Thumbnail placeholder -->
+    <div style="background:var(--slate-100);border:1px solid var(--slate-200);border-radius:8px;height:140px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+      <span style="font-size:12px;color:var(--slate-400);">Preview not available for this file type</span>
+    </div>
+
+    <!-- Used-by summary -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:700;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Usage</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--slate-600);">
+        <span class="used-by"><span class="used-by-dot"></span>Used by 4 of 4 workspaces</span>
+      </div>
+    </div>
+
+    <!-- Version history (collapsible) -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:700;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+        Version history
+        <button class="btn btn-xs btn-secondary" onclick="toggleVersionHistory()">Show</button>
+      </div>
+      <div id="doc-version-history" style="display:none;">
+        <div class="version-row current">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          <span style="font-weight:600;">v4</span><span style="color:var(--slate-400);">Current</span>
+          <span style="color:var(--slate-400);margin-left:auto;font-size:11px;">May 1, 2026</span>
+        </div>
+        <div class="version-row">
+          <span style="font-weight:500;color:var(--slate-500);">v3</span>
+          <span style="color:var(--slate-400);">Sarah C.</span>
+          <span style="color:var(--slate-400);margin-left:auto;font-size:11px;">Apr 10, 2026</span>
+          <button class="btn btn-xs btn-secondary">Restore</button>
+        </div>
+        <div class="version-row">
+          <span style="font-weight:500;color:var(--slate-500);">v2</span>
+          <span style="color:var(--slate-400);">Mike L.</span>
+          <span style="color:var(--slate-400);margin-left:auto;font-size:11px;">Feb 14, 2026</span>
+          <button class="btn btn-xs btn-secondary">Restore</button>
+        </div>
+        <div class="version-row">
+          <span style="font-weight:500;color:var(--slate-500);">v1</span>
+          <span style="color:var(--slate-400);">Sarah C.</span>
+          <span style="color:var(--slate-400);margin-left:auto;font-size:11px;">Jan 5, 2026</span>
+          <button class="btn btn-xs btn-secondary">Restore</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inheritance panel -->
+    <div class="inherit-panel" style="margin-bottom:16px;">
+      <div class="inherit-panel-header">
+        Inheritance
+        <span style="font-size:11px;color:var(--slate-500);font-weight:500;text-transform:none;letter-spacing:0;">Workspaces that use this document</span>
+      </div>
+      <div class="inherit-row">
+        <div><div class="inherit-row-name">Acme Corp</div><div class="inherit-row-status">Active</div></div>
+        <div class="inherit-row-actions">
+          <a class="inherit-override-link" onclick="showToast('Opens Acme Corp knowledge page')" href="#">View workspace</a>
+          <label class="toggle-wrap" onclick="event.stopPropagation()">
+            <input type="checkbox" class="toggle-input" checked onchange="showToast('Toggle inheritance for Acme Corp')">
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+      <div class="inherit-row">
+        <div><div class="inherit-row-name">TerraForm Partners</div><div class="inherit-row-status">Active</div></div>
+        <div class="inherit-row-actions">
+          <a class="inherit-override-link" onclick="showToast('Opens TerraForm Partners knowledge page')" href="#">View workspace</a>
+          <label class="toggle-wrap" onclick="event.stopPropagation()">
+            <input type="checkbox" class="toggle-input" checked onchange="showToast('Toggle inheritance for TerraForm Partners')">
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+      <div class="inherit-row">
+        <div><div class="inherit-row-name">Revel Group</div><div class="inherit-row-status">Active</div></div>
+        <div class="inherit-row-actions">
+          <a class="inherit-override-link" onclick="showToast('Opens Revel Group knowledge page')" href="#">View workspace</a>
+          <label class="toggle-wrap" onclick="event.stopPropagation()">
+            <input type="checkbox" class="toggle-input" checked onchange="showToast('Toggle inheritance for Revel Group')">
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+      <div class="inherit-row">
+        <div><div class="inherit-row-name">Globex Industries</div><div class="inherit-row-status">Active</div></div>
+        <div class="inherit-row-actions">
+          <a class="inherit-override-link" onclick="showToast('Opens Globex Industries knowledge page')" href="#">View workspace</a>
+          <label class="toggle-wrap" onclick="event.stopPropagation()">
+            <input type="checkbox" class="toggle-input" checked onchange="showToast('Toggle inheritance for Globex Industries')">
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Replace file -->
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Replace file</div>
+      <div class="drop-zone" onclick="showToast('File picker: stub')">
+        <div style="font-size:13px;color:var(--slate-500);margin-bottom:4px;">Drop a new version here, or click to browse</div>
+        <div style="font-size:11.5px;color:var(--slate-400);">PDF, DOC, MD, TXT, image up to 50 MB</div>
+      </div>
+    </div>
+
+  </div>
+  <div class="drawer-footer">
+    <button class="btn btn-sm btn-secondary" style="color:var(--red-600);border-color:var(--red-200);" onclick="showToast('Archive document')">Archive</button>
+    <button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="closeDocDrawer()">Close</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     UPLOAD MODAL
+════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="upload-modal" onclick="maybeCloseModal(event,'upload-modal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">Upload document</div>
+    <div class="modal-sub">Documents uploaded here are available at the org level. Use the inheritance panel after uploading to control which workspaces receive it.</div>
+    <div class="drop-zone" onclick="showToast('File picker: stub')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--slate-400);margin-bottom:8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <div style="font-size:13.5px;font-weight:600;color:var(--slate-700);margin-bottom:3px;">Drop file here or click to browse</div>
+      <div style="font-size:12px;color:var(--slate-400);">PDF, DOC, MD, TXT, images — up to 50 MB</div>
+    </div>
+    <!-- Push to all subaccounts toggle -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--slate-100);">
+      <div>
+        <div style="font-size:13.5px;font-weight:600;color:var(--slate-800);">Push to all workspaces</div>
+        <div style="font-size:12px;color:var(--slate-500);">Make available in all 4 subaccount workspaces immediately. You can change per-workspace later.</div>
+      </div>
+      <label class="toggle-wrap" style="margin-left:16px;">
+        <input type="checkbox" class="toggle-input" checked id="push-all-toggle">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm btn-secondary" onclick="closeModal('upload-modal')">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="closeModal('upload-modal');showToast('Document uploaded and pushed to workspaces')">Upload</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     DELETE CONFIRM MODAL
+════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="delete-confirm-modal" onclick="maybeCloseModal(event,'delete-confirm-modal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">Delete this org-level item?</div>
+    <div class="delete-warning" style="margin-top:12px;">
+      Deleting this org-level item will remove it from all subaccounts that inherit it. Workspaces with local overrides keep their copies. This action cannot be undone.
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm btn-secondary" onclick="closeModal('delete-confirm-modal')">Cancel</button>
+      <button class="btn btn-sm" style="background:var(--red-600);color:white;border:none;padding:7px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;" onclick="closeModal('delete-confirm-modal');closeDrawer();showToast('Item deleted')">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+/* ── Tab switching ── */
+function switchKTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const panel = document.getElementById('tab-panel-' + tab);
+  if (panel) panel.classList.add('active');
+
+  // Swap header actions
+  document.getElementById('memory-header-actions').style.display = (tab === 'memory') ? 'flex' : 'none';
+  document.getElementById('docs-header-actions').style.display   = (tab === 'documents') ? 'flex' : 'none';
+}
+
+/* ── Filter chips ── */
+function setFilter(btn) {
+  btn.closest('div').querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+/* ── Overflow menus ── */
+function toggleMenu(id) {
+  const dropdown = document.getElementById('dropdown-' + id);
+  const isOpen = dropdown.classList.contains('open');
+  document.querySelectorAll('.overflow-dropdown').forEach(d => d.classList.remove('open'));
+  if (!isOpen) dropdown.classList.add('open');
+}
+function closeMenu(id) {
+  const dropdown = document.getElementById('dropdown-' + id);
+  if (dropdown) dropdown.classList.remove('open');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.overflow-dropdown').forEach(d => d.classList.remove('open'));
+});
+
+/* ── Memory drawer ── */
+function openDrawer(itemId) {
+  document.getElementById('memory-drawer-overlay').classList.add('open');
+  document.getElementById('memory-drawer').classList.add('open');
+  // Default to view mode
+  switchDrawerMode('view');
+}
+function closeDrawer() {
+  document.getElementById('memory-drawer-overlay').classList.remove('open');
+  document.getElementById('memory-drawer').classList.remove('open');
+}
+function switchDrawerMode(mode) {
+  const viewEl = document.getElementById('drawer-view-mode');
+  const editEl = document.getElementById('drawer-edit-mode');
+  const footerEl = document.getElementById('memory-drawer-footer');
+  if (mode === 'edit') {
+    viewEl.style.display = 'none';
+    editEl.style.display = 'block';
+    footerEl.style.display = 'flex';
+  } else {
+    viewEl.style.display = 'block';
+    editEl.style.display = 'none';
+    footerEl.style.display = 'none';
+  }
+}
+
+/* ── Document drawer ── */
+function openDocDrawer(docId) {
+  document.getElementById('doc-drawer-overlay').classList.add('open');
+  document.getElementById('doc-drawer').classList.add('open');
+}
+function closeDocDrawer() {
+  document.getElementById('doc-drawer-overlay').classList.remove('open');
+  document.getElementById('doc-drawer').classList.remove('open');
+}
+function toggleVersionHistory() {
+  const el = document.getElementById('doc-version-history');
+  const btn = event.target;
+  if (el.style.display === 'none') { el.style.display = 'block'; btn.textContent = 'Hide'; }
+  else { el.style.display = 'none'; btn.textContent = 'Show'; }
+}
+
+/* ── Rich-text execCommand ── */
+function execCmd(cmd, arg) {
+  document.execCommand(cmd, false, arg || null);
+  document.getElementById('rte-content').focus();
+}
+
+/* ── Modals ── */
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+function maybeCloseModal(event, id) {
+  if (event.target === document.getElementById(id)) closeModal(id);
+}
+
+/* ── Toast ── */
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* ── Keyboard ── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeDrawer();
+    closeDocDrawer();
+    closeModal('upload-modal');
+    closeModal('delete-confirm-modal');
+  }
+});
+
+/* ── New entry/block stub drawer ── */
+// "new-entry" and "new-block" handled by openDrawer() already — just shows the drawer.
+// In a real implementation they'd show a blank form.
+</script>
+</body>
+</html>

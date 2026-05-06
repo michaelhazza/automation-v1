@@ -792,3 +792,32 @@ index.html:
 - `prototypes/consolidation-2026-05-06/before-knowledge.html` (banner updated)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead 7b-7, changelog entry added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-8 — 2026-05-06
+**Operator feedback:** Build org-knowledge.html (org-level Knowledge surface: Memory + Documents tabs, "Used by N workspaces" indicators, per-subaccount inheritance toggles) and before-org-knowledge.html (OrgMemoryPage + scattered doc management in production). Update _sidebar.js, index.html, mockup-log.md.
+
+**Changes made:**
+- `org-knowledge.html` created: org-level Knowledge page with two tabs (Memory / Documents). Mode org, active sidebar link org-knowledge.html. Header subtitle "Acme Corp organisation · org-level memory and documents shared across all 4 client workspaces". Primary action dropdown "New entry / New block" (Memory tab), "Upload document + Connect Drive" (Documents tab).
+  - Memory tab: 12 items. Tier 1 section (Brand identity, Voice and tone). Tier 2 section (Offer positioning, ICP). Tier 3 section (Compliance, Proof library, Escalation policy). Authored entries section (5 entries: Approved vendors, Standard contracts, Pricing guidelines, Escalation contacts, Communication style guide). Each item: type chip (Entry/Block), tier badge (Tier 1/2/3 with category), "Inherited by N of 4 workspaces" click-to-reveal indicator (amber dot for 3/4, green dot for 4/4).
+  - Memory drawer (640px): view mode and edit mode. Edit mode: title input, tier dropdown, full rich-text editor (Bold/Italic/Underline/Strikethrough/H2/H3/bullet/numbered/link/code/quote using document.execCommand). Inheritance panel below editor: 4 subaccount rows (Acme Corp, TerraForm Partners, Revel Group, Globex Industries), each with a toggle switch (default on) and "Override at workspace level" link. Footer: Save / Cancel / Delete. Delete opens confirmation modal with warning text.
+  - Documents tab: 2-column card grid with 7 org-level documents (PDF/MD/DOC). Each card: file icon, name, source, size, version count, "Used by N of 4 workspaces" indicator, Edit button, 3-dot overflow (Replace / View inheritance / Archive). Click card opens doc drawer: preview thumbnail placeholder, version history (collapsible), inheritance panel (4 rows with toggles), replace drop zone.
+  - Upload modal: drop zone + "Push to all workspaces" toggle (default on). Delete confirmation modal with warning prose.
+- `before-org-knowledge.html` created: depicts production state. Banner: "BEFORE: OrgMemoryPage at /org/memory + scattered org-level reference document management. No unified org Knowledge surface." Left half: OrgMemoryPage (flat list of 7 memory blocks, no tier grouping, no type distinction, no "Used by" indicator). Right half: SubaccountKnowledgePage with scope filter toggled to "Organisation" (/workspace/knowledge?scope=org) — shows 4 org documents with no inheritance controls and no usage indicators. Production sidebar (no mode switcher, Memory-only under Knowledge section). Annotation callouts on each half explaining the specific gap. Problems box: 8 annotated issues (no unified view, inheritance invisible, no opt-out, documents second-class, no usage indicator, no rich-text, no authored entries at org scope, no tier grouping).
+- `_sidebar.js` updated: org Build section Knowledge item changed from `href: '#', stub: true, stubNote: 'org-knowledge.html in 7b-3'` to `href: 'org-knowledge.html'` (stub removed, link active).
+- `index.html` updated: masthead eyebrow changed to "Prototype Round 7b-8", description paragraph updated. Round counter in meta-row updated to 7b-8. Decisions box: new Round 7b-8 bullet. New Round 7b-8 section at bottom with 2 cards (org-knowledge.html + before-org-knowledge.html).
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- primary task is "manage what all subaccount workspaces inherit". Memory tab default active with the 12 org items immediately visible. No KPI tiles, no monitoring view.
+- Default to hidden: yes -- drawer hidden until row click. Inheritance panel inside edit mode (not visible in view mode). "Used by" details (which workspaces) shown via click-to-reveal toast, not always-expanded list. Document drawer hidden until card click.
+- One primary action: yes -- Memory tab: "+ New entry" dropdown. Documents tab: "+ Upload document". Drawer: "Save". One primary action per surface.
+- Inline state: yes -- "Inherited by N of 4 workspaces" inline on every row (green = all, amber = partial). Tier badge inline. Last updated + author inline. No dashboard or chart needed.
+- Re-check passed: yes -- a non-technical org admin can scan the Memory list, see at a glance which items all 4 workspaces use, click a row to edit it, use the rich-text toolbar, toggle a workspace opt-out, and save without technical knowledge.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/org-knowledge.html` (created)
+- `prototypes/consolidation-2026-05-06/before-org-knowledge.html` (created)
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (org mode Knowledge link: stub removed, href set to org-knowledge.html)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead 7b-8, meta round, description, decisions bullet, Round 7b-8 section + 2 cards)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

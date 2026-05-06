@@ -141,7 +141,7 @@ const NAV = {
           { label: 'Agents',      href: '#',                           icon: 'agents',     stub: true },
           { label: 'Automations', href: '#',                           icon: 'automations', stub: true },
           { label: 'Skills',      href: '#',                           icon: 'skills',     stub: true },
-          { label: 'Knowledge',   href: '#',                           icon: 'knowledge',  stub: true, stubNote: 'org-knowledge.html in 7b-3' },
+          { label: 'Knowledge',   href: 'org-knowledge.html',          icon: 'knowledge' },
           { label: 'Connections', href: '#',                           icon: 'connections', stub: true },
         ],
       },

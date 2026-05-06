@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-7
+    Prototype Round 7b-8
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-7: Knowledge page restructured. Three tabs: Memory (default, combines authored entries and memory blocks with org-inheritance chips and rich-text authoring), Notes (formerly Auto-memory, confidence display and promote-to-memory action), Documents (new, 2-column card grid with org-inherited and client-scoped docs, upload modal, Drive connect, version history drawer). Round 7b-6: Automations page restructured into a three-tab consolidated surface (Workflows / Automations / Triggers).</p>
+  <p>Round 7b-8: Org-level Knowledge page (org-knowledge.html) plus before-org-knowledge.html. Memory and Documents tabs at org scope. "Used by N workspaces" indicators. Per-subaccount inheritance toggles in drawer. Rich-text authoring. _sidebar.js org-mode Knowledge link updated from stub to org-knowledge.html. Round 7b-7: Knowledge page restructured into Memory / Notes / Documents tabs.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-7</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-8</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 50+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -132,6 +132,7 @@
     <li>Round 7b-5: Pages surface: PageProjectsPage + PageProjectDetailPage consolidated into pages.html. Nav item renamed "Sites" to "Pages". Card grid with browser-frame thumbnails and status badges replaces flat table. Detail opens in 600px side drawer (Settings / Content / SEO / Analytics tabs). New page modal with slug auto-gen and color picker. _sidebar.js Pages link in Workspace External section changed from stub to pages.html.</li>
     <li>Round 7b-6: Automations page restructured: three tabs (Workflows / Automations / Triggers) replace four separate routes. Context-aware primary CTA. Cross-tab navigation via trig-chip clicks. before-automations.html updated to 3-column before-state showing all three production pages with annotated problems.</li>
     <li>Round 7b-7: Knowledge page restructured: Memory / Notes / Documents tabs replace Summary / Auto-memory / Authored. Memory tab combines authored entries and memory blocks with org-inheritance chips, tier badges, and 640px rich-text drawer (contentEditable + execCommand toolbar). Notes tab is renamed Auto-memory with promote-to-memory action. Documents tab is new: 2-column card grid, org-inherited section, upload modal, Drive connect, version history collapsible in doc drawer.</li>
+    <li>Round 7b-8: Org Knowledge page (org-knowledge.html): unified org-level Knowledge with Memory and Documents tabs. Memory tab shows 7 blocks (3 tiers) and 5 authored entries with "Inherited by N of 4 workspaces" usage indicators. Documents tab shows 7-card 2-column grid. Drawer includes per-subaccount inheritance toggles and "Override at workspace level" links. Upload modal includes "Push to all workspaces" toggle. _sidebar.js org Build section Knowledge link promoted from stub to org-knowledge.html.</li>
   </ul>
 </div>
 
@@ -905,6 +906,53 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="before-pages.html">Open before &#8594;</a>
         <a href="pages.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-8: Org Knowledge ─────────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#4f46e5"></div>
+    Round 7b-8: Org-level Knowledge page
+  </div>
+
+  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
+    <strong>New surface:</strong> org-knowledge.html is the editing surface for org-level memory and documents that subaccounts inherit from. Memory tab shows 7 blocks (Tier 1 brand/voice, Tier 2 offer/ICP, Tier 3 compliance/proof/escalation) and 5 authored entries. Documents tab shows 7 cards in a 2-column grid. Each item shows "Inherited by N of 4 workspaces" with per-subaccount inheritance toggles and "Override at workspace level" links in the drawer. Upload modal includes "Push to all workspaces" toggle. _sidebar.js org Build section Knowledge link promoted from stub to org-knowledge.html.
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Org Knowledge</div>
+        <div class="proto-card-file">org-knowledge.html</div>
+      </div>
+      <div class="proto-card-desc">Org-level Knowledge: Memory + Documents tabs. Memory tab: 7 blocks grouped by Tier (1, 2, 3) plus 5 authored entries, each showing "Inherited by N of 4 workspaces" indicator. 640px drawer with rich-text editor (execCommand toolbar), tier dropdown, and inheritance panel (per-subaccount toggles, override link). Documents tab: 7-card 2-column grid with PDF / MD / DOC icons, "Used by" indicator, overflow menu (Replace, View inheritance, Archive). Upload modal with "Push to all workspaces" toggle.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">OrgMemoryPage (memory blocks only)</span>
+          <span class="replace-pill strike">Org-scope docs via subaccount filter</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="org-knowledge.html">Open mockup &#8594;</a>
+        <a href="before-org-knowledge.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Before: OrgMemoryPage + scattered docs</div>
+        <div class="proto-card-file">before-org-knowledge.html</div>
+      </div>
+      <div class="proto-card-desc">Current production state: OrgMemoryPage (/org/memory) shows a flat list of memory blocks with no tier grouping, no "Used by" indicator, no inheritance visibility, and no authored entries. Org-scope documents have no dedicated UI; they are accessed via the subaccount Knowledge page with an "Organisation" scope filter toggle. Problems box lists 8 specific gaps: no unified view, no inheritance visibility, no per-workspace opt-out, documents second-class, no usage indicator, no rich-text authoring, no authored entries at org scope, no tier grouping.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="before-org-knowledge.html">Open before &#8594;</a>
+        <a href="org-knowledge.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
       </div>
     </div>
 
