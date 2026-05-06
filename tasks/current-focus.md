@@ -13,12 +13,15 @@ last_merged_commit: bcc9c965
 -->
 
 <!-- mission-control-parallel
-active_spec: tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md
-active_plan: tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md
-build_slug: pre-launch-phase-3-deferred-backlog
-branch: claude/pre-launch-phase-3
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-06
+last_merge_ready_pr: #267
+last_merge_ready_slug: pre-launch-phase-3-deferred-backlog
+last_merge_ready_branch: claude/pre-launch-phase-3
 -->
 
 # Current Focus
@@ -38,7 +41,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active build slug:** `baseline-capture`
 **Status:** **REVIEWING** — F3 baseline-capture build implemented + spec-conformance CONFORMANT (re-run) + pr-reviewer APPROVED + adversarial-reviewer ALL_CLOSED. HEAD `b516e26a`. Phase 2 handoff at `tasks/builds/baseline-capture/handoff.md`. Next step: launch finalisation-coordinator. **REVIEW_GAP:** dual-reviewer skipped (Codex CLI unavailable in this Claude Code web session); chatgpt-pr-review will be the second-opinion pass during Phase 3.
 
-**Parallel build (REVIEWING):** `pre-launch-phase-3-deferred-backlog` on branch `claude/pre-launch-phase-3`. Phase 2 (BUILD) complete 2026-05-06: all 5 chunks (A→E) built; G2 gate clean (lint + typecheck exit 0); branch-level review pass complete — spec-conformance CONFORMANT_AFTER_FIXES (DG-1/DG-2/DG-3 deferred); adversarial-reviewer 2 confirmed holes closed (RLS bypass B-1, OAuth audit B-4); pr-reviewer CHANGES_REQUESTED → 4 blocking fixed (B-1 through B-4) → re-check APPROVED; dual-reviewer SKIPPED (Codex CLI unavailable — REVIEW_GAP); doc-sync gate DONE (2 KNOWLEDGE.md entries, no architecture.md updates required). Phase 2 handoff at `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md`. **Next step:** open new session and type `launch finalisation`.
+**Parallel build (MERGE_READY):** PR #267 — `pre-launch-phase-3-deferred-backlog` on branch `claude/pre-launch-phase-3`. Phase 3 (FINALISATION) complete 2026-05-06T03:43:04Z. All 5 chunks (A→E) built; G2/G4 gates clean; branch-level review pass complete (spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer 2 confirmed holes closed, pr-reviewer CHANGES_REQUESTED → 4 blocking fixed → re-check APPROVED, dual-reviewer SKIPPED REVIEW_GAP); chatgpt-pr-review 2 rounds CLOSED (round 1: B.4 Pass 4 dynamic-construction grep added + 3 Phase 4 deferrals + 1 operator escalation; round 2: 4 doc tightenings + 1 React hook missing-dep fix); doc-sync sweep complete (12 KNOWLEDGE.md entries total, architecture.md indirect-aliasing rule added, all other reference docs verified n/a or unchanged); 16 tasks/todo.md items closed by this build, 1 new Phase 4 item logged (CHATGPT-R2-PH4-1 adversarial invariant pass). `ready-to-merge` label applied; CI G5 running. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-3-deferred-backlog-2026-05-06T03-02-29Z.md`. Phase 3 handoff: `tasks/builds/pre-launch-phase-3-deferred-backlog/handoff.md § Phase 3 (FINALISATION) — complete`.
+
+> ⚠ **Dual-reviewer was skipped — reduced review coverage for this build.** The Codex CLI was unavailable. `chatgpt-pr-review` ran 2 rounds as the primary second-opinion pass and closed cleanly. Consider running `dual-reviewer` manually before merge if Codex becomes available.
 
 ---
 
@@ -72,7 +77,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-06T03:43:04Z
 
 ---
 

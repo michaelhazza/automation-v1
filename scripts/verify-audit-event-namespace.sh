@@ -5,7 +5,7 @@
 # Invariant: audit event names must be referenced via the auditEvent factory
 # (auditEvent.auth.loginFailed, etc.) — never as raw string literals.
 #
-# Three-pass detection strategy:
+# Four-pass detection strategy:
 #
 #   Pass 1 — literal eventType in recordSecurityEvent/recordEvent call objects.
 #     Pattern: recordSecurityEvent({ ... eventType: '<literal>' ... })
@@ -22,11 +22,21 @@
 #     Scope: static patterns only — dynamic template literals out of scope.
 #     Any match fails immediately.
 #
+#   Pass 4 — dynamic-construction patterns at recordSecurityEvent call sites.
+#     Patterns flagged when found within an `eventType:` in a recordSecurityEvent
+#     call (single-line scope only — multi-line objects rely on the type system):
+#       (a) template-literal eventType:        eventType: `auth.login.${...}`
+#       (b) string-concat eventType:           eventType: PREFIX + 'foo'  /  'auth' + variable
+#     The TypeScript type (SecurityEventInputV2) is the canonical defence; this
+#     pass closes the "clever string-build" escape hatch ChatGPT round-1 named.
+#     Any match fails immediately.
+#
 # Allowlist: empty by design. Chunk A cleaned all legacy call sites.
 #
 # Known-bad fixtures:
 #   scripts/fixtures/verify-audit-event-namespace-bad-pass1.txt  (Pass 1)
 #   scripts/fixtures/verify-audit-event-namespace-bad-pass3.txt  (Pass 3)
+#   scripts/fixtures/verify-audit-event-namespace-bad-pass4.txt  (Pass 4)
 #
 # Exit codes: 0 = clean, 1 = first violation found
 # ---------------------------------------------------------------------------
@@ -77,5 +87,30 @@ while IFS= read -r file; do
   echo "verify-audit-event-namespace.sh: raw dotted event-name string assigned in file that calls recordSecurityEvent — use auditEvent factory instead at ${rel_path}:${lineno}"
   exit 1
 done < <(grep -rl "recordSecurityEvent" "$ROOT_DIR/server/" --include="*.ts" 2>/dev/null || true)
+
+# ── Pass 4: dynamic eventType construction at recordSecurityEvent call sites ──
+# Flags template-literal or string-concat eventType: values inside a single-line
+# recordSecurityEvent call. Multi-line object literals are not caught — the type
+# system (SecurityEventInputV2) is canonical there. This pass closes the
+# clever-string-build escape hatch noted by chatgpt-pr-review round 1.
+
+# Pass 4a — template literal: recordSecurityEvent({ ... eventType: `...` ... })
+while IFS= read -r match; do
+  file=$(echo "$match" | cut -d: -f1)
+  lineno=$(echo "$match" | cut -d: -f2)
+  rel_path="${file#$ROOT_DIR/}"
+  echo "verify-audit-event-namespace.sh: template-literal eventType in recordSecurityEvent call — use auditEvent factory member instead at ${rel_path}:${lineno}"
+  exit 1
+done < <(grep -rnE "record(Security|)Event\s*\(\s*\{[^}]*event[Tt]ype\s*:\s*\`" "$ROOT_DIR/server/" --include="*.ts" 2>/dev/null || true)
+
+# Pass 4b — string concatenation: recordSecurityEvent({ ... eventType: X + Y ... })
+# Catches `eventType: <ident> + ...` and `eventType: '...' + <ident>`.
+while IFS= read -r match; do
+  file=$(echo "$match" | cut -d: -f1)
+  lineno=$(echo "$match" | cut -d: -f2)
+  rel_path="${file#$ROOT_DIR/}"
+  echo "verify-audit-event-namespace.sh: string-concat eventType in recordSecurityEvent call — use auditEvent factory member instead at ${rel_path}:${lineno}"
+  exit 1
+done < <(grep -rnE "record(Security|)Event\s*\(\s*\{[^}]*event[Tt]ype\s*:\s*[^,}]*\+[^,}]+" "$ROOT_DIR/server/" --include="*.ts" 2>/dev/null || true)
 
 exit 0

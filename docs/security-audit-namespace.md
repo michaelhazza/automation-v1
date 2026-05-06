@@ -39,6 +39,18 @@ void recordSecurityEvent({
 
 Using `as SecurityAuditEventName` to cast a raw string literal to the event-name type bypasses the factory-enforced closed set. Any PR containing this pattern is a blocking finding — no exceptions. The grep gate `scripts/verify-audit-event-namespace.sh` (Chunk B.4) enforces this at CI time.
 
+## Indirect constant aliasing is a blocking finding
+
+`eventType` must be a direct enum reference at the call site — do not pass through an intermediate variable. The aliasing bypass looks like:
+
+```typescript
+// BLOCKING — do not do this
+const e = auditEvent.auth.loginFailed;
+void recordSecurityEvent({ event: e, ... });
+```
+
+Grep gates cannot reliably detect this class because the variable name carries no semantic signal. The convention is enforced at code review and ChatGPT PR review. If you find yourself wanting to alias the constant, the call site should call `recordSecurityEvent` with `auditEvent.<namespace>.<name>` directly.
+
 ## Severity is declared at the factory, not at the call site
 
 For `auditEvent.security.*` events, severity is bound in the factory entry and MUST NOT be overridden by callers:

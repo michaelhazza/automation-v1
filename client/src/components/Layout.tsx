@@ -362,6 +362,10 @@ export default function Layout({ user, children }: LayoutProps) {
       setSubaccounts([]);
       if (activeClientId) { removeActiveClient(); setActiveClientIdState(null); setActiveClientNameState(null); }
     }
+    // activeClientId is intentionally excluded — this effect is an org-change effect.
+    // Including it would refetch subaccounts on every client switch, which is wasteful
+    // and incorrect (subaccount list is org-scoped, not client-scoped).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasOrgContext, activeOrgId]);
 
   // Fetch org permissions

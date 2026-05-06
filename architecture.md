@@ -1631,6 +1631,8 @@ The split exists because the streams have different write volumes, retention req
 
 `requireSubaccountPermission` (auth.ts) now mirrors `requireOrgPermission` on the 403 path: both emit `auditEvent.auth.permissionDenied` via `recordSecurityEvent`. The subaccount variant skips the emit when neither `req.orgId` nor `req.user.organisationId` is available (authenticated but org-unresolved).
 
+**Indirect constant aliasing rule.** `eventType` must be a direct enum reference at the call site — do not pass through an intermediate variable. Captures the "aliasing" bypass class that grep cannot detect.
+
 ### Canonical RLS session variables (hard rule)
 
 The only session variables that RLS policies may reference are:

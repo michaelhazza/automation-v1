@@ -2542,3 +2542,54 @@ await db.transaction(async (tx) => {
 ```
 
 This replaces the `withOrgTx({ tx: db, organisationId }, ...)` anti-pattern (passing the module-level `db` connection as `tx`). The anti-pattern fakes ALS context without binding a GUC to any real DB connection — code inside the closure that calls `getOrgScopedDb()` receives a connection with no `app.organisation_id` set, and FORCE-RLS writes fail silently. The correct pattern either (a) uses `setOrgGUC` inside a real `db.transaction()` block, or (b) uses the standard `withOrgTx({ tx, organisationId, ... })` pattern where `tx` is the Drizzle transaction handle from an enclosing `db.transaction()` call.
+
+### Closed-enum string-grep gates need a dedicated dynamic-construction pass
+
+**Date:** 2026-05-06
+**Source:** finalisation-coordinator finalisation pass on PR #267 (slug: pre-launch-phase-3-deferred-backlog), chatgpt-pr-review round 1.
+
+When a closed-enum string set is enforced by a grep gate (e.g. "no raw `eventType: 'auth.x'` literals outside the factory"), three classes of bypass exist:
+
+1. **Raw literal at call site** — `eventType: 'auth.loginFailed'` — caught by a literal-string grep.
+2. **Type-cast bypass** — `eventType: rawString as SecurityAuditEventName` — caught by a separate cast-pattern grep.
+3. **Dynamic construction** — `eventType: \`auth.${suffix}\`` (template literal) or `eventType: 'auth.' + suffix` (string concat) — NOT caught by either of the above, because no fixed substring matches the closed-enum pattern.
+
+A robust grep gate must include a dedicated pass for class 3. Pattern shape:
+
+- Pass 4a: flag template-literal `eventType:` in single-line call expressions — match `eventType:\s*\`` followed by `\${`.
+- Pass 4b: flag string-concat `eventType:` — match `eventType:.*\+` where the right operand is non-literal.
+
+Pair the gate with a deliberately-bad fixture per pass to prove the gate trips. The TypeScript type system (closed-enum union derived from a const-object factory) remains the canonical defence; class 3 is the residual escape hatch when a developer side-steps `auditEvent.x.y` syntax. The grep gate is defence in depth.
+
+**Where it generalises.** Any closed-string-set grep gate (audit events, action types, error codes, RLS policy names, capability slugs). If your gate only checks raw literals + casts, expect a dynamic-construction bypass to land within the first few PRs after the gate ships.
+
+**Anti-pattern.** Trusting a single-pass grep ("no literal X anywhere") to enforce a closed enum. The bypass cost is one keystroke (`'` → `` ` ``); the detection cost is one extra pattern in the gate.
+
+### The "indirect constant aliasing" bypass class is doc-only enforcement, not grep-detectable
+
+**Date:** 2026-05-06
+**Source:** finalisation-coordinator finalisation pass on PR #267 (slug: pre-launch-phase-3-deferred-backlog), chatgpt-pr-review round 2.
+
+For closed-enum factories (e.g. `auditEvent.auth.loginFailed`), a fourth bypass class beyond raw-literal, cast, and dynamic-construction exists: **indirect aliasing**.
+
+```typescript
+// All grep gates pass; type system passes; the call site reads "clean".
+const e = auditEvent.auth.loginFailed;
+void recordSecurityEvent({ event: e, ... });
+```
+
+The aliased variable carries no semantic signal that grep can latch onto. A grep gate would have to perform local data-flow analysis to prove `e` originated from the factory, which is beyond the contract of a one-line grep gate. The type system already accepts this: `e` is `SecurityAuditEventName`, the call site is type-correct.
+
+**Enforcement is doc-only**, surfaced at:
+
+- `architecture.md § Layer 4 — Security audit stream` — one-line agent-facing rule per CLAUDE.md §13.
+- `docs/security-audit-namespace.md § Indirect constant aliasing is a blocking finding` — fuller explanation with worked anti-pattern.
+- Code review and ChatGPT PR review treat indirect aliasing as a blocking finding.
+
+**Where it generalises.** Any closed-enum factory where the call-site convention is "use member access". The same class will appear with `errorCode`, action types, capability slugs. Three rules carry the load instead of grep:
+
+1. Type system rejects the worse cases (raw literal, cast).
+2. Grep covers the moderate cases (raw-literal slip, cast bypass, dynamic construction).
+3. Convention + code review covers the residual aliasing class — it cannot be automated reliably.
+
+Don't over-engineer a grep gate to chase aliasing. Document, review, and accept that the type system + grep gates already shut down the worse-cost bypass classes. Rejecting an alias at PR review is cheap; building a static-analysis tool to catch them is not.

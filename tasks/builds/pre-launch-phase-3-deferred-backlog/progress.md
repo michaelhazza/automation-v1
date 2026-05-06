@@ -265,3 +265,20 @@ After the initial pr-reviewer pass (CHANGES_REQUESTED — 4 blocking), fixes wer
 
 SC-COVERAGE-BASELINE numbers pending CI run post-merge. To be filled from the
 `coverage-baseline` CI job output after the PR merges to main.
+
+## Phase 3 — FINALISATION (complete)
+
+| Step | Status | Notes |
+|------|--------|-------|
+| 1. Context load + REVIEW_GAP surfaced | DONE 2026-05-06T02:58:06Z | Resumed from prior finalisation-coordinator pause at S2 conflict |
+| 2. S2 branch-sync | DONE 2026-05-06T02:58:06Z | Merge commit `6f7f6fad`. Resolution: `tasks/builds/pre-launch-phase-3/spec.md` taken from main (`--theirs`) per operator decision — that narrow 7-item spec is owned by a parallel effort on main, not our `pre-launch-phase-3-deferred-backlog` build. Two prior chatgpt-spec-review commits on that file (`32c512c0`, `05871007`) effectively discarded for this conflict. Other 5 staged changes (CLAUDE.md + 4 review-log files) auto-merged clean. Pushed. Post-merge `git rev-list --count HEAD..origin/main` = 0. |
+| 2b. Post-merge file-overlap check | DONE 2026-05-06T02:58:06Z | Overlap = `CLAUDE.md` (auto-merge clean — main added "iteration mantra" prose, our branch had unrelated edits) + `tasks/builds/pre-launch-phase-3/spec.md` (resolved per operator decision above). No code-file overlap. Migration collision detection clean (D.5's `0285_subaccounts_external_id_namespace.sql` does not collide). |
+| 3. G4 regression guard | DONE 2026-05-06 | `npm run lint` exit 0 (0 errors); `npm run typecheck` exit 0. |
+| 4. PR existence check | DONE 2026-05-06 | PR #267 exists; URL captured. |
+| 5. chatgpt-pr-review (manual) | DONE 2026-05-06 | 2 rounds, CLOSED. Round 1: 1 auto-applied (B.4 Pass 4 dynamic-construction grep), 5 verify-clean, 3 polish/Phase-4 deferrals (CHATGPT-R1-PH3-1/2/3), 1 operator escalation (CHATGPT-R1-OP-1 branch-protection), 1 reject. Round 2 (final): 4 auto-applied (3 doc-only + 1 lint — indirect-aliasing rule in `architecture.md` § Layer 4 + `docs/security-audit-namespace.md`, severity-model invariant + observability-scope note in `silentCatchHelper.ts`, React hook `activeClientId` deps disable in `Layout.tsx:365`), 1 already-logged operator, 1 Phase 4 deferral (CHATGPT-R2-PH4-1 adversarial invariant pass), 3 process-skip. No round 3. |
+| 6. Doc-sync sweep (full feature change-set) | DONE 2026-05-06 | 12 KNOWLEDGE.md entries total (10 from Phase 1+2, 2 added in finalisation: closed-enum dynamic-construction grep pass, indirect aliasing as doc-only enforcement). architecture.md updated with indirect-aliasing rule. capabilities.md / integration-reference.md / CLAUDE.md / DEVELOPMENT_GUIDELINES.md / frontend-design-principles.md / CONTRIBUTING.md / docs/decisions all n/a after candidate-set grep. spec-context.md already bumped to 2026-05-05 in spec review. |
+| 7. KNOWLEDGE.md pattern extraction | DONE 2026-05-06 | 2 new entries appended in finalisation (in addition to 10 added during Phase 1+2 spec review and Phase 2 build). |
+| 8. tasks/todo.md cleanup | DONE 2026-05-06 | 16 items marked [x] CLOSED (AR-3.1, AR-5.1, AR-1.1, AR-2.2, AR-4.1, AR-6.1, R1-4, R1-6, R1-8, R2-2, R2-3, R3-1, R3-2, R3-6, REQ #4, REQ #15, DG-1). 1 new Phase 4 item logged (CHATGPT-R2-PH4-1). Status-preserved: R1-7 (revert decision post-launch), R2-6 (profiling post-launch), REQ #29 (CI capture post-merge), DG-2/DG-3 (documented divergence), S-1/S-4 (low-pri test/dev), R1-PH3-1/2/3, R1-OP-1, R2-PH4-1. |
+| 9. current-focus.md → MERGE_READY | DONE 2026-05-06T03:43:04Z | Parallel block transitioned REVIEWING → MERGE_READY; active fields cleared; `last_merge_ready_*` keys set; prose body updated. Canonical block (baseline-capture) untouched — that build is REVIEWING in another session. |
+| 10. ready-to-merge label applied | DONE 2026-05-06T03:43:04Z | `gh pr edit 267 --add-label "ready-to-merge"` succeeded; CI G5 now running. |
+| 11. End-of-phase prompt | DONE 2026-05-06 | CEO summary returned to operator. |

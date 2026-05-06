@@ -1,0 +1,13 @@
+# Known-bad fixtures for verify-audit-event-namespace.sh (B.4) — Pass 4
+# These patterns SHOULD trip the gate: dynamic construction of an audit
+# event name at a recordSecurityEvent call site, instead of using the
+# auditEvent factory.
+
+# 4a — template literal eventType
+recordSecurityEvent({ eventType: `auth.login.${kind}`, organisationId: orgId, meta: {} });
+
+# 4b — string concatenation (variable + string)
+recordSecurityEvent({ eventType: PREFIX + 'failure', organisationId: orgId, meta: {} });
+
+# 4b — string concatenation (string + variable)
+recordSecurityEvent({ eventType: 'auth.' + suffix, organisationId: orgId, meta: {} });

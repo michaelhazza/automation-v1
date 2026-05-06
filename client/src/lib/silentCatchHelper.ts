@@ -1,3 +1,8 @@
+// Best-effort observability, not reliable capture. Network failures are silently
+// dropped. Do not use this as a completeness signal in monitoring.
+//
+// Severity model: `critical` = operator-actionable. Not `important`, not `frequent`.
+// Overuse turns `/api/client-errors` into noise.
 export function logAndSwallow(context: string, options?: { severity?: 'critical' | 'noisy' }): (err: unknown) => void {
   return (err: unknown) => {
     // Always emit at console.debug regardless of NODE_ENV so production browsers

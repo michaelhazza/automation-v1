@@ -155,3 +155,47 @@ These are resolved at build time by the `architect` sub-agent or escalated by `b
 Open a new Claude Code session and type `launch feature coordinator`. Phase 2 entry reads this handoff first; the spec at `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md` is the canonical source of truth for the build.
 
 **Phase status:** PHASE_2_PAUSED_AWAITING_OPERATOR — Phase 2 entry: slug rename complete (`pre-launch-phase-3` → `pre-launch-phase-3-deferred-backlog`, commit `0d000cb3`), S1 sync complete (merge commit `661e6009`, post-merge typecheck clean, pushed). Architect invocation BLOCKED — feature-coordinator sub-agent invocation requires Task/Agent tool which is unavailable in this Claude Code web session. Operator decision required: run architect playbook inline OR defer plan-phase to a Claude Code CLI session.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #267
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-3-deferred-backlog-2026-05-06T03-02-29Z.md` (rounds 1 + 2; CLOSED)
+**spec_deviations reviewed:** yes — DG-1 closed in commit `319151dc` (Phase 3 finalisation); DG-2 + DG-3 routed to `tasks/todo.md` per Phase 2 spec-conformance pass
+**Doc-sync sweep verdicts:**
+- KNOWLEDGE.md updated: yes (12 entries total — 10 added during Phase 1+2, 2 added in Phase 3 finalisation: closed-enum dynamic-construction grep pass, indirect aliasing as doc-only enforcement)
+- architecture.md updated: yes (§ Layer 4 — Security audit stream gained an "Indirect constant aliasing rule" line in finalisation; existing references to `auditEvent` factory + `docs/security-audit-namespace.md` + `docs/oauth-state-telemetry.md` already in place from Phase 2 doc-sync gate)
+- capabilities.md updated: n/a — no add/remove/rename of product capability, agency capability, skill, or integration in this PR
+- integration-reference.md updated: n/a — no integration behaviour change (GHL pagination is internal infrastructure, not a public integration contract change)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — checked grep terms (errorCodes, AppError, auditEvent, NormalisedEmail, setOrgGUC, MAX_GHL_LOCATIONS_TO_ENROL, external_id_namespace, verify-* gates, ghlAutoEnrolLocationsPageJob, orgScoping, silentCatchHelper); zero stale references in either file. Phase 3 codifies extensions to existing patterns; locked rules unchanged.
+- spec-context.md updated: yes — `last_reviewed_at` bumped to 2026-05-05 during spec review (Phase 1)
+- frontend-design-principles.md updated: n/a — no new UI pattern, hard rule, or worked example in this PR (all client-side changes are existing-pattern extensions)
+- CONTRIBUTING.md updated: n/a — no lint-suppression policy or contributor-convention changes
+- docs/decisions/ updated: n/a — no durable architectural choice locked that isn't already covered by the spec § 4 Decisions block; Phase 3 ships extensions to patterns established in earlier phases
+
+**KNOWLEDGE.md entries added:** 12 total (10 from Phase 1+2 + 2 added in Phase 3 finalisation)
+
+**tasks/todo.md items removed/updated:** 16 marked closed by this build:
+- AR-3.1, AR-5.1, AR-1.1, AR-2.2, AR-4.1, AR-6.1 (6 adversarial-reviewer Phase 2 items)
+- CHATGPT-R1-4, R1-6, R1-8 (3 round-1 chatgpt-pr-review items; R1-7 telemetry side closed, revert decision remains as scoped post-launch entry)
+- CHATGPT-R2-2, R2-3 (2 round-2 chatgpt-pr-review items; R2-6 remains as post-launch profiling entry)
+- CHATGPT-R3-1, R3-2, R3-6 (3 round-3 chatgpt-pr-review items)
+- REQ #4 (WONT-DO mini-spec amendment), REQ #15 (skill-envelope CI gate shipped)
+- DG-1 (architecture.md link added in commit `319151dc`)
+
+Plus 1 new Phase 4 item logged: **CHATGPT-R2-PH4-1** (adversarial invariant testing pass).
+
+**Status preserved (post-launch / Phase 4 deferrals, not closed by Phase 3):**
+- CHATGPT-R1-7 (OAuth state TTL revert decision — telemetry shipped, decision needs ≥2 weeks staging traffic)
+- CHATGPT-R2-6 (pre+post invalidation guards profiling — needs first production traffic)
+- REQ #29 (SC-COVERAGE-BASELINE numbers — CI capture post-merge)
+- DG-2, DG-3 (spec-conformance directional gaps; documented divergence)
+- S-1, S-4 (pr-reviewer / adversarial-reviewer — inline test copy, in-memory queue setSystemWorkerContext)
+- CHATGPT-R1-PH3-1, R1-PH3-2, R1-PH3-3 (round 1 Phase 4 items: skill-envelope asyncHandler-wrap gate, CI rationale comments, scripts/README)
+- CHATGPT-R1-OP-1 (operator action: branch-protection required checks)
+- CHATGPT-R2-PH4-1 (operator-driven adversarial pass after R1-OP-1 lands)
+
+**ready-to-merge label applied at:** 2026-05-06T03:43:04Z
+
+**Next step:** await CI green (G5: full lint + typecheck + test gates run on label apply), then operator drives merge per the 4-step sequence: (1) update `tasks/current-focus.md` on feature branch to clear `last_merge_ready_*` keys + add `last_merged_*` keys + status NONE + replace prose Status block with "Just merged" paragraph, (2) commit on feature branch, (3) push feature branch, (4) `gh pr merge 267 --squash --delete-branch`.
