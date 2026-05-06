@@ -142,3 +142,47 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 - `npm run typecheck` — exit 0
 - Commit: `ce537318`
 
+## Chunk C — DONE 2026-05-06
+
+(Summary in prior session — commit `3624394a` on branch. C.1 sentinel org fix, C.2 queryAuditEvents two-tx RLS fix, C.3 stateExpired/stateNotFound userAgent/ip fields, C.4 resumeRunAfterOAuth job, C.5 RLS-boundary guard + securityAuditService two-tx pattern.)
+
+## Chunk D — Independent hardening — DONE 2026-05-06
+
+### Files created
+- `server/lib/__tests__/rateLimitKeysEmailOnlyPure.test.ts` — D.1 pure test (NormalisedEmail, loginEmailOnlyKey, loginEmailOnlyKeyBurst)
+- `server/services/__tests__/securityAuditServicePiiSubstringPure.test.ts` — D.2 pure test (PII substring blacklist)
+- `server/services/__tests__/connectionTokenServiceAssertionsPure.test.ts` — D.3 pure test (decideTokenRefreshAssertion)
+- `server/services/__tests__/ghlEnrolCapDecisionPure.test.ts` — D.4 pure test (decideEnrolPath)
+- `server/jobs/ghlAutoEnrolLocationsPageJob.ts` — D.5 background pagination job
+- `server/jobs/__tests__/ghlAutoEnrolLocationsPagePure.test.ts` — D.5 pure test (classifyPageOutcome, classifyError)
+- `migrations/0285_subaccounts_external_id_namespace.sql` — D.5 schema migration (up)
+- `migrations/0285_subaccounts_external_id_namespace.down.sql` — D.5 schema migration (down)
+
+### Files modified
+- `server/lib/rateLimitKeys.ts` — D.1: NormalisedEmail brand, normaliseEmail(), loginEmailOnlyKey(), loginEmailOnlyKeyBurst()
+- `server/routes/auth.ts` — D.1: 4-bucket login RL (2 IP+email existing + 2 email-only new); fail-open on backend error with audit emit
+- `server/services/securityAuditServicePure.ts` — D.2: PII_SUBSTRINGS substring check in sanitiseMeta()
+- `server/services/connectionTokenService.ts` — D.3: principal-context assertions in refreshIfExpired(); trimmedStackTrace(), setSystemWorkerContext(), isSystemContext()
+- `server/services/ghlAgencyOauthService.ts` — D.4: cap check vs MAX_GHL_LOCATIONS_TO_ENROL; dispatch GHL_AUTO_ENROL_PAGE_JOB on cap breach; import crypto
+- `server/config/limits.ts` — D.4/D.5: MAX_GHL_LOCATIONS_TO_ENROL=250, MAX_GHL_PAGES_PER_RUN=200
+- `server/db/schema/subaccounts.ts` — D.5: externalIdNamespace column + orgExternalGhlLocationIdx partial unique index
+- `server/services/queueService.ts` — D.5: register 'ghl:auto-enrol-locations-page' worker via boss.work()
+- `server/services/workflowEngineService.ts` — D.6: in-situ AR-3.1 comment on advisory-lock scope (NOT in same transaction as pgboss.send)
+- `KNOWLEDGE.md` — D.6: advisory-lock scope entry appended
+
+### Deviations from plan
+- D.3: `withPrincipalContext.ts` does NOT export a principal org ID accessor. Used `getOrgTxContext().organisationId` from `instrumentation.ts` instead. The three-state contract (undefined/null/string) maps correctly.
+- D.5: `classifyPageOutcome` exported for testing but test file is fully hermetic (no runtime imports) to avoid env validation. classifyError is duplicated inline in the test.
+- D.6: Advisory lock IS NOT in same transaction as pgboss.send (auto-commit via db.execute). Added comment + KNOWLEDGE entry. Full transaction wrap deferred (AR-3.1 in tasks/todo.md under Deferred).
+- D.5: `npm run db:generate` fails with pre-existing "duplicated view name" error unrelated to D.5 changes. Schema type-checks clean via `npm run typecheck`.
+
+### Verification results
+- `npm run lint` — exit 0 (0 errors, warnings only pre-existing)
+- `npm run typecheck` — exit 0
+- `npx tsx server/lib/__tests__/rateLimitKeysEmailOnlyPure.test.ts` — PASS
+- `npx tsx server/services/__tests__/securityAuditServicePiiSubstringPure.test.ts` — PASS
+- `npx tsx server/services/__tests__/connectionTokenServiceAssertionsPure.test.ts` — PASS
+- `npx tsx server/services/__tests__/ghlEnrolCapDecisionPure.test.ts` — PASS
+- `npx tsx server/jobs/__tests__/ghlAutoEnrolLocationsPagePure.test.ts` — PASS
+- Commit: `e36ea2d4`
+
