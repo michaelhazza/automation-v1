@@ -228,8 +228,10 @@ export async function ghlAutoEnrolLocationsPageWorker(payload: GhlAutoEnrolPageP
 
   const { locations, nextCursor } = fetchResult;
 
-  // Step 7: Empty-page exit
-  if (locations.length === 0) {
+  // Steps 7–8: Classify page outcome and handle early exits before any insert
+  const pageOutcome = classifyPageOutcome({ locations, pageIndex, maxPages: MAX_GHL_PAGES_PER_RUN, nextCursor });
+
+  if (pageOutcome === 'completed_empty') {
     await recordSecurityEvent({
       event: auditEvent.oauth.enrolCompleted,
       organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
@@ -238,8 +240,7 @@ export async function ghlAutoEnrolLocationsPageWorker(payload: GhlAutoEnrolPageP
     return;
   }
 
-  // Step 8: Page-cap check
-  if (pageIndex >= MAX_GHL_PAGES_PER_RUN) {
+  if (pageOutcome === 'partial_page_cap') {
     await recordSecurityEvent({
       event: auditEvent.oauth.enrolPartial,
       organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
@@ -298,8 +299,8 @@ export async function ghlAutoEnrolLocationsPageWorker(payload: GhlAutoEnrolPageP
     },
   });
 
-  // Step 11: All pages done?
-  if (nextCursor === null) {
+  // Steps 11–12: Post-insert branching via classifyPageOutcome result
+  if (pageOutcome === 'completed_cursor_null') {
     await recordSecurityEvent({
       event: auditEvent.oauth.enrolCompleted,
       organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
@@ -314,7 +315,7 @@ export async function ghlAutoEnrolLocationsPageWorker(payload: GhlAutoEnrolPageP
     return;
   }
 
-  // Step 12: Re-enqueue for next page
+  // pageOutcome === 'continue': re-enqueue for next page
   const boss = await getPgBoss();
   await (boss as any).send(
     GHL_AUTO_ENROL_PAGE_JOB,

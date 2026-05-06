@@ -11,6 +11,7 @@ import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
+import { setSystemWorkerContext } from './connectionTokenService.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -543,6 +544,10 @@ export const queueService = {
 
     if (backend.kind === 'pg-boss') {
       const boss = await getPgBoss();
+
+      // Mark this process as a system worker so that refreshIfExpired allows
+      // null-principal (org-less) flows from pg-boss workers.
+      setSystemWorkerContext(true);
 
       // pg-boss deduplicates across instances natively — no advisory lock needed
       await (boss as any).work('maintenance:cleanup-execution-files', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
