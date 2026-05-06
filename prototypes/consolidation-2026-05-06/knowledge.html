@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT — Knowledge page consolidation
+  Source pages: SubaccountKnowledgePage, WorkspaceMemoryPage, MemoryBlockDetailPage, MemoryReviewQueuePage
+
+  SubaccountKnowledgePage fields/actions:
+    KEEP: References tab (title, preview, type, added, promote/edit/rename/archive actions) -> Authored tab
+    KEEP: Insights tab (content, type, domain/topic, source agent, quality score, captured date, promote action) -> Auto-memory tab, Insights sub-section
+    KEEP: Memory Blocks tab (label, content, source, updated, edit/demote actions) -> Auto-memory tab, Memory Blocks sub-section
+    KEEP: Baseline artefacts section (per-slug status badge, edit button) -> Auto-memory tab, Baseline section
+    KEEP: Search across all tabs
+    KEEP: Promote modal (label, condensed content, confirm) -> stays as modal
+    KEEP: Create/edit Reference modal (rich text editor) -> becomes "New entry" button
+    KEEP: Rename modal -> inline on row
+    KEEP: Archive confirmation
+    KEEP: Demote confirmation
+    KEEP: EditArtefactDrawer (per slug, open/close)
+
+  WorkspaceMemoryPage fields/actions:
+    KEEP: Summary tab (compiled memory text, edit, save, regenerate) -> Auto-memory > Summary sub-tab
+    KEEP: Entries tab (content, type badge, timestamp, includedInSummary, delete) -> Auto-memory > Entries sub-tab
+    KEEP: Board Summary tab -> Auto-memory > Board Summary sub-tab
+    DEFER: Search Diagnostics tab -> collapsed "Advanced" within Auto-memory (admin only)
+    KEEP: Version / RunsSinceSummary / LastGenerated / Entries KPIs -> shown as inline meta (not KPI tiles)
+
+  MemoryBlockDetailPage fields/actions:
+    KEEP: Version History tab (version, changeSource, timestamp, select two to compare, diff output) -> Drawer from Memory Block row
+    KEEP: Diff vs Canonical tab (diverges warning, reset-to-canonical, unified diff) -> same drawer
+    DROP: Exposed blockId (internal ID, per design principles rule)
+
+  MemoryReviewQueuePage fields/actions:
+    KEEP: Status filter (pending/approved/rejected/all) -> Review Queue tab
+    KEEP: Type filter (all/belief_conflict/block_proposal/clarification_pending) -> Review Queue tab
+    KEEP: Belief conflict card (entity key, new vs existing belief side-by-side, accept new/existing/reject) -> Review Queue tab
+    KEEP: Block proposal card (block name, content preview, approve/reject) -> Review Queue tab
+    KEEP: Clarification pending card (question text, read-only note) -> Review Queue tab
+    KEEP: Confidence score per item
+    KEEP: Created timestamp per item
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .knowledge-meta {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+  }
+  .k-meta-item {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--slate-500);
+    background: white; border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px;
+  }
+  .k-meta-item strong { color: var(--slate-700); font-weight: 600; }
+
+  .baseline-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+  }
+  .baseline-row:last-child { border-bottom: none; }
+  .baseline-tier { font-size: 10px; color: var(--slate-400); margin-left: 6px; }
+
+  .review-card {
+    border: 1px solid var(--border); border-radius: 10px;
+    background: white; margin-bottom: 10px;
+    box-shadow: var(--shadow-sm);
+  }
+  .review-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+  }
+  .review-card-body { padding: 12px 14px; }
+  .belief-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .belief-side {
+    padding: 10px 12px; background: var(--slate-50);
+    border: 1px solid var(--slate-200); border-radius: 8px;
+  }
+  .belief-side-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 4px; }
+  .belief-value { font-size: 13px; color: var(--slate-800); margin-bottom: 4px; }
+  .belief-conf { font-size: 11px; color: var(--slate-400); }
+
+  .authored-row {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 11px 14px; border-bottom: 1px solid var(--slate-100);
+    transition: background 0.1s;
+  }
+  .authored-row:last-child { border-bottom: none; }
+  .authored-row:hover { background: var(--slate-50); }
+  .authored-icon {
+    width: 32px; height: 32px; border-radius: 7px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-100);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+    color: var(--indigo-500);
+  }
+  .authored-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 3px; }
+  .authored-preview { font-size: 12px; color: var(--slate-500); line-height: 1.45; }
+  .authored-meta { font-size: 11px; color: var(--slate-400); margin-top: 4px; display: flex; gap: 10px; }
+  .authored-actions { margin-left: auto; display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+
+  .memory-block-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    transition: background 0.1s;
+  }
+  .memory-block-row:last-child { border-bottom: none; }
+  .memory-block-row:hover { background: var(--slate-50); }
+  .block-label { font-size: 13px; font-weight: 600; color: var(--slate-800); min-width: 160px; }
+  .block-content { font-size: 12px; color: var(--slate-500); flex: 1; line-height: 1.4; }
+  .block-source { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+  .block-actions { margin-left: 10px; display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+
+  .insight-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+  }
+  .insight-row:last-child { border-bottom: none; }
+  .insight-row:hover { background: var(--slate-50); }
+  .insight-type { min-width: 80px; }
+  .insight-text { flex: 1; font-size: 12.5px; color: var(--slate-700); line-height: 1.45; }
+  .insight-agent { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+  .insight-quality { font-size: 11px; font-family: monospace; color: var(--slate-400); white-space: nowrap; min-width: 42px; text-align: right; }
+
+  .memory-summary-text {
+    font-size: 13.5px; line-height: 1.7; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 10px; padding: 16px 18px;
+    min-height: 120px;
+    white-space: pre-wrap;
+  }
+
+  /* Drawer override for this page */
+  .block-drawer { width: 560px; }
+
+  .diff-line { font-size: 11.5px; font-family: monospace; line-height: 1.6; }
+  .diff-add { background: #f0fdf4; color: #166534; }
+  .diff-rem { background: #fef2f2; color: #991b1b; }
+  .diff-ctx { color: var(--slate-500); }
+
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Home</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>Tasks</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Calendar</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 012-2h6a2 2 0 012 2v1.662"/></svg>Agents</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>Workflows</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Knowledge</div>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+        Knowledge <span class="sidebar-badge amber">3</span></a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/></svg>Documents</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>Sites</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Platform</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg>
+        Integrations</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>Connectors</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>Clients</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Acme Corp</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Knowledge</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <h1>Knowledge</h1>
+          <p>Facts, notes, and artefacts that agents use when working for this client. Auto-memory is extracted from runs; authored knowledge is written by you.</p>
+        </div>
+        <button class="btn btn-primary" onclick="document.getElementById('new-entry-drawer').style.display='flex'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          New authored entry
+        </button>
+      </div>
+
+      <!-- Memory inline meta (replaces KPI tiles from WorkspaceMemoryPage) -->
+      <div class="knowledge-meta">
+        <div class="k-meta-item"><strong>Memory v7</strong></div>
+        <div class="k-meta-item">Regenerated <strong>3h ago</strong></div>
+        <div class="k-meta-item">Entries since summary: <strong>2 / 5</strong></div>
+        <div class="k-meta-item"><strong>24</strong> memory entries</div>
+        <div class="k-meta-item"><strong>8</strong> memory blocks</div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="k-tabs">
+        <button class="tab-btn active" onclick="switchKTab('auto',this)">
+          Auto-memory <span class="tab-count">32</span>
+        </button>
+        <button class="tab-btn" onclick="switchKTab('authored',this)">
+          Authored knowledge <span class="tab-count">6</span>
+        </button>
+        <button class="tab-btn" onclick="switchKTab('review',this)">
+          Review queue <span class="tab-count" style="background:#fef3c7;color:#b45309;">3</span>
+        </button>
+      </div>
+
+      <!-- ── AUTO-MEMORY TAB ─────────────────────────────────────────── -->
+      <div class="tab-panel active" id="tab-auto">
+
+        <!-- Sub-tabs within Auto-memory -->
+        <div style="display:flex;gap:0;border-bottom:1px solid var(--slate-100);margin-bottom:16px;">
+          <button class="tab-btn active" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('summary',this)">Summary</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('entries',this)">Entries (24)</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('blocks',this)">Memory Blocks (8)</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('insights',this)">Insights (18)</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('baseline',this)">Baseline artefacts</button>
+          <button class="tab-btn" style="font-size:12.5px;padding:6px 12px;" onclick="switchAutoSub('board',this)">Board summary</button>
+        </div>
+
+        <!-- Summary sub-panel -->
+        <div id="auto-summary" class="auto-sub-panel" style="display:block;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div style="font-size:13px;font-weight:600;color:var(--slate-700);">Compiled memory</div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-sm btn-secondary">Regenerate</button>
+              <button class="btn btn-sm btn-primary">Edit</button>
+            </div>
+          </div>
+          <div class="memory-summary-text">Acme Corp is a mid-market B2B SaaS company in the facilities management space. Key decision-makers are Sarah Chen (VP Operations) and James Watt (CTO). Their primary pain point is manual compliance reporting which currently consumes ~12 hours/week.
+
+Preferred communication: email on Tuesdays/Thursdays, 9am-12pm AEST. Sarah responds quickly on LinkedIn. James prefers technical detail in all correspondence.
+
+Current status: Q2 proposal submitted 2026-04-28. Awaiting sign-off from procurement (Est. 2-3 weeks). Champion is Sarah Chen. Budget approved at $48k ARR.
+
+Recent context: competitor mention (FieldEdge) in 2026-04-22 call. Address proactively in follow-up. Price sensitivity noted for add-ons — bundle preferred.</div>
+        </div>
+
+        <!-- Entries sub-panel -->
+        <div id="auto-entries" class="auto-sub-panel" style="display:none;">
+          <div class="card">
+            <div class="card-header" style="padding:10px 14px;">
+              <div style="font-size:12.5px;color:var(--slate-500);">24 memory entries extracted from agent runs</div>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Clear all</button>
+            </div>
+            <div>
+              <div class="insight-row">
+                <div class="insight-type"><span class="badge badge-blue" style="font-size:10px;">observation</span></div>
+                <div class="insight-text">Sarah Chen responded positively to the ROI framing in the 2026-04-22 call. Mentioned 12h/week figure unprompted.</div>
+                <div class="insight-agent">Outreach Agent</div>
+                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">May 1</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              </div>
+              <div class="insight-row">
+                <div class="insight-type"><span class="badge badge-green" style="font-size:10px;">decision</span></div>
+                <div class="insight-text">Agreed to send technical architecture doc before procurement review. James Watt requested Kubernetes deployment details specifically.</div>
+                <div class="insight-agent">Outreach Agent</div>
+                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 28</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              </div>
+              <div class="insight-row">
+                <div class="insight-type"><span class="badge badge-amber" style="font-size:10px;">preference</span></div>
+                <div class="insight-text">Prefers bundle pricing over line-item invoicing. Mentioned FieldEdge as current vendor — price-sensitive on add-ons.</div>
+                <div class="insight-agent">CRM Agent</div>
+                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 22</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              </div>
+              <div class="insight-row">
+                <div class="insight-type"><span class="badge badge-red" style="font-size:10px;">issue</span></div>
+                <div class="insight-text">Procurement cycle longer than expected (2-3 weeks). Flag for follow-up if no response by May 12.</div>
+                <div class="insight-agent">CRM Agent</div>
+                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 28</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              </div>
+              <div class="insight-row">
+                <div class="insight-type"><span class="badge badge-violet" style="font-size:10px;">pattern</span></div>
+                <div class="insight-text">C-suite at Acme consistently responds within 2 business days when contacted on Tuesdays or Thursdays, 9am-12pm AEST.</div>
+                <div class="insight-agent">Outreach Agent</div>
+                <div style="width:70px;text-align:right;font-size:11px;color:var(--slate-400);">Apr 15</div>
+                <div style="margin-left:8px;"><button class="btn btn-xs btn-ghost" style="color:var(--red-400);">&times;</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Memory Blocks sub-panel -->
+        <div id="auto-blocks" class="auto-sub-panel" style="display:none;">
+          <div class="card">
+            <div class="card-header">
+              <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Memory Blocks — loaded into every agent run</span>
+              <button class="btn btn-xs btn-secondary" onclick="document.getElementById('new-block-drawer').style.display='flex'">+ New block</button>
+            </div>
+            <div>
+              <div class="memory-block-row">
+                <div style="flex:1;">
+                  <div class="block-label">Brand voice</div>
+                  <div class="block-content">Professional but warm. Avoid jargon. Use "we" when referring to the agency. Lead with outcomes, not features. Max 3 paragraphs per email.</div>
+                  <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Manual &middot; Updated Apr 30</div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-slate" style="font-size:10px;">Manual</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost" onclick="document.getElementById('block-detail-drawer').style.display='flex'" title="Version history">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <div class="memory-block-row">
+                <div style="flex:1;">
+                  <div class="block-label">Key stakeholders</div>
+                  <div class="block-content">Sarah Chen (VP Ops) — decision-maker. James Watt (CTO) — technical approver. Procurement lead unknown. Budget: $48k ARR approved.</div>
+                  <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">From Reference &middot; Updated May 1</div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-indigo" style="font-size:10px;">From reference</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+              <div class="memory-block-row">
+                <div style="flex:1;">
+                  <div class="block-label">Competitor context</div>
+                  <div class="block-content">Currently using FieldEdge. Pain points: slow support, no API for custom reporting. Our differentiators: real-time compliance dashboard, Zapier integration.</div>
+                  <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Manual &middot; Updated Apr 22</div>
+                </div>
+                <div class="block-actions">
+                  <span class="badge badge-slate" style="font-size:10px;">Manual</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                  <button class="btn btn-xs btn-ghost">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </button>
+                  <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Demote</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Insights sub-panel -->
+        <div id="auto-insights" class="auto-sub-panel" style="display:none;">
+          <div class="filter-row">
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Domain: All</option>
+              <option>sales</option>
+              <option>operations</option>
+            </select>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Topic: All</option>
+              <option>stakeholders</option>
+              <option>pricing</option>
+              <option>timeline</option>
+            </select>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Type: All</option>
+              <option>observation</option>
+              <option>decision</option>
+              <option>preference</option>
+              <option>issue</option>
+              <option>pattern</option>
+            </select>
+            <select class="form-select" style="font-size:12px;padding:5px 10px;">
+              <option>Task: All</option>
+              <option>outreach</option>
+              <option>crm-sync</option>
+            </select>
+          </div>
+          <div class="card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Insight</th>
+                  <th>Type</th>
+                  <th>Domain / Topic</th>
+                  <th>Source</th>
+                  <th>Quality</th>
+                  <th>Captured</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="max-width:360px;"><div style="font-size:12.5px;line-height:1.45;color:var(--slate-700);">Acme prefers detailed technical architecture docs before procurement sign-off</div></td>
+                  <td><span class="badge badge-green" style="font-size:10px;">decision</span></td>
+                  <td><div style="display:flex;gap:4px;flex-wrap:wrap;"><span class="badge badge-indigo" style="font-size:10px;">sales</span><span class="badge badge-slate" style="font-size:10px;">procurement</span></div></td>
+                  <td style="font-size:12px;color:var(--slate-500);">Outreach Agent</td>
+                  <td style="font-family:monospace;font-size:12px;color:var(--slate-500);">0.91</td>
+                  <td style="font-size:12px;color:var(--slate-400);">Apr 28</td>
+                  <td><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></td>
+                </tr>
+                <tr>
+                  <td style="max-width:360px;"><div style="font-size:12.5px;line-height:1.45;color:var(--slate-700);">Contact response rate peaks Tuesday/Thursday 9am-12pm AEST</div></td>
+                  <td><span class="badge badge-violet" style="font-size:10px;">pattern</span></td>
+                  <td><div style="display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">operations</span></div></td>
+                  <td style="font-size:12px;color:var(--slate-500);">Outreach Agent</td>
+                  <td style="font-family:monospace;font-size:12px;color:var(--slate-500);">0.87</td>
+                  <td style="font-size:12px;color:var(--slate-400);">Apr 15</td>
+                  <td><button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Baseline artefacts sub-panel -->
+        <div id="auto-baseline" class="auto-sub-panel" style="display:none;">
+          <div class="card">
+            <div class="card-header">
+              <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Baseline artefacts — structured client profile</span>
+            </div>
+            <div>
+              <div class="baseline-row">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Company overview</span>
+                  <span class="baseline-tier">Tier 1</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="badge badge-green" style="font-size:10px;">Completed</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Key contacts</span>
+                  <span class="baseline-tier">Tier 1</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="badge badge-green" style="font-size:10px;">Completed</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Goals and objectives</span>
+                  <span class="baseline-tier">Tier 1</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="badge badge-green" style="font-size:10px;">Completed</span>
+                  <button class="btn btn-xs btn-secondary">Edit</button>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Brand guidelines</span>
+                  <span class="baseline-tier">Tier 2</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="badge badge-amber" style="font-size:10px;">In progress</span>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Competitive landscape</span>
+                  <span class="baseline-tier">Tier 2</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="badge badge-slate" style="font-size:10px;">Not started</span>
+                </div>
+              </div>
+              <div class="baseline-row">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:13px;font-weight:500;color:var(--slate-800);">Onboarding playbook</span>
+                  <span class="baseline-tier">Tier 3</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="badge badge-slate" style="font-size:10px;">Not started</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Board summary sub-panel -->
+        <div id="auto-board" class="auto-sub-panel" style="display:none;">
+          <div style="font-size:13px;font-weight:600;color:var(--slate-700);margin-bottom:8px;">Board summary</div>
+          <p style="font-size:12.5px;color:var(--slate-500);margin-bottom:12px;">A compressed snapshot of the board state, injected into agent context instead of raw task listings. Regenerated alongside the main memory summary.</p>
+          <div class="memory-summary-text">Active tasks: 3 in progress, 2 blocked, 5 completed this week.
+
+Blocked: "Send technical architecture doc" waiting on Engineering review. "Procurement follow-up" scheduled for May 12.
+
+In progress: "Draft Q2 proposal response", "LinkedIn outreach to James Watt", "Competitor analysis update".</div>
+        </div>
+
+      </div><!-- /tab-auto -->
+
+      <!-- ── AUTHORED KNOWLEDGE TAB ─────────────────────────────────── -->
+      <div class="tab-panel" id="tab-authored">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div class="search-wrap" style="width:300px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="search" placeholder="Search authored entries...">
+          </div>
+          <button class="btn btn-primary btn-sm">+ New entry</button>
+        </div>
+
+        <div class="card">
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Acme onboarding SOPs</div>
+              <div class="authored-preview">Step-by-step process for onboarding Acme to the platform. Covers CRM sync, agent config, data sources, and first-run checklist.</div>
+              <div class="authored-meta">
+                <span>reference</span>
+                <span>Added May 1</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Email tone guidelines</div>
+              <div class="authored-preview">Specific tone rules for correspondence with Acme stakeholders. Professional, concise, avoid sports metaphors, always CC James on technical threads.</div>
+              <div class="authored-meta">
+                <span>reference</span>
+                <span>Added Apr 28</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+          <div class="authored-row">
+            <div class="authored-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="authored-title">Deal history notes</div>
+              <div class="authored-preview">Chronological log of all significant interactions since first contact in Jan 2026. Includes proposal versions, key objections, and decisions.</div>
+              <div class="authored-meta">
+                <span>reference</span>
+                <span>Added Apr 15</span>
+              </div>
+            </div>
+            <div class="authored-actions">
+              <button class="btn btn-xs btn-ghost" style="color:var(--indigo-600);">Promote to block</button>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--amber-600);">Archive</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tab-authored -->
+
+      <!-- ── REVIEW QUEUE TAB ───────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-review">
+        <div class="filter-row">
+          <select class="form-select" style="font-size:12px;padding:5px 10px;">
+            <option>Status: Pending</option>
+            <option>Approved</option>
+            <option>Rejected</option>
+            <option>All statuses</option>
+          </select>
+          <select class="form-select" style="font-size:12px;padding:5px 10px;">
+            <option>Type: All</option>
+            <option>Belief conflicts</option>
+            <option>Block proposals</option>
+            <option>Clarifications</option>
+          </select>
+          <span style="font-size:12px;color:var(--slate-500);margin-left:4px;">3 items pending your review</span>
+        </div>
+
+        <!-- Belief conflict -->
+        <div class="review-card">
+          <div class="review-card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge badge-amber" style="font-size:10px;text-transform:uppercase;">Belief conflict</span>
+              <span style="font-size:12px;color:var(--slate-700);">Entity: <strong>procurement_lead</strong></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.83 &middot; May 5, 2:14pm</span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+            </div>
+          </div>
+          <div class="review-card-body">
+            <div class="belief-grid">
+              <div class="belief-side">
+                <div class="belief-side-label">New belief</div>
+                <div class="belief-value">Procurement lead is Marcus Hill, Finance Manager</div>
+                <div class="belief-conf">confidence 0.83</div>
+              </div>
+              <div class="belief-side">
+                <div class="belief-side-label">Existing belief</div>
+                <div class="belief-value">Procurement lead unknown</div>
+                <div class="belief-conf">confidence 1.00 (manual entry)</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-sm btn-secondary" style="color:var(--indigo-700);border-color:var(--indigo-200);background:var(--indigo-50);">Accept new belief</button>
+              <button class="btn btn-sm btn-secondary" style="color:var(--indigo-700);border-color:var(--indigo-200);background:var(--indigo-50);">Keep existing</button>
+              <button class="btn btn-sm btn-ghost" style="margin-left:auto;">Reject both</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Block proposal -->
+        <div class="review-card">
+          <div class="review-card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge badge-green" style="font-size:10px;text-transform:uppercase;">Block proposal</span>
+              <span style="font-size:12px;color:var(--slate-700);font-weight:600;">Competitive response playbook</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.77 &middot; May 4, 10:02am</span>
+              <span style="font-size:11px;color:var(--slate-400);">CRM Agent</span>
+            </div>
+          </div>
+          <div class="review-card-body">
+            <pre style="font-size:12px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:140px;overflow-y:auto;white-space:pre-wrap;font-family:inherit;line-height:1.5;">When FieldEdge is mentioned: acknowledge their current investment, then pivot to our real-time compliance dashboard differentiator and our Zapier integration (which they lack). Do not lead with price. Offer a side-by-side comparison if they request it — use the Q1-2026 comparison sheet (link in docs).</pre>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="btn btn-sm btn-primary">Approve and activate</button>
+              <button class="btn btn-sm btn-ghost" style="margin-left:auto;">Reject</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Clarification pending -->
+        <div class="review-card">
+          <div class="review-card-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge badge-sky" style="font-size:10px;text-transform:uppercase;">Clarification pending</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.61 &middot; May 3, 4:30pm</span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+            </div>
+          </div>
+          <div class="review-card-body">
+            <div style="font-size:13px;color:var(--slate-800);margin-bottom:8px;">"In the April 22 call, Sarah mentioned a 'sister company' that might also benefit from the platform. Is this a separate opportunity or is she referring to Acme's parent group?"</div>
+            <div style="font-size:12px;color:var(--slate-500);font-style:italic;">Read-only: clarifications resolve via the agent run inbox, not this queue.</div>
+          </div>
+        </div>
+
+      </div><!-- /tab-review -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── BLOCK DETAIL DRAWER ──────────────────────────────────────── -->
+<div id="block-detail-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer block-drawer">
+    <div class="drawer-header">
+      <h2>Memory block: Brand voice</h2>
+      <button class="drawer-close" onclick="document.getElementById('block-detail-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;color:var(--slate-500);margin-bottom:6px;">Current content</div>
+        <div style="font-size:12.5px;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;line-height:1.55;">Professional but warm. Avoid jargon. Use "we" when referring to the agency. Lead with outcomes, not features. Max 3 paragraphs per email.</div>
+      </div>
+      <div class="tabs" style="margin-bottom:16px;">
+        <button class="tab-btn active">Version history</button>
+        <button class="tab-btn">Diff vs canonical</button>
+      </div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:8px;">Select two versions to compare</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--slate-200);border-radius:7px;cursor:pointer;font-size:12.5px;">
+          <input type="checkbox"> <span style="font-weight:600;color:var(--slate-700);">v3</span> <span style="color:var(--slate-500);">manual_edit</span> <span style="margin-left:auto;color:var(--slate-400);">May 1, 9:22am</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--slate-200);border-radius:7px;cursor:pointer;font-size:12.5px;">
+          <input type="checkbox" checked> <span style="font-weight:600;color:var(--slate-700);">v2</span> <span style="color:var(--slate-500);">agent_update</span> <span style="margin-left:auto;color:var(--slate-400);">Apr 28, 3:45pm</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--indigo-200);border-radius:7px;cursor:pointer;font-size:12.5px;background:var(--indigo-50);">
+          <input type="checkbox" checked> <span style="font-weight:600;color:var(--indigo-700);">v1</span> <span style="color:var(--indigo-500);">initial_create</span> <span style="margin-left:auto;color:var(--slate-400);">Apr 15, 11:00am</span>
+        </label>
+      </div>
+      <button class="btn btn-sm btn-primary" style="margin-bottom:14px;">Compare v2 vs v1</button>
+      <pre style="font-size:11px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;white-space:pre-wrap;"><span class="diff-rem">- Professional, concise, minimal.</span>
+<span class="diff-add">+ Professional but warm. Avoid jargon. Use "we" when referring to the agency.</span>
+<span class="diff-ctx">  Lead with outcomes, not features.</span>
+<span class="diff-add">+ Max 3 paragraphs per email.</span></pre>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('block-detail-drawer').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── NEW ENTRY DRAWER ──────────────────────────────────────────── -->
+<div id="new-entry-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer">
+    <div class="drawer-header">
+      <h2>New authored entry</h2>
+      <button class="drawer-close" onclick="document.getElementById('new-entry-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-field">
+        <label class="form-label">Title (first line of content)</label>
+        <input class="form-input" placeholder="e.g. Email tone guidelines">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Content</label>
+        <div style="border:1px solid var(--slate-300);border-radius:8px;overflow:hidden;">
+          <div style="padding:6px 10px;background:var(--slate-50);border-bottom:1px solid var(--slate-200);display:flex;gap:6px;">
+            <button class="btn btn-xs btn-ghost" style="font-weight:700;">B</button>
+            <button class="btn btn-xs btn-ghost" style="font-style:italic;">I</button>
+            <button class="btn btn-xs btn-ghost">H1</button>
+            <button class="btn btn-xs btn-ghost">H2</button>
+            <button class="btn btn-xs btn-ghost">&#8226; List</button>
+          </div>
+          <textarea class="form-textarea" style="border:none;border-radius:0;min-height:220px;" placeholder="Long-form notes, SOPs, brand docs, meeting summaries..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('new-entry-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Save entry</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── NEW BLOCK DRAWER ──────────────────────────────────────────── -->
+<div id="new-block-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer">
+    <div class="drawer-header">
+      <h2>New memory block</h2>
+      <button class="drawer-close" onclick="document.getElementById('new-block-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-field">
+        <label class="form-label">Label</label>
+        <input class="form-input" placeholder="e.g. Brand voice">
+        <div class="form-hint">Loaded into every agent run as stable context (max 80 chars)</div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Content</label>
+        <textarea class="form-textarea" style="font-family:monospace;font-size:12px;min-height:160px;" placeholder="Plain text, max 2000 characters..."></textarea>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('new-block-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Save block</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchKTab(id, btn) {
+  document.querySelectorAll('#k-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+}
+function switchAutoSub(id, btn) {
+  btn.closest('div').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.auto-sub-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('auto-' + id).style.display = 'block';
+}
+</script>
+</body>
+</html>

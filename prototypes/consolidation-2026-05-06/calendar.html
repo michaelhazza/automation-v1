@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT — Merged Calendar
+  Sources: ScheduleCalendarPage, SubaccountScheduleCalendarPage
+
+  ScheduleCalendarPage fields/actions:
+    KEEP: ScheduleCalendar component (merged projection across all subaccounts) -> scope = All clients
+    KEEP: window selector (7/14/30 days) -> top filter
+    KEEP: per-occurrence: subaccountId, agentId, sourceId, source type (scheduled_task / workflow / agent) -> row detail
+    KEEP: onClick navigation to scheduled-task or agent manage page -> row click
+
+  SubaccountScheduleCalendarPage fields/actions:
+    KEEP: same ScheduleCalendar component -> scope = selected client
+    KEEP: window selector -> same control
+    KEEP: subaccountId scoping -> becomes the "Client" filter selection
+
+  Merged design:
+    Single page. "Scope" filter at top: All clients OR a specific client.
+    When a specific client is selected from the client switcher, auto-scopes to that client.
+    Window selector preserved.
+    Calendar view: grouped by day, shows agent name, source type, occurrence time.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .cal-day-group { margin-bottom: 16px; }
+  .cal-day-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--slate-400);
+    padding: 8px 0 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .cal-day-label.today { color: var(--indigo-600); }
+  .cal-day-today-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--indigo-500);
+  }
+
+  .cal-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: white;
+    border: 1px solid var(--border); border-radius: 9px;
+    margin-bottom: 6px; cursor: pointer;
+    transition: all 0.12s; box-shadow: var(--shadow-sm);
+  }
+  .cal-item:hover { border-color: var(--indigo-300); box-shadow: 0 2px 8px rgba(99,102,241,0.12); }
+
+  .cal-time {
+    font-size: 12px; font-family: monospace; color: var(--slate-500);
+    width: 52px; flex-shrink: 0; text-align: right;
+  }
+  .cal-type-icon {
+    width: 30px; height: 30px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .cal-agent-name { font-size: 13px; font-weight: 600; color: var(--slate-800); margin-bottom: 2px; }
+  .cal-item-meta { font-size: 11.5px; color: var(--slate-500); display: flex; gap: 8px; align-items: center; }
+
+  .scope-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200); background: white;
+    color: var(--slate-600); cursor: pointer; transition: all 0.12s;
+  }
+  .scope-pill.active { border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700); }
+  .scope-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .window-btn {
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 12.5px; font-weight: 500;
+    border: 1px solid var(--slate-200); background: white;
+    color: var(--slate-600); cursor: pointer; transition: all 0.12s;
+  }
+  .window-btn.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">All clients</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Home</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>Tasks</a>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Calendar</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>Agents</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>Clients</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Calendar</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header" style="margin-bottom:16px;">
+        <h1>Calendar</h1>
+        <p>Scheduled agent runs and workflow executions across your clients.</p>
+      </div>
+
+      <!-- Controls row -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+        <!-- Scope filter -->
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span style="font-size:12px;color:var(--slate-500);font-weight:500;">Scope:</span>
+          <button class="scope-pill active" onclick="setScope('all',this)">
+            <span class="scope-dot" style="background:var(--slate-400);"></span>
+            All clients
+          </button>
+          <button class="scope-pill" onclick="setScope('acme',this)">
+            <span class="scope-dot" style="background:#3b82f6;"></span>
+            Acme Corp
+          </button>
+          <button class="scope-pill" onclick="setScope('beta',this)">
+            <span class="scope-dot" style="background:#10b981;"></span>
+            Beta Industries
+          </button>
+          <button class="scope-pill" onclick="setScope('gamma',this)">
+            <span class="scope-dot" style="background:#f59e0b;"></span>
+            Gamma Holdings
+          </button>
+        </div>
+
+        <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
+          <span style="font-size:12px;color:var(--slate-500);font-weight:500;margin-right:4px;">Window:</span>
+          <button class="window-btn" onclick="setWindow(7,this)">7 days</button>
+          <button class="window-btn active" onclick="setWindow(14,this)">14 days</button>
+          <button class="window-btn" onclick="setWindow(30,this)">30 days</button>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
+        <div class="legend-item">
+          <div style="width:10px;height:10px;border-radius:3px;background:var(--indigo-100);border:1.5px solid var(--indigo-300);"></div>
+          Scheduled task
+        </div>
+        <div class="legend-item">
+          <div style="width:10px;height:10px;border-radius:3px;background:#eff6ff;border:1.5px solid #bfdbfe;"></div>
+          Workflow
+        </div>
+        <div class="legend-item">
+          <div style="width:10px;height:10px;border-radius:3px;background:#f0fdf4;border:1.5px solid #a7f3d0;"></div>
+          Agent heartbeat
+        </div>
+      </div>
+
+      <!-- Calendar view -->
+      <div style="max-width:800px;">
+
+        <!-- Today -->
+        <div class="cal-day-group">
+          <div class="cal-day-label today">
+            <div class="cal-day-today-dot"></div>
+            Today, Wed May 6
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">09:00</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Outreach Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Acme Corp</span>
+              </div>
+            </div>
+            <span class="status-dot dot-blue dot-pulse" style="margin-right:4px;"></span>
+            <span style="font-size:11.5px;color:#3b82f6;font-weight:500;">Running now</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">10:30</div>
+            <div class="cal-type-icon" style="background:#eff6ff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Lead nurture workflow</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-blue" style="font-size:10px;">workflow</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Beta Industries</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">14:00</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Compliance check — monthly report</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">scheduled task</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Gamma Holdings</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Tomorrow -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Thu May 7</div>
+          <div class="cal-item">
+            <div class="cal-time">09:00</div>
+            <div class="cal-type-icon" style="background:#f0fdf4;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">CRM Hygiene Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-green" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Acme Corp</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">11:15</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Outreach Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Beta Industries</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Fri May 8 -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Fri May 8</div>
+          <div class="cal-item">
+            <div class="cal-time">09:00</div>
+            <div class="cal-type-icon" style="background:#eff6ff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Weekly reporting workflow</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-blue" style="font-size:10px;">workflow</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>All clients</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Sat empty state -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Sat May 9</div>
+          <div style="padding:10px 0;font-size:12.5px;color:var(--slate-400);font-style:italic;">No scheduled runs</div>
+        </div>
+
+      </div><!-- /calendar view -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<script>
+function setScope(id, btn) {
+  document.querySelectorAll('.scope-pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function setWindow(days, btn) {
+  document.querySelectorAll('.window-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

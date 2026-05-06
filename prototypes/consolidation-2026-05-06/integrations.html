@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT — Integrations + Issues tab
+  Sources: IntegrationsAndCredentialsPage, AdminHealthFindingsPage, HealthAuditWidget
+
+  IntegrationsAndCredentialsPage fields/actions:
+    KEEP: Credentials tab (CredentialsTab component — credential list, add/edit/delete) -> Connections tab, Credentials section
+    KEEP: Integrations tab (McpServersPage — MCP server list, add/test/remove) -> Connections tab, Integrations section
+    KEEP: Tab persistence via URL search param -> preserved (tab=connections|issues)
+
+  AdminHealthFindingsPage fields/actions:
+    KEEP: findings list grouped by severity (critical/warning/info) -> Issues tab
+    KEEP: severity pill (critical/warning/info) -> Issues tab per-row
+    KEEP: resourceKind, resourceLabel -> Issues tab per-row
+    KEEP: message -> Issues tab per-row
+    KEEP: recommendation -> Issues tab per-row (expanded)
+    KEEP: detectedAt -> Issues tab per-row
+    KEEP: "Mark resolved" button (permission-gated, org.health_audit.resolve) -> Issues tab per-row
+    KEEP: "Run health audit" button (re-scan) -> Issues tab header
+    KEEP: refresh/loading state -> Issues tab
+    KEEP: canResolve permission check -> per-row display
+    KEEP: detector field -> shown in row detail (not primary)
+    DROP: "Back to admin" link (now within nav context)
+
+  HealthAuditWidget fields/actions:
+    KEEP: inline severity grouping pattern -> matched in Issues tab
+    KEEP: compact card-per-finding layout -> matched
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integrations — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .cred-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-bottom: 1px solid var(--slate-100);
+    transition: background 0.1s;
+  }
+  .cred-row:last-child { border-bottom: none; }
+  .cred-row:hover { background: var(--slate-50); }
+  .cred-icon {
+    width: 32px; height: 32px; border-radius: 7px;
+    background: var(--slate-100); border: 1px solid var(--slate-200);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .cred-name { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .cred-type { font-size: 11.5px; color: var(--slate-400); margin-top: 1px; }
+
+  .mcp-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-bottom: 1px solid var(--slate-100);
+  }
+  .mcp-row:last-child { border-bottom: none; }
+  .mcp-name { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .mcp-url { font-size: 11.5px; font-family: monospace; color: var(--slate-400); margin-top: 1px; }
+
+  .finding-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .finding-card.critical { border-left: 3px solid var(--red-500); }
+  .finding-card.warning  { border-left: 3px solid var(--amber-500); }
+  .finding-card.info     { border-left: 3px solid var(--slate-300); }
+
+  .finding-header {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 14px; cursor: pointer;
+  }
+  .finding-body { padding: 0 14px 12px 44px; }
+
+  .finding-resource { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+  .finding-message { font-size: 13px; color: var(--slate-800); font-weight: 500; flex: 1; }
+  .finding-recommendation { font-size: 12.5px; color: var(--slate-600); line-height: 1.5; margin-bottom: 8px; }
+  .finding-meta { font-size: 11.5px; color: var(--slate-400); }
+
+  .issues-summary {
+    display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .issue-count-card {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 14px; background: white;
+    border: 1px solid var(--border); border-radius: 8px;
+    font-size: 12px; color: var(--slate-600);
+    box-shadow: var(--shadow-sm);
+  }
+  .issue-count-num { font-size: 18px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Home</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>Agents</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Platform</div>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg>
+        Integrations
+        <span class="sidebar-badge" style="background:rgba(239,68,68,0.2);color:#fca5a5;">2</span></a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>Connectors</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>Clients</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Integrations</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <h1>Integrations</h1>
+        <p>Connections and credentials your agents use, plus open issues detected by the health audit.</p>
+      </div>
+
+      <div class="tabs" id="int-tabs">
+        <button class="tab-btn active" onclick="switchIntTab('connections',this)">
+          Connections
+        </button>
+        <button class="tab-btn" onclick="switchIntTab('issues',this)">
+          Issues
+          <span class="tab-count" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;">2</span>
+        </button>
+      </div>
+
+      <!-- ── CONNECTIONS TAB ──────────────────────────────────────── -->
+      <div class="tab-panel active" id="tab-connections">
+
+        <!-- Credentials section -->
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div>
+              <div style="font-size:14px;font-weight:700;color:var(--slate-800);">Credentials</div>
+              <div style="font-size:12.5px;color:var(--slate-500);margin-top:2px;">API keys, OAuth tokens, and secrets used by agents and automations</div>
+            </div>
+            <button class="btn btn-sm btn-primary">+ Add credential</button>
+          </div>
+          <div class="card">
+            <div class="cred-row">
+              <div class="cred-icon">&#128274;</div>
+              <div style="flex:1;">
+                <div class="cred-name">HubSpot API key</div>
+                <div class="cred-type">api_key &middot; Used by 2 agents</div>
+              </div>
+              <span class="badge badge-green" style="font-size:10px;">Valid</span>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+            <div class="cred-row">
+              <div class="cred-icon">&#128274;</div>
+              <div style="flex:1;">
+                <div class="cred-name">PhantomBuster API key</div>
+                <div class="cred-type">api_key &middot; Used by 1 agent</div>
+              </div>
+              <span class="badge badge-green" style="font-size:10px;">Valid</span>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+            <div class="cred-row">
+              <div class="cred-icon">&#128274;</div>
+              <div style="flex:1;">
+                <div class="cred-name">Google Workspace OAuth</div>
+                <div class="cred-type">oauth2 &middot; Used by 1 agent</div>
+              </div>
+              <span class="badge badge-amber" style="font-size:10px;">Expires soon</span>
+              <button class="btn btn-xs btn-secondary">Refresh</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+            <div class="cred-row">
+              <div class="cred-icon">&#128274;</div>
+              <div style="flex:1;">
+                <div class="cred-name">Slack bot token</div>
+                <div class="cred-type">bot_token &middot; Not yet used</div>
+              </div>
+              <span class="badge badge-slate" style="font-size:10px;">Not in use</span>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MCP / Integrations section -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div>
+              <div style="font-size:14px;font-weight:700;color:var(--slate-800);">MCP integrations</div>
+              <div style="font-size:12.5px;color:var(--slate-500);margin-top:2px;">Model Context Protocol servers that agents can call as tools</div>
+            </div>
+            <button class="btn btn-sm btn-primary">+ Add MCP server</button>
+          </div>
+          <div class="card">
+            <div class="mcp-row">
+              <div class="cred-icon" style="background:var(--indigo-50);border-color:var(--indigo-100);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg>
+              </div>
+              <div style="flex:1;">
+                <div class="mcp-name">Filesystem server</div>
+                <div class="mcp-url">mcp://localhost:3001</div>
+              </div>
+              <span class="badge badge-green" style="font-size:10px;">Connected</span>
+              <button class="btn btn-xs btn-secondary">Test</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Remove</button>
+            </div>
+            <div class="mcp-row">
+              <div class="cred-icon" style="background:var(--indigo-50);border-color:var(--indigo-100);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+              </div>
+              <div style="flex:1;">
+                <div class="mcp-name">GitHub MCP</div>
+                <div class="mcp-url">https://mcp.github.com/v1</div>
+              </div>
+              <span class="badge badge-red" style="font-size:10px;">Error</span>
+              <button class="btn btn-xs btn-secondary">Test</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Remove</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tab-connections -->
+
+      <!-- ── ISSUES TAB ──────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-issues" style="display:none;">
+
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+          <div class="issues-summary">
+            <div class="issue-count-card" style="border-color:#fecaca;">
+              <span class="issue-count-num" style="color:var(--red-600);">1</span>
+              <span style="color:var(--red-600);">Critical</span>
+            </div>
+            <div class="issue-count-card" style="border-color:#fde68a;">
+              <span class="issue-count-num" style="color:var(--amber-600);">1</span>
+              <span style="color:var(--amber-600);">Warning</span>
+            </div>
+            <div class="issue-count-card">
+              <span class="issue-count-num" style="color:var(--slate-500);">0</span>
+              <span style="color:var(--slate-500);">Info</span>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-secondary">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            Run health audit
+          </button>
+        </div>
+
+        <div style="font-size:11px;color:var(--slate-400);margin-bottom:12px;">Last audit: May 5, 2026 at 11:32pm</div>
+
+        <!-- Critical -->
+        <div class="finding-card critical">
+          <div class="finding-header">
+            <span class="badge badge-red" style="font-size:10px;text-transform:uppercase;flex-shrink:0;margin-top:1px;">Critical</span>
+            <div style="flex:1;">
+              <div class="finding-message">GitHub MCP server unreachable</div>
+              <div class="finding-resource">MCP integration &middot; github-mcp</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+              <span style="font-size:11px;color:var(--slate-400);">May 5</span>
+              <!-- Permission-gated resolve button -->
+              <button class="btn btn-xs btn-secondary">Mark resolved</button>
+            </div>
+          </div>
+          <div class="finding-body">
+            <div class="finding-recommendation">The GitHub MCP server at https://mcp.github.com/v1 returned a connection timeout. Agents using this integration will fail tool calls that require GitHub access. Verify the URL and authentication token are current.</div>
+            <div class="finding-meta">Detected by: mcp_connectivity_check &middot; Detected May 5, 11:32pm</div>
+          </div>
+        </div>
+
+        <!-- Warning -->
+        <div class="finding-card warning">
+          <div class="finding-header">
+            <span class="badge badge-amber" style="font-size:10px;text-transform:uppercase;flex-shrink:0;margin-top:1px;">Warning</span>
+            <div style="flex:1;">
+              <div class="finding-message">Google Workspace OAuth token expires in 3 days</div>
+              <div class="finding-resource">Credential &middot; google-workspace-oauth</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+              <span style="font-size:11px;color:var(--slate-400);">May 5</span>
+              <button class="btn btn-xs btn-secondary">Mark resolved</button>
+            </div>
+          </div>
+          <div class="finding-body">
+            <div class="finding-recommendation">The OAuth2 refresh token will expire 2026-05-09. Refresh the token in the Connections tab before expiry to prevent agents from losing access to Google Drive and Gmail.</div>
+            <div class="finding-meta">Detected by: credential_expiry_check &middot; Detected May 5, 11:32pm</div>
+          </div>
+        </div>
+
+        <!-- Empty info section -->
+        <div style="padding:20px 0 0;border-top:1px solid var(--slate-100);margin-top:4px;">
+          <div style="font-size:12px;color:var(--slate-400);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Info</div>
+          <div style="font-size:13px;color:var(--slate-400);font-style:italic;padding:8px 0;">No info-level findings.</div>
+        </div>
+
+      </div><!-- /tab-issues -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<script>
+function switchIntTab(id, btn) {
+  document.querySelectorAll('#int-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+  const panel = document.getElementById('tab-' + id);
+  panel.classList.add('active');
+  panel.style.display = 'block';
+}
+</script>
+</body>
+</html>

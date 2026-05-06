@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nav Restructure — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  @media (max-width: 900px) { .compare-grid { grid-template-columns: 1fr; } }
+
+  .nav-mock {
+    background: #0f172a;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.20);
+    min-height: 640px;
+  }
+  .nav-mock-label {
+    padding: 10px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .nav-mock-label.before { color: #fbbf24; }
+  .nav-mock-label.after  { color: #86efac; }
+
+  .nav-group-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: rgba(255,255,255,0.22);
+    padding: 10px 18px 4px;
+  }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 18px; font-size: 12.5px; color: rgba(255,255,255,0.55);
+    border-left: 2px solid transparent;
+    position: relative;
+  }
+  .nav-item.active { color: #a5b4fc; background: rgba(99,102,241,0.12); border-left-color: #6366f1; }
+  .nav-item svg { flex-shrink: 0; opacity: 0.6; }
+  .nav-item.active svg { opacity: 1; }
+
+  .nav-item-badge {
+    margin-left: auto;
+    font-size: 9.5px; font-weight: 700;
+    padding: 1px 5px; border-radius: 8px;
+  }
+  .nb-red { background: rgba(239,68,68,0.25); color: #fca5a5; }
+  .nb-amber { background: rgba(245,158,11,0.2); color: #fbbf24; }
+  .nb-indigo { background: rgba(99,102,241,0.25); color: #a5b4fc; }
+
+  .nav-item.removed { color: rgba(255,255,255,0.25); text-decoration: line-through; }
+  .nav-item.removed svg { opacity: 0.25; }
+  .remove-badge {
+    margin-left: auto; font-size: 9px; font-weight: 700;
+    color: #f87171; background: rgba(239,68,68,0.15);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  .fold-badge {
+    margin-left: auto; font-size: 9px; font-weight: 700;
+    color: #fbbf24; background: rgba(245,158,11,0.15);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  .new-badge {
+    margin-left: auto; font-size: 9px; font-weight: 700;
+    color: #86efac; background: rgba(16,185,129,0.15);
+    border-radius: 4px; padding: 1px 5px;
+  }
+
+  .annotations { margin-top: 24px; }
+  .annotation {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px; margin-bottom: 8px;
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .annotation-added   { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.2); color: #059669; }
+  .annotation-removed { background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.18); color: #dc2626; }
+  .annotation-folded  { background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2); color: #b45309; }
+  .annotation-icon { font-size: 14px; flex-shrink: 0; }
+
+  .summary-box {
+    background: white; border: 1px solid #e8ecf0; border-radius: 12px;
+    padding: 20px 24px; margin-bottom: 28px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .summary-box h3 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 12px; }
+  .summary-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+  .summary-stat { text-align: center; }
+  .summary-stat-num { font-size: 28px; font-weight: 800; color: #4f46e5; letter-spacing: -0.02em; }
+  .summary-stat-label { font-size: 11px; color: #64748b; margin-top: 2px; }
+
+  .what-contains {
+    padding: 5px 18px 8px 40px;
+    font-size: 11.5px; color: rgba(255,255,255,0.38);
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (proposed) -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        Tasks
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Calendar
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 012-2h6a2 2 0 012 2v1.662"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Automations
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Workflows
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Knowledge</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+        Knowledge
+        <span class="sidebar-badge amber">3</span>
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+        Documents
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Sites
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Platform</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14 10 10 0 0014.14-14.14"/></svg>
+        Integrations
+        <span class="sidebar-badge" style="background:rgba(239,68,68,0.2);color:#fca5a5;">2</span>
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+        Connectors
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Clients
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/><path d="M4.93 19.07a10 10 0 0014.14-14.14"/></svg>
+        Manage Org
+      </a>
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Nav Restructure</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Before / After Comparison</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <h1>Left Nav: Before vs After</h1>
+        <p>Current state has ~45 items. Proposed nav has ~16 primary items with sub-items folded into the pages they belong to.</p>
+      </div>
+
+      <div class="summary-box">
+        <h3>Reduction summary</h3>
+        <div class="summary-stats">
+          <div class="summary-stat">
+            <div class="summary-stat-num" style="color:#ef4444;">~45</div>
+            <div class="summary-stat-label">Current nav items</div>
+          </div>
+          <div class="summary-stat" style="font-size:24px;color:#94a3b8;line-height:1;padding-top:8px;">&#8594;</div>
+          <div class="summary-stat">
+            <div class="summary-stat-num" style="color:#10b981;">~16</div>
+            <div class="summary-stat-label">Proposed nav items</div>
+          </div>
+          <div class="summary-stat">
+            <div class="summary-stat-num" style="color:#6366f1;">4</div>
+            <div class="summary-stat-label">Pages merged</div>
+          </div>
+          <div class="summary-stat">
+            <div class="summary-stat-num" style="color:#f59e0b;">6</div>
+            <div class="summary-stat-label">Items folded into pages</div>
+          </div>
+          <div class="summary-stat">
+            <div class="summary-stat-num" style="color:#ef4444;">1</div>
+            <div class="summary-stat-label">Items removed (Briefs)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="compare-grid">
+
+        <!-- BEFORE -->
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:10px;">Current (~45 items)</div>
+          <div class="nav-mock">
+            <div class="nav-mock-label before">CURRENT STATE</div>
+
+            <div class="nav-group-label">Workspace</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              Home
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+              Tasks
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+              Briefs
+              <span class="remove-badge">REMOVED</span>
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Calendar
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Client Calendar
+              <span class="fold-badge">MERGED</span>
+            </div>
+
+            <div class="nav-group-label">Agents</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+              Agents
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87"/></svg>
+              Skills
+              <span class="fold-badge">INTO AGENT</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87"/></svg>
+              Skill Studio
+              <span class="fold-badge">INTO AGENT</span>
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              Run History
+            </div>
+
+            <div class="nav-group-label">Automation</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27"/></svg>
+              Automations (user)
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27"/></svg>
+              Automations (admin)
+              <span class="fold-badge">MERGED</span>
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+              Workflows
+            </div>
+
+            <div class="nav-group-label">Knowledge</div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14"/></svg>
+              SubaccountKnowledge
+              <span class="fold-badge">MERGED</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3H5a2 2 0 00-2 2v4"/></svg>
+              Workspace Memory
+              <span class="fold-badge">MERGED</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+              Memory Block Detail
+              <span class="fold-badge">TO DRAWER</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+              Memory Review Queue
+              <span class="fold-badge">MERGED</span>
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16"/></svg>
+              Documents
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>
+              Sites
+            </div>
+
+            <div class="nav-group-label">Platform</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+              Integrations
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/></svg>
+              Health Findings
+              <span class="fold-badge">INTO INTEGR</span>
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+              Connectors
+            </div>
+
+            <div class="nav-group-label">Manage</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>
+              Clients
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/></svg>
+              Categories
+              <span class="fold-badge">INTO ORG (Tags)</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21"/></svg>
+              Engines
+              <span class="fold-badge">INTO ORG</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              Board Templates
+              <span class="fold-badge">INTO ORG</span>
+            </div>
+            <div class="nav-item removed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Permissions
+              <span class="fold-badge">INTO ORG</span>
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+              Manage Org
+            </div>
+
+          </div>
+        </div>
+
+        <!-- AFTER -->
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:10px;">Proposed (~16 items)</div>
+          <div class="nav-mock">
+            <div class="nav-mock-label after">PROPOSED STATE</div>
+
+            <div class="nav-group-label">Workspace</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              Home
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+              Tasks
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Calendar
+              <span class="new-badge">MERGED</span>
+            </div>
+            <div class="nav-item active">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+              Agents
+            </div>
+            <div class="what-contains">Skills now live inside Agent edit</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              Automations
+              <span class="new-badge">MERGED</span>
+            </div>
+            <div class="what-contains">Admin + user views, permission-gated</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+              Workflows
+            </div>
+
+            <div class="nav-group-label">Knowledge</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+              Knowledge
+              <span class="nb-amber nav-item-badge">3 review</span>
+            </div>
+            <div class="what-contains">Auto-memory + Authored + Review queue</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/></svg>
+              Documents
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>
+              Sites
+            </div>
+
+            <div class="nav-group-label">Platform</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+              Integrations
+              <span class="nb-red nav-item-badge">2 issues</span>
+            </div>
+            <div class="what-contains">Connections + Issues tab (was Health Findings)</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+              Connectors
+            </div>
+
+            <div class="nav-group-label">Manage</div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>
+              Clients
+            </div>
+            <div class="nav-item">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+              Manage Org
+              <span class="new-badge">CONSOLIDATED</span>
+            </div>
+            <div class="what-contains">Tags, Engines, Board, Permissions, Spending, Audit</div>
+
+          </div>
+
+          <!-- Annotations -->
+          <div class="annotations">
+            <div class="annotation annotation-removed">
+              <span class="annotation-icon">&#8722;</span>
+              <div><strong>Briefs removed</strong> — separate cleanup PR, not mocked.</div>
+            </div>
+            <div class="annotation annotation-folded">
+              <span class="annotation-icon">&#8594;</span>
+              <div><strong>Skills</strong> folded into Agent edit as a tab. SkillStudioPage becomes a drawer from within agent edit.</div>
+            </div>
+            <div class="annotation annotation-folded">
+              <span class="annotation-icon">&#8594;</span>
+              <div><strong>Health Findings</strong> renamed "Issues" and moved as a tab inside Integrations.</div>
+            </div>
+            <div class="annotation annotation-folded">
+              <span class="annotation-icon">&#8594;</span>
+              <div><strong>Memory Review Queue, Workspace Memory, Memory Block Detail</strong> all fold into the Knowledge page (tabs + drawer).</div>
+            </div>
+            <div class="annotation annotation-added">
+              <span class="annotation-icon">+</span>
+              <div><strong>Calendar</strong> merged: org-level and subaccount-level collapse into one page with a scope filter.</div>
+            </div>
+            <div class="annotation annotation-added">
+              <span class="annotation-icon">+</span>
+              <div><strong>Automations</strong> merged: user-facing and admin views in one page, admin actions permission-gated.</div>
+            </div>
+            <div class="annotation annotation-added">
+              <span class="annotation-icon">+</span>
+              <div><strong>Manage Org</strong> absorbs Categories (now Tags), Engines, Board Templates, Permissions, and Spending thresholds.</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /compare-grid -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+</body>
+</html>

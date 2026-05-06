@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT — Merged Automations List
+  Sources: AutomationsPage, AdminAutomationsPage
+
+  AutomationsPage fields/actions:
+    KEEP: automation name, description, engineType, readiness (ready/needs_setup) -> list rows
+    KEEP: filter status: active -> filter control
+    KEEP: link to automation detail -> row click
+    KEEP: New Automation CTA -> permission-gated
+
+  AdminAutomationsPage fields/actions:
+    KEEP: process name, description, status (active/inactive/draft), orgCategoryId, workflowEngineId -> list rows
+    KEEP: isSystemManaged flag -> badge on row
+    KEEP: Create form (name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema) -> "New" drawer
+    KEEP: Activate/deactivate toggle -> per-row actions (admin only)
+    KEEP: Delete -> per-row actions (admin only)
+    KEEP: Link system process (systemProcessId, select from list) -> admin-only action
+    KEEP: Categories available in create form -> map to Tags per confirmed decision
+    KEEP: Engines available in create form -> engine picker
+    KEEP: webhook path visible -> in row detail/drawer
+
+  Merged design:
+    Single list. Admin actions (create, activate/deactivate, delete, link system) are permission-gated.
+    Non-admin sees read-only list + "Run" button per row.
+    Admin sees full controls.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Automations — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .auto-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 100px 120px 100px;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--slate-100);
+    transition: background 0.1s;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+  }
+  .auto-row:last-child { border-bottom: none; }
+  .auto-row:hover { background: var(--slate-50); }
+  .auto-name { font-size: 13.5px; font-weight: 600; color: var(--slate-900); margin-bottom: 2px; }
+  .auto-desc { font-size: 12px; color: var(--slate-500); }
+  .auto-actions { display: flex; gap: 5px; align-items: center; justify-content: flex-end; }
+
+  .admin-notice {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    background: var(--indigo-50); border-bottom: 1px solid var(--indigo-100);
+    font-size: 12px; color: var(--indigo-700);
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Home</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>Tasks</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>Agents</a>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>Workflows</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Knowledge</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>Knowledge</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Platform</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Integrations</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>Clients</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Automations</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <h1>Automations</h1>
+          <p>External tools your Workflows can call. Automations wrap n8n and other engines.</p>
+        </div>
+        <!-- Primary CTA — permission-gated (admin only) -->
+        <button class="btn btn-primary" onclick="document.getElementById('new-auto-drawer').style.display='flex'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          New automation
+        </button>
+      </div>
+
+      <!-- Filters row -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <div class="search-wrap" style="width:260px;">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-box" type="search" placeholder="Search automations...">
+        </div>
+        <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+          <option>Status: All</option>
+          <option selected>Active</option>
+          <option>Draft</option>
+          <option>Inactive</option>
+        </select>
+        <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+          <option>Tag: All</option>
+          <option>outreach</option>
+          <option>crm</option>
+          <option>reporting</option>
+        </select>
+        <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+          <option>Engine: All</option>
+          <option>n8n</option>
+          <option>internal</option>
+        </select>
+        <span style="margin-left:auto;font-size:12px;color:var(--slate-500);">6 automations</span>
+      </div>
+
+      <div class="card">
+        <!-- Admin notice banner -->
+        <div class="admin-notice">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          You have admin access. Activate, deactivate, and link system automations using the row controls below.
+        </div>
+
+        <!-- Table header -->
+        <div class="auto-row" style="cursor:default;background:var(--slate-50);border-bottom:1px solid var(--slate-200);">
+          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Name</div>
+          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Engine</div>
+          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Status</div>
+          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Readiness</div>
+          <div></div>
+        </div>
+
+        <!-- Rows -->
+        <a class="auto-row" href="automation-detail.html">
+          <div>
+            <div class="auto-name">HubSpot contact sync</div>
+            <div class="auto-desc">Syncs enriched contact data back to HubSpot CRM after agent runs</div>
+            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">crm</span></div>
+          </div>
+          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+          <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
+            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
+            Ready
+          </div>
+          <div class="auto-actions" onclick="event.preventDefault()">
+            <button class="btn btn-xs btn-secondary">Deactivate</button>
+            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+          </div>
+        </a>
+
+        <a class="auto-row" href="automation-detail.html">
+          <div>
+            <div class="auto-name">LinkedIn outreach trigger</div>
+            <div class="auto-desc">Fires PhantomBuster sequence when a contact enters the "warm" pipeline stage</div>
+            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">outreach</span></div>
+          </div>
+          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+          <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
+            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
+            Ready
+          </div>
+          <div class="auto-actions" onclick="event.preventDefault()">
+            <button class="btn btn-xs btn-secondary">Deactivate</button>
+            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+          </div>
+        </a>
+
+        <a class="auto-row" href="automation-detail.html">
+          <div>
+            <div class="auto-name">Compliance report generator</div>
+            <div class="auto-desc">Generates monthly compliance PDF and emails to nominated contacts</div>
+            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">reporting</span></div>
+          </div>
+          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+          <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
+            <span class="status-dot dot-amber" style="width:6px;height:6px;"></span>
+            <span style="color:var(--amber-700);">Needs setup</span>
+          </div>
+          <div class="auto-actions" onclick="event.preventDefault()">
+            <button class="btn btn-xs btn-secondary">Deactivate</button>
+            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+          </div>
+        </a>
+
+        <a class="auto-row" href="automation-detail.html" style="opacity:0.65;">
+          <div>
+            <div class="auto-name">Weekly digest email</div>
+            <div class="auto-desc">Sends a weekly summary of agent activity to the client</div>
+            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-slate" style="font-size:10px;">system</span></div>
+          </div>
+          <div><span class="badge badge-slate" style="font-size:10px;">internal</span></div>
+          <div><span class="badge badge-slate" style="font-size:10px;">Inactive</span></div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--slate-400);">
+            <span class="status-dot dot-slate" style="width:6px;height:6px;"></span>
+            Inactive
+          </div>
+          <div class="auto-actions" onclick="event.preventDefault()">
+            <button class="btn btn-xs btn-primary" style="font-size:10px;">Activate</button>
+            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+          </div>
+        </a>
+
+        <a class="auto-row" href="automation-detail.html" style="opacity:0.65;">
+          <div>
+            <div class="auto-name">Deal stage notification</div>
+            <div class="auto-desc">Pings Slack when a deal moves to "proposal sent"</div>
+            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-slate" style="font-size:10px;">crm</span></div>
+          </div>
+          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+          <div><span class="badge badge-amber" style="font-size:10px;">Draft</span></div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--slate-400);">
+            <span class="status-dot dot-amber" style="width:6px;height:6px;"></span>
+            <span style="color:var(--amber-700);">Needs setup</span>
+          </div>
+          <div class="auto-actions" onclick="event.preventDefault()">
+            <button class="btn btn-xs btn-primary" style="font-size:10px;">Activate</button>
+            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+          </div>
+        </a>
+
+        <div class="auto-row" style="cursor:default;background:var(--slate-50);border-top:1px solid var(--slate-100);">
+          <div style="display:flex;align-items:center;gap:8px;" colspan="5">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--slate-400);"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            <span style="font-size:12px;color:var(--slate-500);">Link a system automation</span>
+            <button class="btn btn-xs btn-secondary">Browse system automations</button>
+          </div>
+        </div>
+
+      </div><!-- /card -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── NEW AUTOMATION DRAWER ─────────────────────────────────────── -->
+<div id="new-auto-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:520px;">
+    <div class="drawer-header">
+      <h2>New automation</h2>
+      <button class="drawer-close" onclick="document.getElementById('new-auto-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-field">
+        <label class="form-label">Name</label>
+        <input class="form-input" placeholder="e.g. HubSpot contact sync">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Description</label>
+        <textarea class="form-textarea" style="min-height:60px;" placeholder="What does this automation do?"></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Engine</label>
+        <select class="form-select" style="width:100%;">
+          <option>n8n</option>
+          <option>internal</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Tag</label>
+        <select class="form-select" style="width:100%;">
+          <option value="">None</option>
+          <option>crm</option>
+          <option>outreach</option>
+          <option>reporting</option>
+        </select>
+        <div class="form-hint">Tags are managed in Manage Org.</div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Webhook path <span style="font-weight:400;color:var(--slate-400);">(optional)</span></label>
+        <input class="form-input" placeholder="e.g. /webhooks/crm-sync" style="font-family:monospace;font-size:12px;">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Input schema <span style="font-weight:400;color:var(--slate-400);">(JSON)</span></label>
+        <textarea class="form-textarea" style="font-family:monospace;font-size:11.5px;min-height:80px;" placeholder='{"type":"object","properties":{"contactId":{"type":"string"}}}'></textarea>
+      </div>
+      <div class="form-field" style="margin-bottom:0;">
+        <label class="form-label">Output schema <span style="font-weight:400;color:var(--slate-400);">(JSON)</span></label>
+        <textarea class="form-textarea" style="font-family:monospace;font-size:11.5px;min-height:80px;" placeholder='{"type":"object","properties":{"success":{"type":"boolean"}}}'></textarea>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('new-auto-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Create automation</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

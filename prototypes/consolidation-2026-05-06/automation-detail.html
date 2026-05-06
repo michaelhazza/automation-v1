@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT — Merged Automation Detail
+  Sources: AutomationExecutionPage, ExecutionDetailPage, AdminAutomationEditPage
+
+  AutomationExecutionPage fields/actions:
+    KEEP: process name, description, inputSchema, outputSchema -> Definition tab
+    KEEP: inputData (JSON editor or text) -> Run tab
+    KEEP: file upload (staged files, multiple, with type/size) -> Run tab
+    KEEP: execution status badge (pending/running/completed/failed/timeout/cancelled) -> Run tab
+    KEEP: live output streaming (WebSocket) -> Run tab
+    KEEP: outputData display -> Run tab
+    KEEP: errorMessage display -> Run tab
+    KEEP: durationMs -> Run tab
+    KEEP: isTestExecution flag -> shown as "Test run" badge
+    KEEP: ExecFile list (fileName, fileType, fileSize) -> Run tab
+
+  ExecutionDetailPage fields/actions:
+    KEEP: execution status, startedAt, completedAt, durationMs -> History tab row detail
+    KEEP: inputData (prettified JSON) -> history detail drawer
+    KEEP: outputData (prettified JSON) -> history detail drawer
+    KEEP: errorMessage, errorDetail -> history detail drawer
+    KEEP: isTestExecution flag -> history row badge
+    KEEP: file attachments with download links -> history detail drawer
+    DROP: exposed execution.id as page heading (internal ID)
+
+  AdminAutomationEditPage fields/actions:
+    KEEP: name, description -> Definition tab (editable inline)
+    KEEP: status, orgCategoryId -> Definition tab
+    KEEP: workflowEngineId -> Definition tab
+    KEEP: webhookPath -> Definition tab
+    KEEP: inputSchema, outputSchema -> Definition tab
+    KEEP: testInput + test result -> Run tab (merges with AutomationExecutionPage)
+    KEEP: categories list for tag picker -> Definition tab
+    KEEP: Save button -> Definition tab
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Automation Detail — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .schema-block {
+    font-size: 12px; font-family: monospace;
+    background: var(--slate-900); color: #a5f3fc;
+    border-radius: 8px; padding: 14px 16px;
+    line-height: 1.6; max-height: 200px; overflow-y: auto;
+  }
+
+  .output-block {
+    font-size: 12px; font-family: monospace;
+    background: #f0fdf4; border: 1px solid #a7f3d0;
+    color: #166534; border-radius: 8px; padding: 14px 16px;
+    line-height: 1.6; max-height: 200px; overflow-y: auto;
+  }
+
+  .error-block {
+    font-size: 12px; font-family: monospace;
+    background: var(--red-50); border: 1px solid #fecaca;
+    color: var(--red-700); border-radius: 8px; padding: 12px 14px;
+    line-height: 1.5;
+  }
+
+  .file-upload-area {
+    border: 2px dashed var(--slate-300); border-radius: 10px;
+    padding: 20px; text-align: center; cursor: pointer;
+    transition: all 0.15s; background: var(--slate-50);
+  }
+  .file-upload-area:hover { border-color: var(--indigo-400); background: var(--indigo-50); }
+
+  .exec-status-running {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+    color: #3b82f6; background: #eff6ff;
+    border: 1px solid #bfdbfe; border-radius: 20px; padding: 4px 10px;
+  }
+  .exec-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid #bfdbfe; border-top-color: #3b82f6;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .history-row {
+    display: grid; grid-template-columns: 120px 1fr 80px 100px 80px;
+    align-items: center; padding: 10px 14px;
+    border-bottom: 1px solid var(--slate-100);
+    font-size: 12.5px; cursor: pointer; transition: background 0.1s;
+  }
+  .history-row:last-child { border-bottom: none; }
+  .history-row:hover { background: var(--slate-50); }
+
+  .webhook-path {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-family: monospace;
+    color: var(--slate-600); background: var(--slate-50);
+    border: 1px solid var(--slate-200); border-radius: 6px;
+    padding: 4px 10px;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>Agents</a>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>Workflows</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>Clients</a>
+      <a class="sidebar-link" href="#"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="automations.html" style="color:var(--indigo-500);text-decoration:none;font-size:13px;">&#8592; Automations</a>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">HubSpot contact sync</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <h1 style="font-size:20px;">HubSpot contact sync</h1>
+            <span class="badge badge-green">Active</span>
+            <span class="badge badge-slate" style="font-size:10px;">n8n</span>
+            <span class="badge badge-indigo" style="font-size:10px;">crm</span>
+          </div>
+          <p>Syncs enriched contact data back to HubSpot CRM after agent runs</p>
+          <div style="margin-top:6px;">
+            <span class="webhook-path">POST /webhooks/hubspot-sync</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabs" id="auto-detail-tabs">
+        <button class="tab-btn active" onclick="switchTab('definition',this)">Definition</button>
+        <button class="tab-btn" onclick="switchTab('run',this)">Run (sandbox)</button>
+        <button class="tab-btn" onclick="switchTab('history',this)">History <span class="tab-count">18</span></button>
+      </div>
+
+      <!-- ── DEFINITION TAB ──────────────────────────────────────── -->
+      <div class="tab-panel active" id="tab-definition">
+        <div style="max-width:760px;">
+          <div class="card" style="margin-bottom:14px;">
+            <div class="card-header">
+              <h3>Details</h3>
+              <button class="btn btn-xs btn-primary" onclick="toggleEdit()">Edit</button>
+            </div>
+            <div class="card-body">
+              <div class="config-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;" id="detail-view">
+                <div>
+                  <div class="form-label" style="margin-bottom:2px;">Name</div>
+                  <div style="font-size:13.5px;font-weight:600;color:var(--slate-800);">HubSpot contact sync</div>
+                </div>
+                <div>
+                  <div class="form-label" style="margin-bottom:2px;">Status</div>
+                  <span class="badge badge-green">Active</span>
+                </div>
+                <div style="grid-column:1/-1;">
+                  <div class="form-label" style="margin-bottom:2px;">Description</div>
+                  <div style="font-size:13px;color:var(--slate-700);">Syncs enriched contact data back to HubSpot CRM after agent runs</div>
+                </div>
+                <div>
+                  <div class="form-label" style="margin-bottom:2px;">Engine</div>
+                  <div style="font-size:13px;color:var(--slate-700);">n8n</div>
+                </div>
+                <div>
+                  <div class="form-label" style="margin-bottom:2px;">Tag</div>
+                  <span class="badge badge-indigo" style="font-size:10px;">crm</span>
+                </div>
+              </div>
+
+              <div id="detail-edit" style="display:none;">
+                <div class="form-field">
+                  <label class="form-label">Name</label>
+                  <input class="form-input" value="HubSpot contact sync">
+                </div>
+                <div class="form-field">
+                  <label class="form-label">Description</label>
+                  <textarea class="form-textarea" style="min-height:60px;">Syncs enriched contact data back to HubSpot CRM after agent runs</textarea>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div class="form-field" style="margin-bottom:0;">
+                    <label class="form-label">Engine</label>
+                    <select class="form-select" style="width:100%;"><option selected>n8n</option><option>internal</option></select>
+                  </div>
+                  <div class="form-field" style="margin-bottom:0;">
+                    <label class="form-label">Tag</label>
+                    <select class="form-select" style="width:100%;"><option>None</option><option selected>crm</option><option>outreach</option></select>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+                  <button class="btn btn-secondary" onclick="toggleEdit()">Cancel</button>
+                  <button class="btn btn-primary">Save changes</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:14px;">
+            <div class="card-header"><h3>Input schema</h3></div>
+            <div class="card-body">
+              <div class="schema-block">{"type": "object",
+  "properties": {
+    "contactId": { "type": "string", "description": "HubSpot contact ID" },
+    "fields": {
+      "type": "object",
+      "properties": {
+        "jobTitle": { "type": "string" },
+        "companySize": { "type": "string" },
+        "dealStage": { "type": "string" }
+      }
+    }
+  },
+  "required": ["contactId", "fields"]
+}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><h3>Output schema</h3></div>
+            <div class="card-body">
+              <div class="schema-block">{"type": "object",
+  "properties": {
+    "success": { "type": "boolean" },
+    "updatedFields": { "type": "array", "items": { "type": "string" } },
+    "hubspotRecordUrl": { "type": "string" }
+  }
+}</div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-definition -->
+
+      <!-- ── RUN TAB ─────────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-run" style="display:none;">
+        <div style="max-width:720px;">
+          <div class="card" style="margin-bottom:14px;">
+            <div class="card-header">
+              <h3>Sandbox run</h3>
+              <span class="badge badge-amber" style="font-size:10px;">Test only</span>
+            </div>
+            <div class="card-body">
+              <div class="form-field">
+                <label class="form-label">Input data (JSON)</label>
+                <textarea class="form-textarea" style="font-family:monospace;font-size:12px;min-height:120px;">{"contactId": "8820491","fields": {"jobTitle": "VP Operations","companySize": "201-500","dealStage": "proposal_sent"}}</textarea>
+              </div>
+
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Attachments <span style="font-weight:400;color:var(--slate-400);">(optional)</span></label>
+                <div class="file-upload-area">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--slate-400);margin:0 auto 8px;display:block;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  <div style="font-size:13px;color:var(--slate-500);">Drop files here or click to upload</div>
+                  <div style="font-size:11.5px;color:var(--slate-400);margin-top:4px;">PDF, CSV, images, audio — up to 50MB each</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;margin-bottom:20px;">
+            <button class="btn btn-primary">Run automation</button>
+          </div>
+
+          <!-- Execution result (running state shown) -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Last result</h3>
+              <div class="exec-status-running">
+                <div class="exec-spinner"></div>
+                Running
+              </div>
+            </div>
+            <div class="card-body">
+              <div style="font-size:12px;color:var(--slate-500);margin-bottom:10px;">Started 8s ago &middot; Test run</div>
+              <div style="background:var(--slate-900);border-radius:8px;padding:12px 14px;font-size:11.5px;font-family:monospace;color:#94a3b8;line-height:1.7;min-height:80px;">
+                <div style="color:#86efac;">&#x25b6; Connecting to n8n webhook...</div>
+                <div style="color:#94a3b8;">&#x25b6; Sending payload to HubSpot...</div>
+                <div style="color:#fbbf24;">&#x25b6; Waiting for response...</div>
+                <div style="color:#475569;animation:pulse-dot 1.2s infinite;">&#x25b6; &#x2588;</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /tab-run -->
+
+      <!-- ── HISTORY TAB ──────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-history" style="display:none;">
+        <div class="card">
+          <div class="card-header">
+            <span style="font-size:12.5px;color:var(--slate-600);">18 executions</span>
+            <div style="display:flex;gap:6px;">
+              <select class="form-select" style="font-size:12px;padding:4px 8px;">
+                <option>All statuses</option>
+                <option>Completed</option>
+                <option>Failed</option>
+                <option>Test only</option>
+              </select>
+            </div>
+          </div>
+          <!-- Header row -->
+          <div class="history-row" style="cursor:default;background:var(--slate-50);border-bottom:1px solid var(--slate-200);">
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Status</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">When</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Duration</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Type</div>
+            <div></div>
+          </div>
+          <!-- History rows -->
+          <div class="history-row" onclick="openExecDetail(this)">
+            <div><span class="badge badge-green" style="font-size:10px;">completed</span></div>
+            <div style="font-size:12.5px;color:var(--slate-700);">May 5, 3:22pm</div>
+            <div style="font-size:12.5px;color:var(--slate-600);">1.4s</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">production</span></div>
+            <div style="text-align:right;"><button class="btn btn-xs btn-ghost">View</button></div>
+          </div>
+          <div class="history-row" onclick="openExecDetail(this)">
+            <div><span class="badge badge-green" style="font-size:10px;">completed</span></div>
+            <div style="font-size:12.5px;color:var(--slate-700);">May 5, 1:08pm</div>
+            <div style="font-size:12.5px;color:var(--slate-600);">2.1s</div>
+            <div><span class="badge badge-amber" style="font-size:10px;">test</span></div>
+            <div style="text-align:right;"><button class="btn btn-xs btn-ghost">View</button></div>
+          </div>
+          <div class="history-row" onclick="openExecDetail(this)">
+            <div><span class="badge badge-red" style="font-size:10px;">failed</span></div>
+            <div style="font-size:12.5px;color:var(--slate-700);">May 4, 9:47am</div>
+            <div style="font-size:12.5px;color:var(--slate-600);">0.8s</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">production</span></div>
+            <div style="text-align:right;"><button class="btn btn-xs btn-ghost">View</button></div>
+          </div>
+          <div class="history-row" onclick="openExecDetail(this)">
+            <div><span class="badge badge-green" style="font-size:10px;">completed</span></div>
+            <div style="font-size:12.5px;color:var(--slate-700);">May 3, 11:15am</div>
+            <div style="font-size:12.5px;color:var(--slate-600);">1.9s</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">production</span></div>
+            <div style="text-align:right;"><button class="btn btn-xs btn-ghost">View</button></div>
+          </div>
+          <div class="history-row" onclick="openExecDetail(this)">
+            <div><span class="badge badge-green" style="font-size:10px;">completed</span></div>
+            <div style="font-size:12.5px;color:var(--slate-700);">May 2, 4:02pm</div>
+            <div style="font-size:12.5px;color:var(--slate-600);">1.2s</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">production</span></div>
+            <div style="text-align:right;"><button class="btn btn-xs btn-ghost">View</button></div>
+          </div>
+        </div>
+      </div><!-- /tab-history -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── EXECUTION DETAIL DRAWER ────────────────────────────────────── -->
+<div id="exec-detail-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:540px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Execution detail</h2>
+        <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">May 4, 2026 at 9:47am &middot; production run</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('exec-detail-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+        <div style="background:var(--red-50);border:1px solid #fecaca;border-radius:8px;padding:10px 12px;text-align:center;">
+          <div style="font-size:10.5px;color:var(--red-400);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">Status</div>
+          <span class="badge badge-red" style="font-size:10px;">failed</span>
+        </div>
+        <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:10px 12px;text-align:center;">
+          <div style="font-size:10.5px;color:var(--slate-400);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">Duration</div>
+          <div style="font-size:14px;font-weight:600;color:var(--slate-700);">0.8s</div>
+        </div>
+        <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:10px 12px;text-align:center;">
+          <div style="font-size:10.5px;color:var(--slate-400);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">Type</div>
+          <span class="badge badge-slate" style="font-size:10px;">production</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div class="section-title">Error</div>
+        <div class="error-block">HubSpot API 429 Too Many Requests. Rate limit exceeded. Retry-After: 60s.</div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div class="section-title">Input</div>
+        <div class="schema-block">{"contactId": "7741882","fields": {"jobTitle": "Head of Finance","companySize": "201-500"}}</div>
+      </div>
+
+      <div>
+        <div class="section-title">Output</div>
+        <div style="font-size:12.5px;color:var(--slate-400);font-style:italic;">No output — run failed before completion.</div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('exec-detail-drawer').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let editMode = false;
+function toggleEdit() {
+  editMode = !editMode;
+  document.getElementById('detail-view').style.display = editMode ? 'none' : 'block';
+  document.getElementById('detail-edit').style.display = editMode ? 'block' : 'none';
+}
+function switchTab(id, btn) {
+  document.querySelectorAll('#auto-detail-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+  const panel = document.getElementById('tab-' + id);
+  panel.classList.add('active');
+  panel.style.display = 'block';
+}
+function openExecDetail(row) {
+  document.getElementById('exec-detail-drawer').style.display = 'flex';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT — Agent Edit with Skills embedded
+  Sources: AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage
+
+  AdminAgentEditPage fields/actions:
+    KEEP: name, description, icon, masterPrompt, additionalPrompt -> Config tab
+    KEEP: modelProvider, modelId -> Config tab
+    KEEP: temperature (mapped to responseMode), outputSize -> Config tab
+    KEEP: allowModelOverride -> Config tab
+    KEEP: defaultSkillSlugs -> Skills tab (via SkillPickerSection component)
+    KEEP: heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours/Minutes -> Config tab (Schedule section)
+    KEEP: concurrencyPolicy -> Config tab
+    KEEP: catchUpPolicy, catchUpCap, maxConcurrentRuns -> Config tab
+    KEEP: parentAgentId, agentRole, agentTitle -> Config tab
+    KEEP: Data sources (name, description, sourceType, sourcePath, contentType, syncMode, priority, maxTokenBudget, cacheMinutes) -> Data Sources tab
+    KEEP: status, isSystemManaged badge inline
+    KEEP: RunActivityChart -> deferred to "Run history" button (inline state, not a panel)
+    KEEP: TestPanel -> Test tab
+    KEEP: RunCostPanel -> deferred out (admin-only, behind Advanced)
+    KEEP: InvocationsCard -> deferred to inline meta on Test tab
+    DROP: systemAgentId exposed directly (internal ID)
+
+  AdminSkillsPage fields/actions:
+    KEEP: skill name, slug, description, type (built_in/custom), isActive, visibility -> Skills tab picker
+    KEEP: agents-using-skill info -> shown as count inline
+    KEEP: Activate/deactivate toggle -> per-skill in picker
+    KEEP: Edit skill -> opens skill drawer
+    KEEP: Delete skill -> in skill drawer (destructive)
+    KEEP: Visibility control (org/client/hidden) -> in skill drawer
+
+  AdminSkillEditPage / SkillStudioPage fields/actions:
+    KEEP: name, slug, description, instructions -> skill drawer
+    KEEP: definition (JSON tool schema) -> skill drawer (monospace editor)
+    KEEP: ParameterBuilder (visual parameter editor) -> skill drawer
+    KEEP: isActive toggle -> skill drawer
+    KEEP: built_in lock (read-only for built-in) -> skill drawer
+    DROP: separate page navigation for skill edit/create
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Edit — Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .agent-header-card {
+    background: white; border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 20px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px;
+    box-shadow: var(--shadow-sm);
+  }
+  .agent-icon-big {
+    width: 44px; height: 44px; border-radius: 11px;
+    background: linear-gradient(135deg, var(--indigo-500), var(--violet-500));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0;
+  }
+  .agent-header-info { flex: 1; }
+  .agent-header-name { font-size: 17px; font-weight: 700; color: var(--slate-900); }
+  .agent-header-meta { font-size: 12px; color: var(--slate-500); margin-top: 3px; display: flex; gap: 10px; align-items: center; }
+
+  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width:800px) { .config-grid { grid-template-columns: 1fr; } }
+
+  .config-section {
+    background: white; border: 1px solid var(--border); border-radius: 12px;
+    margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-sm);
+  }
+  .config-section-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--slate-50);
+  }
+  .config-section-header h3 { font-size: 13px; font-weight: 600; color: var(--slate-700); }
+  .config-section-body { padding: 14px 16px; }
+
+  .response-mode-option {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; border: 1.5px solid var(--slate-200);
+    border-radius: 8px; cursor: pointer; margin-bottom: 6px;
+    transition: all 0.1s;
+  }
+  .response-mode-option.selected {
+    border-color: var(--indigo-400); background: var(--indigo-50);
+  }
+  .response-mode-option input[type=radio] { flex-shrink: 0; margin-top: 2px; }
+  .response-mode-name { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .response-mode-desc { font-size: 11.5px; color: var(--slate-500); margin-top: 2px; }
+
+  /* Skills tab */
+  .skill-list-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    transition: background 0.1s;
+  }
+  .skill-list-item:last-child { border-bottom: none; }
+  .skill-list-item:hover { background: var(--slate-50); }
+  .skill-name { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .skill-desc { font-size: 12px; color: var(--slate-500); }
+  .skill-slug { font-size: 11px; font-family: monospace; color: var(--slate-400); }
+
+  .skill-toggle {
+    width: 36px; height: 20px; border-radius: 10px;
+    background: var(--slate-200); position: relative;
+    cursor: pointer; flex-shrink: 0; border: none;
+    transition: background 0.15s;
+  }
+  .skill-toggle.on { background: var(--indigo-500); }
+  .skill-toggle::after {
+    content: '';
+    position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: white; transition: left 0.15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .skill-toggle.on::after { left: 18px; }
+
+  /* Data source rows */
+  .ds-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+  }
+  .ds-row:last-child { border-bottom: none; }
+  .ds-name { font-size: 13px; font-weight: 500; color: var(--slate-800); flex: 1; }
+  .ds-meta { font-size: 11.5px; color: var(--slate-500); display: flex; gap: 8px; flex-wrap: wrap; }
+  .ds-status { font-size: 11px; color: var(--slate-400); }
+
+  /* Skill drawer specifics */
+  .param-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 0; border-bottom: 1px solid var(--slate-100);
+  }
+  .param-row:last-child { border-bottom: none; }
+  .param-name { font-size: 12.5px; font-family: monospace; color: var(--slate-700); width: 130px; flex-shrink: 0; }
+  .param-type { font-size: 11px; color: var(--slate-400); width: 60px; }
+  .param-desc { font-size: 12px; color: var(--slate-600); flex: 1; }
+  .param-req { font-size: 10px; font-weight: 700; color: var(--red-500); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9660;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Home</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>Tasks</a>
+      <a class="sidebar-link active" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 012-2h6a2 2 0 012 2v1.662"/></svg>Agents</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>Workflows</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Knowledge</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>Knowledge</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/></svg>Documents</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Platform</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Integrations</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/></svg>Clients</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Agents</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Outreach Agent</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Agent header card -->
+      <div class="agent-header-card">
+        <div class="agent-icon-big">&#128172;</div>
+        <div class="agent-header-info">
+          <div class="agent-header-name">Outreach Agent</div>
+          <div class="agent-header-meta">
+            <span class="badge badge-green" style="font-size:10px;">Active</span>
+            <span style="color:var(--slate-300);">|</span>
+            <span>Claude Sonnet 4.6</span>
+            <span style="color:var(--slate-300);">|</span>
+            <span>4 skills enabled</span>
+            <span style="color:var(--slate-300);">|</span>
+            <span>Last run 22m ago</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-secondary">View run history</button>
+          <button class="btn btn-sm btn-primary">Save changes</button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="agent-tabs">
+        <button class="tab-btn active" onclick="switchAgentTab('config',this)">Configuration</button>
+        <button class="tab-btn" onclick="switchAgentTab('skills',this)">What this agent can do <span class="tab-count">4</span></button>
+        <button class="tab-btn" onclick="switchAgentTab('datasources',this)">Data sources <span class="tab-count">2</span></button>
+        <button class="tab-btn" onclick="switchAgentTab('test',this)">Test</button>
+      </div>
+
+      <!-- ── CONFIG TAB ──────────────────────────────────────────── -->
+      <div class="tab-panel active" id="tab-config">
+        <div class="config-section">
+          <div class="config-section-header">
+            <h3>Identity</h3>
+          </div>
+          <div class="config-section-body">
+            <div class="config-grid">
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Agent name</label>
+                <input class="form-input" value="Outreach Agent">
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Icon</label>
+                <input class="form-input" value="&#128172;" style="width:80px;">
+              </div>
+            </div>
+            <div class="form-field" style="margin-top:14px;margin-bottom:0;">
+              <label class="form-label">Description</label>
+              <input class="form-input" value="Handles outreach, follow-ups, and relationship management for Acme Corp.">
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-header">
+            <h3>Instructions</h3>
+          </div>
+          <div class="config-section-body">
+            <div class="form-field">
+              <label class="form-label">Core instructions</label>
+              <textarea class="form-textarea" style="min-height:120px;">You are an outreach specialist for Acme Corp. Your role is to manage email and LinkedIn correspondence with prospects and clients. Always maintain a professional but warm tone. Lead with client outcomes, not product features. Before sending any communication, verify the recipient's preferences from the Knowledge base.</textarea>
+            </div>
+            <div class="form-field" style="margin-bottom:0;">
+              <label class="form-label">Additional context <span style="font-size:11px;color:var(--slate-400);font-weight:normal;">(appended to core instructions)</span></label>
+              <textarea class="form-textarea" style="min-height:60px;" placeholder="Optional additional instructions...">When referencing competitor FieldEdge, always acknowledge their investment then pivot to our differentiated compliance dashboard.</textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-header">
+            <h3>Model and behaviour</h3>
+          </div>
+          <div class="config-section-body">
+            <div class="config-grid">
+              <div>
+                <div class="form-field">
+                  <label class="form-label">Model</label>
+                  <select class="form-select" style="width:100%;">
+                    <option selected>Claude Sonnet 4.6</option>
+                    <option>Claude Opus 4.6</option>
+                    <option>Claude Haiku 4.5</option>
+                    <option>Claude Opus 4</option>
+                    <option>Claude Sonnet 4</option>
+                  </select>
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Output size</label>
+                  <select class="form-select" style="width:100%;">
+                    <option selected>Standard (default)</option>
+                    <option>Extended</option>
+                    <option>Maximum</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="form-label">Response mode</label>
+                <div class="response-mode-option selected">
+                  <input type="radio" name="rmode" checked>
+                  <div>
+                    <div class="response-mode-name">Balanced (default)</div>
+                    <div class="response-mode-desc">Consistent and clear responses</div>
+                  </div>
+                </div>
+                <div class="response-mode-option">
+                  <input type="radio" name="rmode">
+                  <div>
+                    <div class="response-mode-name">Precise</div>
+                    <div class="response-mode-desc">Fully deterministic output</div>
+                  </div>
+                </div>
+                <div class="response-mode-option">
+                  <input type="radio" name="rmode">
+                  <div>
+                    <div class="response-mode-name">Expressive</div>
+                    <div class="response-mode-desc">More varied, natural language</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:12px;padding:10px 12px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;display:flex;align-items:center;gap:8px;">
+              <input type="checkbox"> <label style="font-size:13px;color:var(--slate-700);cursor:pointer;">Allow model override per-run</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-header">
+            <h3>Schedule and concurrency</h3>
+          </div>
+          <div class="config-section-body">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+              <input type="checkbox" id="heartbeat-cb" checked>
+              <label for="heartbeat-cb" style="font-size:13px;color:var(--slate-700);">Scheduled heartbeat enabled</label>
+            </div>
+            <div class="config-grid">
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Interval (hours)</label>
+                <input class="form-input" value="24" type="number" style="width:120px;">
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Offset hours / minutes</label>
+                <div style="display:flex;gap:6px;">
+                  <input class="form-input" value="9" type="number" style="width:70px;" placeholder="h">
+                  <input class="form-input" value="0" type="number" style="width:70px;" placeholder="m">
+                </div>
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Concurrency policy</label>
+                <select class="form-select" style="width:100%;">
+                  <option selected>Skip if already active</option>
+                  <option>Coalesce if active</option>
+                  <option>Always enqueue</option>
+                </select>
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Catch-up policy</label>
+                <select class="form-select" style="width:100%;">
+                  <option selected>Skip missed</option>
+                  <option>Enqueue missed (with cap)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-header">
+            <h3>Hierarchy</h3>
+            <span style="font-size:11.5px;color:var(--slate-400);">Optional — sets this agent's role in a multi-agent system</span>
+          </div>
+          <div class="config-section-body">
+            <div class="config-grid">
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Parent agent</label>
+                <select class="form-select" style="width:100%;"><option value="">None (top-level)</option><option>CRM Orchestrator</option></select>
+              </div>
+              <div class="form-field" style="margin-bottom:0;">
+                <label class="form-label">Agent role</label>
+                <input class="form-input" placeholder="e.g. specialist" value="">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;padding-top:8px;">
+          <button class="btn btn-primary">Save configuration</button>
+        </div>
+      </div><!-- /tab-config -->
+
+      <!-- ── SKILLS TAB ──────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-skills" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div>
+            <div style="font-size:13.5px;font-weight:600;color:var(--slate-700);">Skills this agent can use</div>
+            <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Toggle skills on or off. Edit or create custom skills using the drawer.</div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="document.getElementById('skill-edit-drawer').style.display='flex'">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            New skill
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span style="font-size:12px;color:var(--slate-500);">4 of 7 skills enabled for this agent</span>
+            <div class="search-wrap" style="width:220px;">
+              <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input class="search-box" type="search" placeholder="Filter skills..." style="font-size:12px;padding:5px 10px 5px 30px;">
+            </div>
+          </div>
+          <div>
+            <!-- Enabled skills -->
+            <div class="skill-list-item">
+              <button class="skill-toggle on" onclick="this.classList.toggle('on')"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">send_email</div>
+                <div class="skill-desc">Send emails via the configured SMTP provider</div>
+                <div class="skill-slug">built-in</div>
+              </div>
+              <span class="badge badge-slate" style="font-size:10px;">built-in</span>
+              <span style="font-size:11px;color:var(--slate-400);">global</span>
+              <button class="btn btn-xs btn-ghost" onclick="document.getElementById('skill-edit-drawer').style.display='flex'" title="Edit">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+            </div>
+            <div class="skill-list-item">
+              <button class="skill-toggle on" onclick="this.classList.toggle('on')"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">search_crm</div>
+                <div class="skill-desc">Search and retrieve records from HubSpot CRM</div>
+                <div class="skill-slug">custom</div>
+              </div>
+              <span class="badge badge-indigo" style="font-size:10px;">custom</span>
+              <span style="font-size:11px;color:var(--slate-400);">org</span>
+              <button class="btn btn-xs btn-ghost" onclick="document.getElementById('skill-edit-drawer').style.display='flex'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+            </div>
+            <div class="skill-list-item">
+              <button class="skill-toggle on" onclick="this.classList.toggle('on')"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">linkedin_message</div>
+                <div class="skill-desc">Send LinkedIn messages via PhantomBuster integration</div>
+                <div class="skill-slug">custom</div>
+              </div>
+              <span class="badge badge-indigo" style="font-size:10px;">custom</span>
+              <span style="font-size:11px;color:var(--slate-400);">org</span>
+              <button class="btn btn-xs btn-ghost" onclick="document.getElementById('skill-edit-drawer').style.display='flex'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+            </div>
+            <div class="skill-list-item">
+              <button class="skill-toggle on" onclick="this.classList.toggle('on')"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">update_crm_record</div>
+                <div class="skill-desc">Create or update contact/deal records in HubSpot</div>
+                <div class="skill-slug">custom</div>
+              </div>
+              <span class="badge badge-indigo" style="font-size:10px;">custom</span>
+              <span style="font-size:11px;color:var(--slate-400);">org</span>
+              <button class="btn btn-xs btn-ghost" onclick="document.getElementById('skill-edit-drawer').style.display='flex'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+            </div>
+            <!-- Disabled skills -->
+            <div style="padding:6px 14px;background:var(--slate-50);border-top:1px solid var(--slate-100);">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);">Not enabled for this agent</span>
+            </div>
+            <div class="skill-list-item" style="opacity:0.55;">
+              <button class="skill-toggle" onclick="this.classList.toggle('on');this.closest('.skill-list-item').style.opacity='1'"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">schedule_meeting</div>
+                <div class="skill-desc">Create calendar invites via Calendly or Google Calendar</div>
+                <div class="skill-slug">built-in</div>
+              </div>
+              <span class="badge badge-slate" style="font-size:10px;">built-in</span>
+              <span style="font-size:11px;color:var(--slate-400);">global</span>
+              <button class="btn btn-xs btn-ghost">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/></svg>
+              </button>
+            </div>
+            <div class="skill-list-item" style="opacity:0.55;">
+              <button class="skill-toggle" onclick="this.classList.toggle('on');this.closest('.skill-list-item').style.opacity='1'"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">generate_pdf</div>
+                <div class="skill-desc">Generate and return a PDF from HTML or markdown</div>
+                <div class="skill-slug">built-in</div>
+              </div>
+              <span class="badge badge-slate" style="font-size:10px;">built-in</span>
+              <span style="font-size:11px;color:var(--slate-400);">global</span>
+              <button class="btn btn-xs btn-ghost">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/></svg>
+              </button>
+            </div>
+            <div class="skill-list-item" style="opacity:0.55;">
+              <button class="skill-toggle" onclick="this.classList.toggle('on');this.closest('.skill-list-item').style.opacity='1'"></button>
+              <div style="flex:1;min-width:0;">
+                <div class="skill-name">slack_notify</div>
+                <div class="skill-desc">Post a message to a Slack channel or user</div>
+                <div class="skill-slug">custom</div>
+              </div>
+              <span class="badge badge-indigo" style="font-size:10px;">custom</span>
+              <span style="font-size:11px;color:var(--slate-400);">org</span>
+              <button class="btn btn-xs btn-ghost">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-skills -->
+
+      <!-- ── DATA SOURCES TAB ────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-datasources" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div style="font-size:13px;color:var(--slate-500);">External data fetched and injected into agent context at run time</div>
+          <button class="btn btn-sm btn-primary">+ Add data source</button>
+        </div>
+        <div class="card">
+          <div>
+            <div class="ds-row">
+              <div style="flex:1;">
+                <div class="ds-name">Acme HubSpot export</div>
+                <div class="ds-meta">
+                  <span>HTTP URL</span>
+                  <span>JSON</span>
+                  <span>Lazy sync</span>
+                  <span>Priority 0</span>
+                  <span>8,000 token budget</span>
+                  <span>60m cache</span>
+                </div>
+              </div>
+              <span class="badge badge-green" style="font-size:10px;">Last fetch: OK</span>
+              <button class="btn btn-xs btn-secondary">Edit</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Remove</button>
+            </div>
+            <div class="ds-row">
+              <div style="flex:1;">
+                <div class="ds-name">Compliance checklist</div>
+                <div class="ds-meta">
+                  <span>File upload</span>
+                  <span>PDF</span>
+                  <span>Static</span>
+                  <span>Priority 1</span>
+                  <span>4,000 token budget</span>
+                </div>
+              </div>
+              <span class="badge badge-slate" style="font-size:10px;">Static file</span>
+              <button class="btn btn-xs btn-secondary">Replace</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Remove</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-datasources -->
+
+      <!-- ── TEST TAB ────────────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-test" style="display:none;">
+        <div class="config-section">
+          <div class="config-section-header">
+            <h3>Test run</h3>
+            <span style="font-size:11.5px;color:var(--slate-500);">Runs against the saved configuration</span>
+          </div>
+          <div class="config-section-body">
+            <div class="form-field">
+              <label class="form-label">Input prompt or task description</label>
+              <textarea class="form-textarea" style="min-height:100px;" placeholder="Describe what you want the agent to do in this test run...">Draft a follow-up email to Sarah Chen at Acme Corp referencing our Q2 proposal sent April 28. Offer to answer any questions and suggest a 15-minute call next Tuesday or Thursday morning.</textarea>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;">
+              <div style="font-size:12px;color:var(--slate-500);">Test runs use the same model and skills as production runs.</div>
+              <button class="btn btn-primary">Run test</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-test -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── SKILL EDIT DRAWER ─────────────────────────────────────────── -->
+<div id="skill-edit-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:560px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Edit skill: search_crm</h2>
+        <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Custom skill &middot; org-wide</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('skill-edit-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="tabs" style="margin-bottom:16px;">
+        <button class="tab-btn active">Details</button>
+        <button class="tab-btn">Tool definition</button>
+        <button class="tab-btn">Parameters</button>
+        <button class="tab-btn">Test</button>
+      </div>
+
+      <div class="form-field">
+        <label class="form-label">Name</label>
+        <input class="form-input" value="search_crm">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Slug</label>
+        <input class="form-input" value="search_crm" style="font-family:monospace;font-size:12px;">
+        <div class="form-hint">Used to reference this skill in agent config. Immutable after first save.</div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Description</label>
+        <input class="form-input" value="Search and retrieve records from HubSpot CRM">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Instructions <span style="font-weight:400;color:var(--slate-400);">(how the agent uses this skill)</span></label>
+        <textarea class="form-textarea">When calling search_crm, always include the subaccountId from context. Return only the top 5 results by relevance score. If no results found, inform the user rather than hallucinating records.</textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;">
+        <input type="checkbox" id="skill-active" checked>
+        <label for="skill-active" style="font-size:13px;color:var(--slate-700);">Skill is active</label>
+        <div style="margin-left:auto;">
+          <label class="form-label" style="display:inline;margin-bottom:0;">Visibility</label>
+          <select class="form-select" style="margin-left:6px;font-size:12px;padding:4px 8px;">
+            <option selected>Org (all clients)</option>
+            <option>Client-specific</option>
+            <option>Hidden</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" style="color:var(--red-600);" onclick="document.getElementById('skill-edit-drawer').style.display='none'">Delete skill</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('skill-edit-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Save skill</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchAgentTab(id, btn) {
+  document.querySelectorAll('#agent-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+  const panel = document.getElementById('tab-' + id);
+  panel.classList.add('active');
+  panel.style.display = 'block';
+}
+</script>
+</body>
+</html>
