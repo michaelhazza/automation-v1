@@ -3180,3 +3180,26 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
   - Two routes to close: (a) extend `parseCurrentFocusBlock` + `readActiveBuildSlug` to read the canonical block PLUS any `mission-control-parallel` blocks, returning a list rather than a single active build; (b) drop the parallel-block convention and use `tasks/builds/<slug>/progress.md` files alone for tracking concurrent builds (status pointer becomes informational only).
   - Out of scope for Phase 3 — this is dashboard tooling drift, not a spec or code-correctness issue. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md` and the handoff file regardless of dashboard visibility. Operator authorised the parallel-build pattern explicitly in the Phase 3 invocation instructions.
   - **Codex framing:** "Either teach the parser about parallel blocks or use an existing supported mechanism for in-flight builds."
+
+---
+
+## Deferred from spec-conformance review — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+**Captured:** 2026-05-06T02:10:53Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-launch-phase-3-deferred-backlog-2026-05-06T02-10-53Z.md`
+**Spec:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
+
+- [ ] DG-1 — `architecture.md § Layer 4` does not link to `docs/oauth-state-telemetry.md`
+  - Spec section: §11 C.4
+  - Gap: Telemetry doc was created but not linked from architecture.md; spec required a reference.
+  - Suggested approach: Add a sentence at architecture.md:1628 after the existing `docs/security-audit-namespace.md` reference: *"OAuth state lifecycle telemetry conventions live in `docs/oauth-state-telemetry.md`."*
+
+- [ ] DG-2 — `setOrgGUC` helper created but not adopted at the spec-named call sites
+  - Spec section: §11 E.5
+  - Gap: `server/lib/orgScoping.ts` exports `setOrgGUC(tx, orgId)` (E-7 PASS), but the two refactor sites at `server/routes/oauthIntegrations.ts:434-445` and `server/middleware/auth.ts:148-154` call `tx.execute(sql` + "`SELECT set_config(...)`" + `)` inline rather than `await setOrgGUC(tx, orgId)`. Both sites also keep `withOrgTx({ tx, ... }, callback)` as an outer wrapper, which spec/plan did not prescribe. Functionally equivalent — KNOWLEDGE.md endorses both shapes — but the implementation deviates from the spec's literal helper-adoption contract.
+  - Suggested approach: Confirm the current `db.transaction + inline set_config + withOrgTx({tx,...})` shape is intentional final state; if so, update KNOWLEDGE.md's "Usage pattern" snippet to reflect the dual canonical shapes; alternatively, replace the inline `set_config` with `await setOrgGUC(tx, orgId)` at both sites for consistency with the new helper.
+
+- [ ] DG-3 — Connection-token service uses `getOrgTxContext` instead of `withPrincipalContext` for principal context
+  - Spec section: §7.7
+  - Gap: `connectionTokenService.ts:50-54` reads via `getOrgTxContext()` from `server/instrumentation.ts`, treating its `organisationId` as the principal org. Spec §7.7 wanted reads via the `PrincipalContext` ALS specifically. Builder noted in `progress.md` that `withPrincipalContext.ts` does not export a principal-org accessor, so the substitution was made. Three-state contract (undefined/null/string) is preserved. Conflating principal context with org-tx context means a future principal-context-without-org-tx flow would not be caught by D-5.
+  - Suggested approach: If the org-tx context IS the principal context in all current call sites (verified true today), accept the substitution and add a one-line note in `connectionTokenService.ts` near `getPrincipalOrgId` explaining the substitution and the future-caller risk. Otherwise, introduce a `getPrincipalOrgId()` export on `withPrincipalContext.ts` and switch the helper to use it.
