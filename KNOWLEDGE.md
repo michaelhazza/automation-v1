@@ -2593,3 +2593,6 @@ The aliased variable carries no semantic signal that grep can latch onto. A grep
 3. Convention + code review covers the residual aliasing class — it cannot be automated reliably.
 
 Don't over-engineer a grep gate to chase aliasing. Document, review, and accept that the type system + grep gates already shut down the worse-cost bypass classes. Rejecting an alias at PR review is cheap; building a static-analysis tool to catch them is not.
+
+### [2026-05-06] Correction — Synthetos is not agency-only; sub-account is a standalone product surface
+When framing product strategy or recommendations, do not default to "agency operator looking down at clients." The three-tier structure (system / org / sub-account) is deliberate: a sub-account can be sold standalone to an end-client (SMB, solo operator) with no agency above them, and the product must self-contain at that level. Agency-resold sub-accounts are one go-to-market, not the only one. When discussing operator-facing surfaces (Pulse, supervision home, watchers, proactive nudges, calibration), cover both lenses: (a) the agency operator managing many sub-accounts and (b) the end operator running their own business directly inside one sub-account. The video's "my mom" archetype maps to lens (b), not (a).
