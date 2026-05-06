@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-2
+    Prototype Round 7b-3
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-2: Team page with Members and Org Chart tabs. Merges SubaccountTeamPage (/admin/subaccounts/:id/team) and OrgChartPage (/org-chart) into a single tabbed surface. Members tab: 8 mock rows with role/permission/status badges, member detail drawer, overflow menu, invite modal. Org Chart tab: CSS flexbox tree with connector lines, hover highlight, click-through to the same member detail drawer, plus a before companion page.</p>
+  <p>Round 7b-3: Queues page — consolidates JobQueueDashboardPage (system/job-queues) and SystemTaskQueuePage (system/task-queue) into a single two-tab surface. Queue health tab: KPI strip, 4 tier cards (agent execution, financial, maintenance, memory), per-queue table with drawer (sparkline, errors, DLQ retry, config). Execution log tab: filter bar with live tail toggle, 20-row execution table with drawer (timestamps, payloads, error, retry history, action buttons). Before companion page shows the two-page split with annotated problems.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-2</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-3</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 44+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 46+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -758,6 +758,53 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="before-team.html">Open before &#8594;</a>
         <a href="team.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-3: Queues (system admin) ─────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#6366f1"></div>
+    Round 7b-3: Queues (system admin surface)
+  </div>
+
+  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
+    <strong>Consolidation:</strong> JobQueueDashboardPage (system/job-queues) and SystemTaskQueuePage (system/task-queue) merged into a single queues.html. Audience: SRE / on-call / engineer debugging a specific job. Two tabs: Queue health (KPI strip + 4 tier cards with per-queue tables and drill-in drawer) and Execution log (filter bar + live tail + execution table with detail drawer). Both source pages reached via System mode Queues nav item (was a stub).
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Queues</div>
+        <div class="proto-card-file">queues.html</div>
+      </div>
+      <div class="proto-card-desc">Queue health tab: 4 aggregate KPI tiles (total active, pending, DLQ depth in red, avg duration). 4 tier cards with colored swatches (agent execution indigo, financial blue, maintenance slate, memory emerald), each containing a per-queue table with 9 columns. Click any queue row to open a 520px drawer with: stats grid, sparkline (pending depth over 1h), last 5 errors with toggleable stack traces, DLQ jobs with Retry / Discard buttons, queue config panel, Pause / Resume toggle. Execution log tab: filter bar (status, engine type, time range, search, live tail toggle). 20-row execution table with status and engine badges, process name, org, started, duration, retry count, error preview. Row click opens detail drawer with timestamps, confirm-before-action banner, error panel, payload accordions (outbound, callback, process snapshot), return webhook URL, retry history table, action buttons (Retry now / Discard / Mark cancelled).</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">JobQueueDashboardPage</span>
+          <span class="replace-pill strike">SystemTaskQueuePage</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="queues.html">Open mockup &#8594;</a>
+        <a href="before-queues.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Before: Job Queues + Task Queue</div>
+        <div class="proto-card-file">before-queues.html</div>
+      </div>
+      <div class="proto-card-desc">Side-by-side depiction of the two current production pages. Left: JobQueueDashboardPage — flat table with implicit tier grouping via section rows, no visual tier cards, no drill-down, no DLQ retry UI, no queue pause/resume. Right: SystemTaskQueuePage — flat execution log, no live tail, no process name / org context, no action buttons (retry/discard require CLI). Problems box lists 6 specific gaps.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="before-queues.html">Open before &#8594;</a>
+        <a href="queues.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
       </div>
     </div>
 

@@ -189,7 +189,7 @@ const NAV = {
         items: [
           { label: 'Activity',        href: 'activity.html?scope=system', icon: 'activity' },
           { label: 'Incidents',       href: '#',                          icon: 'incidents',   stub: true, badge: '3', badgeColor: 'amber' },
-          { label: 'Queues',          href: '#',                          icon: 'queues',      stub: true },
+          { label: 'Queues',          href: 'queues.html',                icon: 'queues' },
         ],
       },
       {

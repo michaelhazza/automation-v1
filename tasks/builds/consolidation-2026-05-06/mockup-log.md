@@ -658,4 +658,30 @@ index.html:
 - `prototypes/consolidation-2026-05-06/integrations.html` (app logo SVGs replacing initials, .app-logo CSS class)
 - `prototypes/consolidation-2026-05-06/inbox.html` (button consistency CSS, all active item buttons updated)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions, Round 7b-1 section)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (Round 7b-1 entry)
+
+## Round 7b-3 — 2026-05-06 18:00
+**Operator feedback:** Build queues.html consolidating JobQueueDashboardPage + SystemTaskQueuePage into a two-tab surface (Queue health + Execution log), plus before-queues.html companion, plus index.html and mockup-log updates.
+
+**Changes made:**
+- Created `queues.html`: two-tab system admin surface. Queue health tab: 4 KPI tiles (total active 14, pending 127, DLQ depth 8 in red, avg duration 4.2s); 4 tier cards (agent execution indigo, financial blue, maintenance slate, memory emerald) each with a 9-column per-queue table; 12 mock queues across the four tiers with realistic elevated data (agent.run: 80 pending, 12% retry rate, DLQ 5; spend.aggregate: DLQ 3); row click opens 520px drawer with stats grid, SVG sparkline of pending depth over 1h, last 5 errors with toggleable stack traces, DLQ retry/discard rows (3 mock jobs), read-only queue config grid, pause/resume toggle. Execution log tab: filter bar (status, engine, time range, search, live tail toggle); 20-row execution table with status and engine type badges, process name, org, started, duration, retry count, error preview; pagination row (25 of 1,847); row click opens 520px drawer with timestamps, inline confirm-before-action banner, error block with stack trace, 3-accordion payload section (outbound, callback, process snapshot), return webhook URL, retry history table, Retry now / Discard / Mark cancelled action buttons.
+- Created `before-queues.html`: side-by-side split showing JobQueueDashboardPage (left, flat table with implicit tier section rows, no visual tier cards, no click-through, no DLQ UI) and SystemTaskQueuePage (right, flat execution table with basic status/engine filters, no live tail, task IDs as primary identifier, no process names, no action buttons). Both sides annotated with specific gaps. Problems box lists 6 issues: two pages for related data, no drill-down, tier grouping is data not visual, no live tail, DLQ requires CLI, no queue pause in UI.
+- Updated `_sidebar.js`: Queues item in system mode changed from stub to `href: 'queues.html'`.
+- Updated `index.html`: masthead updated to Round 7b-3 with queues description; new Round 7b-3 section added at bottom with Queues card and Before card; file count updated to 46+.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — system-admin surface for SRE/on-call. Primary task is "identify and remediate a degraded queue or failing execution". Queue health tab opens on the health overview immediately. Execution log opens with failure-biased filter pre-selected to show actionable items. Brief explicitly notes the strict consumer-simplicity rules apply less to power-user system surfaces.
+- Default to hidden: relaxed per brief (system-admin page). KPI strip is aggregate signal, not decoration. Sparkline is in the drawer (progressive disclosure). Stack traces collapsed behind "Show stack" toggle. Payload JSONs are collapsed accordions. Config panel at bottom of drawer.
+- One primary action: yes — Queue health: primary action is "click a queue row to drill in". Execution log: primary action is "click an execution row to inspect". Drawer actions (Retry now, Pause queue) are the single corrective action per context.
+- Inline state: yes — DLQ depth in red in KPI tile and tier table. Pending count colored amber/red when elevated. Status badges inline on every execution row. Error preview truncated inline so engineers can triage without opening a drawer.
+- Re-check passed: yes — SRE landing on Queue health sees KPI strip for global state, scans tier cards for elevated numbers, drills into specific queue. Execution log gives failure firehose with 3 filter controls and live tail. Drawer provides full forensic context without navigating away. System-admin only surface.
+
+**Rule violations flagged:** none (system-admin surface explicitly exempted per brief and frontend-design-principles.md "When to break these rules")
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/queues.html` (created)
+- `prototypes/consolidation-2026-05-06/before-queues.html` (created)
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (Queues stub resolved to queues.html)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead + Round 7b-3 section)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
