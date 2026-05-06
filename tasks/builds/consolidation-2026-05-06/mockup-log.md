@@ -1075,3 +1075,76 @@ index.html: masthead eyebrow Round 7c -> 7d. Description updated. 4 new decision
 **Files modified:**
 - `prototypes/consolidation-2026-05-06/agent-edit.html` (tab strip + two new tab panels + DS drawer + JS updates)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7e-1b — 2026-05-06 (org-agent-edit Skills + Data sources split)
+
+**Operator feedback:** Apply the same Capabilities-to-Skills+Data-sources restructure to org-agent-edit.html. The org-level editor should mirror the workspace editor's IA but with a two-tier view only (System + Organisation; no This client tier at org level).
+
+**Design rationale:** The Capabilities tab failed on two counts: discoverability and scalability. "Capabilities" is jargon — operators do not know what the tab groups until they have opened it. More critically, a single flat tab cannot scale to 200+ skills without becoming a scroll-marathon. Separating Skills and Data sources into two top-level tabs gives each surface a clear primary task (enable/disable skills; attach/configure data sources), and makes the search-driven library structure legible. At org level the split also makes the two-tier inheritance model (System built-ins vs Org-custom additions) obvious from the filter chips, rather than invisible in a flat list. "Skills" and "Data sources" are self-describing labels; "Capabilities" was not.
+
+**Changes made:**
+- Tab strip updated: removed "Capabilities" button, added "Skills" (count 5) and "Data sources" (count 4) buttons. Tab order: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Deployments.
+- `tab-capabilities` panel removed.
+- Added `tab-skills` panel with two sections:
+  - Section 1 "Enabled skills (5)": compact flat rows with tier chip (System/Org) leading each row, toggle, 3-dot overflow. Filter chips: All 5 / System 4 / Org-custom 1. No "This client" filter chip (not applicable at org level). 5 mock skills: Send email (System), Read email inbox (System), HubSpot: read contacts (System), LinkedIn: post message (System), Acme: Outreach scoring rubric (Org).
+  - Section 2 "Add skills": search input + filter chips (All 195 / System 180 / Organisation 15) + live search; results grouped in collapsible sections: System (15 visible + "Show all 180" link), Organisation (5 skills); each row has tier chip + icon + name + desc + "Add" button. "+ Add custom skill" button opens skill creator drawer locked to Org scope.
+- Added `tab-datasources` panel with two sections:
+  - Section 1 "Enabled data sources (4)": rows with type-coloured icon, name, tier chip, inline description with sync status, toggle. 4 mock sources: Org Brand Guide (doc, Org tier), Voice and Tone Standards (doc, Org tier), Org HubSpot CRM (live, System tier), Org ICP profile (memory, Org tier).
+  - Section 2 "Add data sources": search + filter chips (All/Memory/Documents/Bundles/Live integrations) + Add source dropdown. 10 available source rows across types.
+- DS drawer preserved with type-specific content variants.
+- Updated JS: filterSkillLibrary(), setSkillLibFilter(), addSkillToEnabled(), openDsDrawer(), filterDsSources(), setDsFilter(), addDsToEnabled() wired in org-agent-edit.html context.
+- Updated file header comment to note 7e-1b IA change.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — Skills tab opens on the enabled skills list. Primary task at org level is "confirm which skills this template provides to all workspaces". Data sources tab is behind a tab click.
+- Default to hidden: yes — 195-skill library is search-driven; results collapsed by tier; "Show all 180" defers the long tail. No utilization dashboards or KPI tiles added.
+- One primary action: yes — Skills tab: toggle or add a skill. Data sources tab: toggle or add a source. Deployments tab unchanged.
+- Inline state: yes — tier chip inline on every skill row. Toggle state visible without clicking. Data source sync status inline.
+- Re-check passed: yes — an org admin can see at a glance which System and Org-custom skills are enabled, search the library, and add a data source, without the old Capabilities tab's scroll-marathon or jargon barrier.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/org-agent-edit.html` (tab strip + two new tab panels + DS drawer + JS updates)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7e-1c — 2026-05-06 (before-state and index updates)
+
+**Operator feedback:** Update before-agent-edit.html and before-org-agent-edit.html to document the discoverability and IA gaps that the 7e-1a/7e-1b restructure fixes. Update index.html masthead, card descriptions, and decisions box to reflect the Skills + Data sources IA change.
+
+**Design rationale (consolidated):** The Capabilities tab was retired because it failed on three independent dimensions: labelling ("Capabilities" is jargon; "Skills" and "Data sources" are self-describing), scalability (a flat single-tab toggle list cannot grow past ~20 skills before it requires a scroll-marathon; the new search-driven structure scales to 200+), and information hierarchy (data sources were buried below the skill list and frequently missed entirely). The IA split also makes tier inheritance legible for the first time: the filter chips (System / Organisation / This client) give operators a one-click lens into which skills came from the platform, which from the org, and which are workspace-specific — something that was entirely invisible in the flat Capabilities list.
+
+**Changes made:**
+
+before-agent-edit.html:
+- Banner text augmented: BEFORE note now states the single Capabilities tab lumped skills and data sources together; 14-row flat list does not scale; data sources cramped below, often invisible; tier inheritance was implicit and not surfaced.
+- Capabilities tab mockup (second panel) updated: now shows a realistic 14-row flat toggle list (all 14 mock skills from the 7b-9 tier assignment) with data sources section cramped below annotated as "scroll to see" with amber section header and explanatory note.
+- Problems-with-current-state box added at bottom of page (6 items): single tab cannot scale beyond ~20 skills; data sources often missed; no search across 200+ skill library; tier inheritance not visible per-row; "Capabilities" is jargon; no live filter.
+
+before-org-agent-edit.html:
+- Banner text augmented: added a Capabilities IA gap paragraph explaining that AdminAgentEditPage org-level used the same single Capabilities tab; no two-tier filter (System / Org-custom); operator could not tell platform skills from org-custom skills; data sources buried; no search.
+- Skills picker annotation updated to note the flat tier problem and the absence of a System / Org-custom filter at org level.
+- Problems-with-current-state list expanded: added three new items covering single Capabilities tab scalability failure, data sources missed at bottom, and no search across 200+ skills.
+
+index.html:
+- Masthead eyebrow updated from "Round 7d" to "Round 7e-1c".
+- Masthead description paragraph updated to explain Capabilities tab retirement and Skills + Data sources restructure on both surfaces.
+- Meta-row Round field updated to "7e-1c".
+- Agent Edit card description updated: references Round 7e-1a; describes new tab strip (Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs); mentions search-driven Skills tab scaling to 200+; mentions type-coloured Data sources tab rows.
+- Org Agent Edit card description updated: references Round 7e-1b; describes same restructure with two-tier System + Organisation view; notes no This client tier at org level.
+- Decisions box: Round 7e-1 bullet added covering Capabilities retirement rationale, new tab structure on both surfaces, and before-page updates.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — before pages are faithful depictions of prior state with problem annotations; no primary task design decisions.
+- Default to hidden: yes — no new panels or dashboards introduced. Problems boxes are additive annotations, not UI surfaces.
+- One primary action: yes — before pages have no primary actions (reference only).
+- Inline state: yes — problems annotated inline on the before mockups.
+- Re-check passed: yes — a non-technical operator reviewing the before/after pair can immediately see what changed and why. Before pages show the cramped Capabilities tab; after pages show the split Skills and Data sources tabs.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/before-agent-edit.html` (banner augmented, Capabilities tab mockup updated to 14-row flat list + cramped data sources, problems box added)
+- `prototypes/consolidation-2026-05-06/before-org-agent-edit.html` (banner augmented with Capabilities IA gap paragraph, skills annotation updated, problems list expanded)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead Round 7e-1c, description updated, meta-row, agent-edit card desc, org-agent-edit card desc, decisions box Round 7e-1 bullet)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

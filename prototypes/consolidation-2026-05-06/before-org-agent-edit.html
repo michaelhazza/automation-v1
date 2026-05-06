@@ -132,8 +132,10 @@
     <!-- Before-state notice -->
     <div style="padding:16px 24px 0;">
       <div class="before-banner">
-        <strong>BEFORE:</strong> <code>AdminAgentEditPage</code> at <code>/admin/agents/:agentId</code>
+        <strong>BEFORE:</strong> <code>AdminAgentEditPage</code> at <code>/admin/agents/:agentId</code> (org-level context)
         <br>Single-tier flat editor. No inheritance model. No workspace deployment view. Skills have no tier indicators. All settings mix org-level and workspace-level concerns on one undifferentiated form.
+        <br><br>
+        <strong>Capabilities IA gap:</strong> AdminAgentEditPage org-level used the same single Capabilities tab pattern as the workspace editor. No two-tier filter (System / Org-custom) — the operator could not tell which skills were inherited from the platform vs custom-built for the organisation. Data sources were buried at the bottom of the skill list. No search across the skill library; with 200+ skills available, finding one required a scroll-marathon.
         <br><br>
         <a href="org-agent-edit.html" style="color:#92400e;font-weight:600;">See the proposed replacement (org-agent-edit.html) &#8594;</a>
       </div>
@@ -246,7 +248,7 @@
         <div style="padding:8px 12px;">
           <div class="annot">
             <span class="annot-icon">&#9888;</span>
-            No tier indicator on skills. The admin cannot tell which skills are platform-built (System), org-defined (Org), or workspace-specific (This client). Deleting "Acme: Approval channel routing" here would silently affect all workspaces.
+            No tier indicator on skills. The admin cannot tell which skills are platform-built (System) vs org-defined (Org). No two-tier filter (System / Org-custom). Deleting "Acme: Approval channel routing" here would silently affect all workspaces. Data sources (if any) are cramped below all skill rows with no search or filter — often missed entirely.
           </div>
         </div>
       </div>
@@ -299,6 +301,9 @@
           <li>No visibility into which workspaces are using this agent or how many of them exist. Saving a change affects all 4 workspaces silently.</li>
           <li>No per-workspace override visibility. Admins cannot see that Revel Group has 5 local overrides and Acme Corp has 2, so changes may unexpectedly conflict with or overwrite those overrides.</li>
           <li>No tier indicator on skills. System-built skills, org-custom skills, and workspace-scoped skills appear identically in the list. Deleting an org-custom skill here would remove it from all inheriting workspaces with no warning.</li>
+          <li>Single Capabilities tab cannot scale beyond ~20 skills before the admin must scroll endlessly. No two-tier filter (System / Org-custom) at org level. The admin cannot tell which skills are inherited from the platform vs custom-built for the organisation.</li>
+          <li>Data sources cramped at the bottom of the skill list — admins must scroll past all skill rows to reach them, and they are often missed entirely.</li>
+          <li>No search across the skill library. With 200+ skills available, finding a specific skill requires manual scrolling through an unsorted flat list with no filter by tier, category, or enabled state.</li>
           <li>No Deployments view. There is no surface to see which subaccounts have this agent deployed, their run counts, their override count, or their custom skill additions. That information requires navigating to a separate subaccount admin page.</li>
           <li>Schedule and budget are mixed inline with identity and model settings. There is no visual hierarchy indicating that "Schedule" and "Budget" are org-level defaults that workspaces can override.</li>
           <li>Deploying this agent to a new workspace is an entirely separate workflow. There is no "Deploy to workspaces" action on this page, so org admins must navigate away to provision a new deployment.</li>

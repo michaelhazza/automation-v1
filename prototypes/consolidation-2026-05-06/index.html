@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7d
+    Prototype Round 7e-1c
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7d: Knowledge UX complete terminology rebuild. Dropped all schema-verb language ("blocks", "promote", "suppress", "re-add", "re-suppress") from knowledge.html, org-knowledge.html, and inbox.html. New plain-language model: Authored memory / Auto-memory / Documents tabs; Pending review status; Suggested groupings; Track again / Keep ignoring actions; Ignored memories (replacing Suppressed). Inheritance visibility now profile-aware: workspace operators see subaccount items only; org and system admins see inherited items tagged "Admin view" with lock icon linking to org-knowledge.html. Round 7c (permission demos) remains complete.</p>
+  <p>Round 7e-1: Capabilities tab retired on both agent-edit.html (Round 7e-1a) and org-agent-edit.html (Round 7e-1b). Replaced with two top-level tabs, Skills and Data sources, on both surfaces. agent-edit.html tabs are now: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab uses a search-driven Enabled / Add structure scaling to 200+ skills. Data sources tab is elevated to a top-level surface with type-coloured rows. org-agent-edit.html receives the same restructure with a two-tier System + Organisation view at the org level (no This client tier at org level). Round 7e-1c updates before-agent-edit.html and before-org-agent-edit.html to document the discoverability and IA gaps the new design fixes, and updates this index. Round 7d (Knowledge terminology rebuild) and Round 7c (permission demos) remain complete.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7d</div>
+    <div class="meta-item"><strong>Round:</strong> 7e-1c</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 54+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -141,6 +141,7 @@
     <li>Round 7b-10: org-agent-edit.html added as the org-level agent definition editor. Two-tier Capabilities view (System skills read-only, Org-custom skills full edit). Deployments tab new: table of 4 workspaces with status badge, override count, custom skill count, last run, 30-day run count. Row click opens 520px drawer with side-by-side org vs workspace override comparison, custom skills list, recent runs, and force re-sync action. "Deploy to additional workspaces" modal with workspace checklist. Skill creator drawer scope locked to Organisation. _sidebar.js Agents link in Org/Build section promoted from stub to org-agent-edit.html. before-org-agent-edit.html added with simulated production flat editor and 8-item problems list.</li>
     <li>Round 7b-11 (FINAL): Goals tree retired. Per-project Objective field added to project-edit.html. Objective textarea (larger font, helper band explaining agent runtime injection, word count, expandable example objectives). Migration notice card for projects that had a goal_id. before-project-edit.html depicts split: left = project edit with no Objective (only description), right = GoalsPage OKR tree annotated as zero hits in server/services/agent*/. Goals already removed from sidebar in 7b-1. 7b chain complete.</li>
     <li>Round 7c: permission demos for mode switcher and skill creator scope toggle (production gates these via real permission checks, not demo toggles). Sidebar "Demo: viewing as" dropdown simulates three profiles: System admin sees all three mode pills, Org admin sees Workspace + Org, Workspace operator sees no pill row. Skill creator drawer adds collapsible "Demo controls" with Org admin vs Workspace user states; Workspace user disables Organisation scope option with lock icon and tooltip, auto-selects This client, shows static scope label.</li>
+    <li>Round 7e-1: Capabilities tab retired (jargony, did not scale). Replaced with Skills and Data sources as top-level tabs on both agent-edit.html and org-agent-edit.html. agent-edit.html tab strip: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab: Enabled section (compact toggle rows with tier chip) and Add skills section (search-driven, filter chips: All 247 / System 180 / Organisation 15 / This client 3 / Custom only 18; results grouped by tier, collapsible). Data sources tab: Enabled section with type-coloured icon rows and toggle; Add data sources section with search, filter chips (All / Memory / Documents / Bundles / Live integrations), and Add source dropdown. org-agent-edit.html receives the same restructure with two-tier skill view (System + Organisation only; no This client tier at org level). before-agent-edit.html and before-org-agent-edit.html updated with augmented banners and problems-with-current-state lists documenting the Capabilities IA gaps.</li>
   </ul>
 </div>
 
@@ -199,7 +200,7 @@
         <div class="proto-card-title">Agent Edit</div>
         <div class="proto-card-file">agent-edit.html</div>
       </div>
-      <div class="proto-card-desc">6-tab agent detail: Configure, Behaviour (with Prompt History), Capabilities (Skills kit+library 40/60 + Data Sources table), Schedule, Budget, Runs. 180+ skill library with facets. Skill edit drawer. Data Sources separate sub-section.</div>
+      <div class="proto-card-desc">Round 7e-1a: Capabilities tab replaced with Skills and Data sources top-level tabs. Tab strip: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab uses a search-driven Enabled / Add structure scaling to 200+ skills (filter chips: All 247 / System 180 / Organisation 15 / This client 3 / Custom only 18; results grouped by tier). Data sources tab elevated to a top-level surface with type-coloured rows (blue=doc, violet=memory, purple=bundle, green=live). Skill edit drawer and skill creator drawer preserved.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Replaces 5 pages</div>
         <div class="proto-card-replaces-list">
@@ -221,7 +222,7 @@
         <div class="proto-card-title">Org Agent Edit <span style="font-size:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7b-10</span></div>
         <div class="proto-card-file">org-agent-edit.html</div>
       </div>
-      <div class="proto-card-desc">Org-level agent definition editor. 6 tabs: Configure, Behaviour, Capabilities (System + Org-custom skill tiers), Schedule, Budget, Deployments (NEW). Deployments tab shows all 4 workspaces with override count, custom skills, run stats. Row-click drawer with side-by-side field comparison, force re-sync, workspace agent link. Deploy-to-workspaces modal.</div>
+      <div class="proto-card-desc">Org-level agent definition editor. Round 7e-1b: same Capabilities-to-Skills+Data-sources restructure as agent-edit.html. Tab strip: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Deployments. Skills tab shows System and Organisation tiers only (no This client tier at org level). Filter chips: All 11 / System 8 / Org-custom 3. Data sources tab with type-coloured rows. Deployments tab: 4-workspace table, row-click drawer with side-by-side field comparison, force re-sync, workspace agent link. Deploy-to-workspaces modal.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Replaces / improves</div>
         <div class="proto-card-replaces-list">

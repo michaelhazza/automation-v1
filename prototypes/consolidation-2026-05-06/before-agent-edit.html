@@ -117,7 +117,7 @@ body { background: var(--slate-100); }
 
 <div class="before-banner">
   <span>CURRENT STATE</span>
-  <span style="font-weight:400;">5 separate pages replaced by Agent Edit</span>
+  <span style="font-weight:400;">BEFORE: AdminAgentEditPage and SubaccountAgentEditPage both used a single "Capabilities" tab that lumped skills and data sources together. Skills shown as a flat 14-row toggle list — does not scale beyond ~20 skills before the operator has to scroll endlessly. Data sources cramped at the bottom of the same tab, often invisible without scrolling. Tier inheritance (System / Org / This client) was implicit, not surfaced via badges or filtering.</span>
   <a href="agent-edit.html">View consolidated page &rarr;</a>
 </div>
 
@@ -154,10 +154,10 @@ body { background: var(--slate-100); }
     </div>
   </div>
 
-  <!-- Capabilities tab detail -->
+  <!-- Capabilities tab detail — flat 14-row toggle list, data sources buried below -->
   <div class="page-mockup">
     <div class="page-mockup-header">
-      AdminAgentEditPage: Capabilities tab
+      AdminAgentEditPage: Capabilities tab (flat toggle list)
       <span class="route">/admin/agents/:id/edit#capabilities</span>
     </div>
     <div class="page-inner">
@@ -170,32 +170,30 @@ body { background: var(--slate-100); }
         <div class="mini-tab">Behaviour</div>
         <div class="mini-tab active">Capabilities</div>
         <div class="mini-tab">Schedule</div>
+        <div class="mini-tab">Budget</div>
+        <div class="mini-tab">Runs</div>
       </div>
-      <div class="mini-section-hdr">Skills</div>
-      <div style="font-size:10px;color:var(--slate-500);margin-bottom:6px;">Enabled via SkillPickerSection component, links out to AdminSkillsPage for editing</div>
-      <div class="mini-skill-row">
-        <div class="mini-skill-icon">SE</div>
-        <span style="flex:1">Send Email</span>
-        <span class="badge badge-green" style="font-size:9px">On</span>
-        <a href="#" style="font-size:10px;color:var(--indigo-600)">Edit skill</a>
-      </div>
-      <div class="mini-skill-row">
-        <div class="mini-skill-icon">CL</div>
-        <span style="flex:1">CRM Lookup</span>
-        <span class="badge badge-green" style="font-size:9px">On</span>
-        <a href="#" style="font-size:10px;color:var(--indigo-600)">Edit skill</a>
-      </div>
-      <div class="mini-section-hdr">Data Sources</div>
-      <div class="mini-row" style="font-size:11px;">
-        <span style="flex:1">S3 Bucket / prospects</span>
-        <span class="badge badge-indigo" style="font-size:9px">Sync</span>
-        <span class="badge badge-green" style="font-size:9px">OK</span>
-      </div>
-      <div class="mini-row" style="font-size:11px;">
-        <span style="flex:1">Google Docs / Playbooks</span>
-        <span class="badge badge-slate" style="font-size:9px">On demand</span>
-        <span class="badge badge-green" style="font-size:9px">OK</span>
-      </div>
+      <!-- No tier chips, no search, flat toggle list -->
+      <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">14 skills — no search, no tier filter, no grouping</div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SE</div><span style="flex:1;font-size:10px;">Send email</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">RI</div><span style="flex:1;font-size:10px;">Read email inbox</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">LI</div><span style="flex:1;font-size:10px;">LinkedIn: post message</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SM</div><span style="flex:1;font-size:10px;">SMS: send message</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">HR</div><span style="flex:1;font-size:10px;">HubSpot: read contacts</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">HC</div><span style="flex:1;font-size:10px;">HubSpot: create contact</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SF</div><span style="flex:1;font-size:10px;">Salesforce: read records</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SP</div><span style="flex:1;font-size:10px;">Stripe: read payments</span><span class="badge badge-amber" style="font-size:8px">Rate limited</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SU</div><span style="flex:1;font-size:10px;">Summarise content</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">EE</div><span style="flex:1;font-size:10px;">Extract entities</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SA</div><span style="flex:1;font-size:10px;">Sentiment analysis</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">OS</div><span style="flex:1;font-size:10px;">Acme: Outreach scoring</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">LQ</div><span style="flex:1;font-size:10px;">Acme: Lead qualification</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">DM</div><span style="flex:1;font-size:10px;">Acme: Deal stage mapping</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <!-- Data sources section cramped below skill list — often invisible without scrolling -->
+      <div class="mini-section-hdr" style="margin-top:8px;color:var(--amber-600);">Data Sources (scroll to see)</div>
+      <div style="font-size:9px;color:var(--slate-400);margin-bottom:4px;">Operators often miss this section — it requires scrolling past all 14 skill rows above</div>
+      <div class="mini-row" style="font-size:10px;"><span style="flex:1">Acme Brand Guide (doc)</span><span class="badge badge-green" style="font-size:8px">OK</span></div>
+      <div class="mini-row" style="font-size:10px;"><span style="flex:1">Acme HubSpot CRM (live)</span><span class="badge badge-green" style="font-size:8px">Synced</span></div>
     </div>
   </div>
 
@@ -397,8 +395,42 @@ body { background: var(--slate-100); }
     </div>
   </div>
   <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
-    SkillStudioPage and SkillAnalyzerPage are admin-only tools accessible separately from agent management. Operators configuring an agent must navigate: AdminAgentEditPage &gt; Capabilities tab &gt; edit link &gt; AdminSkillEditPage. SkillStudio adds a third context-switch for custom skill creation. In the consolidated view, all skill management lives inside the agent's Capabilities tab as a drawer.
+    SkillStudioPage and SkillAnalyzerPage are admin-only tools accessible separately from agent management. Operators configuring an agent must navigate: AdminAgentEditPage &gt; Capabilities tab &gt; edit link &gt; AdminSkillEditPage. SkillStudio adds a third context-switch for custom skill creation. In the consolidated view, all skill management lives inside the agent's Skills tab with search-driven discovery scaling to 200+ skills.
   </p>
+</div>
+
+<!-- Problems with current state -->
+<div style="margin:0 24px 32px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px 20px;">
+  <h3 style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    Problems with the current state (Capabilities tab IA)
+  </h3>
+  <ul style="list-style:none;display:flex;flex-direction:column;gap:7px;">
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      Single Capabilities tab cannot scale beyond ~20 skills before the operator must scroll endlessly to find a specific skill.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      Data sources cramped at the bottom of the skill list — operators must scroll past all skill rows to reach them, and they are often missed entirely.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      No search across the skill library. With 200+ skills available, finding a specific one requires manual scrolling through an unsorted flat list.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      Tier inheritance (System / Org / This client) not visible per-row. Operators cannot tell which skills are platform-built, org-defined, or workspace-specific.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      "Capabilities" is jargon. Operators do not know what the tab groups until they have already opened it. "Skills" and "Data sources" are self-describing.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      No live filter. If 200+ skills are available, finding one is a scroll-marathon with no way to narrow by tier, category, or enabled state.
+    </li>
+  </ul>
 </div>
 
 </body>
