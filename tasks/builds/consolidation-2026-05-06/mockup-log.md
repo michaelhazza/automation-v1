@@ -1175,4 +1175,30 @@ index.html:
 **Files modified:**
 - `prototypes/consolidation-2026-05-06/agents.html` (full rewrite)
 - `prototypes/consolidation-2026-05-06/index.html` (Agents card updated with three preview links)
+
+## Round 7e-2 — 2026-05-06 17:00
+
+**Operator feedback:** Four targeted changes: (1) calendar header nav conventionality, (2) run-trace timestamp clarity, (3) retire Triggers tab from Automations, (4) add Recent runs + Recent activity list cards to home.
+
+**Changes made:**
+
+- `calendar.html` header restructured: split controls row into two clusters. Left nav cluster: Today button (muted/cursor:default when offset=0, full button when offset!=0) + prev arrow (32x32px) + period label (16px/600) + next arrow. Right view switcher: Week/Fortnight/Month pill group on slate-100 background. Period label en-dash updated in computePeriodLabel JS. renderPeriod() updated to apply muted vs active Today button states.
+- `run-trace.html` timestamps updated: run header now shows "Outreach Agent -- Run #4827" title, two metadata lines: "Started: May 6 2026, 2:14:32 PM · 5 minutes ago" and "Duration: 5 min 32 sec | Status: Running | 47 events". Chain sidebar run times changed from "0:42" to "+5m 32s" format. All 8 event rows use +Xs/+Xm Xs format (e.g., +0s, +3s, +4s, +6s, +9s, +18s, +19s, +28s, +5m 32s). Event detail panel updated to three-line format: event index + type, absolute timestamp (2:15:14 PM, May 6 2026), time-into-run + ago (via JS helpers formatAbsTimestamp and timeAgoFromIso).
+- `automations.html` Triggers tab removed: tab strip reduced to Workflows / External (2 tabs). Subtitle count updated to remove "8 triggers". Triggers panel content commented out. Footer note added: "Triggers and scheduled tasks are managed on the Recurring tasks page →" with stub link. switchTab JS updated to only iterate [workflows, automations]. openNewDrawer JS updated to remove triggers case.
+- `home.html` two list cards added below widget-grid inside home-main, in a 50/50 grid row (list-card-row). Left: "Recent runs" -- 10 rows with status dot, agent name, subaccount badge (4 clients color-coded), status word, duration, time-ago; mix of 6 completed/1 running/2 failed/1 cancelled; click row opens run-trace.html; footer link. Right: "Recent activity" -- 10 rows with type icon, subject, actor/context, time-ago; types: agent_run completed, memory block updated, skill enabled, integration synced, document uploaded, inbox resolved, agent_run failed, memory proposal, workflow completed, identity event; click row opens activity.html; footer link. CSS added for list-card, list-card-row, run-list-row, act-list-row, sub-badge, act-icon.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- all four changes serve the operator's primary task: calendar nav serves "see what's scheduled this week"; run-trace timestamps serve "understand when this event happened"; automations cleanup serves "find my workflows without clutter"; home list cards serve "see what just happened across my system"
+- Default to hidden: yes -- no new KPI tiles, no dashboard panels. List cards show raw lists, no aggregated metrics. Spend/diagnostics remain deferred.
+- One primary action: yes -- home primary action remains "New agent". Calendar primary action remains the view (not the nav). Run-trace primary action remains "select event to inspect".
+- Inline state: yes -- run status is an inline dot + status word. Activity types are color-coded icons inline. Subaccount is an inline badge. No separate status panel.
+- Re-check passed: yes -- a non-technical operator landing on home can see the 10 most recent runs and activity items in a single glance without navigating. Calendar nav follows Google Calendar / Outlook convention so it requires zero learning. Run timestamps are unambiguous (absolute + relative).
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/calendar.html` (header restructured)
+- `prototypes/consolidation-2026-05-06/run-trace.html` (timestamp formats)
+- `prototypes/consolidation-2026-05-06/automations.html` (Triggers tab removed)
+- `prototypes/consolidation-2026-05-06/home.html` (Recent runs + Recent activity added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

@@ -189,6 +189,73 @@
 .inbox-preview-title { font-size: 12px; font-weight: 600; color: var(--slate-800); line-height: 1.4; }
 .inbox-preview-sub { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
 
+/* ── Recent runs + Recent activity list cards ──────── */
+.list-card-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.list-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column;
+}
+.list-card-head {
+  padding: 12px 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100);
+}
+.list-card-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
+.list-card-body { flex: 1; overflow-y: auto; max-height: 320px; }
+.list-card-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--slate-100);
+  font-size: 11.5px;
+}
+.list-card-footer a { color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+.list-card-footer a:hover { text-decoration: underline; }
+
+/* Run row */
+.run-list-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer; transition: background 0.08s;
+}
+.run-list-row:last-child { border-bottom: none; }
+.run-list-row:hover { background: var(--slate-50); }
+.run-list-agent { font-size: 12.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-list-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.run-list-status { font-size: 11px; font-weight: 500; }
+.run-list-time { font-size: 10.5px; color: var(--slate-400); }
+.run-list-reason { font-size: 10.5px; color: var(--red-500); }
+
+/* Subaccount badge (colored) */
+.sub-badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 600;
+  white-space: nowrap; flex-shrink: 0;
+}
+
+/* Activity row */
+.act-list-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 8px 16px; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer; transition: background 0.08s;
+}
+.act-list-row:last-child { border-bottom: none; }
+.act-list-row:hover { background: var(--slate-50); }
+.act-icon {
+  width: 26px; height: 26px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 1px;
+}
+.act-body { flex: 1; min-width: 0; }
+.act-subject { font-size: 12px; font-weight: 600; color: var(--slate-800); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-context { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+.act-time { font-size: 10.5px; color: var(--slate-400); flex-shrink: 0; white-space: nowrap; padding-top: 2px; }
+
 /* ── Replaces banner ───────────────────────────────── */
 .replaces-banner {
   background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
@@ -444,6 +511,291 @@
             </div>
 
           </div><!-- /widget-grid -->
+
+          <!-- Recent runs + Recent activity list cards -->
+          <div class="list-card-row">
+
+            <!-- Recent runs -->
+            <div class="list-card">
+              <div class="list-card-head">
+                <span class="list-card-title">Recent runs</span>
+                <a href="run-trace.html" class="widget-link">View all</a>
+              </div>
+              <div class="list-card-body">
+
+                <!-- Row 1: Running -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-blue dot-pulse" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Outreach Agent</div>
+                    <span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--indigo-600);">Running</span>
+                    <span class="run-list-time">2 min ago</span>
+                  </div>
+                </div>
+
+                <!-- Row 2: Completed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-green" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">CRM Sync Agent</div>
+                    <span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm Partners</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--emerald-600);">Completed</span>
+                    <span class="run-list-time">5 min ago &middot; 2m 14s</span>
+                  </div>
+                </div>
+
+                <!-- Row 3: Failed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-red" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Lead Qualifier</div>
+                    <span class="sub-badge" style="background:#fff7ed;color:#9a3412;">Revel Group</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--red-500);">Failed</span>
+                    <span class="run-list-reason">Credential expired</span>
+                    <span class="run-list-time">12 min ago</span>
+                  </div>
+                </div>
+
+                <!-- Row 4: Completed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-green" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Demo Scheduler</div>
+                    <span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--emerald-600);">Completed</span>
+                    <span class="run-list-time">18 min ago &middot; 45s</span>
+                  </div>
+                </div>
+
+                <!-- Row 5: Completed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-green" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Account Health</div>
+                    <span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex Industries</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--emerald-600);">Completed</span>
+                    <span class="run-list-time">31 min ago &middot; 1m 8s</span>
+                  </div>
+                </div>
+
+                <!-- Row 6: Cancelled -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot" style="background:var(--slate-300);flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Research Agent</div>
+                    <span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm Partners</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--slate-400);">Cancelled</span>
+                    <span class="run-list-time">44 min ago</span>
+                  </div>
+                </div>
+
+                <!-- Row 7: Completed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-green" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Outreach Agent</div>
+                    <span class="sub-badge" style="background:#fff7ed;color:#9a3412;">Revel Group</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--emerald-600);">Completed</span>
+                    <span class="run-list-time">1h 2m ago &middot; 3m 27s</span>
+                  </div>
+                </div>
+
+                <!-- Row 8: Failed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-red" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">CRM Sync Agent</div>
+                    <span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex Industries</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--red-500);">Failed</span>
+                    <span class="run-list-reason">Rate limit hit</span>
+                    <span class="run-list-time">1h 18m ago</span>
+                  </div>
+                </div>
+
+                <!-- Row 9: Completed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-green" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Lead Qualifier</div>
+                    <span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--emerald-600);">Completed</span>
+                    <span class="run-list-time">2h 5m ago &middot; 58s</span>
+                  </div>
+                </div>
+
+                <!-- Row 10: Completed -->
+                <div class="run-list-row" onclick="window.location='run-trace.html'">
+                  <div class="status-dot dot-green" style="flex-shrink:0;"></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="run-list-agent">Demo Scheduler</div>
+                    <span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm Partners</span>
+                  </div>
+                  <div class="run-list-right">
+                    <span class="run-list-status" style="color:var(--emerald-600);">Completed</span>
+                    <span class="run-list-time">2h 41m ago &middot; 1m 52s</span>
+                  </div>
+                </div>
+
+              </div>
+              <div class="list-card-footer">
+                <a href="run-trace.html">View all runs</a>
+              </div>
+            </div>
+
+            <!-- Recent activity -->
+            <div class="list-card">
+              <div class="list-card-head">
+                <span class="list-card-title">Recent activity</span>
+                <a href="activity.html" class="widget-link">View all</a>
+              </div>
+              <div class="list-card-body">
+
+                <!-- Row 1: agent_run completed -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--emerald-50);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-600)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Run completed: Outreach Agent</div>
+                    <div class="act-context">Acme Corp &middot; 47 events, 2m 14s</div>
+                  </div>
+                  <span class="act-time">2 min ago</span>
+                </div>
+
+                <!-- Row 2: memory block updated (manual) -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--indigo-50);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--indigo-600)" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Memory block updated: Acme Voice Standards</div>
+                    <div class="act-context">by you</div>
+                  </div>
+                  <span class="act-time">14 min ago</span>
+                </div>
+
+                <!-- Row 3: skill enabled -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:#f5f3ff;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Skill enabled: Sentiment analysis</div>
+                    <div class="act-context">by you &middot; Lead Qualifier</div>
+                  </div>
+                  <span class="act-time">28 min ago</span>
+                </div>
+
+                <!-- Row 4: integration synced -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--sky-50);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--sky-500)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">HubSpot sync: 47 contacts pulled</div>
+                    <div class="act-context">by CRM Sync Agent</div>
+                  </div>
+                  <span class="act-time">42 min ago</span>
+                </div>
+
+                <!-- Row 5: document uploaded -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:#fff7ed;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Document uploaded: Sales playbook v3.pdf</div>
+                    <div class="act-context">by you &middot; Acme Corp knowledge</div>
+                  </div>
+                  <span class="act-time">1h 5m ago</span>
+                </div>
+
+                <!-- Row 6: inbox item resolved -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--emerald-50);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-600)" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Approval resolved: sent draft email</div>
+                    <div class="act-context">by you &middot; Outreach Agent</div>
+                  </div>
+                  <span class="act-time">1h 22m ago</span>
+                </div>
+
+                <!-- Row 7: agent_run failed -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:#fef2f2;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--red-500)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Run failed: CRM Sync Agent</div>
+                    <div class="act-context">Credential expired &middot; Globex Industries</div>
+                  </div>
+                  <span class="act-time">2h 11m ago</span>
+                </div>
+
+                <!-- Row 8: memory block proposal -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--amber-50);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Memory proposal: competitor pricing update</div>
+                    <div class="act-context">auto-extracted &middot; pending review</div>
+                  </div>
+                  <span class="act-time">3h 40m ago</span>
+                </div>
+
+                <!-- Row 9: workflow_run completed -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--emerald-50);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-600)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">Workflow completed: Demo follow-up sequence</div>
+                    <div class="act-context">TerraForm Partners &middot; 3 steps</div>
+                  </div>
+                  <span class="act-time">5h 18m ago</span>
+                </div>
+
+                <!-- Row 10: identity event -->
+                <div class="act-list-row" onclick="window.location='activity.html'">
+                  <div class="act-icon" style="background:var(--slate-100);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--slate-500)" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  </div>
+                  <div class="act-body">
+                    <div class="act-subject">New team member onboarded</div>
+                    <div class="act-context">James Liu joined the workspace</div>
+                  </div>
+                  <span class="act-time">1 day ago</span>
+                </div>
+
+              </div>
+              <div class="list-card-footer">
+                <a href="activity.html">View all activity</a>
+              </div>
+            </div>
+
+          </div><!-- /list-card-row -->
 
         </div><!-- /home-main -->
 

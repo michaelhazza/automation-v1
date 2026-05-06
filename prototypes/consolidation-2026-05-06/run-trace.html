@@ -270,7 +270,7 @@
           <div class="chain-run-meta">
             <span class="status-dot dot-blue dot-pulse"></span>
             <span>running</span>
-            <span style="margin-left:auto;">0:42</span>
+            <span style="margin-left:auto;">+5m 32s</span>
           </div>
         </div>
         <div class="chain-run" style="padding-left:24px;border-left:2px solid var(--slate-100);">
@@ -278,7 +278,7 @@
           <div class="chain-run-meta" style="font-size:10.5px;">
             <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
             <span>completed</span>
-            <span style="margin-left:auto;">0:12</span>
+            <span style="margin-left:auto;">+1m 12s</span>
           </div>
         </div>
         <div style="padding:6px 14px;font-size:10.5px;color:var(--slate-400);">Parent run</div>
@@ -299,7 +299,7 @@
         <div class="run-header">
           <div>
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-              <div class="run-title">Outreach Agent</div>
+              <div class="run-title">Outreach Agent — Run #4827</div>
               <div class="live-indicator" id="live-badge">
                 <div class="live-dot"></div>
                 Live
@@ -307,11 +307,14 @@
               <div id="hist-badge" style="display:none;" class="badge badge-green">Completed</div>
             </div>
             <div class="run-meta-items">
-              <span class="run-meta-item">Started 0:42 ago</span>
+              <span class="run-meta-item">Started: May 6 2026, 2:14:32 PM &middot; 5 minutes ago</span>
+            </div>
+            <div class="run-meta-items" style="margin-top:2px;">
+              <span class="run-meta-item" id="duration-label">Duration: 5 min 32 sec</span>
+              <span class="run-meta-item" style="color:var(--slate-300);">|</span>
+              <span class="run-meta-item">Status: <span id="status-text" style="font-weight:600;color:var(--indigo-600);">Running</span></span>
               <span class="run-meta-item" style="color:var(--slate-300);">|</span>
               <span class="run-meta-item" id="event-count-label">47 events</span>
-              <span class="run-meta-item" style="color:var(--slate-300);">|</span>
-              <span class="run-meta-item" id="duration-label">running...</span>
             </div>
           </div>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
@@ -336,7 +339,7 @@
                   <div class="event-type-label etype-run_start">run_start</div>
                   <div class="event-content">Run initiated. Input: "Draft follow-up email to Sarah Chen at Acme Corp..."</div>
                 </div>
-                <div class="event-time">0:00</div>
+                <div class="event-time">+0s</div>
               </div>
 
               <!-- Event 2: LLM_CALL -->
@@ -347,7 +350,7 @@
                   <div class="event-type-label etype-llm_call">llm_call</div>
                   <div class="event-content">Planning step: identified 3 required actions, retrieve memory, draft email, confirm send.</div>
                 </div>
-                <div class="event-time">0:03</div>
+                <div class="event-time">+3s</div>
               </div>
 
               <!-- Event 3: TOOL_CALL -->
@@ -358,7 +361,7 @@
                   <div class="event-type-label etype-tool_call">tool_call: search_crm</div>
                   <div class="event-content">Querying HubSpot for "Sarah Chen" at "Acme Corp"</div>
                 </div>
-                <div class="event-time">0:04</div>
+                <div class="event-time">+4s</div>
               </div>
 
               <!-- Event 4: TOOL_RESULT -->
@@ -369,7 +372,7 @@
                   <div class="event-type-label etype-tool_result">tool_result: search_crm</div>
                   <div class="event-content">Found 1 contact. Sarah Chen, VP Operations, sarah.chen@acmecorp.com. Last contacted Apr 28.</div>
                 </div>
-                <div class="event-time">0:06</div>
+                <div class="event-time">+6s</div>
               </div>
 
               <!-- Event 5: LLM_CALL (second) -->
@@ -380,7 +383,7 @@
                   <div class="event-type-label etype-llm_call">llm_call</div>
                   <div class="event-content">Drafting email body using retrieved contact data and memory blocks (brand voice, key stakeholders, competitor context)</div>
                 </div>
-                <div class="event-time">0:09</div>
+                <div class="event-time">+9s</div>
               </div>
 
               <!-- Event 6: TOOL_CALL (send_email) -->
@@ -391,7 +394,7 @@
                   <div class="event-type-label etype-tool_call">tool_call: send_email</div>
                   <div class="event-content">Preparing email to sarah.chen@acmecorp.com, subject "Following up on our Q2 proposal"</div>
                 </div>
-                <div class="event-time">0:18</div>
+                <div class="event-time">+18s</div>
               </div>
 
               <!-- Event 7: HITL_GATE -->
@@ -402,7 +405,7 @@
                   <div class="event-type-label" style="color:var(--amber-600);">hitl_gate: send_email</div>
                   <div class="event-content">Awaiting operator approval before sending. Email queued in review.</div>
                 </div>
-                <div class="event-time">0:19</div>
+                <div class="event-time">+19s</div>
               </div>
 
               <!-- Event 8: DELEGATION -->
@@ -413,7 +416,7 @@
                   <div class="event-type-label etype-delegation">delegation: crm-enrichment-agent</div>
                   <div class="event-content">Delegating contact enrichment to CRM sub-agent. Awaiting completion.</div>
                 </div>
-                <div class="event-time">0:28</div>
+                <div class="event-time">+28s</div>
               </div>
 
               <!-- Events 9-47 placeholder rows -->
@@ -428,7 +431,7 @@
                   <div class="event-type-label etype-llm_call">llm_call</div>
                   <div class="event-content" style="color:var(--slate-400);">Streaming...</div>
                 </div>
-                <div class="event-time">0:42</div>
+                <div class="event-time">+5m 32s</div>
               </div>
 
             </div>
@@ -491,7 +494,7 @@ const EVENTS = {
     type: 'RUN_START',
     label: 'run_start',
     seq: 1, total: 47,
-    timeIntoRun: '0:00',
+    timeIntoRun: '+0s',
     iso: '2026-05-06T09:00:00.000Z',
     fields: {
       trigger_source: 'manual',
@@ -506,7 +509,7 @@ const EVENTS = {
     type: 'LLM_CALL',
     label: 'llm_call',
     seq: 2, total: 47,
-    timeIntoRun: '0:03',
+    timeIntoRun: '+3s',
     iso: '2026-05-06T09:00:03.421Z',
     fields: {
       model: 'claude-sonnet-4-6',
@@ -524,7 +527,7 @@ const EVENTS = {
     type: 'TOOL_CALL',
     label: 'tool_call',
     seq: 3, total: 47,
-    timeIntoRun: '0:04',
+    timeIntoRun: '+4s',
     iso: '2026-05-06T09:00:04.109Z',
     fields: {
       tool_name: 'search_crm',
@@ -538,7 +541,7 @@ const EVENTS = {
     type: 'TOOL_RESULT',
     label: 'tool_result',
     seq: 4, total: 47,
-    timeIntoRun: '0:06',
+    timeIntoRun: '+6s',
     iso: '2026-05-06T09:00:06.884Z',
     fields: {
       tool_name: 'search_crm',
@@ -552,7 +555,7 @@ const EVENTS = {
     type: 'LLM_CALL',
     label: 'llm_call',
     seq: 5, total: 47,
-    timeIntoRun: '0:09',
+    timeIntoRun: '+9s',
     iso: '2026-05-06T09:00:09.002Z',
     fields: {
       model: 'claude-sonnet-4-6',
@@ -570,7 +573,7 @@ const EVENTS = {
     type: 'TOOL_CALL',
     label: 'tool_call',
     seq: 6, total: 47,
-    timeIntoRun: '0:18',
+    timeIntoRun: '+18s',
     iso: '2026-05-06T09:00:18.451Z',
     fields: {
       tool_name: 'send_email',
@@ -584,7 +587,7 @@ const EVENTS = {
     type: 'HITL_GATE',
     label: 'hitl_gate',
     seq: 7, total: 47,
-    timeIntoRun: '0:19',
+    timeIntoRun: '+19s',
     iso: '2026-05-06T09:00:19.210Z',
     fields: {
       gate_type: 'approval',
@@ -599,7 +602,7 @@ const EVENTS = {
     type: 'DELEGATION',
     label: 'delegation',
     seq: 8, total: 47,
-    timeIntoRun: '0:28',
+    timeIntoRun: '+28s',
     iso: '2026-05-06T09:00:28.003Z',
     fields: {
       sub_agent_name: 'CRM Enrichment Agent',
@@ -613,7 +616,7 @@ const EVENTS = {
     type: 'LLM_CALL',
     label: 'llm_call',
     seq: 47, total: 47,
-    timeIntoRun: '0:42',
+    timeIntoRun: '+5m 32s',
     iso: '2026-05-06T09:00:42.000Z',
     fields: {
       model: 'claude-sonnet-4-6',
@@ -734,6 +737,29 @@ function toggleExpand(id, link) {
   }
 }
 
+// ── Timestamp formatting helpers ─────────────────────────────────────────────
+function formatAbsTimestamp(iso) {
+  // Format ISO to "2:15:14 PM, May 6 2026"
+  const d = new Date(iso);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  return `${h}:${mm}:${ss} ${ampm}, ${months[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
+}
+
+function timeAgoFromIso(iso) {
+  // Prototype anchor: run started at 2:14:32 PM May 6 2026, viewed "now" ~5 min 32s later
+  const runStartMs = new Date('2026-05-06T14:14:32.000Z').getTime();
+  const viewNowMs = runStartMs + (5 * 60 + 32) * 1000;
+  const diff = Math.round((viewNowMs - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff} seconds ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)} minutes ago`;
+  return `${Math.floor(diff/3600)} hours ago`;
+}
+
 // ── selectEvent: updates the right panel ────────────────────────────────────
 let currentEventIdx = null;
 
@@ -760,8 +786,14 @@ function selectEvent(n) {
     DELEGATION: 'delegation'
   };
 
-  document.getElementById('detail-title').textContent = `Event #${evt.seq} of ${evt.total}: ${typeLabels[evt.type] || evt.label}`;
-  document.getElementById('detail-sub').textContent = `${evt.timeIntoRun} into run  |  ${evt.iso}`;
+  // Three-line timestamp in header
+  const absTime = formatAbsTimestamp(evt.iso);
+  const agoTime = timeAgoFromIso(evt.iso);
+
+  document.getElementById('detail-title').textContent = `Event #${evt.seq} of ${evt.total} · ${typeLabels[evt.type] || evt.label}`;
+  document.getElementById('detail-sub').innerHTML =
+    `<div style="font-size:13px;font-weight:600;color:var(--slate-900);margin:4px 0 2px;">${absTime}</div>` +
+    `<div style="font-size:11px;color:var(--slate-500);">${evt.timeIntoRun} into run &middot; ${agoTime}</div>`;
   document.getElementById('detail-body').innerHTML = buildDetailHtml(evt);
   document.getElementById('detail-footer').style.display = '';
 }
@@ -790,7 +822,9 @@ function setMode(mode, btn) {
     document.getElementById('hist-badge').style.display = 'none';
     document.getElementById('cancel-btn').style.display = '';
     document.getElementById('streaming-event').style.display = 'flex';
-    document.getElementById('duration-label').textContent = 'running...';
+    document.getElementById('duration-label').textContent = 'Duration: 5 min 32 sec';
+    document.getElementById('status-text').textContent = 'Running';
+    document.getElementById('status-text').style.color = 'var(--indigo-600)';
     document.getElementById('event-count-label').textContent = '47 events';
   } else {
     document.getElementById('live-badge').style.display = 'none';
@@ -798,9 +832,17 @@ function setMode(mode, btn) {
     document.getElementById('cancel-btn').style.display = 'none';
     document.getElementById('streaming-event').style.display = 'none';
     document.getElementById('duration-label').textContent = 'Duration: 1m 14s';
+    document.getElementById('status-text').textContent = 'Completed';
+    document.getElementById('status-text').style.color = 'var(--emerald-600)';
     document.getElementById('event-count-label').textContent = '52 events';
   }
 }
+
+// Init: set status-text for live mode on load
+(function() {
+  document.getElementById('status-text').textContent = 'Running';
+  document.getElementById('status-text').style.color = 'var(--indigo-600)';
+})();
 
 function switchRunTab(id, btn) {
   document.querySelectorAll('.tabs .tab-btn').forEach(b => b.classList.remove('active'));

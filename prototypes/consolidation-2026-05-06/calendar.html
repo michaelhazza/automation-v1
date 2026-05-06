@@ -232,19 +232,23 @@
           </button>
         </div>
 
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <!-- Period navigation arrows + label -->
-          <div style="display:flex;align-items:center;gap:0;border:1px solid var(--slate-200);border-radius:8px;overflow:hidden;">
-            <button class="period-nav-btn" onclick="shiftPeriod(-1)" title="Previous period" style="padding:5px 10px;border:none;background:white;cursor:pointer;font-size:14px;color:var(--slate-500);transition:background 0.1s;line-height:1;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8249;</button>
-            <span id="period-label" style="padding:4px 12px;font-size:12.5px;font-weight:600;color:var(--slate-700);white-space:nowrap;border-left:1px solid var(--slate-200);border-right:1px solid var(--slate-200);min-width:160px;text-align:center;">May 6 - May 12, 2026</span>
-            <button class="period-nav-btn" onclick="shiftPeriod(1)" title="Next period" style="padding:5px 10px;border:none;background:white;cursor:pointer;font-size:14px;color:var(--slate-500);transition:background 0.1s;line-height:1;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
+        <div style="margin-left:auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+          <!-- Nav cluster: Today + prev/next arrows + period label -->
+          <div class="nav-cluster" style="display:flex;align-items:center;gap:6px;">
+            <!-- Today button -->
+            <button id="today-btn" onclick="resetToToday()" style="height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--slate-300);background:white;color:var(--slate-700);font-size:12.5px;font-weight:500;cursor:pointer;transition:all 0.12s;white-space:nowrap;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">Today</button>
+            <!-- Prev arrow -->
+            <button onclick="shiftPeriod(-1)" title="Previous period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8249;</button>
+            <!-- Period label -->
+            <span id="period-label" style="font-size:16px;font-weight:600;color:var(--slate-900);white-space:nowrap;min-width:200px;text-align:center;">May 6 – May 12, 2026</span>
+            <!-- Next arrow -->
+            <button onclick="shiftPeriod(1)" title="Next period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
           </div>
-          <button class="window-btn" onclick="resetToToday()" id="today-btn" style="font-size:12px;">Today</button>
-          <!-- Period type buttons -->
-          <div style="display:flex;gap:2px;">
-            <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)">Week</button>
-            <button class="window-btn" id="btn-fortnight" onclick="switchCalView('14',this)">Fortnight</button>
-            <button class="window-btn" id="btn-month" onclick="switchCalView('30',this)">Month</button>
+          <!-- View switcher (right, separate cluster) -->
+          <div style="display:flex;gap:2px;background:var(--slate-100);padding:3px;border-radius:8px;">
+            <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)" style="border-radius:6px;">Week</button>
+            <button class="window-btn" id="btn-fortnight" onclick="switchCalView('14',this)" style="border-radius:6px;">Fortnight</button>
+            <button class="window-btn" id="btn-month" onclick="switchCalView('30',this)" style="border-radius:6px;">Month</button>
           </div>
         </div>
       </div>
@@ -744,7 +748,7 @@ function computePeriodLabel(type, offset) {
     weekStart.setDate(weekStart.getDate() + offset * 7);
     var weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 6);
-    return formatDate(weekStart) + ' - ' + formatDate(weekEnd) + ', ' + weekEnd.getFullYear();
+    return formatDate(weekStart) + ' – ' + formatDate(weekEnd) + ', ' + weekEnd.getFullYear();
   }
 
   if (type === 'fortnight') {
@@ -752,7 +756,7 @@ function computePeriodLabel(type, offset) {
     fStart.setDate(fStart.getDate() + offset * 14);
     var fEnd = new Date(fStart);
     fEnd.setDate(fEnd.getDate() + 13);
-    return formatDate(fStart) + ' - ' + formatDate(fEnd) + ', ' + fEnd.getFullYear();
+    return formatDate(fStart) + ' – ' + formatDate(fEnd) + ', ' + fEnd.getFullYear();
   }
 
   if (type === 'month') {
@@ -766,11 +770,23 @@ function computePeriodLabel(type, offset) {
 function renderPeriod() {
   var label = computePeriodLabel(currentPeriodType, currentPeriodOffset);
   document.getElementById('period-label').textContent = label;
-  // Highlight Today button only when at offset 0
+  // Today button: muted/disabled when on current period, active when offset != 0
   var todayBtn = document.getElementById('today-btn');
   if (todayBtn) {
-    todayBtn.style.fontWeight = currentPeriodOffset === 0 ? '700' : '500';
-    todayBtn.style.color = currentPeriodOffset === 0 ? 'var(--indigo-600)' : '';
+    if (currentPeriodOffset === 0) {
+      todayBtn.style.borderColor = 'var(--slate-300)';
+      todayBtn.style.color = 'var(--slate-400)';
+      todayBtn.style.cursor = 'default';
+      todayBtn.style.background = 'white';
+      todayBtn.setAttribute('onmouseover', '');
+      todayBtn.setAttribute('onmouseout', '');
+    } else {
+      todayBtn.style.borderColor = 'var(--slate-300)';
+      todayBtn.style.color = 'var(--slate-700)';
+      todayBtn.style.cursor = 'pointer';
+      todayBtn.setAttribute('onmouseover', "this.style.background='var(--slate-50)'");
+      todayBtn.setAttribute('onmouseout', "this.style.background='white'");
+    }
   }
 }
 

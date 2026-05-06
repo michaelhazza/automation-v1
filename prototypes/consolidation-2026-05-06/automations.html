@@ -202,7 +202,7 @@
       <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0;">
         <div>
           <h1>Automations</h1>
-          <p style="color:var(--slate-500);font-size:13px;margin-top:2px;">Acme Corp &middot; 10 workflows, 12 automations, 8 triggers</p>
+          <p style="color:var(--slate-500);font-size:13px;margin-top:2px;">Acme Corp &middot; 10 workflows, 12 automations</p>
         </div>
         <!-- Primary CTA changes per active tab -->
         <button id="primary-cta" class="btn btn-primary" onclick="openNewDrawer()">
@@ -211,16 +211,13 @@
         </button>
       </div>
 
-      <!-- Three-tab bar -->
+      <!-- Two-tab bar (Triggers moved to Recurring tasks page) -->
       <div class="page-tabs" style="margin-top:16px;" id="main-tabs">
         <div class="page-tab active" id="tab-workflows" onclick="switchTab('workflows')">
           Workflows <span class="tab-count">10</span>
         </div>
         <div class="page-tab" id="tab-automations" onclick="switchTab('automations')">
-          Automations <span class="tab-count">12</span>
-        </div>
-        <div class="page-tab" id="tab-triggers" onclick="switchTab('triggers')">
-          Triggers <span class="tab-count">8</span>
+          External <span class="tab-count">12</span>
         </div>
       </div>
 
@@ -661,46 +658,15 @@
         </div><!-- /card -->
       </div><!-- /panel-automations -->
 
-      <!-- ════════════════════ TRIGGERS TAB ════════════════════ -->
-      <div class="tab-panel" id="panel-triggers" style="padding-top:18px;">
+      <!-- Recurring tasks footer note (Triggers tab was here; removed in round 7e-2) -->
+      <div style="margin-top:24px;padding:12px 16px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;font-size:12.5px;color:var(--slate-500);">
+        Triggers and scheduled tasks are managed on the
+        <a href="#" style="color:var(--indigo-600);font-weight:600;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Recurring tasks page</a>.
+      </div>
 
-        <!-- Filters -->
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-          <div class="search-wrap" style="width:240px;">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input class="search-box" type="search" placeholder="Search triggers...">
-          </div>
-          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
-            <option>Source: All</option>
-            <option>Webhook</option>
-            <option>Schedule</option>
-            <option>HubSpot</option>
-            <option>Stripe</option>
-            <option>Email</option>
-            <option>Manual</option>
-          </select>
-          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
-            <option>Status: All</option>
-            <option>Active</option>
-            <option>Paused</option>
-            <option>Error</option>
-          </select>
-          <span style="margin-left:auto;font-size:12px;color:var(--slate-500);">8 triggers</span>
-        </div>
-
-        <div class="card">
-
-          <!-- Table header -->
-          <div class="trig-row" style="cursor:default;background:var(--slate-50);border-bottom:1px solid var(--slate-200);">
-            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Name</div>
-            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Source</div>
-            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Filter</div>
-            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Fires</div>
-            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Last fired</div>
-            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Status</div>
-          </div>
-
-          <!-- Trigger 1 — Webhook -->
+          <!-- REMOVED TRIGGERS PANEL CONTENT (round 7e-2):
+          <div class="tab-panel" id="panel-triggers">...</div>
+          BEGIN_REMOVED_CONTENT
           <div class="trig-row" onclick="openTriggerDrawer('HubSpot contact webhook')">
             <div>
               <div class="trig-name">HubSpot contact webhook</div>
@@ -863,9 +829,7 @@
             <div style="font-size:12px;color:var(--slate-500);">1d ago &middot; 3/7d</div>
             <div><span class="badge badge-slate" style="font-size:10px;">Dev only</span></div>
           </div>
-
-        </div><!-- /card -->
-      </div><!-- /panel-triggers -->
+          END_REMOVED -->
 
     </div><!-- /page-body -->
   </div><!-- /main -->
@@ -1142,22 +1106,26 @@
 
 <script>
   /* ── Tab switching ────────────────────────────────────── */
-  const CTA_LABELS = { workflows: 'New workflow', automations: 'New automation', triggers: 'New trigger' };
+  /* Note: Triggers tab removed in round 7e-2. Tab strip is now Workflows / External. */
+  const CTA_LABELS = { workflows: 'New workflow', automations: 'New automation' };
   let activeTab = 'workflows';
 
   function switchTab(tab) {
-    ['workflows', 'automations', 'triggers'].forEach(t => {
-      document.getElementById('tab-' + t).classList.toggle('active', t === tab);
-      document.getElementById('panel-' + t).classList.toggle('active', t === tab);
+    ['workflows', 'automations'].forEach(t => {
+      const tabEl = document.getElementById('tab-' + t);
+      const panelEl = document.getElementById('panel-' + t);
+      if (tabEl) tabEl.classList.toggle('active', t === tab);
+      if (panelEl) panelEl.classList.toggle('active', t === tab);
     });
-    document.getElementById('primary-cta-label').textContent = CTA_LABELS[tab];
+    document.getElementById('primary-cta-label').textContent = CTA_LABELS[tab] || 'New';
     activeTab = tab;
   }
 
   /* ── Context-aware primary CTA ───────────────────────── */
   function openNewDrawer() {
-    const ids = { workflows: 'new-workflow-drawer', automations: 'new-auto-drawer', triggers: 'new-trigger-drawer' };
-    document.getElementById(ids[activeTab]).style.display = 'flex';
+    const ids = { workflows: 'new-workflow-drawer', automations: 'new-auto-drawer' };
+    const drawerId = ids[activeTab];
+    if (drawerId) document.getElementById(drawerId).style.display = 'flex';
   }
 
   /* ── Workflow drawer ─────────────────────────────────── */
