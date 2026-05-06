@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-1
+    Prototype Round 7b-2
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-1: nav consolidation across all three sidebar modes (Workspace / Org / System), grouped into labelled sections. Plus three mechanical fixes: calendar period navigation (arrows, period label, Today button), Connections page real app logos (inline SVG), and Inbox action button visual consistency (uniform sizing, outlined Archive).</p>
+  <p>Round 7b-2: Team page with Members and Org Chart tabs. Merges SubaccountTeamPage (/admin/subaccounts/:id/team) and OrgChartPage (/org-chart) into a single tabbed surface. Members tab: 8 mock rows with role/permission/status badges, member detail drawer, overflow menu, invite modal. Org Chart tab: CSS flexbox tree with connector lines, hover highlight, click-through to the same member detail drawer, plus a before companion page.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-1</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-2</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 42+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 44+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -127,6 +127,7 @@
     <li>Round 7b-1: Calendar period navigation: back/forward arrows, current period label, Today reset button. Period type buttons renamed Week / Fortnight / Month.</li>
     <li>Round 7b-1: Connections page: inline SVG monogram logos for all 8 connections (Gmail, Salesforce, HubSpot, Zapier, AWS S3, Slack, Google Analytics, generic servers).</li>
     <li>Round 7b-1: Inbox action buttons: uniform sizing (padding 7px 14px, font-size 13px) across all item types. Archive is now an outlined button, not a plain text link. Primary actions solid indigo, secondary actions outlined slate.</li>
+    <li>Round 7b-2: Team page: SubaccountTeamPage and OrgChartPage merged into one page with Members + Org Chart tabs. Member detail drawer is shared across both tabs (click a row or an org card). Invite modal adds a pending row to the Members table. Org chart is CSS flexbox only (read view), no D3 or graph library.</li>
   </ul>
 </div>
 
@@ -710,6 +711,53 @@
       <div class="proto-card-desc">All action buttons unified to padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px. Primary actions (Approve, Open task, Reply to agent, View run trace) solid indigo. Secondary actions (Reject, View draft, Re-authenticate, View task) white bg with slate border. Archive is now an outlined button (white bg, slate border, slate-500 text) not a plain text link. Keyboard hints unchanged.</div>
       <div class="proto-card-footer">
         <a class="proto-card-link" href="inbox.html">Open mockup &#8594;</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-2: Team page ─────────────────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#8b5cf6"></div>
+    Round 7b-2: Team page (Members + Org Chart)
+  </div>
+
+  <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#4c1d95;line-height:1.55;">
+    <strong>Consolidation:</strong> SubaccountTeamPage and OrgChartPage merged into team.html with two tabs. Member detail drawer is shared between the Members table (row click) and the Org Chart (card click). The invite modal adds a pending row live. Org Chart uses CSS flexbox tree (read view; drag-and-drop deferred to production).
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Team</div>
+        <div class="proto-card-file">team.html</div>
+      </div>
+      <div class="proto-card-desc">Members tab: 8 rows (7 active, 1 pending invite) with avatar circles, role badges, permission set badges, last-active, status dots, overflow menus. Row click opens 440px member detail drawer with role/permission dropdowns, joined/last-active, recent activity, send-password-reset and suspend/remove actions. Invite modal adds a pending row live. Org Chart tab: CSS flexbox tree for Acme Corp, CEO down to 3 levels, connector lines. Card hover: indigo highlight + elevation. Card click: opens same member detail drawer.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">SubaccountTeamPage</span>
+          <span class="replace-pill strike">OrgChartPage</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="team.html">Open mockup &#8594;</a>
+        <a href="before-team.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Before: Team + Org Chart</div>
+        <div class="proto-card-file">before-team.html</div>
+      </div>
+      <div class="proto-card-desc">Side-by-side depiction of the two current pages: SubaccountTeamPage (utilitarian flat table, email-first columns, old-style "Add member" button) and OrgChartPage (sparse hierarchy, name+role only, no avatars, no click actions). Problems box lists 7 specific gaps in the current state.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="before-team.html">Open before &#8594;</a>
+        <a href="team.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
       </div>
     </div>
 

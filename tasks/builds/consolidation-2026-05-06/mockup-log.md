@@ -548,6 +548,37 @@ Index updated:
 - `prototypes/consolidation-2026-05-06/index.html` (masthead + decisions + Round 7a section)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
 
+## Round 7b-2 — 2026-05-06
+**Operator feedback:** Build team.html (Members + Org Chart tabs) and before-team.html, update index.html and mockup-log.md.
+
+**Changes made:**
+- `team.html` created: Members tab with 8 mock rows (7 active, 1 pending invite), avatar circles (color-coded initials), role badges (Org admin / Manager / User / Client user), permission set badge, last-active column, status dots (active/pending/suspended), overflow 3-dot menu per row (Edit, Resend invite, Suspend, Remove actions). Row click opens 440px member detail drawer. Drawer: avatar+name+email header, role and permission set dropdowns, joined/last-active fields, recent activity list (3-5 items per member), send-password-reset button, status toggle, suspend/remove danger zone at bottom. Pending row shows dashed avatar border, "Resend invite"/"Cancel invite" in overflow menu and in drawer. Invite modal: email, first name, last name, role dropdown, permission set dropdown, "Send invite" button. After submit: toast "Invite sent to email" and new pending row appended live to table. Org Chart tab: CSS flexbox tree (no D3), Acme Corp hierarchy (CEO Sarah Chen, VP Sales Mike Liu with 3 reports including SDR Manager Lisa Wong who has 2 sub-reports, VP Marketing Carlos Diaz with 1 report). Pending invitee (James Kim) shown as dashed-border card. Anna Brown (not yet invited) shown as grey card. Card hover: indigo border + elevation. Card click: opens same member detail drawer as Members tab. "Add unassigned member to chart" button below chart fires stub toast. Read-view-only note below chart. Tab switching wired with `switchTeamTab()`. Overflow dropdowns use fixed positioning. Escape key closes drawer and modal. Toast auto-dismisses at 2.5s.
+- `before-team.html` created: Before banner explaining the two-page production state. Old-style sidebar depicting production nav (no mode switcher, Team under Manage section, Org Chart as a separate Org-level section). Two-column split: left half shows SubaccountTeamPage (email-first flat table, 6 rows, utilitarian "Add member" button, annotation about modal limitations), right half shows OrgChartPage (sparser hierarchy: name+role only, no avatars, no email, no click actions, annotation about read-only state). Problems box with 7 specific gaps. After-state link at bottom pointing to team.html.
+- `index.html` updated: masthead eyebrow changed to "Prototype Round 7b-2", description updated to describe team.html, file count updated to 44+, decisions box gets Round 7b-2 bullet, new Round 7b-2 section at bottom with two cards (team.html and before-team.html with cross-links).
+
+**Design decisions:**
+- Single `team.html` (tabs) vs two separate pages: tabs chosen because Members and Org Chart are two views of the same data set (people at Acme Corp). An operator who adds a member via the invite modal should immediately be able to place them in the org chart without navigating.
+- Member detail drawer is shared across both tabs. This means the single interaction pattern (click to inspect) works regardless of which tab the operator is on, reducing cognitive overhead.
+- Org Chart is CSS flexbox only for this prototype. No graph library loaded. The layout is sufficient to communicate the hierarchy and the click-through pattern. Drag-and-drop editing is noted as deferred to production in the chart's footnote.
+- Pending invite row (James Kim) is shown in both the Members table and the Org Chart (as a dashed-border card under Lisa Wong, who invited him). This makes the pending state visible from both surfaces.
+- Anna Brown (not yet invited, shown in Org Chart under Lisa Wong) demonstrates the "unassigned in chart" state that the "+ Add unassigned member to chart" button would address.
+- `_sidebar.js` workspace mode has Team as a stub (fires toast). This is per the brief: the Team link in the sidebar remains a stub; team.html is reachable directly or via the index.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Members tab is the default active view (primary task: manage team members). Org Chart is secondary, behind a tab. Invite modal is reachable from two obvious CTAs.
+- Default to hidden: yes -- member detail drawer is hidden until row/card click. Overflow menu is hidden until dot-button click. No KPI tiles. No analytics panel. Last-active column shows relative time, not a chart.
+- One primary action: yes -- "Invite member" is the primary action on this page (CTA in both the topbar and the page header). The Members toolbar has a second invite button but it is the same action, not a competing action.
+- Inline state: yes -- status (active/pending/suspended) is shown as an inline status dot + label directly in the table row. Role and permission set are shown as small badges inline. Last active is a plain relative time string inline.
+- Re-check passed: yes -- a non-technical operator landing on this page can immediately see who their team members are, their roles, and whether any invites are pending. Clicking a row gives full detail without navigating away. The Org Chart is one click away on a clearly labelled tab.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/team.html` (created)
+- `prototypes/consolidation-2026-05-06/before-team.html` (created)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions box, Round 7b-2 section)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
 ## Round 7b-1 — 2026-05-06
 
 **Operator feedback:** Nav consolidation across all three sidebar modes. 10 approved nav decisions implemented. Three mechanical fixes: calendar period navigation, Connections logos, Inbox button consistency.
