@@ -170,4 +170,77 @@
 - `prototypes/consolidation-2026-05-06/permissions.html` (created)
 - `prototypes/consolidation-2026-05-06/lifecycle-errors.html` (created)
 - `prototypes/consolidation-2026-05-06/index.html` (updated)
+
+## Round 4 — 2026-05-06 (fix-up: three confirmed bugs)
+
+**Operator feedback:** Fix three confirmed bugs: (1) invalid nested anchors in index.html causing layout artifacts, (2) stale nav items across per-page mockups, (3) em-dashes in UI copy violating operator preference rule.
+
+**Changes made:**
+
+Bug 1 — Stretched-link refactor in index.html:
+- Changed all 15 `<a class="proto-card" href="X.html">` outer elements to `<div class="proto-card">` (and matching `</a>` to `</div>`)
+- Moved `href` to the inner `<a class="proto-card-link">` element in every card footer
+- Converted `<div class="proto-card-link">Open mockup</div>` placeholders to `<a class="proto-card-link" href="X.html">Open mockup</a>` in all 15 cards
+- Added CSS: `.proto-card { position: relative; }`, `.proto-card-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }`, `.before-link { position: relative; z-index: 2; }`
+- Removed all `onclick="event.stopPropagation()"` attributes from before-links (no longer needed)
+
+Bug 2 — Canonical nav applied to all sidebar pages:
+- Canonical nav structure: WORKSPACE (Home, Inbox+badge, Tasks, Calendar, Agents, Automations, Workflows) / KNOWLEDGE (Knowledge) / PLATFORM (Connections) / MANAGE (Clients, Manage Org)
+- `knowledge.html`: removed stale "Documents" from Knowledge section, removed stale "Connectors" from Platform section, added missing Workflows to Workspace
+- `agents.html`: restructured from (Workspace: Home, Inbox) + (Operate: Agents, Automations, Calendar, Knowledge, Connections) + (Settings: Manage org) to canonical 4-section layout; added Tasks, Workflows, Clients
+- `automations.html`: added missing Inbox and Calendar to Workspace; renamed "Integrations" to "Connections" in Platform; added Clients to Manage
+- `calendar.html`: added missing Inbox, Workflows to Workspace; added missing Knowledge and Platform (Connections) sections
+- `home.html`: restructured from (Workspace: Home, Inbox) + (Operate: Agents, Automations, Calendar, Knowledge, Connections) + (Settings: Manage org) to canonical layout; added Tasks, Workflows, Clients
+- `inbox.html`: added missing Workflows to Workspace; added missing Platform (Connections) and Manage (Clients, Manage Org) sections
+- `integrations.html`: completely restructured from custom bare nav to canonical 4-section sidebar with proper logo, sidebar-section wrappers, all 11 items; Connections marked active
+- `manage-org.html`: added Inbox, Tasks, Calendar, Automations, Workflows to Workspace; removed stale "Integrations" and "Connectors" items; renamed to "Connections"; added Knowledge section
+- `run-trace.html`: expanded from minimal (Agents only) to full canonical nav; Agents remains active (parent of run-trace sub-screen)
+- `workflows.html`: restructured from (Workspace: Home, Inbox) + (Operate: Agents, Automations, Workflows, Calendar) to canonical layout; added Tasks, Clients; proper section labels
+- `agent-edit.html`: expanded from minimal (Agents only) to full canonical nav; Agents remains active (parent sub-screen)
+- `automation-detail.html`: expanded from minimal (Agents, Automations, Workflows) + (Manage: Clients, Manage Org) to full canonical nav; Automations marked active
+- `shell-nav.html`: updated after-state "Board" label to "Home" (round 3 established home.html as the operator landing page; "Board" was a stale label). Note: "Board" remains in the before-state and the disposition table where it refers to WorkspaceBoardPage source.
+
+Bug 3 — Em-dash removal:
+- Before count (non-zero files): 25 files with em-dashes, total approximately 115 occurrences
+- Title tag em-dashes: replaced ` — ` with ` | ` in all `<title>` tags across all files
+- Body content em-dashes: replaced ` — ` with `, ` on all non-comment lines across all files
+- Table cell null indicator em-dashes (`before-agents.html` line 246, `permissions.html` line 214): replaced `—` with `-`
+- Page-disposition.html summary chip placeholders (`—` inside span elements updated by JavaScript): replaced with `0`
+- After count: 0 non-comment em-dashes across all files (4 remaining instances are all inside HTML comments and exempt per spec)
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — fix-up round, no new screens added
+- Default to hidden: yes — no new panels or dashboards introduced
+- One primary action: yes — no screen structure changed
+- Inline state: yes — no changes to information architecture
+- Re-check passed: yes — bug fixes only, no UX changes
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/index.html` (Bug 1: stretched-link refactor; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/knowledge.html` (Bug 2: nav; Bug 3: em-dashes)
+- `prototypes/consolidation-2026-05-06/agents.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/automations.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/calendar.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/home.html` (Bug 2: nav; Bug 3: em-dash title+body)
+- `prototypes/consolidation-2026-05-06/inbox.html` (Bug 2: nav; Bug 3: em-dashes)
+- `prototypes/consolidation-2026-05-06/integrations.html` (Bug 2: nav; Bug 3: em-dashes)
+- `prototypes/consolidation-2026-05-06/manage-org.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/run-trace.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/workflows.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/automation-detail.html` (Bug 2: nav; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/shell-nav.html` (Bug 2: "Board" to "Home" in after-state; Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/before-agents.html` (Bug 3: table cell em-dash)
+- `prototypes/consolidation-2026-05-06/before-knowledge.html` (Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/before-run-trace.html` (Bug 3: em-dash body)
+- `prototypes/consolidation-2026-05-06/before-workflows.html` (Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/before-agent-edit.html` (Bug 3: em-dashes)
+- `prototypes/consolidation-2026-05-06/empty-states.html` (Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/glossary.html` (Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/lifecycle-errors.html` (Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/onboarding.html` (Bug 3: em-dash title)
+- `prototypes/consolidation-2026-05-06/page-disposition.html` (Bug 3: em-dash placeholders and title)
+- `prototypes/consolidation-2026-05-06/permissions.html` (Bug 3: table cell em-dash, title)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (updated)

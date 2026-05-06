@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  FIELD AUDIT — Inbox (new page, Round 2)
+  FIELD AUDIT, Inbox (new page, Round 2)
 
   Consolidates all HITL surfaces:
     KEEP from InboxPage: task / review / failed_run types, status filter, sort, subaccount filter, archive, mark-read
@@ -12,13 +12,13 @@
     ADD: block_proposal preview in drawer
     ADD: inline approve/reject for simple items (approval_pending, block_proposal)
     DROP: separate MemoryReviewQueuePage, ReviewQueuePage as nav items (both folded here)
-    DEFERRED: AgentMailboxPage — has different UX semantics (two-way agent comms); folded as a type here
+    DEFERRED: AgentMailboxPage, has different UX semantics (two-way agent comms); folded as a type here
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inbox — Synthetos Consolidation</title>
+<title>Inbox | Synthetos Consolidation</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="_shared.css">
@@ -155,11 +155,25 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 012-2h6a2 2 0 012 2v1.662"/></svg>Agents</a>
       <a class="sidebar-link" href="#">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Automations</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>Workflows</a>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-label">Knowledge</div>
       <a class="sidebar-link" href="knowledge.html">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>Knowledge</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Platform</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><path d="M13 13h9v9h-9z" stroke-dasharray="2 2"/></svg>Connections</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Manage</div>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>Clients</a>
+      <a class="sidebar-link" href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>Manage Org</a>
     </div>
   </nav>
 
@@ -184,7 +198,7 @@
       <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
         <div>
           <h1>Inbox</h1>
-          <p>Tasks, approvals, belief conflicts, and failed runs across all clients — one place to act.</p>
+          <p>Tasks, approvals, belief conflicts, and failed runs across all clients, one place to act.</p>
         </div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-sm btn-secondary">Mark all read</button>
@@ -284,7 +298,7 @@
           </div>
           <div class="item-main">
             <div class="item-title">Block proposal: Competitive response playbook</div>
-            <div class="item-subtitle">CRM Agent synthesised a new memory block for handling FieldEdge mentions during outreach. Preview available — approve to activate this block in all runs.</div>
+            <div class="item-subtitle">CRM Agent synthesised a new memory block for handling FieldEdge mentions during outreach. Preview available, approve to activate this block in all runs.</div>
             <div class="item-meta">
               <span class="badge badge-green" style="font-size:10px;">Block proposal</span>
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
@@ -310,7 +324,7 @@
           </div>
           <div class="item-main">
             <div class="item-title">Approval needed: Proposal follow-up email to Sarah Chen</div>
-            <div class="item-subtitle">Outreach Agent drafted a follow-up referencing the Kubernetes architecture doc. Review before sending — deal value exceeds $20k approval threshold.</div>
+            <div class="item-subtitle">Outreach Agent drafted a follow-up referencing the Kubernetes architecture doc. Review before sending, deal value exceeds $20k approval threshold.</div>
             <div class="item-meta">
               <span class="badge badge-indigo" style="font-size:10px;">Approval pending</span>
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
@@ -427,7 +441,7 @@
         </div>
 
         <!-- Section: Recent (read) -->
-        <div class="section-divider" style="margin-top:20px;">Earlier — read (8)</div>
+        <div class="section-divider" style="margin-top:20px;">Earlier, read (8)</div>
 
         <!-- Item 8: Approval approved (past) -->
         <div class="inbox-item" style="opacity:0.75;">
@@ -551,7 +565,7 @@
           <div class="item-type-icon icon-task"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
           <div class="item-main">
             <div class="item-title" style="font-weight:500;">Task: Update competitor comparison sheet (Q2 refresh)</div>
-            <div class="item-subtitle">Due May 15. CRM Agent will auto-complete initial draft from public data — final review needed before sending to Acme.</div>
+            <div class="item-subtitle">Due May 15. CRM Agent will auto-complete initial draft from public data, final review needed before sending to Acme.</div>
             <div class="item-meta">
               <span class="badge badge-amber" style="font-size:10px;">In progress</span>
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
@@ -590,12 +604,12 @@
         <div class="belief-side belief-new">
           <div class="belief-label">New belief (from agent)</div>
           <div class="belief-value">Procurement lead is Marcus Hill, Finance Manager</div>
-          <div class="belief-conf">Confidence 0.74 — inferred from April 28 call transcript</div>
+          <div class="belief-conf">Confidence 0.74, inferred from April 28 call transcript</div>
         </div>
         <div class="belief-side">
           <div class="belief-label">Existing belief</div>
           <div class="belief-value">Procurement lead is unknown</div>
-          <div class="belief-conf">Confidence 1.00 — manually set on Apr 15</div>
+          <div class="belief-conf">Confidence 1.00, manually set on Apr 15</div>
         </div>
       </div>
 
@@ -633,7 +647,7 @@
       </div>
       <div style="margin-bottom:14px;">
         <div style="font-size:12px;font-weight:600;color:var(--slate-700);margin-bottom:5px;">Content preview</div>
-        <pre style="font-size:12px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:160px;overflow-y:auto;white-space:pre-wrap;font-family:inherit;line-height:1.55;">When FieldEdge is mentioned: acknowledge their current investment, then pivot to our real-time compliance dashboard differentiator and our Zapier integration (which they lack). Do not lead with price. Offer a side-by-side comparison if they request it — use the Q1-2026 comparison sheet in the Acme authored knowledge.</pre>
+        <pre style="font-size:12px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:160px;overflow-y:auto;white-space:pre-wrap;font-family:inherit;line-height:1.55;">When FieldEdge is mentioned: acknowledge their current investment, then pivot to our real-time compliance dashboard differentiator and our Zapier integration (which they lack). Do not lead with price. Offer a side-by-side comparison if they request it, use the Q1-2026 comparison sheet in the Acme authored knowledge.</pre>
       </div>
       <div style="padding:10px 12px;background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;margin-bottom:14px;">
         <div style="font-size:12px;font-weight:600;color:var(--emerald-700);margin-bottom:3px;">If approved</div>
