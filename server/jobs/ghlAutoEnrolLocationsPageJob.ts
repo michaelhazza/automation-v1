@@ -12,6 +12,7 @@
 
 import { sql, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { setOrgGUC } from '../lib/orgScoping.js';
 import { connectorConfigs } from '../db/schema/connectorConfigs.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
@@ -249,30 +250,35 @@ export async function ghlAutoEnrolLocationsPageWorker(payload: GhlAutoEnrolPageP
     return;
   }
 
-  // Step 9: Insert locations via raw SQL (ON CONFLICT with partial index WHERE clause)
+  // Step 9: Insert locations via raw SQL (ON CONFLICT with partial index WHERE clause).
+  // Each INSERT runs inside its own org-scoped transaction so the FORCE-RLS
+  // WITH CHECK on subaccounts is satisfied (set_config scoped to tx via is_local=true).
   const now = new Date();
   for (const loc of locations) {
     try {
-      await db.execute(sql`
-        INSERT INTO subaccounts (
-          id, organisation_id, name, slug, status,
-          connector_config_id, external_id, external_id_namespace, created_at, updated_at
-        ) VALUES (
-          gen_random_uuid(),
-          ${organisationId},
-          ${loc.name},
-          ${loc.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + loc.id.slice(-4)},
-          'active',
-          ${connectionId},
-          ${loc.id},
-          'ghl_location',
-          ${now.toISOString()},
-          ${now.toISOString()}
-        )
-        ON CONFLICT (organisation_id, external_id)
-          WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL
-        DO NOTHING
-      `);
+      await db.transaction(async (tx) => {
+        await setOrgGUC(tx, organisationId);
+        await tx.execute(sql`
+          INSERT INTO subaccounts (
+            id, organisation_id, name, slug, status,
+            connector_config_id, external_id, external_id_namespace, created_at, updated_at
+          ) VALUES (
+            gen_random_uuid(),
+            ${organisationId},
+            ${loc.name},
+            ${loc.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + loc.id.slice(-4)},
+            'active',
+            ${connectionId},
+            ${loc.id},
+            'ghl_location',
+            ${now.toISOString()},
+            ${now.toISOString()}
+          )
+          ON CONFLICT (organisation_id, external_id)
+            WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL
+          DO NOTHING
+        `);
+      });
     } catch (err) {
       // Non-fatal insert errors — log and continue
       logger.warn('ghl.autoEnrolPage.insertError', {

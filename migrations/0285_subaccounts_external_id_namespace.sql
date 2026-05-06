@@ -19,9 +19,13 @@ DECLARE remaining int;
 BEGIN
   SELECT COUNT(*) INTO remaining
     FROM subaccounts
-   WHERE external_id IS NOT NULL AND external_id_namespace IS NULL;
+   WHERE external_id IS NOT NULL
+     AND external_id_namespace IS NULL
+     AND connector_config_id IN (
+       SELECT id FROM connector_configs WHERE connector_type = 'ghl'
+     );
   IF remaining > 0 THEN
-    RAISE EXCEPTION 'backfill incomplete: % rows still have external_id_namespace = NULL', remaining;
+    RAISE EXCEPTION 'backfill incomplete: % GHL-linked rows still have external_id_namespace = NULL', remaining;
   END IF;
 END $$;
 
