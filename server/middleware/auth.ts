@@ -392,6 +392,18 @@ export const requireSubaccountPermission = (permissionKey: string) => {
         }
       }
 
+      const organisationIdForAudit = req.orgId ?? req.user?.organisationId;
+      if (organisationIdForAudit) {
+        void recordSecurityEvent({
+          event:          auditEvent.auth.permissionDenied,
+          organisationId: organisationIdForAudit,
+          actorUserId:    req.user.id,
+          actorRole:      req.user.role,
+          ip:             req.ip ?? null,
+          userAgent:      req.get('user-agent') ?? null,
+          meta:           { route: req.path, method: req.method, requiredPermission: permissionKey, subaccountId },
+        });
+      }
       res.status(403).json({ error: 'Forbidden' });
       return;
     } catch (err) {

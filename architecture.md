@@ -1629,6 +1629,8 @@ The platform writes **two distinct audit streams**, never one merged stream:
 
 The split exists because the streams have different write volumes, retention requirements, and exposure rules — and because muddling them was a pre-launch finding. Detection gate: `scripts/verify-audit-stream-split.sh` (grep guard at `scripts/__fixtures__/audit-stream-split/`).
 
+`requireSubaccountPermission` (auth.ts) now mirrors `requireOrgPermission` on the 403 path: both emit `auditEvent.auth.permissionDenied` via `recordSecurityEvent`. The subaccount variant skips the emit when neither `req.orgId` nor `req.user.organisationId` is available (authenticated but org-unresolved).
+
 ### Canonical RLS session variables (hard rule)
 
 The only session variables that RLS policies may reference are:
