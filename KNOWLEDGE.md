@@ -2483,3 +2483,7 @@ The terminal round IS logged with full session-log structure (raw response, deci
 **Heuristic for declaring convergence early.** If round N produces only "nice-to-have" findings already labelled optional by the reviewer, AND the verdict has stabilised at APPROVED for two consecutive rounds, AND the operator has signalled finalisation intent, run the zero-findings validation round explicitly to confirm. This prevents premature finalisation on a spec that has lurking issues the reviewer hasn't surfaced yet.
 
 **Anti-pattern.** Treating a terminal zero-findings round as "wasted" and skipping it. The convergence signal is the audit artifact — without it, the spec's "ready to build" status is operator assertion, not reviewer-confirmed.
+
+### D.6 advisory-lock scope (2026-05-06)
+
+`pg_try_advisory_xact_lock` in `workflowEngineService.ts` `tick()` is NOT in the same transaction as `pgboss.send()`. The lock runs in auto-commit mode via `db.execute` (no wrapping `db.transaction`), so it releases at statement end — it does NOT span the full tick() handler. `pgboss.send()` runs on a separate auto-commit connection. Contention detection still works (two concurrent handlers racing on the same runId will observe `got=false`), but there is no serialisation gate. A full fix (wrapping tick() in a single `db.transaction`) is deferred — tracked in `tasks/todo.md` under `## Deferred`. AR-3.1 noted in-situ in the source file.

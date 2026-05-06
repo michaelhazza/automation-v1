@@ -63,11 +63,17 @@ export interface NormalisedSecurityEvent {
 
 const META_MAX_BYTES = 16 * 1024;
 const PII_BLACKLIST = new Set(['password', 'token', 'secret', 'authorization']);
+const PII_SUBSTRINGS = ['password', 'token', 'secret', 'authorization', 'credential'] as const;
 
 function sanitiseMeta(meta: Record<string, unknown>): Record<string, unknown> {
   const sanitised = { ...meta };
   for (const k of Object.keys(sanitised)) {
     if (PII_BLACKLIST.has(k.toLowerCase())) {
+      sanitised[k] = '[redacted]';
+      continue;
+    }
+    // substring match for keys like 'user_password', 'AUTH_TOKEN', 'client_secret'
+    if (PII_SUBSTRINGS.some(s => k.toLowerCase().includes(s))) {
       sanitised[k] = '[redacted]';
     }
   }

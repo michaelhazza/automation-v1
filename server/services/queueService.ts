@@ -1329,6 +1329,19 @@ export const queueService = {
         },
       });
 
+      // Phase 3 D.5 — GHL auto-enrol locations page (paginated background job).
+      // Triggered when autoEnrolAgencyLocations detects > MAX_GHL_LOCATIONS_TO_ENROL.
+      // Uses singletonKey to prevent concurrent runs per connection.
+      // Does NOT use createWorker's org-scoped tx — uses withAdminConnection directly.
+      await (boss as any).work(
+        'ghl:auto-enrol-locations-page',
+        { teamSize: 1, teamConcurrency: 1 },
+        async (job: any) => {
+          const { ghlAutoEnrolLocationsPageWorker } = await import('../jobs/ghlAutoEnrolLocationsPageJob.js');
+          await ghlAutoEnrolLocationsPageWorker(job.data);
+        },
+      );
+
       // Pre-launch hardening C-P0-2 — OAuth resume restart (event-driven).
       // Dequeued after a successful OAuth token exchange when a pendingRunId was
       // stored on the state nonce. Default resolveOrgContext reads organisationId
