@@ -44,7 +44,7 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
   useEffect(() => {
     api.get('/api/system/company-templates').then(({ data }) => {
       setConfigTemplates(data.filter((t: { isPublished: boolean }) => t.isPublished));
-    }).catch(logAndSwallow('SystemOrganisationsPage: company templates fetch'));
+    }).catch(logAndSwallow('SystemOrganisationsPage: company templates fetch', { severity: 'critical' }));
   }, []);
 
   const [editOrg, setEditOrg] = useState<Organisation | null>(null);

@@ -58,6 +58,13 @@ This file is read at three points:
 - **Action when triggered:** Decide between centralised audit API (mechanical enforcement) vs TypeScript ESLint rule (lint-time enforcement). Implement the chosen option. Refactor every audit call site.
 - **Why it stays deferred today:** The grep gate has not yet drifted; structural enforcement is overkill for a stable surface.
 
+### L5 cost-gate — proactive 80% trigger
+
+- **Source:** This spec §4.H4 + §4.L5; chatgpt-spec-review round 1 (2026-05-06).
+- **Trigger condition:** The optimiser cost-gate workflow's measured `dollarsPerSubaccountPerDay` reaches 80% of the $0.02 threshold (≥ $0.016/sa/day) on **two consecutive runs** of the workflow. The threshold-fail at $0.02 is the reactive guard; this proactive trigger fires before that and prevents reaching the ceiling under load.
+- **Action when triggered:** Read the diagnostic-logging output from the last two runs (totalTokens, numberOfRenderCalls, averageTokensPerRecommendation, totalCostDollars). Identify the drift vector — per-call token count (prompt change), call count (batching change), or rate (model change). Apply the appropriate fix in the same PR or a follow-up before the next optimiser-touching merge.
+- **Why it stays deferred today:** The reactive gate at $0.02 holds the line; the proactive trigger is monitoring discipline that only matters once the gate has been running long enough to produce a trend.
+
 ---
 
 ## How to use this runbook

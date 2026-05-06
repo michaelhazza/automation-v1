@@ -264,10 +264,10 @@ export async function dispatchWebhookSideEffects(
         result = await db.transaction(async (tx) => {
           await tx.execute(sql`SELECT set_config('app.organisation_id', ${connection.organisationId}, true)`);
           const rows = await tx.execute<{ id: string; inserted: boolean }>(sql`
-            INSERT INTO subaccounts (id, organisation_id, name, slug, status, connector_config_id, external_id, created_at, updated_at)
-            VALUES (gen_random_uuid(), ${connection.organisationId}, ${locName}, ${slug}, 'active', ${connection.id}, ${locId}, now(), now())
-            ON CONFLICT (connector_config_id, external_id)
-              WHERE deleted_at IS NULL AND connector_config_id IS NOT NULL AND external_id IS NOT NULL
+            INSERT INTO subaccounts (id, organisation_id, name, slug, status, connector_config_id, external_id, external_id_namespace, created_at, updated_at)
+            VALUES (gen_random_uuid(), ${connection.organisationId}, ${locName}, ${slug}, 'active', ${connection.id}, ${locId}, 'ghl_location', now(), now())
+            ON CONFLICT (organisation_id, external_id)
+              WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL
             DO UPDATE SET name = EXCLUDED.name, updated_at = now()
             RETURNING id, (xmax = 0) AS inserted
           `);

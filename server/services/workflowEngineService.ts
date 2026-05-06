@@ -836,6 +836,15 @@ export const WorkflowEngineService = {
    */
   async tick(runId: string): Promise<void> {
     // Layer 2 — non-blocking advisory lock.
+    // AR-3.1 NOTE: pg_try_advisory_xact_lock runs in auto-commit mode here (db.execute
+    // without a wrapping db.transaction). The xact-level lock releases at statement end,
+    // NOT at function end. pgboss.send() below (and all other DB ops in this handler)
+    // run on separate auto-commit connections — the advisory lock does NOT span them.
+    // The practical effect is contention detection only (if another handler holds a lock
+    // on the same runId it returns got=false), not a true serialisation gate.
+    // A full fix (wrapping all of tick() in a single db.transaction) is deferred to AR-3.1
+    // resolution and tracked in tasks/todo.md under ## Deferred. The current implementation
+    // is safe under pg-boss's own singletonKey deduplication (§5.6 layer 1).
     const lockResult = await db.execute(
       sql`SELECT pg_try_advisory_xact_lock(hashtext(${'workflow-run:' + runId})::bigint) AS got`
     );

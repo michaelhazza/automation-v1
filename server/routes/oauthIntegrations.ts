@@ -352,7 +352,7 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   }
 
   const { consumeGhlOAuthState } = await import('../services/ghlOAuthStateStore.js');
-  const stateData = await consumeGhlOAuthState(state);
+  const stateData = await consumeGhlOAuthState(state, { userAgent: req.get('user-agent') ?? null, ip: req.ip ?? null });
   if (!stateData) {
     // Expired, already consumed, and unknown nonces all return null (intentional —
     // avoids an oracle that distinguishes the three cases). Log for observability.
