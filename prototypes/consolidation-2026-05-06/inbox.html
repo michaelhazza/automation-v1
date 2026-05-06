@@ -89,7 +89,7 @@
    * Round 7b-1: Uniform inbox action button sizing.
    * All action buttons: padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px.
    * Primary (Approve, Reply to agent, Open task, View run trace, Re-authenticate): solid indigo.
-   * Secondary (Reject, View draft, Re-suppress, Keep existing): white bg, slate-300 border, slate-700 text.
+   * Secondary (Reject, View draft, Keep ignoring, Keep existing): white bg, slate-300 border, slate-700 text.
    * Archive: white bg, slate-300 border, slate-500 text (muted to differentiate without being a plain link).
    * Override btn-xs sizing with .inbox-btn base.
    */
@@ -438,7 +438,7 @@
           </div>
           <div class="item-main">
             <div class="item-title">Failed run: CRM Sync Agent</div>
-            <div class="item-subtitle">Run failed after 3 retries. Error: HubSpot OAuth token expired. Re-authentication required to resume CRM syncing for Revel Group.</div>
+            <div class="item-subtitle">Run failed after 3 retries. HubSpot connection expired. Re-authentication required to resume CRM syncing for Revel Group.</div>
             <div class="item-meta">
               <span class="badge badge-red" style="font-size:10px;">Failed run</span>
               <span class="client-pill" style="background:#fef3c7;color:#b45309;">
@@ -449,8 +449,8 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="inbox-btn inbox-btn-primary">View run trace</button>
-            <button class="inbox-btn inbox-btn-secondary">Re-authenticate</button>
+            <a href="run-trace.html" class="inbox-btn inbox-btn-primary" style="text-decoration:none;">View run trace</a>
+            <a href="integrations.html" class="inbox-btn inbox-btn-secondary" style="text-decoration:none;">Re-authenticate</a>
             <button class="inbox-btn inbox-btn-archive">Archive</button>
           </div>
           <div class="item-time">May 5, 7:45am</div>

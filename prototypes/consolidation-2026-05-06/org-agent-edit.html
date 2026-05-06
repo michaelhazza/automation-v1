@@ -418,7 +418,7 @@
             <div class="section-card-header"><h3>Identity</h3></div>
             <div class="section-card-body">
               <div style="display:flex;gap:14px;align-items:flex-start;">
-                <div style="width:48px;height:48px;border-radius:10px;background:var(--indigo-50);border:1px solid var(--indigo-200);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;cursor:pointer;" title="Click to change icon">&#128270;</div>
+                <div style="width:48px;height:48px;border-radius:10px;background:var(--emerald-50);border:1px solid #a7f3d0;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:#059669;flex-shrink:0;cursor:pointer;letter-spacing:-0.5px;" title="Click to change icon">OA</div>
                 <div style="flex:1;">
                   <div class="form-field" style="margin-bottom:12px;">
                     <label class="form-label">Agent name</label>
@@ -548,7 +548,7 @@ Note: Workspaces may append workspace-specific instructions to this system role.
           <div class="section-card" style="margin-bottom:18px;">
             <div class="section-card-header" style="justify-content:space-between;">
               <h3>Enabled skills <span style="font-weight:400;color:var(--slate-400);font-size:12px;">5</span></h3>
-              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong> — Org-level definition</span>
+              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong>, org-level definition</span>
             </div>
             <div class="skill-toggle-list" style="border:none;border-radius:0;">
 
@@ -929,7 +929,7 @@ Note: Workspaces may append workspace-specific instructions to this system role.
           <div class="section-card" style="margin-bottom:18px;">
             <div class="section-card-header" style="justify-content:space-between;">
               <h3>Enabled data sources <span style="font-weight:400;color:var(--slate-400);font-size:12px;">4</span></h3>
-              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong> — Org-level definition</span>
+              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong>, org-level definition</span>
             </div>
             <div class="skill-toggle-list" style="border:none;border-radius:0;">
 
@@ -1576,25 +1576,25 @@ function openOrgSkillCtxMenu(event, tier) {
   let items = [];
   if (tier === 'system') {
     items = [
-      { label: 'View source', icon: '&#128196;' },
-      { label: 'Configure for this agent', icon: '&#9881;' },
+      { label: 'View source', icon: '' },
+      { label: 'Configure for this agent', icon: '' },
       { sep: true },
-      { label: 'Disable', icon: '&#128683;' },
+      { label: 'Disable', icon: '' },
     ];
   } else if (tier === 'org') {
     items = [
-      { label: 'Edit', icon: '&#9998;' },
-      { label: 'Configure', icon: '&#9881;' },
-      { label: 'View parameters', icon: '&#128196;' },
+      { label: 'Edit', icon: '' },
+      { label: 'Configure', icon: '' },
+      { label: 'View parameters', icon: '' },
       { sep: true },
-      { label: 'Disable', icon: '&#128683;' },
-      { label: 'Delete skill', icon: '&#128465;', cls: 'ctx-danger',
+      { label: 'Disable', icon: '' },
+      { label: 'Delete skill', icon: '', cls: 'ctx-danger',
         note: 'Inheriting workspaces will lose this skill' },
     ];
   } else {
     /* view-only fallback */
     items = [
-      { label: 'View source', icon: '&#128196;' },
+      { label: 'View source', icon: '' },
     ];
   }
 
@@ -1889,7 +1889,7 @@ function openDeploymentsDrawer(wsKey) {
   const ws = WORKSPACE_DATA[wsKey];
   if (!ws) return;
 
-  document.getElementById('dd-title').textContent = ws.name + ' — Deployment details';
+  document.getElementById('dd-title').textContent = ws.name + ': Deployment details';
   document.getElementById('dd-subtitle').textContent = ws.slug + ' · ' + ws.status;
 
   const statusCls = ws.status === 'Active' ? 'dep-status-active'

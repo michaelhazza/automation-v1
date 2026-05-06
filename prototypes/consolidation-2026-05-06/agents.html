@@ -875,13 +875,16 @@ function agentIconHtml(a) {
 function tagsHtml(tags, isLocal) {
   let out = tags.map(t => `<span class="tag-chip">${t}</span>`).join('');
   if (isLocal) out += `<span class="tag-chip-local">Local</span>`;
-  return out || '<span style="color:var(--slate-300);font-size:11px;">—</span>';
+  return out || '<span style="color:var(--slate-300);font-size:11px;">-</span>';
 }
 
 function actionsHtml(actions, view, agentId) {
   const btns = [];
   actions.forEach(a => {
-    if (a === 'edit')     btns.push(`<button class="act-btn act-edit" onclick="showToast('Opening agent edit...')">Edit</button>`);
+    if (a === 'edit') {
+      const editHref = view === 'org' ? 'org-agent-edit.html' : 'agent-edit.html';
+      btns.push(`<a href="${editHref}" class="act-btn act-edit" style="text-decoration:none;">Edit</a>`);
+    }
     if (a === 'run')      btns.push(`<button class="act-btn act-run" onclick="showToast('Triggering run for this workspace...')">Run</button>`);
     if (a === 'view-run') btns.push(`<a href="run-trace.html" class="act-btn act-run" style="text-decoration:none;">View run</a>`);
     if (a === 'fix')      btns.push(`<button class="act-btn" style="background:var(--red-50);color:var(--red-600);border:1px solid #fecaca;" onclick="showToast('Opening credential fix flow...')">Fix</button>`);

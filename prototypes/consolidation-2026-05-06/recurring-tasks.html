@@ -789,7 +789,7 @@ const TASKS = [
   { id:11, name:'Failed sync notification',  type:'event',   detail:'On agent_completed', agent:'Internal Escalation',  workflow:null,               status:'active',  lastFired:'Yesterday',             fires30:8,   nextFire:null },
   { id:12, name:'New customer onboarding',   type:'event',   detail:'On task_moved',      agent:'Onboarding Agent',     workflow:'Onboarding flow',  status:'active',  lastFired:'3 days ago',            fires30:5,   nextFire:null },
   { id:13, name:'Demo follow-up',            type:'event',   detail:'On task_completed',  agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Today 11:00am',         fires30:18,  nextFire:null },
-  { id:14, name:'Churn risk monitor',        type:'event',   detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',           fires30:3,   nextFire:null, error:'HubSpot OAuth expired' },
+  { id:14, name:'Churn risk monitor',        type:'event',   detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',           fires30:3,   nextFire:null, error:'HubSpot connection expired' },
   // Manual (3)
   { id:15, name:'Quarterly business review', type:'manual',  detail:'Manual only',        agent:'Reporting Agent',      workflow:'QBR workflow',     status:'active',  lastFired:'Apr 30',                fires30:1,   nextFire:null },
   { id:16, name:'Custom outreach blast',     type:'manual',  detail:'Manual only',        agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'2 weeks ago',           fires30:1,   nextFire:null },
@@ -811,7 +811,7 @@ function renderRows(tasks) {
     const statusBadge = `<span class="status-badge ${t.status}">${STATUS_LABELS[t.status]}</span>
       ${t.error ? `<div class="error-inline" style="margin-top:4px;font-size:11px;">${escHtml(t.error)}</div>` : ''}`;
 
-    const nextCell = t.nextFire ? `<span class="next-fire">${escHtml(t.nextFire)}</span>` : '<span class="muted">—</span>';
+    const nextCell = t.nextFire ? `<span class="next-fire">${escHtml(t.nextFire)}</span>` : '<span class="muted">-</span>';
 
     return `<tr onclick="openDrawer(${t.id})" data-id="${t.id}" data-type="${t.type}" data-status="${t.status}">
       <td><span class="task-name">${escHtml(t.name)}</span></td>

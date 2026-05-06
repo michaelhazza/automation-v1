@@ -619,7 +619,7 @@ const MOCK_ROWS = [
     duration: null,
     detail: {
       findingType: 'credential_expiry',
-      integration: 'Gmail (OAuth)',
+      integration: 'Gmail',
       expiresAt: '2026-05-08T09:00:00Z',
       affectedAgents: 'Outreach Agent, CRM Sync Agent',
     },
@@ -1469,7 +1469,7 @@ function buildDrawerFooter(row) {
     btns.push(`<a href="inbox.html" class="btn btn-primary" style="font-size:12.5px;padding:7px 14px;">View in Inbox</a>`);
   }
   if (row.type === 'health_finding') {
-    btns.push(`<button class="btn btn-secondary" style="font-size:12.5px;padding:7px 14px;" onclick="alert('Prototype stub')">View finding</button>`);
+    btns.push(`<button class="btn btn-secondary" style="font-size:12.5px;padding:7px 14px;" onclick="showToast('Opening finding detail...')">View finding</button>`);
   }
 
   btns.push(`<button class="btn btn-ghost" style="font-size:12.5px;padding:7px 14px;" onclick="closeDrawer()">Close</button>`);

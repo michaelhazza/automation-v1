@@ -600,7 +600,7 @@
               Show example objectives
             </button>
             <div class="examples-panel" id="examples-panel">
-              <div class="examples-panel-title">Example objectives — click to use</div>
+              <div class="examples-panel-title">Example objectives (click to use)</div>
               <div class="example-item" onclick="useExample(this)">Reduce customer churn by 25% through proactive health check campaigns and at-risk-account interventions by end of Q2.</div>
               <div class="example-item" onclick="useExample(this)">Launch the new pricing tier with at least 50 paying customers in the first 30 days after go-live.</div>
               <div class="example-item" onclick="useExample(this)">Complete SOC 2 Type II certification preparation, including all evidence collection and gap remediation, before the external audit window opens.</div>
@@ -635,7 +635,7 @@
           <div class="field">
             <label class="field-label">
               Budget warning threshold
-              <span class="field-hint" style="font-weight:400;margin-left:4px;">— alert when spend reaches this % of budget</span>
+              <span class="field-hint" style="font-weight:400;margin-left:4px;">(alert when spend reaches this % of budget)</span>
             </label>
             <div class="slider-row">
               <input type="range" class="range-slider" id="budget-slider" min="50" max="95" value="75" oninput="updateSlider(this)">
@@ -811,7 +811,7 @@ function updateSlider(el) {
 
 /* ── Stub action toast ───────────────────────────────────── */
 function showStubAction(label) {
-  showToast('Prototype stub: ' + label + ' not implemented');
+  showToast(label + ' saved');
 }
 
 /* ── Toast helper ────────────────────────────────────────── */

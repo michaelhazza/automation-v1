@@ -1264,3 +1264,81 @@ index.html:
 - `prototypes/consolidation-2026-05-06/agent-edit.html` (skill state CSS + rows + modal added)
 - `prototypes/consolidation-2026-05-06/org-agent-edit.html` (skill state CSS + rows + modal added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7-final-B — 2026-05-06
+
+**Operator feedback:** Final polish pass before review-ready. Walk every after-mockup page systematically against 10 check categories: terminology, em-dashes, emojis, design principles, mock data quality, stub labels, cross-links, demo profile gating, sidebar consistency, visual consistency.
+
+**Changes made:**
+
+Em-dash fixes (user-visible content only, HTML/CSS/JS comments exempt):
+- `run-trace.html`: "Outreach Agent — Run #4827" replaced with "Outreach Agent: Run #4827"
+- `project-edit.html`: "Example objectives — click to use" replaced with "(click to use)"; "— alert when spend..." replaced with "(alert when spend...)"
+- `org-agent-edit.html`: "Outreach Agent — Org-level definition" (2 instances) replaced with "Outreach Agent, org-level definition"; JS string " — Deployment details" replaced with ": Deployment details"
+- `agents.html`: null indicator em-dash in tags column replaced with hyphen
+- `recurring-tasks.html`: null indicator em-dash in "Next fire" column replaced with hyphen
+- `queues.html`: 5 null indicator em-dashes in table cells replaced with hyphens
+
+Terminology fixes:
+- `inbox.html`: "HubSpot OAuth token expired" replaced with "HubSpot connection expired"; CSS comment updated from "Re-suppress" to "Keep ignoring"
+- `agent-edit.html`: credential select "(OAuth, valid)" replaced with "(connected, valid)"; "HubSpot API key (valid)" replaced with "HubSpot key (valid)"
+- `manage-org.html`: "Google Workspace OAuth token expires in 3 days" replaced with "Google Workspace connection expires in 3 days"
+- `recurring-tasks.html`: error mock data "HubSpot OAuth expired" replaced with "HubSpot connection expired"
+- `activity.html`: integration field "Gmail (OAuth)" replaced with "Gmail"
+
+Emoji fixes (&#12xxxx entities, all replaced with SVG or text):
+- `knowledge.html`: 24 emoji entities removed. &#128683; (prohibited) replaced with SVG circle-line icon; &#128065; (eye) removed from "Admin view" chip label; &#128274; (lock) removed from "Edit at org level" button; &#128196;/&#128202; (document icons) replaced with inline SVG file/chart icons throughout
+- `org-knowledge.html`: 21 emoji entities removed. &#128101; (group) removed from "Used by N workspaces" chips; &#128101; removed from "Not yet shared" chip; &#128196;/&#128202; doc icons replaced with SVG
+- `agent-edit.html`: &#128270; (magnifying glass) agent icon replaced with "OA" initials in emerald circle
+- `org-agent-edit.html`: &#128270; agent icon replaced with "OA" initials; &#128196;/&#128683;/&#128465;/&#9998;/&#9881; in context menu items replaced with empty strings (text-only items)
+
+Cross-link fixes:
+- `home.html`: "View run log" link changed from # to activity.html; spend drawer "coming soon" note replaced with link to spending.html
+- `agents.html`: "Edit" row action changed from showToast to actual <a> link: workspace view -> agent-edit.html, org view -> org-agent-edit.html
+- `inbox.html`: "View run trace" button changed from button (stub) to <a href="run-trace.html">; "Re-authenticate" button changed to <a href="integrations.html">
+- `agent-edit.html`: data source drawer "View full document in Knowledge", "Edit in Knowledge", "Edit bundle in Knowledge" links changed from # (onclick=false) to href="knowledge.html"
+- `automations.html`: "Recurring tasks page" footer link changed from # to recurring-tasks.html
+- `org-knowledge.html`: "View at workspace level" link added to all 6 authored memory overflow menus, pointing to knowledge.html
+
+Stub/placeholder fixes:
+- `home.html`: "Detailed spend breakdown - coming soon" replaced with proper "View full spending breakdown" link to spending.html
+- `spending.html`: 4 x alert('Pause stub') replaced with showToast('Agent paused')
+- `activity.html`: alert('Prototype stub') in "View finding" button replaced with showToast('Opening finding detail...')
+- `project-edit.html`: showToast message changed from "Prototype stub: X not implemented" to "X saved"
+
+Pages checked with no changes needed:
+- `calendar.html`: clean, period navigation works, no terminology issues
+- `automation-detail.html`: clean, no issues found
+- `team.html`: em-dash in CSS comment only (exempt), no other issues
+- `integrations.html`: clean, uses "Sign in" / "Key" / "Web login" terminology correctly
+- `manage-org.html`: one OAuth fix applied, otherwise clean
+- `pages.html`: stub CSS class names only (not UI text), showToast used for stub actions
+- `onboarding.html`: no sidebar (intentional: full-screen flow), no issues
+- `queues.html`: OAuth in system admin error tables (exception per brief), null indicators fixed, correctly defaults to system mode
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- polish pass only. No information architecture changes. Primary tasks remain unchanged on all pages.
+- Default to hidden: yes -- no new panels or dashboards added. Spend drawer "coming soon" note replaced with direct link rather than expanding the drawer content.
+- One primary action: yes -- no screen structure changed. Cross-link fixes route to correct destination pages.
+- Inline state: yes -- agent icon uses initials (readable inline state without emoji dependency). Knowledge overflow menus now show workspace link inline.
+- Re-check passed: yes -- emoji removal makes Admin view and document type indicators use text or SVG rather than platform-dependent emoji glyphs, which is more reliable and professional. Terminology fixes ("connection expired" vs "OAuth token expired") are more operator-friendly.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/run-trace.html` (em-dash in title)
+- `prototypes/consolidation-2026-05-06/project-edit.html` (em-dashes, stub toast message)
+- `prototypes/consolidation-2026-05-06/org-agent-edit.html` (em-dashes, agent icon emoji, context menu emoji)
+- `prototypes/consolidation-2026-05-06/inbox.html` (OAuth terminology, CSS comment, cross-links)
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (OAuth/API key terminology, Knowledge cross-links, agent icon emoji)
+- `prototypes/consolidation-2026-05-06/manage-org.html` (OAuth terminology)
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html` (OAuth error, null indicator)
+- `prototypes/consolidation-2026-05-06/activity.html` (OAuth field, stub alert)
+- `prototypes/consolidation-2026-05-06/home.html` (View run log link, spend drawer note)
+- `prototypes/consolidation-2026-05-06/agents.html` (Edit cross-link, null indicator)
+- `prototypes/consolidation-2026-05-06/knowledge.html` (24 emoji entities replaced)
+- `prototypes/consolidation-2026-05-06/org-knowledge.html` (21 emoji entities replaced, workspace cross-links added)
+- `prototypes/consolidation-2026-05-06/spending.html` (Pause stubs replaced with toast)
+- `prototypes/consolidation-2026-05-06/automations.html` (recurring-tasks cross-link)
+- `prototypes/consolidation-2026-05-06/queues.html` (null indicator em-dashes)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

@@ -420,7 +420,7 @@
             <div class="section-card-header"><h3>Identity</h3></div>
             <div class="section-card-body">
               <div style="display:flex;gap:14px;align-items:flex-start;">
-                <div style="width:48px;height:48px;border-radius:10px;background:var(--indigo-50);border:1px solid var(--indigo-200);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;cursor:pointer;" title="Click to change icon">&#128270;</div>
+                <div style="width:48px;height:48px;border-radius:10px;background:var(--emerald-50);border:1px solid #a7f3d0;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:#059669;flex-shrink:0;cursor:pointer;letter-spacing:-0.5px;" title="Click to change icon">OA</div>
                 <div style="flex:1;">
                   <div class="form-field" style="margin-bottom:12px;">
                     <label class="form-label">Agent name</label>
@@ -1746,7 +1746,7 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
       <div id="skill-tab-details">
       <div class="form-field"><label class="form-label">Skill name</label><input class="form-input" value="Send email"></div>
       <div class="form-field"><label class="form-label">Description (shown to agent)</label><textarea class="form-textarea">Send an email via Gmail to one or more recipients. Use for outreach, follow-ups, proposals, and confirmations. Always check the approval threshold before calling this skill for deal-related emails.</textarea></div>
-      <div class="form-field"><label class="form-label">Connected credential</label><select class="form-select" style="width:100%;"><option selected>agency-gmail@example.com (OAuth, valid)</option><option>outreach@client.com (OAuth, valid)</option></select></div>
+      <div class="form-field"><label class="form-label">Connected credential</label><select class="form-select" style="width:100%;"><option selected>agency-gmail@example.com (connected, valid)</option><option>outreach@client.com (connected, valid)</option></select></div>
       <div class="form-field"><label class="form-label">Max calls per run</label><input class="form-input" value="5" type="number"><div class="form-hint">Limit emails this agent can send in a single run</div></div>
       <div class="form-field" style="margin-bottom:0;">
         <label class="form-label">Client visibility</label>
@@ -1932,7 +1932,7 @@ var dsDrawerContents = {
       + '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">'
       + 'Acme Inc Brand Guide v3. Our brand voice is direct, confident, and approachable. We lead with outcomes, avoid jargon, and never use passive voice. Primary colour: #4F46E5...'
       + '</div></div>'
-      + '<a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">View full document in Knowledge</a>'
+      + '<a href="knowledge.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">View full document in Knowledge</a>'
   },
   'memory': {
     title: 'Voice and Tone Standards',
@@ -1949,7 +1949,7 @@ var dsDrawerContents = {
       + '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">'
       + 'Tone: Professional but warm. Lead with outcomes. Max 3 paragraphs per email. Avoid jargon. Sign off with first name only. Never use passive voice...'
       + '</div></div>'
-      + '<a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Edit in Knowledge</a>'
+      + '<a href="knowledge.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">Edit in Knowledge</a>'
   },
   'bundle': {
     title: 'Demo collateral Q1 2026',
@@ -1966,7 +1966,7 @@ var dsDrawerContents = {
       + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Product Overview Slides.pdf</span><span style="margin-left:auto;color:var(--slate-400);">210 KB</span></div>'
       + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;border-bottom:none;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Pricing One-Pager.pdf</span><span style="margin-left:auto;color:var(--slate-400);">22 KB</span></div>'
       + '</div></div>'
-      + '<a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Edit bundle in Knowledge</a>'
+      + '<a href="knowledge.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">Edit bundle in Knowledge</a>'
   },
   'live': {
     title: 'Acme HubSpot CRM',
@@ -1977,7 +1977,7 @@ var dsDrawerContents = {
       + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">On-demand lookup</div></div>'
       + '<div><div class="form-label">Sync interval</div><div style="font-size:13px;">Every 15 min</div></div>'
       + '<div><div class="form-label">Records cached</div><div style="font-size:13px;">4,218 contacts</div></div>'
-      + '<div><div class="form-label">Credential</div><div style="font-size:13px;">HubSpot API key (valid)</div></div>'
+      + '<div><div class="form-label">Credential</div><div style="font-size:13px;">HubSpot key (valid)</div></div>'
       + '</div>'
       + '<div style="background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--slate-600);">'
       + 'Connection healthy. Last sync completed in 1.2s. No errors in last 48 hours.'
