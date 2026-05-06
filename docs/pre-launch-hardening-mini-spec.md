@@ -129,7 +129,7 @@
 
 **Effort:** small.
 
-**Done criteria:** all three jobs execute their intended writes under the same RLS contract as `memoryDedupJob`; test added per job that verifies a real row is decayed/pruned/recalibrated.
+**Done criteria:** all three jobs execute their intended writes under the same RLS contract as `memoryDedupJob`; pure-function test added per job that verifies the decay/prune/recalibrate decision logic. (integration tests permanently deferred per feedback_unit-tests-mid-build)
 
 ---
 

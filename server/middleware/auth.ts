@@ -1,17 +1,21 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../db/schema/index.js';
+import { orgUserRoles, subaccountUserAssignments, permissionSetItems, users } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { auditService } from '../services/auditService.js';
 import { withOrgTx } from '../instrumentation.js';
+import { recordSecurityEvent } from '../services/securityAuditService.js';
+import { auditEvent } from '../../shared/types/securityAuditEvents.js';
 
 export interface JwtPayload {
   id: string;
   organisationId: string;
   role: string;
   email: string;
+  /** Standard JWT issued-at claim (seconds since epoch). Set by jsonwebtoken automatically. */
+  iat?: number;
 }
 
 declare global {
@@ -76,6 +80,33 @@ export const authenticate = async (
 
   req.user = payload;
 
+  // JWT forced-logout: reject tokens issued before the user last changed their password.
+  // This check runs outside the org-scoped tx (uses db directly) because it must
+  // execute before the org context is established and is not tenant-data access.
+  // Both sides compared at second-precision (JWT iat is whole seconds; passwordChangedAt
+  // is floored to seconds at write-time in authService). Use strict `>` so a token
+  // reissued in the same wall-clock second as the password change is not revoked.
+  const [userRow] = await db
+    .select({ passwordChangedAt: users.passwordChangedAt })
+    .from(users)
+    .where(and(eq(users.id, payload.id), isNull(users.deletedAt)));
+  const issuedSec = payload.iat ?? 0;
+  const pwdChangedSec = userRow?.passwordChangedAt
+    ? Math.floor(userRow.passwordChangedAt.getTime() / 1000)
+    : 0;
+  if (userRow && userRow.passwordChangedAt && pwdChangedSec > issuedSec) {
+    void recordSecurityEvent({
+      event:          auditEvent.auth.tokenRevoked,
+      organisationId: payload.organisationId,
+      actorUserId:    payload.id,
+      ip:             req.ip ?? null,
+      userAgent:      req.get('user-agent') ?? null,
+      meta:           { reason: 'password_changed_after_token_issued' },
+    });
+    res.status(401).json({ error: 'token_revoked', message: 'Your session has expired. Please log in again.' });
+    return;
+  }
+
   // system_admin can pass X-Organisation-Id to scope into any org.
   if (payload.role === 'system_admin') {
     const headerOrgId = req.headers['x-organisation-id'] as string | undefined;
@@ -94,6 +125,17 @@ export const authenticate = async (
           path: req.path,
         },
         ipAddress: req.ip,
+      });
+      void recordSecurityEvent({
+        event:          auditEvent.auth.crossOrgAccess,
+        organisationId: payload.organisationId,
+        actorUserId:    payload.id,
+        actorRole:      payload.role,
+        targetType:     'organisation',
+        targetId:       headerOrgId,
+        ip:             req.ip ?? null,
+        userAgent:      req.get('user-agent') ?? null,
+        meta:           { route: req.path, method: req.method, targetOrganisationId: headerOrgId },
       });
     }
   } else {
@@ -280,6 +322,15 @@ export const requireOrgPermission = (permissionKey: string) => {
       }
 
       if (!req._orgPermissionCache.has(permissionKey)) {
+        void recordSecurityEvent({
+          event:          auditEvent.auth.permissionDenied,
+          organisationId: organisationId,
+          actorUserId:    req.user.id,
+          actorRole:      req.user.role,
+          ip:             req.ip ?? null,
+          userAgent:      req.get('user-agent') ?? null,
+          meta:           { route: req.path, method: req.method, requiredPermission: permissionKey },
+        });
         res.status(403).json({ error: 'You do not have permission to perform this action. Contact your organisation administrator if you believe this is a mistake.' });
         return;
       }
@@ -341,6 +392,18 @@ export const requireSubaccountPermission = (permissionKey: string) => {
         }
       }
 
+      const organisationIdForAudit = req.orgId ?? req.user?.organisationId;
+      if (organisationIdForAudit) {
+        void recordSecurityEvent({
+          event:          auditEvent.auth.permissionDenied,
+          organisationId: organisationIdForAudit,
+          actorUserId:    req.user.id,
+          actorRole:      req.user.role,
+          ip:             req.ip ?? null,
+          userAgent:      req.get('user-agent') ?? null,
+          meta:           { route: req.path, method: req.method, requiredPermission: permissionKey, subaccountId },
+        });
+      }
       res.status(403).json({ error: 'Forbidden' });
       return;
     } catch (err) {

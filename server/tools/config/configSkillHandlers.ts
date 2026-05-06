@@ -17,8 +17,9 @@ import { configHistoryService } from '../../services/configHistoryService.js';
 import { boardService } from '../../services/boardService.js';
 import { db } from '../../db/index.js';
 import { subaccounts, agents, subaccountAgents } from '../../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
+import { isActive } from '../../lib/queryHelpers.js';
 import { computeDescendantIds, mapSubaccountAgentIdsToAgentIds, resolveEffectiveScope, type RosterEntry } from './configSkillHandlersPure.js';
 
 // ---------------------------------------------------------------------------
@@ -31,8 +32,8 @@ async function getConfigAgentId(orgId: string): Promise<string | null> {
   const rows = await db
     .select({ agentId: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
-    .where(and(eq(agents.organisationId, orgId), eq(systemAgents.slug, 'configuration-assistant')));
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
+    .where(and(eq(agents.organisationId, orgId), isActive(agents), eq(systemAgents.slug, 'configuration-assistant')));
   return rows[0]?.agentId ?? null;
 }
 
@@ -450,7 +451,7 @@ export async function executeConfigUpdateDataSource(
     const [ds] = await db
       .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
       .from(agentDataSources)
-      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isActive(agents)))
       .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
@@ -474,7 +475,7 @@ export async function executeConfigRemoveDataSource(
     const [ds] = await db
       .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
       .from(agentDataSources)
-      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isActive(agents)))
       .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
@@ -586,7 +587,7 @@ export async function executeConfigListSubaccounts(
     const rows = await db
       .select({ id: subaccounts.id, name: subaccounts.name, slug: subaccounts.slug, status: subaccounts.status })
       .from(subaccounts)
-      .where(and(eq(subaccounts.organisationId, context.organisationId), isNull(subaccounts.deletedAt)));
+      .where(and(eq(subaccounts.organisationId, context.organisationId), isActive(subaccounts)));
     return { success: true, subaccounts: rows };
   } catch (err) {
     return { success: false, error: String(err) };
@@ -662,7 +663,7 @@ export async function executeConfigListDataSources(
           loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
         })
         .from(agentDataSources)
-        .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isNull(agents.deletedAt)))
+        .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isActive(agents)))
         .where(and(eq(agentDataSources.agentId, String(input.agentId)), eq(agents.organisationId, context.organisationId)));
     } else if (input.subaccountAgentId) {
       // Org-scoped: subaccountAgentService.getLinkById verifies org ownership
@@ -675,7 +676,7 @@ export async function executeConfigListDataSources(
         })
         .from(agentDataSources)
         .innerJoin(subaccountAgents, and(eq(agentDataSources.subaccountAgentId, subaccountAgents.id), eq(subaccountAgents.isActive, true)))
-        .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isNull(agents.deletedAt)))
+        .innerJoin(agents, and(eq(subaccountAgents.agentId, agents.id), isActive(agents)))
         .where(and(eq(agentDataSources.subaccountAgentId, String(input.subaccountAgentId)), eq(agents.organisationId, context.organisationId)));
     } else {
       return { success: false, error: 'One of agentId or subaccountAgentId is required' };

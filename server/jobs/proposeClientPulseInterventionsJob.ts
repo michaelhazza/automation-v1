@@ -11,8 +11,9 @@
  * Queue: `clientpulse:propose-interventions`.
  */
 
-import { eq, and, gte, desc, sql, isNull } from 'drizzle-orm';
+import { eq, and, gte, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import { actions } from '../db/schema/actions.js';
 import { agents } from '../db/schema/agents.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
@@ -306,10 +307,11 @@ async function resolveScenarioDetectorAgentId(organisationId: string): Promise<s
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)
-    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isNull(systemAgents.deletedAt)))
+    .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
     .where(
       and(
         eq(agents.organisationId, organisationId),
+        isActive(agents),
         eq(systemAgents.slug, SCENARIO_DETECTOR_SYSTEM_AGENT_SLUG),
       ),
     )

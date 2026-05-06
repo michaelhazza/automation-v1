@@ -194,6 +194,10 @@ import asksRouter from './routes/asks.js';
 import fileRevertRouter from './routes/fileRevert.js';
 // Workflows V1 Phase 2 — workflow drafts fetch + discard (Chunk 14b)
 import workflowDraftsRouter from './routes/workflowDrafts.js';
+// Pre-Launch Phase 2 — client-side error reporting
+import clientErrorsRouter from './routes/clientErrors.js';
+// F3 Baseline Capture — baseline status, manual entry, admin reset (Chunks 4A/4B)
+import baselinesRouter from './routes/baselines.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -272,6 +276,13 @@ app.use(ghlWebhookRouter);
 app.use(teamworkWebhookRouter);
 app.use(slackWebhookRouter);
 app.use(workspaceInboundWebhookRouter);
+
+// Path-scoped tight JSON parser for /api/client-errors — applied BEFORE the
+// global 10MB parser so oversized payloads return 413 here instead of being
+// accepted. express.json() checks req._body and skips re-parsing once a body
+// has already been populated, so the global parser below is a no-op for this
+// path. ChatGPT-Round-1 Finding 3.
+app.use('/api/client-errors', express.json({ limit: '16kb' }));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -429,6 +440,8 @@ app.use(teamsRouter);
 app.use(asksRouter);
 app.use(fileRevertRouter);
 app.use(workflowDraftsRouter);
+app.use(clientErrorsRouter);
+app.use(baselinesRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -519,6 +532,15 @@ async function start() {
       '[boot] WEBHOOK_SECRET is unset in production. Outbound webhooks would be unsigned and inbound callbacks would accept any token. Set WEBHOOK_SECRET to a long random string before booting in production.',
     );
   }
+  const { validateEncryptionKeyOrThrow } = await import('./services/connectionTokenValidation.js');
+  validateEncryptionKeyOrThrow();
+
+  // ChatGPT-Round-2 Finding 1 — fail fast if the security-audit sentinel
+  // organisation row is missing. Pre-auth events (auth.login.failure, etc.)
+  // depend on this row existing; without it, recordSecurityEvent silently
+  // swallows the FK violation and login-failure audit is lost.
+  const { validateSecurityAuditSentinelOrgOrThrow } = await import('./services/securityAuditSentinelValidation.js');
+  await validateSecurityAuditSentinelOrgOrThrow();
 
   await seedPermissions();
   await backfillOrgUserRoles();

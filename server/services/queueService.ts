@@ -11,6 +11,7 @@ import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
+import { setSystemWorkerContext } from './connectionTokenService.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -543,6 +544,10 @@ export const queueService = {
 
     if (backend.kind === 'pg-boss') {
       const boss = await getPgBoss();
+
+      // Mark this process as a system worker so that refreshIfExpired allows
+      // null-principal (org-less) flows from pg-boss workers.
+      setSystemWorkerContext(true);
 
       // pg-boss deduplicates across instances natively — no advisory lock needed
       await (boss as any).work('maintenance:cleanup-execution-files', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
@@ -1329,6 +1334,19 @@ export const queueService = {
         },
       });
 
+      // Phase 3 D.5 — GHL auto-enrol locations page (paginated background job).
+      // Triggered when autoEnrolAgencyLocations detects > MAX_GHL_LOCATIONS_TO_ENROL.
+      // Uses singletonKey to prevent concurrent runs per connection.
+      // Does NOT use createWorker's org-scoped tx — uses withAdminConnection directly.
+      await (boss as any).work(
+        'ghl:auto-enrol-locations-page',
+        { teamSize: 1, teamConcurrency: 1 },
+        async (job: any) => {
+          const { ghlAutoEnrolLocationsPageWorker } = await import('../jobs/ghlAutoEnrolLocationsPageJob.js');
+          await ghlAutoEnrolLocationsPageWorker(job.data);
+        },
+      );
+
       // Pre-launch hardening C-P0-2 — OAuth resume restart (event-driven).
       // Dequeued after a successful OAuth token exchange when a pendingRunId was
       // stored on the state nonce. Default resolveOrgContext reads organisationId
@@ -1362,6 +1380,33 @@ export const queueService = {
       // Agentic Commerce — agent-spend-response queue (main→worker, Chunk 11)
       // Consumed by the IEE worker; main app does not register a handler for this queue.
       // Declared here for documentation completeness. The worker polls by correlationId.
+
+      // F3 §4 — daily fallback: evaluate pending baselines and enqueue capture jobs.
+      await (boss as any).work('evaluate-all-pending-baselines', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { evaluateAllPendingBaselinesHandler } = await import('../jobs/evaluateAllPendingBaselines.js');
+          await withTimeout(evaluateAllPendingBaselinesHandler(job).then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'evaluate-all-pending-baselines', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('evaluate-all-pending-baselines', '0 6 * * *', {});
+
+      // F3 §5 — per-baseline capture worker (event-driven; enqueued by subscriber + cron).
+      await (boss as any).work('capture-baseline', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { captureBaselineJobHandler } = await import('../jobs/captureBaselineJob.js');
+          await withTimeout(captureBaselineJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'capture-baseline', jobId: job.id });
+          }
+          throw err;
+        }
+      });
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {

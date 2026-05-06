@@ -1,0 +1,5 @@
+# assert-active-allowlist.txt
+# Whole-file carve-outs for verify-assert-active.sh.
+# One relative path per line (from repo root). Blank lines and # comments ignored.
+# Add a file here only when the assertActive/isActive check is provably not needed
+# (e.g. the query result is never returned or stored as a live entity reference).

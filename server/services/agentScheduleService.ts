@@ -2,6 +2,7 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, systemAgents, subaccounts } from '../db/schema/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
@@ -268,7 +269,7 @@ export const agentScheduleService = {
         agentStatus: agents.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .leftJoin(
         systemAgents,
         and(eq(agents.systemAgentId, systemAgents.id), eq(systemAgents.slug, 'subaccount-optimiser')),
@@ -326,7 +327,7 @@ export const agentScheduleService = {
     const rows = await db
       .select({ subaccountId: subaccountAgents.subaccountId, organisationId: subaccountAgents.organisationId })
       .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.scheduleEnabled, true),
@@ -474,7 +475,7 @@ export const agentScheduleService = {
         and(
           eq(agents.systemAgentId, systemAgent.id),
           eq(agents.organisationId, subaccount.organisationId),
-          isNull(agents.deletedAt),
+          isActive(agents),
         )
       )
       .limit(1);

@@ -98,6 +98,9 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
   const [error, setError] = useState<string | null>(null);
   const initialTab = (searchParams.get('tab') as Tab | null) ?? 'skills';
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+  const [showOnboardedBanner, setShowOnboardedBanner] = useState(
+    searchParams.get('newlyOnboarded') === '1',
+  );
 
   // Identity tab state
   const [identity, setIdentity] = useState<AgentIdentity | null>(null);
@@ -547,6 +550,18 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       {/* ── Identity tab ── */}
       {activeTab === 'identity' && (
         <>
+          {showOnboardedBanner && (
+            <div className="flex items-start justify-between gap-3 mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded-lg text-[13px] text-green-800">
+              <span>Identity provisioned. Confirm signature and channel preferences below.</span>
+              <button
+                onClick={() => setShowOnboardedBanner(false)}
+                className="flex-shrink-0 text-green-600 hover:text-green-900 bg-transparent border-0 cursor-pointer p-0 leading-none"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {identityLoading && <div className="text-[13px] text-slate-400">Loading…</div>}
           {!identityLoading && !identity && (
             <div className="text-[13px] text-slate-500">
@@ -579,7 +594,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
               <RevokeIdentityDialog
                 open={revokeOpen}
                 agentId={link.agentId}
-                agentName={identity.displayName}
+                agentName={link.agent?.name ?? identity.displayName}
                 onClose={() => setRevokeOpen(false)}
                 onSuccess={async () => {
                   const updated: AgentIdentity = await getAgentIdentity(link.agentId);

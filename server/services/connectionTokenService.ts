@@ -13,6 +13,45 @@ import { env } from '../lib/env.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 import { getRefreshBufferMs } from './connectionTokenServicePure.js';
+import { getOrgTxContext } from '../instrumentation.js';
+import { auditEvent } from '../../shared/types/securityAuditEvents.js';
+import { AppError } from '../lib/errors.js';
+import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from './securityAuditService.js';
+
+export { validateEncryptionKeyOrThrow } from './connectionTokenValidation.js';
+
+// ─── Phase 3 D.3: principal-context discipline helpers ────────────────────────
+
+function trimmedStackTrace(): string {
+  return (new Error().stack ?? '').split('\n').slice(1, 6).join('\n');
+}
+
+let systemWorkerContextFlag = false;
+
+/**
+ * Set by worker bootstrap to indicate execution inside a pg-boss worker or
+ * known internal service. A null principal is only allowed inside verified
+ * system contexts (isSystemContext() === true).
+ */
+export function setSystemWorkerContext(active: boolean): void {
+  systemWorkerContextFlag = active;
+}
+
+function isSystemContext(): boolean {
+  return systemWorkerContextFlag;
+}
+
+/**
+ * Returns the current principal org ID from the ALS context:
+ *   - undefined: no ALS context active (suspicious — outside any withOrgTx)
+ *   - null:      ALS context present but org-less (system/worker flows)
+ *   - string:    the tenant org ID of the current request/job
+ */
+function getPrincipalOrgId(): string | null | undefined {
+  const ctx = getOrgTxContext();
+  if (ctx === undefined) return undefined;
+  return ctx.organisationId ?? null;
+}
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -132,6 +171,51 @@ export const connectionTokenService = {
   async refreshIfExpired(connection: IntegrationConnection): Promise<IntegrationConnection> {
     if (connection.authType !== 'oauth2') return connection;
     if (!connection.tokenExpiresAt) return connection;
+
+    // ─── Phase 3 D.3: principal-context discipline ────────────────────────────
+    const principalOrgId = getPrincipalOrgId();
+
+    if (principalOrgId === undefined) {
+      await recordSecurityEvent({
+        event:          auditEvent.security.missingPrincipalContext,
+        organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+        meta: { connectionId: connection.id, connectionOrgId: connection.organisationId, callerStack: trimmedStackTrace() },
+      });
+      throw new AppError({
+        code:       'MISSING_PRINCIPAL_CONTEXT',
+        statusCode: 500,
+        message:    'Principal context not set in ALS — refusing token refresh',
+        context:    { connectionId: connection.id, connectionOrgId: connection.organisationId },
+      });
+    }
+    // principalOrgId === null → system flow (pg-boss workers, internal services) — allowed if isSystemContext()
+    if (principalOrgId === null && !isSystemContext()) {
+      await recordSecurityEvent({
+        event:          auditEvent.security.missingPrincipalContext,
+        organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+        meta: { connectionId: connection.id, connectionOrgId: connection.organisationId, reason: 'null_principal_outside_system_context', callerStack: trimmedStackTrace() },
+      });
+      throw new AppError({
+        code:       'MISSING_PRINCIPAL_CONTEXT',
+        statusCode: 500,
+        message:    'Null principal outside system context — refusing token refresh',
+        context:    { connectionId: connection.id, connectionOrgId: connection.organisationId },
+      });
+    }
+    if (principalOrgId !== null && principalOrgId !== connection.organisationId) {
+      await recordSecurityEvent({
+        event:          auditEvent.security.crossTenantAttempt,
+        organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+        meta: { connectionId: connection.id, connectionOrgId: connection.organisationId, principalOrgId, attemptedOperation: 'token_refresh' },
+      });
+      throw new AppError({
+        code:       'CROSS_TENANT_TOKEN_REFRESH',
+        statusCode: 403,
+        message:    'Cross-tenant token refresh blocked',
+        context:    { connectionOrgId: connection.organisationId, principalOrgId },
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const expiresAt = new Date(connection.tokenExpiresAt).getTime();
     const now = Date.now();

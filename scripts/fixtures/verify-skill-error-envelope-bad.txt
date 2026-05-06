@@ -1,0 +1,9 @@
+// Synthetic in-scope skill file snippet — must trip the gate.
+// This represents a skill handler that returns an error object WITHOUT an ok: field.
+
+export async function handleSkillCall(input: unknown) {
+  if (!input) {
+    return { error: 'input is required' };
+  }
+  return { result: 'done' };
+}

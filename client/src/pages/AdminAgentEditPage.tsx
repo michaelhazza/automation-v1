@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { toast } from 'sonner';
@@ -1760,7 +1761,7 @@ function AgentBudgetTab({ agentId }: { agentId: string }) {
       .then(r => {
         if (r.data.length > 0) setResolvedSubaccountId(r.data[0].subaccountId);
       })
-      .catch(() => {});
+      .catch(logAndSwallow('AdminAgentEditPage: agent activity subaccount resolution', { severity: 'critical' }));
   }, [agentId, resolvedSubaccountId]);
 
   useEffect(() => {

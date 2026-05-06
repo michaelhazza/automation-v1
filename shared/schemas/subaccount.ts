@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ALL_METRIC_SLUGS, type BaselineMetricSlug } from '../constants/baselineMetrics.js';
 
 const tier12ArtefactEntry = z.object({
   status: z.enum(['not_started', 'in_progress', 'completed', 'skipped']),
@@ -87,4 +88,26 @@ export function assertVersionGate(
     };
   }
   return baselineArtefactsStatusSchema.parse(raw);
+}
+
+/**
+ * F3 §2 — opt-in subset of baseline metrics for this subaccount. Stored in
+ * subaccounts.settings JSONB under the key `baseline_metrics_opt_in`. When
+ * absent, default = full v1 set (all slugs from ALL_METRIC_SLUGS).
+ */
+export const subaccountSettingsSchema = z.object({
+  baseline_metrics_opt_in: z.array(z.enum(ALL_METRIC_SLUGS as [BaselineMetricSlug, ...BaselineMetricSlug[]])).optional(),
+}).passthrough();  // allow other settings keys (existing JSONB shape is open)
+
+export type SubaccountSettings = z.infer<typeof subaccountSettingsSchema>;
+
+/**
+ * F3 — resolve the effective opt-in metric set for a subaccount, defaulting
+ * to ALL_METRIC_SLUGS when the field is absent or settings is null.
+ */
+export function resolveBaselineOptIn(rawSettings: unknown): readonly BaselineMetricSlug[] {
+  if (!rawSettings || typeof rawSettings !== 'object') return ALL_METRIC_SLUGS;
+  const parsed = subaccountSettingsSchema.safeParse(rawSettings);
+  if (!parsed.success) return ALL_METRIC_SLUGS;
+  return parsed.data.baseline_metrics_opt_in ?? ALL_METRIC_SLUGS;
 }

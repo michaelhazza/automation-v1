@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import { User } from '../lib/auth';
 
 interface Automation {
@@ -18,7 +19,7 @@ export default function AutomationsPage({ user: _user }: { user: User }) {
   useEffect(() => {
     api.get('/api/automations', { params: { status: 'active' } })
       .then((res) => setAutomations(res.data ?? []))
-      .catch(() => {})
+      .catch(logAndSwallow('AutomationsPage: automations fetch'))
       .finally(() => setLoading(false));
   }, []);
 

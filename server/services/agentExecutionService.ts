@@ -1,5 +1,6 @@
 ﻿import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
+import { isActive } from '../lib/queryHelpers.js';
 import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -3363,7 +3364,7 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
       agentDescription: agents.description,
     })
     .from(subaccountAgents)
-    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isNull(agents.deletedAt)))
+    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
     .where(
       and(
         eq(subaccountAgents.subaccountId, subaccountId),

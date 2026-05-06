@@ -3,13 +3,22 @@ active_spec: docs/baseline-capture-spec.md
 active_plan: tasks/builds/baseline-capture/plan.md
 build_slug: baseline-capture
 branch: claude/baseline-capture
-status: PLANNING
-last_updated: 2026-05-05
-last_merged_pr: #262
-last_merged_slug: stream-2-optimiser-finish
-last_merged_branch: stream-2-optimiser-finish
-last_merged_at: 2026-05-05T01:33:57Z
-last_merged_commit: e75f9dbd
+status: REVIEWING
+last_updated: 2026-05-06
+last_merged_pr: #267
+last_merged_slug: pre-launch-phase-3-deferred-backlog
+last_merged_branch: claude/pre-launch-phase-3
+last_merged_at: 2026-05-06T14:15:00Z
+last_merged_commit: 8b6f8d80
+-->
+
+<!-- mission-control-parallel
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: NONE
+last_updated: 2026-05-06
 -->
 
 # Current Focus
@@ -27,9 +36,21 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** `docs/baseline-capture-spec.md`
 **Active plan:** `tasks/builds/baseline-capture/plan.md`
 **Active build slug:** `baseline-capture`
-**Status:** **PLANNING** — F3 implementation plan authored 2026-05-05 (12 chunks, `tasks/builds/baseline-capture/plan.md`). Awaiting operator final pass before development starts on branch `claude/baseline-capture`.
+**Status:** **REVIEWING** — F3 baseline-capture build implemented + spec-conformance CONFORMANT (re-run) + pr-reviewer APPROVED + adversarial-reviewer ALL_CLOSED. HEAD `b516e26a`. Phase 2 handoff at `tasks/builds/baseline-capture/handoff.md`. Next step: launch finalisation-coordinator. **REVIEW_GAP:** dual-reviewer skipped (Codex CLI unavailable in this Claude Code web session); chatgpt-pr-review will be the second-opinion pass during Phase 3.
 
-**Just MERGE_READY:** PR #261 — `pre-launch-hardening`. Phase 1 of the pre-launch P0 hardening plan. 24 of 25 P0 items closed across 6 chunks: OAuth state security (S-P0-1, S-P0-2 via durable `oauth_state_nonces` table, migrations 0277/0278; cleanup job `maintenance:oauth-state-cleanup` every 5 min), security primitives (S-P0-3 verify, S-P0-5 DB rate limiter on auth/forgot/reset with login 60s + forgot/reset 300s windows, S-P0-6 webhook HMAC boot assert, S-P0-7 OAuth postMessage origin allowlist, S-P0-8 multer 25MB cap, S-P0-9 forgot/reset DB rate limiter), auto-start onboarding via pg-boss (S-P0-4 GUC propagation, D-P0-1 `ghl:auto-start-onboarding` queue with singletonKey + per-org dedup window), customer-facing P0s (C-P0-1 integrationBlockService E-D4 hard-block via `integrationNotResumable` flag returning structured `TOOL_NOT_RESUMABLE`; C-P0-2 OAuth resume restart job `run:resumeAfterOAuth` + `pendingRunId` column; C-P0-3 Universal Brief routes stub; C-P0-6 soft-delete sweep), data integrity P0s (D-P0-2 step.approval_resolved emission; D-P0-3 23505→409 conversion via `insertRunRowWithUniqueGuard`; D-P0-4 version predicate via `OptimisticLockError`; D-P0-5 durable `task_events` table migration 0279 with FORCE RLS + explicit GUC inside service-opened transaction; D-P0-6 resolver atomicity; D-P0-7 run-depth fail-fast via `assertRunDepth` from `server/lib/runDepthGuard.ts` with `MAX_WORKFLOW_RUN_DEPTH = 10` throwing `RunDepthExceededError statusCode 422`), operational readiness P0s (O-P0-1 CI workspace-actor-coverage gate, O-P0-2 verifier sweep, O-P0-3 reseed env-guard + backup/restore runbook with task_events orphan validation queries, O-P0-4 verify reseed_restore_users transaction wrap, O-P0-5 skill-analyzer pipeline observability). **Pipeline:** `pr-reviewer` (CHANGES_REQUESTED → 6 fixes in `a06efdcf`) → `dual-reviewer` (Codex 1 iter, APPROVED with 2 deferrals) → `adversarial-reviewer` (HOLES_FOUND: 1 confirmed AR-1.1 task_events GUC + 2 likely AR-2.1 trust proxy / AR-3.1 OAuth resume RLS, all 3 fixed in `38d7c495`; 4 worth-confirming routed to `tasks/todo.md` in `ac3c53e8`) → `chatgpt-pr-review` (2 rounds, APPROVED with fixes; Round 1 4 fixes `161b1081`; Round 2 4 fixes `7f5991d6`). Doc-sync sweep complete. Phase 3 handoff: `tasks/builds/pre-launch-hardening/handoff.md`.
+---
+
+**Just merged:** PR #267 — `pre-launch-phase-3-deferred-backlog`. Pre-launch Phase 3 closes the 24-item deferred backlog from Phases 1+2 — hardening only, no new features. Five chunks: (A) canonical typed errors and audit-event factory locked at the type system, (B) four CI grep gates that fail-fast on raw-string slips (table-list, error envelope, rate-limit key normalisation, audit namespace including B.4 Pass 4 dynamic-construction detector), (C) OAuth state telemetry plus admin-query helper for sentinel rows, (D) per-email login rate-limit bucket, GHL pagination job with single-writer-per-connection guarantee and 250-location cap, connection-token cross-tenant assertions, (E) cleanup including LRU dedupe on `/api/client-errors` and severity tagging on the silent-catch helper. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer CHANGES_REQUESTED → 4 blocking fixed → re-check APPROVED → adversarial-reviewer 2 confirmed holes closed → dual-reviewer SKIPPED (Codex CLI unavailable, REVIEW_GAP) → chatgpt-pr-review 2 rounds CLOSED (round 1: B.4 Pass 4 grep added, 3 Phase 4 deferrals, 1 operator escalation; round 2: 4 doc tightenings + 1 React hook missing-dep fix). Late CI fix: 7 Phase 3 pure tests had landed as bare-script `node:assert` files; reworked them (and 3 pre-existing siblings) to vitest `expect()` plus extracted 3 inline decision helpers into Pure sibling modules (`ghlEnrolCapDecisionPure`, `connectionTokenAssertionsPure`, `ghlAutoEnrolLocationsPageJobPure`) so production and tests share one source of truth — required to satisfy `verify-test-quality.sh` and `verify-pure-helper-convention.sh` gates. Doc-sync sweep complete (12 KNOWLEDGE.md entries, architecture.md indirect-aliasing rule added). 16 tasks/todo.md items closed; 1 new Phase 4 item logged (CHATGPT-R2-PH4-1 adversarial invariant pass). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-3-deferred-backlog-2026-05-06T03-02-29Z.md`. Phase 3 handoff: `tasks/builds/pre-launch-phase-3-deferred-backlog/handoff.md`.
+
+> ⚠ **Dual-reviewer was skipped — reduced review coverage for this build.** The Codex CLI was unavailable. `chatgpt-pr-review` ran 2 rounds as the primary second-opinion pass and closed cleanly. **Operator action — CHATGPT-R1-OP-1:** apply branch-protection required-checks on `main` (`Grep invariants`, `Lint + Typecheck`, `unit tests`, `integration tests`, `Portable framework tests`) so future PRs cannot merge red. See `tasks/todo.md`.
+
+---
+
+**Just merged:** PR #264 — `pre-launch-phase-2`. Pre-launch P1 hardening — the second of the three pre-launch passes (Phase 1 was PR #261 `pre-launch-hardening`; Phase 2 is this branch; Phase 3 is the post-merge follow-up captured in deferred tasks). 53 P1 items shipped across 7 plan chunks: maintenance-job RLS contract (`ruleAutoDeprecateJob`, `fastPathDecisionsPruneJob`, `fastPathRecalibrateJob` mirror admin/org tx contract with pure-function tests); execution-path correctness (C4b invalidation re-check, W1-43 single-webhook defence, W1-44 required_connections resolution, W1-38 error vocabulary closure, HERMES-S1 errorMessage threading, H3-PARTIAL-COUPLING decoupling); gate hygiene cleanup (`actionCallAllowlist.ts`, `measureInterventionOutcomeJob` canonicalAccounts via service, `referenceDocumentService` no direct adapter, PrincipalContext propagation, skill visibility drift fix, YAML frontmatter on workflow skills, explicit yaml import, canonical dictionary entries, capabilities editorial rule, explicit package.json deps, skill MD definitions, rule-conflict parser tests, saveSkillVersion pure unit test, security runbook, RLS import-type filter, audit-stream split gate, coverage baseline placeholder); UI tweaks (email tile C-P0-5, onboard navigation D9, revoke confirm-name D14, thread-context version pinning C-P0-4); soft-delete sweep (22 join sites switched to `isActive(table)`, `assertActive()` runtime guard, §8.27 lint-justified rule); auth lifecycle (OAuth window 5min, JWT password-change revocation with second-precision alignment, signup email dim, login dual-bucket); audit + webhooks (`security_audit_events` table migration 0281 with `securityAuditService` writer + sentinel-org boot invariant; webhook 5xx `recordIncident` coverage; OAuth pendingRunId resume wiring; `withOrgTx` GUC fragility fix AR-3.1). **Pipeline:** `spec-conformance` CONFORMANT_AFTER_FIXES (27/30; 1 mechanical fix; 3 directional gaps deferred — REQ #4 pure-vs-integration, REQ #15 envelope-gate scope, REQ #29 CI-baseline placeholder) → `pr-reviewer` CHANGES_REQUESTED → 3 blocking + 4 strong fixed in `ff37d968` → `dual-reviewer` REVIEW_GAP (Codex CLI unavailable) → `adversarial-reviewer` HOLES_FOUND (1 confirmed AR-2.1 signup JWT clock-skew fixed in `0af15bf6`; 2 likely-holes + 4 worth-confirming routed to `tasks/todo.md`) → `chatgpt-pr-review` 3 rounds: Round 1 verdict applied 4 fixes (sentinel-org constant `7499f870`, JWT `iat` second-precision write+read sides, `/api/client-errors` 16kb tight body cap, `logAndSwallow` always-emit `console.debug`), 4 deferrals → Round 2 applied 1 fix (security-audit sentinel-org boot invariant `2bd17f65` mirroring `validateEncryptionKeyOrThrow`), 3 deferrals, 2 verify-clean (leftJoin + `isActive` placement, two-layer rate-limit key normalisation) → Round 3 close-out: "You are genuinely done"; 3 deferrals (CHATGPT-R3-1 extend CI grep invariants, CHATGPT-R3-2 canonical error taxonomy, CHATGPT-R3-6 audit event namespace consistency); 3 no-action. Doc-sync sweep: `architecture.md` updated (§Layer 4 Security audit stream split documented), `DEVELOPMENT_GUIDELINES.md` updated (§8.28 JWT `iat` second-precision; §8.29 per-route body-size cap ordering), 6 KNOWLEDGE.md patterns appended. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-2-2026-05-05T08-52-25Z.md`. Phase 3 handoff: `tasks/builds/pre-launch-phase-2/handoff.md § Phase 3 (FINALISATION) — complete`.
+
+> ⚠ **Dual-reviewer was skipped — reduced review coverage for this build.** The Codex CLI was unavailable (ad-hoc build in main session). `chatgpt-pr-review` was the primary second-opinion pass and ran for 3 rounds. Consider running `dual-reviewer` manually before merge if Codex becomes available.
+
+**Just merged:** PR #261 — `pre-launch-hardening`. Phase 1 of the pre-launch P0 hardening plan. 24 of 25 P0 items closed across 6 chunks: OAuth state security (S-P0-1, S-P0-2 via durable `oauth_state_nonces` table, migrations 0277/0278; cleanup job `maintenance:oauth-state-cleanup` every 5 min), security primitives (S-P0-3 verify, S-P0-5 DB rate limiter on auth/forgot/reset, S-P0-6 webhook HMAC boot assert, S-P0-7 OAuth postMessage origin allowlist, S-P0-8 multer 25MB cap, S-P0-9 forgot/reset DB rate limiter), auto-start onboarding via pg-boss (S-P0-4 GUC propagation, D-P0-1 `ghl:auto-start-onboarding` queue), customer-facing P0s (C-P0-1 integrationBlockService E-D4 hard-block; C-P0-2 OAuth resume restart job; C-P0-3 Universal Brief routes stub; C-P0-6 soft-delete sweep), data integrity P0s (D-P0-2 step.approval_resolved emission; D-P0-3 23505→409 conversion; D-P0-4 version predicate via `OptimisticLockError`; D-P0-5 durable `task_events` table migration 0279 with FORCE RLS; D-P0-6 resolver atomicity; D-P0-7 run-depth fail-fast `MAX_WORKFLOW_RUN_DEPTH = 10`), operational readiness P0s (O-P0-1 CI workspace-actor-coverage gate, O-P0-2 verifier sweep, O-P0-3 reseed env-guard + backup/restore runbook, O-P0-4 reseed_restore_users transaction wrap, O-P0-5 skill-analyzer pipeline observability).
 
 ---
 
@@ -55,7 +76,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06T14:15:00Z
 
 ---
 

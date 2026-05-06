@@ -90,6 +90,12 @@ export const subaccounts = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     connectorConfigId: uuid('connector_config_id').references((): AnyPgColumn => connectorConfigs.id),
     externalId: text('external_id'),
+
+    // ── Phase 3 D.5 — GHL location idempotency namespace (migration 0285) ──
+    // Namespaces the externalId so the partial unique index only applies to
+    // GHL-enrolled rows. Other providers may use externalId with their own
+    // namespace values in future without colliding.
+    externalIdNamespace: text('external_id_namespace'),
   },
   (table) => ({
     orgIdx: index('subaccounts_org_idx').on(table.organisationId),
@@ -97,6 +103,12 @@ export const subaccounts = pgTable(
     slugUniqueIdx: uniqueIndex('subaccounts_slug_unique_idx')
       .on(table.organisationId, table.slug)
       .where(sql`${table.deletedAt} IS NULL`),
+    // Partial unique index for GHL location idempotency — prevents duplicate
+    // enrolment of the same GHL location across the background pagination job.
+    // Only enforced for ghl_location namespace, soft-delete aware.
+    orgExternalGhlLocationIdx: uniqueIndex('subaccounts_org_external_ghl_location_idx')
+      .on(table.organisationId, table.externalId)
+      .where(sql`${table.externalIdNamespace} = 'ghl_location' AND ${table.deletedAt} IS NULL`),
   })
 );
 

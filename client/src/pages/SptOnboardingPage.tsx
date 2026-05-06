@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import { useOAuthPopup } from '../hooks/useOAuthPopup';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -215,7 +216,7 @@ export default function SptOnboardingPage() {
         );
         setConnection(active ?? null);
       })
-      .catch(() => {})
+      .catch(logAndSwallow('SptOnboardingPage: existing stripe connection check', { severity: 'critical' }))
       .finally(() => setStep(1));
   };
 

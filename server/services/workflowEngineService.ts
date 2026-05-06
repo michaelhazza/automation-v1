@@ -102,6 +102,7 @@ import { WorkflowRunPauseStopService } from './workflowRunPauseStopService.js';
 import { decideRunNextState } from './workflowRunPauseStopServicePure.js';
 import { getStepCostEstimate } from '../lib/workflow/costEstimationDefaults.js';
 import { WorkflowRunCostLedgerService } from './workflowRunCostLedgerService.js';
+import { shouldDiscardWriteForInvalidation } from './workflowEngineServicePure.js';
 
 const TICK_QUEUE = 'workflow-run-tick';
 const WATCHDOG_QUEUE = 'workflow-watchdog';
@@ -139,9 +140,9 @@ function requireSubaccountId(run: WorkflowRun): string {
 }
 
 // C4b-INVAL-RACE: re-read step run after external I/O to discard late writes
-// to invalidated steps. Returns the work result unchanged if the step is still
-// live; returns { discarded: true, reason: 'invalidated' } if a concurrent
-// edit invalidated the step while external I/O was in flight.
+// to invalidated or cancelled steps. Returns the work result unchanged if the
+// step is still live; returns { discarded: true, reason: 'invalidated' } if a
+// concurrent edit invalidated or cancelled the step while I/O was in flight.
 async function withInvalidationGuard<T>(
   stepRunId: string,
   externalWork: () => Promise<T>,
@@ -149,7 +150,7 @@ async function withInvalidationGuard<T>(
   const result = await externalWork();
   const [sr] = await db.select({ status: workflowStepRuns.status })
     .from(workflowStepRuns).where(eq(workflowStepRuns.id, stepRunId)).limit(1);
-  if (sr?.status === 'invalidated') {
+  if (shouldDiscardWriteForInvalidation(sr?.status ?? '')) {
     return { discarded: true, reason: 'invalidated' };
   }
   return result;
@@ -835,6 +836,15 @@ export const WorkflowEngineService = {
    */
   async tick(runId: string): Promise<void> {
     // Layer 2 — non-blocking advisory lock.
+    // AR-3.1 NOTE: pg_try_advisory_xact_lock runs in auto-commit mode here (db.execute
+    // without a wrapping db.transaction). The xact-level lock releases at statement end,
+    // NOT at function end. pgboss.send() below (and all other DB ops in this handler)
+    // run on separate auto-commit connections — the advisory lock does NOT span them.
+    // The practical effect is contention detection only (if another handler holds a lock
+    // on the same runId it returns got=false), not a true serialisation gate.
+    // A full fix (wrapping all of tick() in a single db.transaction) is deferred to AR-3.1
+    // resolution and tracked in tasks/todo.md under ## Deferred. The current implementation
+    // is safe under pg-boss's own singletonKey deduplication (§5.6 layer 1).
     const lockResult = await db.execute(
       sql`SELECT pg_try_advisory_xact_lock(hashtext(${'workflow-run:' + runId})::bigint) AS got`
     );
@@ -1689,6 +1699,15 @@ export const WorkflowEngineService = {
           });
         }
 
+        // Pre-call invalidation guard (C4b-INVAL-RACE): abort if the step was
+        // invalidated or cancelled while we were setting up the dispatch.
+        const [preActionCheck] = await db.select({ status: workflowStepRuns.status })
+          .from(workflowStepRuns).where(eq(workflowStepRuns.id, sr.id)).limit(1);
+        if (shouldDiscardWriteForInvalidation(preActionCheck?.status ?? '')) {
+          logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
+          return;
+        }
+
         // Execute synchronously via the action pipeline.
         try {
           const guardedResult = await withInvalidationGuard(sr.id, () => executeActionCall({
@@ -1865,6 +1884,15 @@ export const WorkflowEngineService = {
           })
           .where(eq(workflowStepRuns.id, sr.id));
 
+        // Pre-call invalidation guard (C4b-INVAL-RACE): abort if the step was
+        // invalidated or cancelled while we were setting up the dispatch.
+        const [preAgentCheck] = await db.select({ status: workflowStepRuns.status })
+          .from(workflowStepRuns).where(eq(workflowStepRuns.id, sr.id)).limit(1);
+        if (shouldDiscardWriteForInvalidation(preAgentCheck?.status ?? '')) {
+          logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
+          return;
+        }
+
         // Enqueue onto the Workflow-agent-step queue. The worker creates
         // the agent_runs row (with workflow_step_run_id) and runs
         // executeRun synchronously. The completion hook fires when done.
@@ -1922,6 +1950,15 @@ export const WorkflowEngineService = {
       case 'invoke_automation': {
         const autoStep = step as InvokeAutomationStep;
         const ctx = run.contextJson as unknown as RunContext;
+
+        // Pre-call invalidation guard (C4b-INVAL-RACE): abort if the step was
+        // invalidated or cancelled before we begin the automation dispatch.
+        const [preInvokeCheck] = await db.select({ status: workflowStepRuns.status })
+          .from(workflowStepRuns).where(eq(workflowStepRuns.id, sr.id)).limit(1);
+        if (shouldDiscardWriteForInvalidation(preInvokeCheck?.status ?? '')) {
+          logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
+          return;
+        }
 
         // Mark step as running before dispatch.
         await db
