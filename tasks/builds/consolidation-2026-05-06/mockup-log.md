@@ -710,3 +710,29 @@ index.html:
 - `prototypes/consolidation-2026-05-06/_sidebar.js` (Spending stub resolved to spending.html)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions box, Round 7b-4 section)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-5 — 2026-05-06
+
+**Operator feedback:** Build pages.html (renamed "Sites" to "Pages") and before-pages.html companion. Light redesign: card grid, status badges, detail drawer instead of separate route. Update _sidebar.js Pages link, index.html, mockup-log.md.
+
+**Changes made:**
+- `pages.html` created: Card grid (3 cols desktop, 2 cols tablet, 1 col mobile) with 6 mock page cards. Each card has a browser-frame thumbnail placeholder (styled div with primary color fill at low opacity), bold page name, URL slug in monospace, status badge (Published green / Draft amber / Archived slate), last-updated text, theme color dot, and custom-domain pill where applicable. Status filter pills (All / Published / Draft / Archived) and search input filter by name/slug in real time. Page count subtitle updates on filter. Click any card opens a 600px slide-in drawer. Drawer header shows name, URL, status badge. Four tabs: Settings (name, slug, custom domain, color picker with 5 chips + custom input, status dropdown), Content (block list: Hero, Body, CTA, Footer with "Edit content" stub button), SEO (meta title, meta description textarea, OG image upload placeholder, canonical URL), Analytics (4 metric tiles: visits 1,248 / conversion 4.3% / avg time 1:42 / bounce 38%, "View detailed analytics" stub link). Drawer footer: "View live page" external-link button, Duplicate outlined button, Archive outlined button, Save changes primary button. New page modal: name input, slug (auto-generated from name, editable, prefixed with domain), 5 color chips + custom color input, status dropdown (Draft/Published). Submit appends a new card live with a "New" badge, shows "Page created" toast. Escape key closes open drawer/modal. No em-dashes in any UI copy.
+- `before-pages.html` created: Before banner with route annotation. Left: compact old-nav sidebar (flat list, nav item labeled "Sites" active). Right: production table (Name, Slug/URL, Custom domain, Created, Updated, Actions columns, 6 rows). Route annotation callout explaining detail navigates to a separate full-page route. Below the table: sketch of PageProjectDetailPage.tsx (back link, field rows: name, slug, custom domain, primaryColor as raw hex, created, updated, Save/Cancel buttons). Problems box lists 7 specific gaps: two-step navigation, no visual thumbnail, no status column, no status filter, raw hex color only, no analytics, wrong "Sites" label.
+- `_sidebar.js` updated: Workspace External section Pages item changed from `href: '#', stub: true` to `href: 'pages.html'` (stub flag removed).
+- `index.html` updated: masthead eyebrow changed to "Round 7b-5", description updated, file count updated to "50+", confirmed decisions box gets Round 7b-5 bullet, new Round 7b-5 section added at bottom with two cards (pages.html and before-pages.html with cross-links).
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- primary task for a workspace operator on Pages is "find and manage a landing page". The list opens immediately on the card grid. No KPI tiles, no usage charts, no analytics dashboard on the list view.
+- Default to hidden: yes -- Analytics tab in the drawer is hidden until selected. SEO and Content tabs are hidden. No analytics surfaced on the card grid itself (theme dot and status badge only). Drawer is hidden until a card is clicked.
+- One primary action: yes -- the list page has one primary action: "+ New page". The drawer's primary action is "Save changes". The new-page modal's primary action is "Create page". No competing primaries.
+- Inline state: yes -- page status shown inline as a badge on each card. Theme color shown as a dot. Custom domain shown as a pill chip on the relevant card. Last-updated text inline. No separate status panel or analytics strip on the list.
+- Re-check passed: yes -- a non-technical operator landing on Pages sees their page cards immediately (name, status, URL), can filter to "Draft" with one click, and can edit settings in a drawer without navigating away. Card thumbnails provide visual distinction without adding cognitive load.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/pages.html` (created)
+- `prototypes/consolidation-2026-05-06/before-pages.html` (created)
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (Pages stub resolved to pages.html)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions box, Round 7b-5 section)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

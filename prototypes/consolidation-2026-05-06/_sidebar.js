@@ -104,7 +104,7 @@ const NAV = {
       {
         label: 'External',
         items: [
-          { label: 'Pages',       href: '#',                icon: 'pages',    stub: true },
+          { label: 'Pages',       href: 'pages.html',       icon: 'pages' },
           { label: 'Portal',      href: '#',                icon: 'portal',   stub: true },
         ],
       },

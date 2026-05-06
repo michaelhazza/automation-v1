@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-4
+    Prototype Round 7b-5
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-4: Spending page — consolidates SpendingBudgetsPage (/admin/spending-budgets) and SpendLedgerPage (/admin/subaccounts/:id/spend-ledger) into a single spending.html with two tabs. Caps and budgets tab: org-level cap card with progress bar and pace indicator, per-workspace caps table with inline editing and status badges (within cap, over-pace amber, near cap red), defaults panel. Ledger tab: filter bar, KPI strip, flat transaction table with 25 rows, group-by switching (Day, Subaccount, Agent), row click opens 440px transaction detail drawer with cost breakdown and run trace link. Edit cap modal shared between tabs with validation. Before companion page shows the two-page split with annotated problems.</p>
+  <p>Round 7b-5: Pages surface (renamed from "Sites") -- consolidates PageProjectsPage and PageProjectDetailPage into a single pages.html. Card grid replaces flat table. Status badges and filter pills added. Theme color dot visible per card. Detail opens in a 600px side drawer with four tabs (Settings, Content, SEO, Analytics) instead of navigating to a separate route. New page modal with name, slug, color picker, and status. Before companion shows the two-page production state with annotated problems.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-4</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-5</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 48+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 50+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -129,6 +129,7 @@
     <li>Round 7b-1: Inbox action buttons: uniform sizing (padding 7px 14px, font-size 13px) across all item types. Archive is now an outlined button, not a plain text link. Primary actions solid indigo, secondary actions outlined slate.</li>
     <li>Round 7b-2: Team page: SubaccountTeamPage and OrgChartPage merged into one page with Members + Org Chart tabs. Member detail drawer is shared across both tabs (click a row or an org card). Invite modal adds a pending row to the Members table. Org chart is CSS flexbox only (read view), no D3 or graph library.</li>
     <li>Round 7b-4: Spending page: SpendingBudgetsPage and SpendLedgerPage merged into spending.html with two tabs. Org-level cap card with progress bar and pace line. Per-workspace caps table with inline edit, status badges (within cap, over-pace amber, near cap red). Ledger tab with 25+ transactions, KPI strip, group-by (None / Day / Subaccount / Agent). Transaction detail drawer with cost breakdown and run trace link. Edit cap modal with validation (daily and monthly). _sidebar.js Spending link in Org mode changed from stub to spending.html.</li>
+    <li>Round 7b-5: Pages surface: PageProjectsPage + PageProjectDetailPage consolidated into pages.html. Nav item renamed "Sites" to "Pages". Card grid with browser-frame thumbnails and status badges replaces flat table. Detail opens in 600px side drawer (Settings / Content / SEO / Analytics tabs). New page modal with slug auto-gen and color picker. _sidebar.js Pages link in Workspace External section changed from stub to pages.html.</li>
   </ul>
 </div>
 
@@ -853,6 +854,53 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="before-spending.html">Open before &#8594;</a>
         <a href="spending.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-5: Pages surface ─────────────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#4f46e5"></div>
+    Round 7b-5: Pages (renamed from Sites)
+  </div>
+
+  <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#3730a3;line-height:1.55;">
+    <strong>Redesign:</strong> PageProjectsPage + PageProjectDetailPage consolidated into pages.html. "Sites" renamed to "Pages" in the workspace External nav section. Card grid with browser-frame thumbnails replaces the flat utilitarian table. Status badges and filter pills (All / Published / Draft / Archived) added. Theme primary color visible as a dot on each card. Detail opens in a 600px slide-in drawer (Settings, Content, SEO, Analytics tabs) rather than navigating to a separate route. New page modal with slug auto-generation and color picker. _sidebar.js External section Pages link updated from stub to pages.html.
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Pages</div>
+        <div class="proto-card-file">pages.html</div>
+      </div>
+      <div class="proto-card-desc">Card grid of 6 mock pages with browser-frame thumbnails, status badges, theme color dots, and URL slugs. Status filter pills. Detail opens in a 600px side drawer with Settings (name, slug, custom domain, color picker, status), Content (block list + edit stub), SEO (meta title, description, OG image, canonical URL), and Analytics (4 tiles: visits, conversion rate, avg time, bounce rate) tabs. New page modal with name, slug auto-gen, 5 color chips + custom input, status. "Page created" toast and live card append.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">PageProjectsPage</span>
+          <span class="replace-pill strike">PageProjectDetailPage (as separate route)</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="pages.html">Open mockup &#8594;</a>
+        <a href="before-pages.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Before: PageProjectsPage (Sites)</div>
+        <div class="proto-card-file">before-pages.html</div>
+      </div>
+      <div class="proto-card-desc">Current production state: flat table (Name, Slug/URL, Custom domain, Created, Updated, Actions). "Sites" label in old nav. No status column, no filter, no color preview. Edit navigates to a separate full-page route. Problems box lists 7 specific gaps in the current state.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="before-pages.html">Open before &#8594;</a>
+        <a href="pages.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
       </div>
     </div>
 
