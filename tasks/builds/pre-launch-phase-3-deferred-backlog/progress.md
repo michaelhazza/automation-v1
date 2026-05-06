@@ -186,3 +186,45 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 - `npx tsx server/jobs/__tests__/ghlAutoEnrolLocationsPagePure.test.ts` — PASS
 - Commit: `e36ea2d4`
 
+## Chunk E — Cleanup and convenience — DONE 2026-05-06
+
+### Files created
+- `server/lib/orgScoping.ts` — E.5: `setOrgGUC(tx, orgId)` canonical helper for setting org GUC in real db.transaction blocks
+- `server/routes/__tests__/clientErrorsLruPure.test.ts` — E.3: pure LRU dedupe tests (4/4 pass)
+- `scripts/verify-skill-error-envelope.sh` — E.6: REQ #15 skill-envelope CI gate
+- `scripts/fixtures/verify-skill-error-envelope-bad.txt` — E.6: known-bad fixture
+
+### Files modified
+- `server/lib/queryHelpers.ts` — E.1: narrowed `isActive`/`assertActive` generic constraint from `deletedAt: unknown` to `deletedAt: Date | null`
+- `client/src/lib/silentCatchHelper.ts` — E.2: extended `logAndSwallow` with optional `{ severity: 'critical' | 'noisy' }` parameter
+- `client/src/pages/AdminAgentEditPage.tsx` — E.2: severity: 'critical'
+- `client/src/pages/SystemOrganisationsPage.tsx` — E.2: severity: 'critical'
+- `client/src/pages/SystemIncidentsPage.tsx` — E.2: severity: 'critical'
+- `client/src/pages/OnboardingWizardPage.tsx` — E.2: severity: 'critical' (2 call sites)
+- `client/src/pages/SptOnboardingPage.tsx` — E.2: severity: 'critical'
+- `client/src/components/Layout.tsx` — E.2: severity: 'critical' (2 call sites)
+- `client/src/App.tsx` — E.2: severity: 'critical' (3 call sites — permissions fetches)
+- `client/src/hooks/useConversation.ts` — E.2: severity: 'critical'
+- `server/routes/clientErrors.ts` — E.3: LRU dedupe (SHA-256, 60s window, 1000 cap) before rate-limit check; `decideDedupe` exported as pure helper
+- `migrations/0277_oauth_state_nonces.sql` — E.4: added system-scoped header comment as line 1
+- `KNOWLEDGE.md` — E.5: appended `setOrgGUC` canonical replacement entry
+- `.github/workflows/ci.yml` — E.6: added E.6 step to grep_invariants job
+- `docs/pre-launch-hardening-mini-spec.md` — E.6: amended REQ #4 done criteria (integration test → pure-function test)
+- `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md` — E.7: SC-COVERAGE-BASELINE placeholder section
+
+### Deviations from plan
+- E.5: The `withOrgTx({ tx: db })` anti-pattern no longer exists in `oauthIntegrations.ts` or `auth.ts` — it was already fixed in Chunk C (proper `db.transaction` + inline `set_config` + `withOrgTx`). `server/lib/orgScoping.ts` created as the canonical helper for future use; KNOWLEDGE.md updated to reference it.
+- E.5: Helper placed in `server/lib/orgScoping.ts` (spec says `server/middleware/orgScoping.ts` but plan corrected to `server/lib/orgScoping.ts` — using lib as the plan confirmed).
+- E.6: CRM provider-call builder files (`crmCreateTaskServicePure.ts`, etc.) added to the allowlist — they return `ProviderCall` objects, not skill envelopes. `readDataSource.ts` correctly uses `ok:` and is not allowlisted.
+
+### Verification results
+- `npm run lint` — exit 0
+- `npm run typecheck` — exit 0
+- `npm run build:client` — exit 0 (built in 14.57s)
+- `npx tsx server/routes/__tests__/clientErrorsLruPure.test.ts` — 4/4 PASS
+- `bash scripts/verify-skill-error-envelope.sh` — EXIT:0 (OK; fixture self-check confirmed)
+
+## Phase 3 SC-COVERAGE-BASELINE
+
+SC-COVERAGE-BASELINE numbers pending CI run post-merge. To be filled from the
+`coverage-baseline` CI job output after the PR merges to main.

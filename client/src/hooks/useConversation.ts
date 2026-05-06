@@ -71,7 +71,7 @@ export function useConversation(
         setConversationId(res.data.conversationId);
         setMessages(res.data.messages);
       })
-      .catch(logAndSwallow('useConversation: conversation fetch'));
+      .catch(logAndSwallow('useConversation: conversation fetch', { severity: 'critical' }));
   }, [scopeType, scopeId]);
 
   useEffect(() => {

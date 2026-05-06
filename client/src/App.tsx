@@ -223,7 +223,7 @@ function SpendingBudgetsListPageRoute({ user }: { user: User }) {
     api.get('/api/my-permissions').then(({ data }) => {
       const perms: string[] = data?.permissions ?? [];
       setCanCreate(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(logAndSwallow('SpendingBudgetsListPageRoute: permissions fetch'));
+    }).catch(logAndSwallow('SpendingBudgetsListPageRoute: permissions fetch', { severity: 'critical' }));
   }, [user]);
   return <SpendingBudgetsListPage canCreate={canCreate} />;
 }

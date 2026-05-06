@@ -147,6 +147,9 @@ jobs:
       - name: B.4 Audit event namespace (no raw eventType strings)
         run: bash scripts/verify-audit-event-namespace.sh
 
+      - name: "E.6 Skill error envelope (return paths must include ok: field)"
+        run: bash scripts/verify-skill-error-envelope.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/

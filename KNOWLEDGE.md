@@ -2487,3 +2487,20 @@ The terminal round IS logged with full session-log structure (raw response, deci
 ### D.6 advisory-lock scope (2026-05-06)
 
 `pg_try_advisory_xact_lock` in `workflowEngineService.ts` `tick()` is NOT in the same transaction as `pgboss.send()`. The lock runs in auto-commit mode via `db.execute` (no wrapping `db.transaction`), so it releases at statement end — it does NOT span the full tick() handler. `pgboss.send()` runs on a separate auto-commit connection. Contention detection still works (two concurrent handlers racing on the same runId will observe `got=false`), but there is no serialisation gate. A full fix (wrapping tick() in a single `db.transaction`) is deferred — tracked in `tasks/todo.md` under `## Deferred`. AR-3.1 noted in-situ in the source file.
+
+### E.5 setOrgGUC — canonical replacement for the withOrgTx({tx:db}) anti-pattern (2026-05-06)
+
+**Date:** 2026-05-06
+**Source:** pre-launch-phase-3-deferred-backlog Chunk E, adversarial-reviewer AR-3.1 residue.
+
+`server/lib/orgScoping.ts` exports `setOrgGUC(tx: OrgScopedTx, orgId: string): Promise<void>`. This is the canonical way to set the per-transaction organisation_id GUC for code that must open its own `db.transaction()` block outside the request middleware path (background jobs, unauthenticated callbacks, maintenance scripts).
+
+Usage pattern:
+```typescript
+await db.transaction(async (tx) => {
+  await setOrgGUC(tx, orgId);
+  // ... rest of the transaction body
+});
+```
+
+This replaces the `withOrgTx({ tx: db, organisationId }, ...)` anti-pattern (passing the module-level `db` connection as `tx`). The anti-pattern fakes ALS context without binding a GUC to any real DB connection — code inside the closure that calls `getOrgScopedDb()` receives a connection with no `app.organisation_id` set, and FORCE-RLS writes fail silently. The correct pattern either (a) uses `setOrgGUC` inside a real `db.transaction()` block, or (b) uses the standard `withOrgTx({ tx, organisationId, ... })` pattern where `tx` is the Drizzle transaction handle from an enclosing `db.transaction()` call.
