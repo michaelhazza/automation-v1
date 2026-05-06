@@ -440,3 +440,39 @@ before-home.html:
 - `prototypes/consolidation-2026-05-06/before-home.html` (Change 3b: created, grounded in DashboardPage.tsx)
 - `prototypes/consolidation-2026-05-06/index.html` (Round 6 metadata, home card Before link, new Round 6 section, decisions box updated)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7 — 2026-05-06
+
+**Operator feedback:** Swap widget 4 ("Recent successes") with a "Spend & cap" widget. Same 2x2 grid, 4 widgets total. Spec included daily and monthly rows, pace indicator, amber warning on over-pace, and a placeholder spending drawer.
+
+**Changes made:**
+- Removed "Recent successes" widget CSS (.success-row, .success-agent, .success-client, .success-time) and widget 4 HTML entirely
+- Added "Spend & cap" widget in widget 4 position (same grid cell, same ~280px footprint)
+  - Row 1 "Today": $9.50 / $50 daily cap (19%), 4px indigo progress bar, no warning (under cap)
+  - Row 2 "This month": $325 / $1,500 monthly cap (22%), 8px indigo progress bar with dotted pace line at 19.4% (day 6 of 31), amber projection "On pace for $1,680/month" with "Over pace" chip ($35 over pace = ~12% over, which exceeds the 10% amber threshold)
+  - Footer: "Scope: Acme Corp" in muted text
+  - Widget is clickable, opens spending drawer
+- Added CSS for spend widget sections, bars, pace line, projection states, warning chip, scope line
+- Added spending detail drawer (placeholder): top-5-spenders stub table with agent names, run counts, MTD spend; "coming soon" note for per-run and cache detail; Escape key and overlay click to close; vanilla JS open/close
+
+**Schema verification:** Confirmed cap fields exist in schema:
+- `workspaceLimits.ts`: `dailyCostLimitCents`, `monthlyCostLimitCents` (per subaccount)
+- `orgComputeBudgets.ts`: `monthlyComputeLimitCents` (org level)
+Widget labels ("daily cap", "monthly cap") accurately reflect the two-tier cap structure.
+
+**Widget swap rationale:** Cost state is more decision-relevant operator information than a "recent successes" counter. An operator seeing spend approaching a cap can act (pause an agent, raise a cap, investigate a spender). Recent successes duplicates what the Today's runs sparkline already communicates (97% success rate). The swap does not add a screen or violate the 4-widget count constraint.
+
+**Drawer status:** Placeholder only as specified. Shows stub table of top 5 spenders with "coming soon" note for full breakdown.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- widget surfaces spend state the operator needs to notice without requiring navigation to a settings or billing page
+- Default to hidden: yes -- the spending drawer is hidden; the widget shows only the two most decision-relevant numbers (today vs daily cap, MTD vs monthly cap)
+- One primary action: yes -- widget click opens drawer; no competing actions
+- Inline state: yes -- cost state is inline on the home page, not behind a dedicated billing dashboard
+- Re-check passed: yes -- a non-technical operator reading "$9.50 / $50 today" and "$325 / $1,500 this month" with an "Over pace" chip understands the situation without explanation
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/home.html`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

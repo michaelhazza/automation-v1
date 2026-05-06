@@ -5,9 +5,10 @@
     1. Today's runs (sparkline + count + success rate)
     2. Active agents (list, elapsed, current step)
     3. Today's schedule (next 3-5 runs)
-    4. Recent successes (last 5 completed runs)
+    4. Spend & cap (daily + monthly spend vs caps, pace indicator)
   Right-side Inbox widget retained (small state preview, not duplicated central section).
   Primary action: "New agent" (top-right, one per screen).
+  Round 7: swapped widget 4 from "Recent successes" to "Spend & cap".
 -->
 <html lang="en">
 <head>
@@ -106,16 +107,60 @@
 .sched-name { font-size: 12.5px; font-weight: 600; color: var(--slate-800); }
 .sched-client { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
 
-/* ── Recent successes widget ───────────────────────── */
-.success-row {
-  display: flex; align-items: center; gap: 9px;
-  padding: 7px 0; border-bottom: 1px solid var(--slate-100);
-  cursor: pointer;
+/* ── Spend & cap widget ────────────────────────────── */
+.spend-section { padding: 10px 0; border-bottom: 1px solid var(--slate-100); }
+.spend-section:last-of-type { border-bottom: none; }
+.spend-section-label { font-size: 10.5px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.spend-metric { font-size: 12.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 5px; }
+.spend-metric .spend-pct { font-size: 11.5px; font-weight: 500; color: var(--slate-500); }
+.spend-bar-track { background: var(--slate-100); border-radius: 99px; position: relative; overflow: visible; }
+.spend-bar-fill { border-radius: 99px; height: 100%; transition: width 0.3s; }
+.spend-bar-fill.indigo { background: var(--indigo-500); }
+.spend-bar-fill.amber-fill { background: #f59e0b; }
+.spend-bar-fill.red-fill { background: var(--red-500); }
+.spend-pace-line {
+  position: absolute; top: -3px; bottom: -3px; width: 0;
+  border-left: 1.5px dotted var(--slate-400);
+  pointer-events: none;
 }
-.success-row:last-child { border-bottom: none; }
-.success-agent { font-size: 12.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.success-client { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
-.success-time { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+.spend-projection { font-size: 11px; color: var(--slate-500); margin-top: 4px; }
+.spend-projection.amber { color: #92400e; }
+.spend-projection.red { color: var(--red-600); }
+.spend-warning-chip {
+  display: inline-block; background: #fef3c7; border: 1px solid #fde68a;
+  color: #92400e; font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px; margin-left: 4px;
+}
+.spend-scope { font-size: 10.5px; color: var(--slate-400); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--slate-100); }
+
+/* ── Spend drawer ──────────────────────────────────── */
+.drawer-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(15,23,42,0.3); z-index: 50;
+}
+.drawer-overlay.open { display: block; }
+.spend-drawer {
+  position: fixed; top: 0; right: -420px; bottom: 0;
+  width: 400px; background: white; box-shadow: -4px 0 24px rgba(15,23,42,0.12);
+  z-index: 51; transition: right 0.22s ease; display: flex; flex-direction: column;
+}
+.spend-drawer.open { right: 0; }
+.spend-drawer-head {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.spend-drawer-title { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+.spend-drawer-close {
+  background: none; border: none; cursor: pointer; padding: 4px;
+  color: var(--slate-400); border-radius: 4px;
+}
+.spend-drawer-close:hover { background: var(--slate-100); color: var(--slate-700); }
+.spend-drawer-body { padding: 16px 20px; flex: 1; overflow-y: auto; }
+.spend-table-stub { width: 100%; border-collapse: collapse; font-size: 12px; }
+.spend-table-stub th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 8px; border-bottom: 1px solid var(--slate-200); }
+.spend-table-stub td { padding: 8px 8px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); }
+.spend-table-stub td:last-child { text-align: right; font-weight: 600; color: var(--slate-900); font-variant-numeric: tabular-nums; }
+.spend-drawer-note { font-size: 11.5px; color: var(--slate-400); margin-top: 16px; padding: 10px; background: var(--slate-50); border-radius: 6px; }
 
 /* ── Inbox sidebar card ────────────────────────────── */
 .inbox-card {
@@ -411,53 +456,58 @@
               </div>
             </div>
 
-            <!-- Widget 4: Recent successes -->
-            <div class="widget">
+            <!-- Widget 4: Spend & cap -->
+            <!--
+              Mock data:
+                Today: $9.50 / $50 daily cap = 19% (indigo, under pace)
+                Month MTD: $325 / $1,500 monthly cap = 21.7%
+                Day 6 of 31 = 19.4% elapsed => expected pace spend = $290
+                Actual $325 is $35 over pace (~12% over) => amber projection
+                Pace line position = 19.4% of bar width
+            -->
+            <div class="widget" id="spend-widget" style="cursor:pointer;" onclick="openSpendDrawer()">
               <div class="widget-head">
-                <span class="widget-title">Recent successes</span>
-                <a class="widget-link" href="#">View run log</a>
+                <span class="widget-title">Spend &amp; cap</span>
+                <span class="widget-link" style="cursor:pointer;">Details</span>
               </div>
               <div class="widget-body">
-                <div class="success-row">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  <div style="flex:1;min-width:0;">
-                    <div class="success-agent">Research Agent</div>
-                    <div class="success-client">Acme Corp</div>
+
+                <!-- Row 1: Today vs daily cap -->
+                <div class="spend-section">
+                  <div class="spend-section-label">Today</div>
+                  <div class="spend-metric">
+                    $9.50 / $50 daily cap
+                    <span class="spend-pct">(19%)</span>
                   </div>
-                  <span class="success-time">8m ago</span>
-                </div>
-                <div class="success-row">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  <div style="flex:1;min-width:0;">
-                    <div class="success-agent">Reporting Agent</div>
-                    <div class="success-client">Maple Digital</div>
+                  <!-- 4px bar -->
+                  <div class="spend-bar-track" style="height:4px;">
+                    <div class="spend-bar-fill indigo" style="width:19%;height:4px;"></div>
                   </div>
-                  <span class="success-time">1h ago</span>
                 </div>
-                <div class="success-row">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  <div style="flex:1;min-width:0;">
-                    <div class="success-agent">CRM Agent</div>
-                    <div class="success-client">Nova Agency</div>
+
+                <!-- Row 2: Month-to-date vs monthly cap -->
+                <div class="spend-section">
+                  <div class="spend-section-label">This month</div>
+                  <div class="spend-metric">
+                    $325 / $1,500 monthly cap
+                    <span class="spend-pct">(22%)</span>
                   </div>
-                  <span class="success-time">3h ago</span>
-                </div>
-                <div class="success-row">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  <div style="flex:1;min-width:0;">
-                    <div class="success-agent">Lead Scoring Agent</div>
-                    <div class="success-client">Acme Corp</div>
+                  <!-- 8px bar with pace line -->
+                  <div class="spend-bar-track" style="height:8px;">
+                    <div class="spend-bar-fill indigo" style="width:21.7%;height:8px;"></div>
+                    <!-- Pace line at 19.4% of bar -->
+                    <div class="spend-pace-line" style="left:19.4%;top:-4px;bottom:-4px;"></div>
                   </div>
-                  <span class="success-time">4h ago</span>
-                </div>
-                <div class="success-row">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-500)" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  <div style="flex:1;min-width:0;">
-                    <div class="success-agent">Contract Agent</div>
-                    <div class="success-client">Beacon Consulting</div>
+                  <!-- Projection line: $35 over pace = ~12% over => amber -->
+                  <div class="spend-projection amber">
+                    On pace for $1,680 / month
+                    <span class="spend-warning-chip">Over pace</span>
                   </div>
-                  <span class="success-time">5h ago</span>
                 </div>
+
+                <!-- Footer scope -->
+                <div class="spend-scope">Scope: Acme Corp</div>
+
               </div>
             </div>
 
@@ -512,5 +562,72 @@
     </div><!-- /page-body -->
   </div><!-- /main -->
 </div><!-- /app-shell -->
+
+<!-- Spend drawer overlay -->
+<div class="drawer-overlay" id="spend-overlay" onclick="closeSpendDrawer()"></div>
+
+<!-- Spend detail drawer -->
+<div class="spend-drawer" id="spend-drawer">
+  <div class="spend-drawer-head">
+    <span class="spend-drawer-title">Spending detail - May 2026</span>
+    <button class="spend-drawer-close" onclick="closeSpendDrawer()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="spend-drawer-body">
+    <p style="font-size:12px;color:var(--slate-500);margin:0 0 14px;">Top spenders this month across Acme Corp.</p>
+    <table class="spend-table-stub">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Runs</th>
+          <th>MTD spend</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Outreach Agent</td>
+          <td style="color:var(--slate-500);">142</td>
+          <td>$98.20</td>
+        </tr>
+        <tr>
+          <td>Research Agent</td>
+          <td style="color:var(--slate-500);">87</td>
+          <td>$74.55</td>
+        </tr>
+        <tr>
+          <td>Lead Scoring Agent</td>
+          <td style="color:var(--slate-500);">203</td>
+          <td>$61.40</td>
+        </tr>
+        <tr>
+          <td>CRM Hygiene Agent</td>
+          <td style="color:var(--slate-500);">56</td>
+          <td>$52.80</td>
+        </tr>
+        <tr>
+          <td>Reporting Agent</td>
+          <td style="color:var(--slate-500);">31</td>
+          <td>$38.05</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="spend-drawer-note">Detailed spend breakdown - coming soon. Per-run cost, cache savings, and per-automation view will appear here.</div>
+  </div>
+</div>
+
+<script>
+function openSpendDrawer() {
+  document.getElementById('spend-overlay').classList.add('open');
+  document.getElementById('spend-drawer').classList.add('open');
+}
+function closeSpendDrawer() {
+  document.getElementById('spend-overlay').classList.remove('open');
+  document.getElementById('spend-drawer').classList.remove('open');
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeSpendDrawer();
+});
+</script>
 </body>
 </html>
