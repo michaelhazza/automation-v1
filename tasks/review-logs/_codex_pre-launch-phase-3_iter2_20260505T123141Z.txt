@@ -1,0 +1,29 @@
+Iteration 2 Codex review — 9 findings.
+
+1. §3 line 98, §4.L1 line 138, §12 line 431 — important
+   L1 says "call from existing prod boot validation chain" but the chain is in server/index.ts (not in inventory). validateEncryptionKeyOrThrow IS called from there.
+   Fix: Add server/index.ts to the inventory; pin the boot callsite line.
+
+2. §14 line 473 — minor
+   Pre-review checklist says "one new pure-function test file (L2)" but iteration 1 added webhookSecretValidatorPure.test.ts so there are now two new test files (L1, L2).
+
+3. §3 line 113 vs §4.L2 line 153-169 — minor
+   Helper input names mismatch: "reqPath/reqMethod" in §3 vs "path/method" in §4.
+
+4. §3 line 113, §4.L2 line 155 — important
+   "Sibling Pure.ts module — implementation choice" violates file-inventory-lock. Pin location.
+
+5. §4.L5 lines 234-240 — important
+   verificationMatrix.test.ts globally mocks env/db/renderRecommendation/query modules — a live LLM cost gate cannot run inside it. Move to dedicated integration file.
+
+6. §4.L5 lines 238-239 — important
+   "Model's published per-token rate" is unpinned. Name model + rates + source-of-truth + update path.
+
+7. lines 46, 240, 250, 435 — important
+   Goal "every relevant optimiser change measured" but workflow path filter is `optimiser/**` only — out-of-tree LLM/pricing changes can shift cost without triggering the gate.
+
+8. §4.L5 line 242, §12 line 435 — important
+   Done definition contradicts secret-absence behaviour: "every PR runs measurement" vs "no-secrets path exits early."
+
+9. §3 line 124, §11 line 421, §12 line 441 — minor
+   `tasks/current-focus.md` listed as PR-touched but text says "after merge" — future-tense drift.
