@@ -476,3 +476,74 @@ Widget labels ("daily cap", "monthly cap") accurately reflect the two-tier cap s
 **Files modified:**
 - `prototypes/consolidation-2026-05-06/home.html`
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7a — 2026-05-06
+
+**Operator feedback:** Three-mode left nav across all prototype pages via shared _sidebar.js. Exhaustive nav per mode. New activity.html page mirroring ActivityPage.tsx. All non-before pages updated to use shared sidebar.
+
+**Changes made:**
+
+New files:
+- `_sidebar.js` created: exposes `renderSidebar(mode, activeHref)`. Three modes (workspace / org / system). Mode switcher pill row at top of sidebar (above logo), persists to localStorage key `prototype.sidebar.mode`. Workspace mode: 15 items in Workspace section (Home, Inbox+badge, Calendar, Agents, Automations, Workflows, Tasks, Sites, Triggers, Goals, Org Chart, Portal, Team, Activity, Action Log), plus Knowledge, Connections, ClientPulse, Manage/bottom sections. Org mode: 13 items in Organisation section, plus ClientPulse stubs and Manage bottom. System mode: 11 items all stubs except Activity which links to activity.html?scope=system. Profile link (avatar + "Profile Settings" stub) at bottom of every mode. Stub links show 2-second slate toast and preventDefault (no navigation). Active link detection by basename match.
+- `activity.html` created: mirrors ActivityPage.tsx and ActivityFeedTable.tsx. Scope toggle (Subaccount / Org / System) in page header. Default scope derived from sidebar mode or ?scope= query param. Filter bar: search, type (24 activity types in Core and Workspace optgroups), status, severity, sort (attention first / newest / oldest / severity). Active filter pills with remove buttons. 28 mock rows covering all 24 activity types across 4 workspaces (Acme Corp, Beta Inc, Gamma Solutions, Nova Digital). Table columns: Type (color-coded badge), Subject (ellipsis link), Status (color-coded badge), Actor (dot indicator), Severity (dot), Workspace (org/system scope only), Created (relative time), Duration. Row click opens slide-in drawer (440px). Drawer footer: "View run trace" for agent_run, "View in Inbox" for inbox_item/review_item, "View finding" stub for health_finding. Empty state: "No activities match these filters" with Clear filters button. Scope switching updates subtitle and shows/hides Workspace column. Escape key and overlay click close drawer.
+
+Pages updated to use shared sidebar (before-* pages intentionally untouched):
+- `home.html`: inline sidebar replaced with sidebar-mount + renderSidebar('home.html')
+- `inbox.html`: replaced
+- `agents.html`: replaced
+- `automations.html`: replaced
+- `workflows.html`: replaced
+- `knowledge.html`: replaced
+- `integrations.html`: replaced
+- `manage-org.html`: replaced
+- `run-trace.html`: replaced
+- `calendar.html`: replaced
+- `agent-edit.html`: replaced
+- `automation-detail.html`: replaced (active hint: automations.html as parent)
+
+Index updated:
+- Masthead eyebrow: "Prototype Round 7a"
+- Description updated to describe three-mode nav and activity page
+- Decisions box: 6 new items covering sidebar modes, nav item inventories, stub behavior, activity page spec, bucket A consolidations, bucket B stubs
+- New "Round 7a" section with Activity card and Shared Sidebar JS card
+
+**Bucket A consolidations confirmed (deduplicated in sidebar):**
+- Tasks consolidated to Inbox (HITL) -- Inbox is the nav item, Tasks is a stub in Workspace for workspace task board
+- Scheduled/Calendar merged -- single Calendar nav item
+- Action Log kept as stub link in Workspace mode
+- Skills folded into Capabilities tab on agent-edit -- not a nav item
+- Reports under ClientPulse stub section (labeled "separate thread")
+
+**Bucket B stubs (visible but not implemented):**
+- Sites, Triggers, Goals, Org Chart, Portal, Team, Action Log (workspace mode)
+- Companies, Automations (org), Knowledge (org, note: org-knowledge.html in 7b), Connections (org), Skills (org), Workflows (org), Health, Spending Budgets, Teams (org)
+- All System mode links except Activity
+
+**System mode:** Left-nav only. No new page content. All links are stubs pointing to # except Activity which links to activity.html?scope=system. Intent: system admin sees the nav structure; page content is out of scope for this consolidation pass.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Activity page opens on the feed immediately. Filter bar is secondary. Scope toggle is in header, not blocking. Drawer is progressive disclosure.
+- Default to hidden: yes -- drawer hidden until row click. Filter pills only shown when active. Workspace column hidden on subaccount scope. No KPI tiles on activity page.
+- One primary action: yes -- Activity: primary action is "click a row to inspect". Sidebar: primary action is "switch to a nav item". Mode switcher is a secondary control.
+- Inline state: yes -- status, severity, actor type all shown inline in table rows. Scope shown inline in subtitle. No dashboard panels.
+- Re-check passed: yes -- operator landing on Activity sees the feed immediately. Can filter with one dropdown. Row click shows detail without leaving the page. Non-technical operator can understand "attention needed" / "failed" status colors without explanation.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (created)
+- `prototypes/consolidation-2026-05-06/activity.html` (created)
+- `prototypes/consolidation-2026-05-06/home.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/inbox.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/agents.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/automations.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/workflows.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/knowledge.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/integrations.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/manage-org.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/run-trace.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/calendar.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/automation-detail.html` (sidebar replaced)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead + decisions + Round 7a section)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

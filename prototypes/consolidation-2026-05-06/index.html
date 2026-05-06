@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 6
+    Prototype Round 7a
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 6 interactive behavior: run-trace event panel (type-specific fields per event type, all 6 types covered), calendar 7/14/30-day view switching (full-detail / chip-grid / month-dot layouts), home page redesigned with 4-widget dashboard (drops Inbox duplication), plus before-home grounded in DashboardPage.tsx source.</p>
+  <p>Round 7a: three-mode left nav (Workspace / Org / System) shared across all prototype pages via _sidebar.js. Mode persists in localStorage. New Activity page mirrors ActivityPage.tsx with full filter bar, 28 mock rows across all 24 activity types, scope toggle, and slide-in drawer for row detail. System mode is left-nav only (no new page content). All non-before pages updated to use shared sidebar.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 6</div>
+    <div class="meta-item"><strong>Round:</strong> 7a</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 40+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 42+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -110,12 +110,17 @@
     <li>Categories renamed to Tags in all UI copy.</li>
     <li>OrgSettingsPage Memory and Integrations tabs removed from Manage Org. Both have dedicated nav items.</li>
     <li>Workflows and Automations stay separate. Workflow steps can call automations.</li>
-    <li>Client Pulse deferred. Not in this consolidation.</li>
+    <li>Client Pulse deferred (stub links in sidebar under ClientPulse section, labeled "separate thread").</li>
     <li>Per-skill visibility: Hidden (default) or Visible. Two options only.</li>
     <li>Knowledge: 3 tabs (Summary / Auto-memory / Authored). Single meta line replaces metric strip.</li>
-    <li>Home: "Needs your attention" central section removed (duplicated Inbox). Replaced with 4-widget grid: runs sparkline, active agents, today's schedule, recent successes.</li>
-    <li>Run trace: all 6 event types (RUN_START, LLM_CALL, TOOL_CALL, TOOL_RESULT, HITL_GATE, DELEGATION) have type-specific right-panel fields. Click any row to inspect. "View raw event JSON" opens modal.</li>
-    <li>Calendar: 7/14/30 day views wired. 7-day = full detail; 14-day = chip grid; 30-day = month dots with click-to-expand popover.</li>
+    <li>Home: 4-widget grid: runs sparkline, active agents, today's schedule, spend and cap. Inbox as right sidebar preview.</li>
+    <li>Run trace: all 6 event types wired. Calendar: 7/14/30 day views.</li>
+    <li>Three-mode sidebar: Workspace (subaccount context), Org (organisation admin), System (platform admin). Mode persists in localStorage key "prototype.sidebar.mode".</li>
+    <li>Workspace nav: exhaustive list including Tasks, Sites, Triggers, Goals, Org Chart, Portal, Team, Activity, Action Log as stubs. Knowledge, Connections, ClientPulse sections separate. Bottom: Manage link.</li>
+    <li>Org mode: separate nav with Companies, Agents, Calendar, Automations, Knowledge, Connections, Skills, Workflows, Health, Spending Budgets, Team, Teams, Activity.</li>
+    <li>System mode: left-nav only. No new page content. Links to system stubs only, except Activity which links to activity.html?scope=system.</li>
+    <li>Activity page: three scopes (Subaccount / Org / System). Full filter bar. 28 rows across all 24 activity types. Slide-in drawer with type-specific fields. Links to run-trace.html and inbox.html from drawer.</li>
+    <li>Tasks consolidated to Inbox (HITL). Scheduled to Calendar. Action Log kept as stub. Skills folded into Capabilities tab. Reports under ClientPulse stub.</li>
   </ul>
 </div>
 
@@ -594,6 +599,51 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="before-home.html">Open before &#8594;</a>
         <a href="home.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7a: Three-mode nav + Activity page ───────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#4f46e5"></div>
+    Round 7a: Three-mode nav and Activity page
+  </div>
+
+  <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#0c4a6e;line-height:1.55;">
+    <strong>Shared sidebar:</strong> All prototype pages now use _sidebar.js. Three modes: Workspace (subaccount context, 15 nav items + sections), Org (organisation admin, 13 items), System (platform admin, 11 items, left-nav only). Mode persists in localStorage. Clicking a stub link shows a 2-second toast instead of navigating. Before pages are intentionally untouched (they depict the old nav).
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Activity (NEW)</div>
+        <div class="proto-card-file">activity.html</div>
+      </div>
+      <div class="proto-card-desc">Activity feed page mirroring ActivityPage.tsx. Three scopes: Subaccount / Org / System (scope toggle in header, also driven by sidebar mode or ?scope= param). Filter bar: type (all 24 types), status, severity, sort, search. 28 mock rows covering full type set. Row click opens slide-in drawer with type-specific detail fields. Drawer footer links to run-trace.html (agent_run) or inbox.html (inbox_item, review_item).</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Mirrors production</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill">ActivityPage.tsx</span>
+          <span class="replace-pill">ActivityFeedTable</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="activity.html">Open mockup &#8594;</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Shared Sidebar JS</div>
+        <div class="proto-card-file">_sidebar.js</div>
+      </div>
+      <div class="proto-card-desc">Three-mode sidebar shared across all prototype pages. Workspace mode: 15 nav items (Home, Inbox+badge, Calendar, Agents, Automations, Workflows, Tasks, Sites, Triggers, Goals, Org Chart, Portal, Team, Activity, Action Log) plus Knowledge, Connections, ClientPulse sections and Manage. Org mode: 13 items. System mode: 11 items, all stubs except Activity. Profile link at bottom of every mode. Mode pill switcher at top.</div>
+      <div class="proto-card-footer">
+        <span style="font-size:11.5px;color:var(--slate-400,#94a3b8);">No dedicated page, used by all pages</span>
       </div>
     </div>
 
