@@ -736,3 +736,35 @@ index.html:
 - `prototypes/consolidation-2026-05-06/_sidebar.js` (Pages stub resolved to pages.html)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions box, Round 7b-5 section)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-6 — 2026-05-06
+
+**Operator feedback:** Restructure automations.html to consolidate Workflows + External Automations + Triggers into one page with three top-level tabs. Update before-automations.html to show the three-page before-state. Update index.html and mockup-log.md.
+
+**Changes made:**
+- `automations.html` rewritten: Three-tab structure replacing single external-automations list. Tab bar: Workflows (10) / Automations (12) / Triggers (8). Context-aware primary CTA changes label per active tab (New workflow / New automation / New trigger) and opens the matching creation drawer.
+  - Workflows tab: 3-column card grid with 10 mock workflows (New lead onboarding, Invoice processing, Weekly report generation, Customer health check, Churn risk escalation, Demo follow-up sequence, Contract renewal nudge, Support ticket triage, Onboarding email cadence, Subscription upgrade workflow). Each card shows name, description, step count badge, last run status (green succeeded / red failed / slate never run), last run time, run count last 7d, trigger source badge. Click opens workflow drawer with Steps tab (step-number circles + label + description) and Run history tab (dot + outcome + timestamp + duration).
+  - Automations tab: Table with 12 mock external automations. Columns: Name/Trigger description/tag, Action description, Engine, Status, Last fired + count, Actions. Engine badges: n8n / Make / Zapier / internal. Status: Active green / Paused slate / Error red. Admin notice banner. Rows link to automation-detail.html. Admin controls (Pause/Activate/Delete/Retry) per row.
+  - Triggers tab: Table with 8 mock triggers (1 Webhook, 2 Scheduled, 2 HubSpot event, 1 Stripe, 1 Email received, 1 Manual). Columns: Name/URL, Source badge (color-coded per source type), Filter (monospace), Fires (chips linking to targets), Last fired + count, Status. Click opens trigger drawer with Detail tab (name, source select, webhook URL with copy button, event filter, linked targets) and Run history tab (outcome dot + message + timestamp + test-fire button).
+  - Cross-tab navigation: target chips on Triggers tab and target chips in trigger drawer call crossTabNavigate(tab, name) which closes all drawers, switches to the correct tab, and shows a toast confirmation.
+  - Three creation drawers: new-workflow-drawer (name, description, trigger type), new-auto-drawer (preserves prior fields plus trigger/action description fields), new-trigger-drawer (name, source, event filter, note about target linking after creation).
+  - Subtitle line on page header: "Acme Corp - 10 workflows, 12 automations, 7 triggers" (uses middle-dot, not em-dash).
+  - Replaces banner updated: "Replaces 4 pages: AutomationsPage + AdminAutomationsPage + WorkflowsLibraryPage + TriggersPage".
+- `before-automations.html` rewritten: 3-column grid layout. Column 1: WorkflowsLibraryPage (/workflows) with 5 workflow cards showing step badges and last run status. Column 2: AutomationsPage + AdminAutomationsPage (/automations and /admin/automations) with shared table and note about near-duplicate routes. Column 3: TriggersPage (/triggers) with trigger table and annotated note about lack of cross-page navigation. Banner updated: "BEFORE: Three separate top-level pages". Impact summary (4 items) and problems-with-current-state list (6 items). Explicit before-state banner links to automations.html.
+- `index.html`: masthead updated to Round 7b-6 with accurate description. Automations card description updated to reflect three-tab structure. Replaces list expanded from 2 to 4 pages (WorkflowsLibraryPage + TriggersPage added). Round 7b-6 bullet added to confirmed decisions box.
+- `_sidebar.js`: verified. Automations link in Workspace Build section already resolves to automations.html. No standalone Workflows or Triggers items present (removed in 7b-1).
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- primary task on the Automations page is "find and manage an automated process". Three tabs cover the three conceptual types without overwhelming. Default tab is Workflows (the internal multi-step flows that are most commonly built first). The active tab surfaces the most relevant list for that intent.
+- Default to hidden: yes -- run history and detail for any workflow are behind a drawer. Trigger event filter detail is behind the drawer. Admin controls on automations are permission-gated and inline. No KPI tiles, no dashboard view, no aggregated cost panels. Cross-tab chips show names only, not firing statistics.
+- One primary action: yes -- each tab has exactly one primary action that changes label per tab (New workflow / New automation / New trigger). No competing primaries on any tab.
+- Inline state: yes -- workflow last-run status shown as a badge chip on each card without needing to open the drawer. Automation status (Active / Paused / Error) shown inline in the Status column. Trigger status shown inline. Fire count shown as "N/7d" inline without a separate analytics panel.
+- Re-check passed: yes -- a non-technical operator can: (a) click Workflows tab, scan cards for a failed workflow, click it, and see the run history in 2 clicks; (b) click Triggers tab, find a trigger, click a target chip to navigate to the matching automation or workflow in one more click; (c) create a new trigger from "+ New trigger" with a 4-field form. No technical jargon required; source types are labeled plainly (Webhook, Schedule, HubSpot event, etc.).
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/automations.html` (rewritten)
+- `prototypes/consolidation-2026-05-06/before-automations.html` (rewritten)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions box, automations card description)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

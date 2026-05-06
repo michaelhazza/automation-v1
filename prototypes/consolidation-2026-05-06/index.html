@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-5
+    Prototype Round 7b-6
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-5: Pages surface (renamed from "Sites") -- consolidates PageProjectsPage and PageProjectDetailPage into a single pages.html. Card grid replaces flat table. Status badges and filter pills added. Theme color dot visible per card. Detail opens in a 600px side drawer with four tabs (Settings, Content, SEO, Analytics) instead of navigating to a separate route. New page modal with name, slug, color picker, and status. Before companion shows the two-page production state with annotated problems.</p>
+  <p>Round 7b-6: Automations page restructured into a three-tab consolidated surface (Workflows / Automations / Triggers). Previously four separate routes (WorkflowsLibraryPage, AutomationsPage, AdminAutomationsPage, TriggersPage) are now one page. Context-aware primary CTA changes label per active tab. Workflow card grid with step count, last run status, trigger source. Automations table with trigger description, action description, engine, status, and fire count. Triggers table with source badge, event filter, linked target chips, and cross-tab navigation. Drawers for workflow detail (Steps / Run history), trigger detail (Detail / Run history with test-fire button), and new-item creation per tab. Before companion updated to 3-column layout showing all three production surfaces side by side with annotated problems.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-5</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-6</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 50+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -130,6 +130,7 @@
     <li>Round 7b-2: Team page: SubaccountTeamPage and OrgChartPage merged into one page with Members + Org Chart tabs. Member detail drawer is shared across both tabs (click a row or an org card). Invite modal adds a pending row to the Members table. Org chart is CSS flexbox only (read view), no D3 or graph library.</li>
     <li>Round 7b-4: Spending page: SpendingBudgetsPage and SpendLedgerPage merged into spending.html with two tabs. Org-level cap card with progress bar and pace line. Per-workspace caps table with inline edit, status badges (within cap, over-pace amber, near cap red). Ledger tab with 25+ transactions, KPI strip, group-by (None / Day / Subaccount / Agent). Transaction detail drawer with cost breakdown and run trace link. Edit cap modal with validation (daily and monthly). _sidebar.js Spending link in Org mode changed from stub to spending.html.</li>
     <li>Round 7b-5: Pages surface: PageProjectsPage + PageProjectDetailPage consolidated into pages.html. Nav item renamed "Sites" to "Pages". Card grid with browser-frame thumbnails and status badges replaces flat table. Detail opens in 600px side drawer (Settings / Content / SEO / Analytics tabs). New page modal with slug auto-gen and color picker. _sidebar.js Pages link in Workspace External section changed from stub to pages.html.</li>
+    <li>Round 7b-6: Automations page restructured: three tabs (Workflows / Automations / Triggers) replace four separate routes. Context-aware primary CTA. Cross-tab navigation via trig-chip clicks. before-automations.html updated to 3-column before-state showing all three production pages with annotated problems.</li>
   </ul>
 </div>
 
@@ -240,12 +241,14 @@
         <div class="proto-card-title">Automations</div>
         <div class="proto-card-file">automations.html</div>
       </div>
-      <div class="proto-card-desc">Single automations list. Admin actions (create, activate/deactivate, delete) are permission-gated inline. Automation name is a clickable link opening Automation Detail. Annotation on page explains click behaviour.</div>
+      <div class="proto-card-desc">Three-tab consolidated surface: Workflows (card grid, 10 items), Automations (table, 12 items), Triggers (table, 8 items). Context-aware primary CTA. Workflow detail drawer with Steps and Run history tabs. Trigger detail drawer with Detail/Run-history tabs and test-fire button. Cross-tab navigation via target chips on trigger rows. Round 7b-6 restructure.</div>
       <div class="proto-card-replaces">
-        <div class="proto-card-replaces-label">Replaces 2 pages</div>
+        <div class="proto-card-replaces-label">Replaces 4 pages</div>
         <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">WorkflowsLibraryPage</span>
           <span class="replace-pill strike">AutomationsPage</span>
           <span class="replace-pill strike">AdminAutomationsPage</span>
+          <span class="replace-pill strike">TriggersPage</span>
         </div>
       </div>
       <div class="proto-card-footer">

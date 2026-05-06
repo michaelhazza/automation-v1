@@ -1,29 +1,9 @@
 <!DOCTYPE html>
 <!--
-  FIELD AUDIT, Merged Automations List
-  Sources: AutomationsPage, AdminAutomationsPage
-
-  AutomationsPage fields/actions:
-    KEEP: automation name, description, engineType, readiness (ready/needs_setup) -> list rows
-    KEEP: filter status: active -> filter control
-    KEEP: link to automation detail -> row click
-    KEEP: New Automation CTA -> permission-gated
-
-  AdminAutomationsPage fields/actions:
-    KEEP: process name, description, status (active/inactive/draft), orgCategoryId, workflowEngineId -> list rows
-    KEEP: isSystemManaged flag -> badge on row
-    KEEP: Create form (name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema) -> "New" drawer
-    KEEP: Activate/deactivate toggle -> per-row actions (admin only)
-    KEEP: Delete -> per-row actions (admin only)
-    KEEP: Link system process (systemProcessId, select from list) -> admin-only action
-    KEEP: Categories available in create form -> map to Tags per confirmed decision
-    KEEP: Engines available in create form -> engine picker
-    KEEP: webhook path visible -> in row detail/drawer
-
-  Merged design:
-    Single list. Admin actions (create, activate/deactivate, delete, link system) are permission-gated.
-    Non-admin sees read-only list + "Run" button per row.
-    Admin sees full controls.
+  CONSOLIDATED AUTOMATIONS PAGE — Round 7b-6
+  Replaces: AutomationsPage + AdminAutomationsPage + WorkflowsLibraryPage + TriggersPage
+  Structure: three top-level tabs — Workflows / Automations / Triggers
+  Primary action is context-aware (changes per active tab).
 -->
 <html lang="en">
 <head>
@@ -34,11 +14,65 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="_shared.css">
 <style>
+  /* ── Tab bar ────────────────────────────────────────────── */
+  .page-tabs {
+    display: flex; gap: 0; border-bottom: 1px solid var(--slate-200);
+    margin: 0 0 0 0; padding: 0 0;
+  }
+  .page-tab {
+    padding: 10px 20px; font-size: 13.5px; font-weight: 500;
+    color: var(--slate-500); border-bottom: 2px solid transparent;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    user-select: none; white-space: nowrap;
+  }
+  .page-tab:hover { color: var(--slate-800); }
+  .page-tab.active {
+    color: var(--indigo-600); font-weight: 600;
+    border-bottom-color: var(--indigo-600);
+  }
+  .tab-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; border-radius: 9px;
+    background: var(--slate-100); color: var(--slate-600);
+    font-size: 10px; font-weight: 700; padding: 0 5px; margin-left: 5px;
+  }
+  .page-tab.active .tab-count { background: var(--indigo-100); color: var(--indigo-700); }
+
+  /* ── Tab panels ─────────────────────────────────────────── */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Workflow cards ──────────────────────────────────────── */
+  .wf-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .wf-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+    cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .wf-card:hover {
+    border-color: var(--indigo-400);
+    box-shadow: 0 2px 8px rgba(99,102,241,0.1);
+  }
+  .wf-card-name { font-size: 13.5px; font-weight: 600; color: var(--slate-900); margin-bottom: 3px; }
+  .wf-card-desc { font-size: 12px; color: var(--slate-500); margin-bottom: 10px; line-height: 1.45; }
+  .wf-card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .wf-card-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--slate-100);
+    font-size: 11.5px; color: var(--slate-500);
+  }
+
+  /* ── Automations table ───────────────────────────────────── */
   .auto-row {
     display: grid;
-    grid-template-columns: 1fr 100px 100px 120px 100px;
+    grid-template-columns: 1fr 110px 90px 90px 120px 80px;
     align-items: center;
-    padding: 12px 16px;
+    padding: 11px 16px;
     border-bottom: 1px solid var(--slate-100);
     transition: background 0.1s;
     cursor: pointer;
@@ -47,23 +81,102 @@
   }
   .auto-row:last-child { border-bottom: none; }
   .auto-row:hover { background: var(--slate-50); }
-  .auto-name { font-size: 13.5px; font-weight: 600; color: var(--indigo-700); margin-bottom: 2px; }
+  .auto-name { font-size: 13px; font-weight: 600; color: var(--indigo-700); margin-bottom: 2px; }
   a.auto-row:hover .auto-name { text-decoration: underline; }
-  .auto-desc { font-size: 12px; color: var(--slate-500); }
+  .auto-desc { font-size: 11.5px; color: var(--slate-500); }
+  .auto-trigger-desc { font-size: 11.5px; color: var(--slate-600); }
   .auto-actions { display: flex; gap: 5px; align-items: center; justify-content: flex-end; }
 
+  /* ── Trigger table ───────────────────────────────────────── */
+  .trig-row {
+    display: grid;
+    grid-template-columns: 1fr 130px 150px 1fr 90px 80px;
+    align-items: center;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--slate-100);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .trig-row:last-child { border-bottom: none; }
+  .trig-row:hover { background: var(--slate-50); }
+  .trig-name { font-size: 13px; font-weight: 600; color: var(--indigo-700); margin-bottom: 2px; }
+  .trig-filter { font-size: 11px; color: var(--slate-500); font-family: monospace; }
+  .trig-targets { display: flex; flex-wrap: wrap; gap: 4px; }
+  .trig-chip {
+    display: inline-flex; align-items: center;
+    padding: 2px 7px; border-radius: 4px;
+    font-size: 10.5px; font-weight: 500;
+    background: var(--indigo-50); color: var(--indigo-700);
+    border: 1px solid var(--indigo-100);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .trig-chip:hover { background: var(--indigo-100); text-decoration: underline; }
+
+  /* ── Drawers ─────────────────────────────────────────────── */
+  .drawer-tabs {
+    display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 16px;
+  }
+  .drawer-tab {
+    padding: 7px 14px; font-size: 12.5px; font-weight: 500;
+    color: var(--slate-500); border-bottom: 2px solid transparent;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  }
+  .drawer-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .drawer-tab-panel { display: none; }
+  .drawer-tab-panel.active { display: block; }
+
+  .run-hist-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid var(--slate-100);
+    font-size: 12px; color: var(--slate-600);
+  }
+  .run-hist-row:last-child { border-bottom: none; }
+
+  .step-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid var(--slate-100);
+  }
+  .step-item:last-child { border-bottom: none; }
+  .step-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--indigo-100); color: var(--indigo-700);
+    font-size: 10.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .step-label { font-size: 12.5px; font-weight: 600; color: var(--slate-800); }
+  .step-desc { font-size: 11.5px; color: var(--slate-500); }
+
+  /* Target chip inside trigger drawer */
+  .target-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 5px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-100);
+    font-size: 12px; font-weight: 500; color: var(--indigo-700);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .target-chip:hover { background: var(--indigo-100); text-decoration: underline; }
+
+  /* Admin notice */
   .admin-notice {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 14px;
     background: var(--indigo-50); border-bottom: 1px solid var(--indigo-100);
     font-size: 12px; color: var(--indigo-700);
   }
+
+  /* Source badge on trigger type */
+  .source-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 10.5px; font-weight: 600;
+  }
 </style>
 </head>
 <body>
 <div class="app-shell">
 
-  <!-- Sidebar (three-mode shared) -->
+  <!-- Sidebar -->
   <div id="sidebar-mount"></div>
   <script src="_sidebar.js"></script>
   <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'automations.html');</script>
@@ -77,173 +190,892 @@
       <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
     </div>
 
+    <!-- Replaces banner -->
     <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
-      Replaces 2 pages:
-      <a href="before-automations.html" style="color:var(--indigo-600);font-weight:600;">AutomationsPage + AdminAutomationsPage (before)</a>
-      <span style="color:var(--slate-400);font-size:11px;margin-left:8px;">Click any automation name to open its detail (Definition / Run sandbox / History).</span>
+      Replaces 4 pages:
+      <a href="before-automations.html" style="color:var(--indigo-600);font-weight:600;">AutomationsPage + AdminAutomationsPage + WorkflowsLibraryPage + TriggersPage (before)</a>
     </div>
 
     <div class="page-body">
-      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
+
+      <!-- Page header with context-aware CTA -->
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0;">
         <div>
           <h1>Automations</h1>
-          <p>External tools your workflows can call. Wrap n8n, Make, and other engines.</p>
+          <p style="color:var(--slate-500);font-size:13px;margin-top:2px;">Acme Corp &middot; 10 workflows, 12 automations, 8 triggers</p>
         </div>
-        <!-- Primary CTA — permission-gated (admin only) -->
-        <button class="btn btn-primary" onclick="document.getElementById('new-auto-drawer').style.display='flex'">
+        <!-- Primary CTA changes per active tab -->
+        <button id="primary-cta" class="btn btn-primary" onclick="openNewDrawer()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-          New automation
+          <span id="primary-cta-label">New workflow</span>
         </button>
       </div>
 
-      <!-- Filters row -->
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-        <div class="search-wrap" style="width:260px;">
-          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input class="search-box" type="search" placeholder="Search automations...">
+      <!-- Three-tab bar -->
+      <div class="page-tabs" style="margin-top:16px;" id="main-tabs">
+        <div class="page-tab active" id="tab-workflows" onclick="switchTab('workflows')">
+          Workflows <span class="tab-count">10</span>
         </div>
-        <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
-          <option>Status: All</option>
-          <option selected>Active</option>
-          <option>Draft</option>
-          <option>Inactive</option>
-        </select>
-        <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
-          <option>Tag: All</option>
-          <option>outreach</option>
-          <option>crm</option>
-          <option>reporting</option>
-        </select>
-        <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
-          <option>Engine: All</option>
-          <option>n8n</option>
-          <option>internal</option>
-        </select>
-        <span style="margin-left:auto;font-size:12px;color:var(--slate-500);">6 automations</span>
+        <div class="page-tab" id="tab-automations" onclick="switchTab('automations')">
+          Automations <span class="tab-count">12</span>
+        </div>
+        <div class="page-tab" id="tab-triggers" onclick="switchTab('triggers')">
+          Triggers <span class="tab-count">8</span>
+        </div>
       </div>
 
-      <div class="card">
-        <!-- Admin notice banner -->
-        <div class="admin-notice">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          You have admin access. Activate, deactivate, and link system automations using the row controls below.
+      <!-- ════════════════════ WORKFLOWS TAB ════════════════════ -->
+      <div class="tab-panel active" id="panel-workflows" style="padding-top:18px;">
+
+        <!-- Filters -->
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+          <div class="search-wrap" style="width:240px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="search" placeholder="Search workflows...">
+          </div>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Trigger: All</option>
+            <option>Manual</option>
+            <option>Scheduled</option>
+            <option>Event</option>
+          </select>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Status: All</option>
+            <option>Active</option>
+            <option>Never run</option>
+            <option>Failed</option>
+          </select>
         </div>
 
-        <!-- Table header -->
-        <div class="auto-row" style="cursor:default;background:var(--slate-50);border-bottom:1px solid var(--slate-200);">
-          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Name</div>
-          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Engine</div>
-          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Status</div>
-          <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Readiness</div>
-          <div></div>
+        <!-- Workflow card grid -->
+        <div class="wf-grid">
+
+          <!-- Card 1 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('New lead onboarding')">
+            <div class="wf-card-name">New lead onboarding</div>
+            <div class="wf-card-desc">Enriches a new lead, creates a CRM record, and schedules an intro call.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">7 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-indigo" style="font-size:10px;">Event</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 2h ago</span>
+              <span style="color:var(--slate-500);">24 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Invoice processing')">
+            <div class="wf-card-name">Invoice processing</div>
+            <div class="wf-card-desc">Reads an uploaded invoice, extracts line items, and posts to the billing system.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">5 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-sky" style="font-size:10px;">Scheduled</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 6h ago</span>
+              <span style="color:var(--slate-500);">8 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 3 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Weekly report generation')">
+            <div class="wf-card-name">Weekly report generation</div>
+            <div class="wf-card-desc">Compiles KPIs from connected data sources and emails a PDF to stakeholders.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">4 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-sky" style="font-size:10px;">Scheduled</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 2d ago</span>
+              <span style="color:var(--slate-500);">1 run / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 4 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Customer health check')">
+            <div class="wf-card-name">Customer health check</div>
+            <div class="wf-card-desc">Scores active customers on engagement, usage, and support ticket frequency.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">6 steps</span>
+              <span class="badge badge-red" style="font-size:10px;">Last run failed</span>
+              <span class="badge badge-sky" style="font-size:10px;">Scheduled</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 1d ago</span>
+              <span style="color:var(--slate-500);">7 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 5 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Churn risk escalation')">
+            <div class="wf-card-name">Churn risk escalation</div>
+            <div class="wf-card-desc">Flags accounts with declining health scores and routes them to a success rep.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">5 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-indigo" style="font-size:10px;">Event</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 3h ago</span>
+              <span style="color:var(--slate-500);">11 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 6 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Demo follow-up sequence')">
+            <div class="wf-card-name">Demo follow-up sequence</div>
+            <div class="wf-card-desc">Sends a personalised follow-up email series after a demo call is marked complete.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">3 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-indigo" style="font-size:10px;">Event</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 5h ago</span>
+              <span style="color:var(--slate-500);">18 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 7 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Contract renewal nudge')">
+            <div class="wf-card-name">Contract renewal nudge</div>
+            <div class="wf-card-desc">Sends renewal reminders 60, 30, and 7 days before a contract expiry date.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">4 steps</span>
+              <span class="badge badge-slate" style="font-size:10px;">Never run</span>
+              <span class="badge badge-sky" style="font-size:10px;">Scheduled</span>
+            </div>
+            <div class="wf-card-footer">
+              <span style="color:var(--slate-400);">Never run</span>
+              <span style="color:var(--slate-500);">0 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 8 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Support ticket triage')">
+            <div class="wf-card-name">Support ticket triage</div>
+            <div class="wf-card-desc">Classifies incoming tickets by priority and routes to the right support agent.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">5 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-indigo" style="font-size:10px;">Event</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 45m ago</span>
+              <span style="color:var(--slate-500);">32 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 9 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Onboarding email cadence')">
+            <div class="wf-card-name">Onboarding email cadence</div>
+            <div class="wf-card-desc">Sends a 5-touch educational sequence to new customers over their first 30 days.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">8 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-indigo" style="font-size:10px;">Event</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 1h ago</span>
+              <span style="color:var(--slate-500);">9 runs / 7d</span>
+            </div>
+          </div>
+
+          <!-- Card 10 -->
+          <div class="wf-card" onclick="openWorkflowDrawer('Subscription upgrade workflow')">
+            <div class="wf-card-name">Subscription upgrade workflow</div>
+            <div class="wf-card-desc">Detects usage thresholds and initiates an upgrade offer via email and in-app nudge.</div>
+            <div class="wf-card-meta">
+              <span class="badge badge-slate" style="font-size:10px;">6 steps</span>
+              <span class="badge badge-green" style="font-size:10px;">Last run succeeded</span>
+              <span class="badge badge-indigo" style="font-size:10px;">Event</span>
+            </div>
+            <div class="wf-card-footer">
+              <span><span style="color:var(--slate-400);">Last run:</span> 30m ago</span>
+              <span style="color:var(--slate-500);">5 runs / 7d</span>
+            </div>
+          </div>
+
+        </div><!-- /wf-grid -->
+      </div><!-- /panel-workflows -->
+
+      <!-- ════════════════════ AUTOMATIONS TAB ════════════════════ -->
+      <div class="tab-panel" id="panel-automations" style="padding-top:18px;">
+
+        <!-- Filters -->
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+          <div class="search-wrap" style="width:240px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="search" placeholder="Search automations...">
+          </div>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Status: All</option>
+            <option selected>Active</option>
+            <option>Paused</option>
+            <option>Error</option>
+          </select>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Tag: All</option>
+            <option>crm</option>
+            <option>outreach</option>
+            <option>billing</option>
+            <option>notifications</option>
+          </select>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Engine: All</option>
+            <option>n8n</option>
+            <option>Make</option>
+            <option>internal</option>
+          </select>
+          <span style="margin-left:auto;font-size:12px;color:var(--slate-500);">12 automations</span>
         </div>
 
-        <!-- Rows -->
-        <a class="auto-row" href="automation-detail.html">
-          <div>
-            <div class="auto-name">HubSpot contact sync</div>
-            <div class="auto-desc">Syncs enriched contact data back to HubSpot CRM after agent runs</div>
-            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">crm</span></div>
+        <div class="card">
+          <!-- Admin notice -->
+          <div class="admin-notice">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            You have admin access. Activate, deactivate, and manage automations using the row controls.
           </div>
-          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
-          <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
-            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
-            Ready
-          </div>
-          <div class="auto-actions" onclick="event.preventDefault()">
-            <button class="btn btn-xs btn-secondary">Deactivate</button>
-            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
-          </div>
-        </a>
 
-        <a class="auto-row" href="automation-detail.html">
-          <div>
-            <div class="auto-name">LinkedIn outreach trigger</div>
-            <div class="auto-desc">Fires PhantomBuster sequence when a contact enters the "warm" pipeline stage</div>
-            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">outreach</span></div>
+          <!-- Table header -->
+          <div class="auto-row" style="cursor:default;background:var(--slate-50);border-bottom:1px solid var(--slate-200);">
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Name / Trigger</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Action</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Engine</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Status</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Last fired</div>
+            <div></div>
           </div>
-          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
-          <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
-            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
-            Ready
-          </div>
-          <div class="auto-actions" onclick="event.preventDefault()">
-            <button class="btn btn-xs btn-secondary">Deactivate</button>
-            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
-          </div>
-        </a>
 
-        <a class="auto-row" href="automation-detail.html">
-          <div>
-            <div class="auto-name">Compliance report generator</div>
-            <div class="auto-desc">Generates monthly compliance PDF and emails to nominated contacts</div>
-            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-indigo" style="font-size:10px;">reporting</span></div>
-          </div>
-          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
-          <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
-            <span class="status-dot dot-amber" style="width:6px;height:6px;"></span>
-            <span style="color:var(--amber-700);">Needs setup</span>
-          </div>
-          <div class="auto-actions" onclick="event.preventDefault()">
-            <button class="btn btn-xs btn-secondary">Deactivate</button>
-            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
-          </div>
-        </a>
+          <!-- Row 1 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">HubSpot contact sync</div>
+              <div class="auto-trigger-desc">When HubSpot contact is created or updated</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">crm</span></div>
+            </div>
+            <div class="auto-desc">Send enriched data back to HubSpot</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">2h ago &middot; 14/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
 
-        <a class="auto-row" href="automation-detail.html" style="opacity:0.65;">
-          <div>
-            <div class="auto-name">Weekly digest email</div>
-            <div class="auto-desc">Sends a weekly summary of agent activity to the client</div>
-            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-slate" style="font-size:10px;">system</span></div>
-          </div>
-          <div><span class="badge badge-slate" style="font-size:10px;">internal</span></div>
-          <div><span class="badge badge-slate" style="font-size:10px;">Inactive</span></div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--slate-400);">
-            <span class="status-dot dot-slate" style="width:6px;height:6px;"></span>
-            Inactive
-          </div>
-          <div class="auto-actions" onclick="event.preventDefault()">
-            <button class="btn btn-xs btn-primary" style="font-size:10px;">Activate</button>
-            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
-          </div>
-        </a>
+          <!-- Row 2 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">LinkedIn outreach trigger</div>
+              <div class="auto-trigger-desc">When deal stage moves to "warm"</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">outreach</span></div>
+            </div>
+            <div class="auto-desc">Start PhantomBuster sequence</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">5h ago &middot; 8/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
 
-        <a class="auto-row" href="automation-detail.html" style="opacity:0.65;">
-          <div>
-            <div class="auto-name">Deal stage notification</div>
-            <div class="auto-desc">Pings Slack when a deal moves to "proposal sent"</div>
-            <div style="margin-top:4px;display:flex;gap:4px;"><span class="badge badge-slate" style="font-size:10px;">crm</span></div>
-          </div>
-          <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
-          <div><span class="badge badge-amber" style="font-size:10px;">Draft</span></div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--slate-400);">
-            <span class="status-dot dot-amber" style="width:6px;height:6px;"></span>
-            <span style="color:var(--amber-700);">Needs setup</span>
-          </div>
-          <div class="auto-actions" onclick="event.preventDefault()">
-            <button class="btn btn-xs btn-primary" style="font-size:10px;">Activate</button>
-            <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
-          </div>
-        </a>
+          <!-- Row 3 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Stripe charge succeeded</div>
+              <div class="auto-trigger-desc">On Stripe charge.succeeded event</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">billing</span></div>
+            </div>
+            <div class="auto-desc">Post to #sales Slack channel</div>
+            <div><span class="badge badge-violet" style="font-size:10px;">Make</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">1h ago &middot; 21/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
 
-        <div class="auto-row" style="cursor:default;background:var(--slate-50);border-top:1px solid var(--slate-100);">
-          <div style="display:flex;align-items:center;gap:8px;" colspan="5">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--slate-400);"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-            <span style="font-size:12px;color:var(--slate-500);">Link a system automation</span>
-            <button class="btn btn-xs btn-secondary">Browse system automations</button>
+          <!-- Row 4 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Welcome email on signup</div>
+              <div class="auto-trigger-desc">When new user completes registration</div>
+              <div style="margin-top:3px;"><span class="badge badge-sky" style="font-size:10px;">onboarding</span></div>
+            </div>
+            <div class="auto-desc">Send welcome email via Gmail</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">internal</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">30m ago &middot; 19/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 5 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Deal stage notification</div>
+              <div class="auto-trigger-desc">When deal moves to "proposal sent"</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">crm</span></div>
+            </div>
+            <div class="auto-desc">Ping Slack #deals channel</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">4h ago &middot; 6/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 6 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Compliance report generator</div>
+              <div class="auto-trigger-desc">First Monday of each month at 8am UTC</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">reporting</span></div>
+            </div>
+            <div class="auto-desc">Generate PDF and email to compliance@</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+            <div>
+              <span class="badge badge-green" style="font-size:10px;">Active</span>
+              <span class="badge badge-amber" style="font-size:10px;margin-left:3px;">Needs setup</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">4d ago &middot; 1/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 7 -->
+          <a class="auto-row" href="automation-detail.html" style="opacity:0.72;">
+            <div>
+              <div class="auto-name">Invoice reminder</div>
+              <div class="auto-trigger-desc">Daily at 9am UTC, invoices due in 7 days</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">billing</span></div>
+            </div>
+            <div class="auto-desc">Send reminder email via Mailgun</div>
+            <div><span class="badge badge-violet" style="font-size:10px;">Make</span></div>
+            <div><span class="badge badge-slate" style="font-size:10px;">Paused</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">3d ago &middot; 2/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-primary" style="font-size:10px;">Activate</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 8 -->
+          <a class="auto-row" href="automation-detail.html" style="opacity:0.72;">
+            <div>
+              <div class="auto-name">Weekly digest email</div>
+              <div class="auto-trigger-desc">Every Friday at 4pm UTC</div>
+              <div style="margin-top:3px;"><span class="badge badge-slate" style="font-size:10px;">notifications</span></div>
+            </div>
+            <div class="auto-desc">Send weekly activity summary to client</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">internal</span></div>
+            <div><span class="badge badge-slate" style="font-size:10px;">Paused</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">7d ago &middot; 0/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-primary" style="font-size:10px;">Activate</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 9 - Error -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Lead score update</div>
+              <div class="auto-trigger-desc">When Salesforce opportunity value changes</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">crm</span></div>
+            </div>
+            <div class="auto-desc">Update lead score in HubSpot</div>
+            <div><span class="badge badge-sky" style="font-size:10px;">Zapier</span></div>
+            <div><span class="badge badge-red" style="font-size:10px;">Error</span></div>
+            <div style="font-size:12px;color:var(--red-500);">Failed 1d ago</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Retry</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 10 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Calendar booking confirmation</div>
+              <div class="auto-trigger-desc">When Calendly event is scheduled</div>
+              <div style="margin-top:3px;"><span class="badge badge-slate" style="font-size:10px;">notifications</span></div>
+            </div>
+            <div class="auto-desc">Send SMS confirmation via Twilio</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">n8n</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">3h ago &middot; 11/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 11 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">Refund processed notification</div>
+              <div class="auto-trigger-desc">On Stripe refund.created event</div>
+              <div style="margin-top:3px;"><span class="badge badge-indigo" style="font-size:10px;">billing</span></div>
+            </div>
+            <div class="auto-desc">Notify #finance-ops Slack channel</div>
+            <div><span class="badge badge-violet" style="font-size:10px;">Make</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">2d ago &middot; 3/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+          <!-- Row 12 -->
+          <a class="auto-row" href="automation-detail.html">
+            <div>
+              <div class="auto-name">G2 review alert</div>
+              <div class="auto-trigger-desc">When new G2 review is posted (email received)</div>
+              <div style="margin-top:3px;"><span class="badge badge-sky" style="font-size:10px;">reputation</span></div>
+            </div>
+            <div class="auto-desc">Create task for CSM response</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">internal</span></div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+            <div style="font-size:12px;color:var(--slate-500);">5d ago &middot; 2/7d</div>
+            <div class="auto-actions" onclick="event.preventDefault()">
+              <button class="btn btn-xs btn-secondary">Pause</button>
+              <button class="btn btn-xs btn-ghost" style="color:var(--red-500);">Delete</button>
+            </div>
+          </a>
+
+        </div><!-- /card -->
+      </div><!-- /panel-automations -->
+
+      <!-- ════════════════════ TRIGGERS TAB ════════════════════ -->
+      <div class="tab-panel" id="panel-triggers" style="padding-top:18px;">
+
+        <!-- Filters -->
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+          <div class="search-wrap" style="width:240px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="search" placeholder="Search triggers...">
           </div>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Source: All</option>
+            <option>Webhook</option>
+            <option>Schedule</option>
+            <option>HubSpot</option>
+            <option>Stripe</option>
+            <option>Email</option>
+            <option>Manual</option>
+          </select>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>Status: All</option>
+            <option>Active</option>
+            <option>Paused</option>
+            <option>Error</option>
+          </select>
+          <span style="margin-left:auto;font-size:12px;color:var(--slate-500);">8 triggers</span>
         </div>
 
-      </div><!-- /card -->
+        <div class="card">
+
+          <!-- Table header -->
+          <div class="trig-row" style="cursor:default;background:var(--slate-50);border-bottom:1px solid var(--slate-200);">
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Name</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Source</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Filter</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Fires</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Last fired</div>
+            <div style="font-size:11px;font-weight:600;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.06em;">Status</div>
+          </div>
+
+          <!-- Trigger 1 — Webhook -->
+          <div class="trig-row" onclick="openTriggerDrawer('HubSpot contact webhook')">
+            <div>
+              <div class="trig-name">HubSpot contact webhook</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;font-family:monospace;">/wh/hubspot-contacts</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:var(--indigo-50);color:var(--indigo-700);">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                Webhook
+              </span>
+            </div>
+            <div class="trig-filter">lifecycle_stage = lead</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','HubSpot contact sync')">HubSpot contact sync</span>
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('workflows','New lead onboarding')">New lead onboarding</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">2h ago &middot; 14/7d</div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          </div>
+
+          <!-- Trigger 2 — Schedule -->
+          <div class="trig-row" onclick="openTriggerDrawer('Daily invoice check')">
+            <div>
+              <div class="trig-name">Daily invoice check</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">Every day</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:var(--sky-50);color:var(--sky-500);">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Schedule
+              </span>
+            </div>
+            <div class="trig-filter">9:00am UTC, weekdays</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','Invoice reminder')">Invoice reminder</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">9h ago &middot; 5/7d</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">Paused</span></div>
+          </div>
+
+          <!-- Trigger 3 — Schedule -->
+          <div class="trig-row" onclick="openTriggerDrawer('Weekly report schedule')">
+            <div>
+              <div class="trig-name">Weekly report schedule</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">Every week</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:var(--sky-50);color:var(--sky-500);">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Schedule
+              </span>
+            </div>
+            <div class="trig-filter">Friday, 4:00pm UTC</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('workflows','Weekly report generation')">Weekly report generation</span>
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','Weekly digest email')">Weekly digest email</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">2d ago &middot; 1/7d</div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          </div>
+
+          <!-- Trigger 4 — HubSpot -->
+          <div class="trig-row" onclick="openTriggerDrawer('HubSpot deal stage change')">
+            <div>
+              <div class="trig-name">HubSpot deal stage change</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">HubSpot CRM</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:#fff7ed;color:#c2410c;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                HubSpot
+              </span>
+            </div>
+            <div class="trig-filter">deal_stage = closed_won</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','Deal stage notification')">Deal stage notification</span>
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('workflows','Demo follow-up sequence')">Demo follow-up sequence</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">4h ago &middot; 6/7d</div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          </div>
+
+          <!-- Trigger 5 — HubSpot -->
+          <div class="trig-row" onclick="openTriggerDrawer('HubSpot churn risk flag')">
+            <div>
+              <div class="trig-name">HubSpot churn risk flag</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">HubSpot CRM</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:#fff7ed;color:#c2410c;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                HubSpot
+              </span>
+            </div>
+            <div class="trig-filter">health_score &lt; 40</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('workflows','Churn risk escalation')">Churn risk escalation</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">3h ago &middot; 11/7d</div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          </div>
+
+          <!-- Trigger 6 — Stripe -->
+          <div class="trig-row" onclick="openTriggerDrawer('Stripe payment events')">
+            <div>
+              <div class="trig-name">Stripe payment events</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">Stripe</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:#f5f3ff;color:#6d28d9;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                Stripe
+              </span>
+            </div>
+            <div class="trig-filter">charge.succeeded, refund.created</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','Stripe charge succeeded')">Stripe charge succeeded</span>
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','Refund processed notification')">Refund processed notification</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">1h ago &middot; 24/7d</div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          </div>
+
+          <!-- Trigger 7 — Email received -->
+          <div class="trig-row" onclick="openTriggerDrawer('G2 review email watcher')">
+            <div>
+              <div class="trig-name">G2 review email watcher</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">Email received</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:var(--emerald-50);color:var(--emerald-600);">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                Email
+              </span>
+            </div>
+            <div class="trig-filter">from: notifications@g2.com</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('automations','G2 review alert')">G2 review alert</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">5d ago &middot; 2/7d</div>
+            <div><span class="badge badge-green" style="font-size:10px;">Active</span></div>
+          </div>
+
+          <!-- Trigger 8 — Manual test -->
+          <div class="trig-row" onclick="openTriggerDrawer('Manual test trigger')">
+            <div>
+              <div class="trig-name">Manual test trigger</div>
+              <div style="font-size:11px;color:var(--slate-400);margin-top:1px;">Manual / development</div>
+            </div>
+            <div>
+              <span class="source-badge" style="background:var(--slate-100);color:var(--slate-600);">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                Manual
+              </span>
+            </div>
+            <div class="trig-filter">No filter (always fires)</div>
+            <div class="trig-targets">
+              <span class="trig-chip" onclick="event.stopPropagation();crossTabNavigate('workflows','Support ticket triage')">Support ticket triage</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-500);">1d ago &middot; 3/7d</div>
+            <div><span class="badge badge-slate" style="font-size:10px;">Dev only</span></div>
+          </div>
+
+        </div><!-- /card -->
+      </div><!-- /panel-triggers -->
 
     </div><!-- /page-body -->
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
-<!-- ── NEW AUTOMATION DRAWER ─────────────────────────────────────── -->
+<!-- ═══════════════ WORKFLOW DRAWER ══════════════════════════════════ -->
+<div id="workflow-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:540px;">
+    <div class="drawer-header">
+      <div>
+        <h2 id="wf-drawer-title">New lead onboarding</h2>
+        <p style="font-size:12px;color:var(--slate-500);margin-top:2px;" id="wf-drawer-meta">5 steps &middot; Event trigger &middot; 24 runs last 7d</p>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('workflow-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-tabs">
+      <div class="drawer-tab active" onclick="switchDrawerTab('wf', 'steps', this)">Steps</div>
+      <div class="drawer-tab" onclick="switchDrawerTab('wf', 'history', this)">Run history</div>
+    </div>
+    <div class="drawer-body" style="padding-top:0;">
+      <div id="wf-panel-steps" class="drawer-tab-panel active">
+        <div class="step-item">
+          <div class="step-num">1</div>
+          <div><div class="step-label">Receive trigger payload</div><div class="step-desc">Parse incoming HubSpot contact data from webhook</div></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">2</div>
+          <div><div class="step-label">Enrich contact</div><div class="step-desc">Query Clearbit and LinkedIn for firmographic data</div></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">3</div>
+          <div><div class="step-label">Create CRM record</div><div class="step-desc">Write enriched contact to HubSpot with tags and lifecycle stage</div></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">4</div>
+          <div><div class="step-label">Score lead</div><div class="step-desc">Apply scoring model to determine initial priority tier</div></div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">5</div>
+          <div><div class="step-label">Schedule intro call</div><div class="step-desc">Create Calendly booking link and send via Gmail</div></div>
+        </div>
+      </div>
+      <div id="wf-panel-history" class="drawer-tab-panel">
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Succeeded</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">2h ago &middot; 1.4s</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Succeeded</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">3h ago &middot; 1.2s</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-red" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--red-600);">Failed: Clearbit timeout</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">5h ago &middot; 30s</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Succeeded</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">7h ago &middot; 1.3s</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Succeeded</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">1d ago &middot; 1.1s</span>
+        </div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary btn-sm">Clone</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--red-500);">Delete</button>
+      <div style="flex:1;"></div>
+      <button class="btn btn-secondary btn-sm">Edit</button>
+      <button class="btn btn-primary btn-sm">Run now</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ TRIGGER DRAWER ═══════════════════════════════════ -->
+<div id="trigger-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:540px;">
+    <div class="drawer-header">
+      <div>
+        <h2 id="trig-drawer-title">HubSpot contact webhook</h2>
+        <p style="font-size:12px;color:var(--slate-500);margin-top:2px;" id="trig-drawer-meta">Webhook &middot; Active &middot; 14 fires last 7d</p>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('trigger-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-tabs">
+      <div class="drawer-tab active" onclick="switchDrawerTab('trig', 'detail', this)">Detail</div>
+      <div class="drawer-tab" onclick="switchDrawerTab('trig', 'history', this)">Run history</div>
+    </div>
+    <div class="drawer-body" style="padding-top:0;">
+
+      <div id="trig-panel-detail" class="drawer-tab-panel active">
+        <div class="form-field">
+          <label class="form-label">Name</label>
+          <input class="form-input" value="HubSpot contact webhook">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Source</label>
+          <select class="form-select" style="width:100%;">
+            <option selected>Webhook</option>
+            <option>Schedule</option>
+            <option>HubSpot event</option>
+            <option>Stripe event</option>
+            <option>Email received</option>
+            <option>Manual</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Webhook URL</label>
+          <div style="display:flex;gap:6px;">
+            <input class="form-input" value="https://app.synthetos.com/wh/hubspot-contacts" style="font-family:monospace;font-size:11.5px;flex:1;" readonly>
+            <button class="btn btn-secondary btn-sm">Copy</button>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Event filter</label>
+          <input class="form-input" value="lifecycle_stage = lead" style="font-family:monospace;font-size:12px;">
+          <div class="form-hint">Leave blank to fire on all events from this source.</div>
+        </div>
+        <div class="form-field" style="margin-bottom:0;">
+          <label class="form-label">Fires these targets</label>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+            <span class="target-chip" onclick="crossTabNavigate('automations','HubSpot contact sync');document.getElementById('trigger-drawer').style.display='none'">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              HubSpot contact sync (Automation)
+            </span>
+            <span class="target-chip" onclick="crossTabNavigate('workflows','New lead onboarding');document.getElementById('trigger-drawer').style.display='none'">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+              New lead onboarding (Workflow)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div id="trig-panel-history" class="drawer-tab-panel">
+        <div style="margin-bottom:10px;">
+          <button class="btn btn-secondary btn-sm">Send test event</button>
+          <span style="font-size:11.5px;color:var(--slate-500);margin-left:8px;">Sends a sample payload to verify the trigger fires correctly.</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Fired successfully</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">2h ago</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Fired successfully</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">3h ago</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-amber" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--amber-700);">Filter skipped (event did not match)</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">4h ago</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Fired successfully</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">5h ago</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Fired successfully</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">7h ago</span>
+        </div>
+        <div class="run-hist-row">
+          <span class="status-dot dot-green" style="width:7px;height:7px;flex-shrink:0;"></span>
+          <span style="color:var(--slate-600);">Fired successfully</span>
+          <span style="margin-left:auto;color:var(--slate-400);font-size:11px;">1d ago</span>
+        </div>
+      </div>
+
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary btn-sm">Pause</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--red-500);">Delete</button>
+      <div style="flex:1;"></div>
+      <button class="btn btn-primary btn-sm">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ NEW ITEM DRAWERS ══════════════════════════════════ -->
+<!-- New workflow drawer -->
+<div id="new-workflow-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:520px;">
+    <div class="drawer-header">
+      <h2>New workflow</h2>
+      <button class="drawer-close" onclick="document.getElementById('new-workflow-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-field"><label class="form-label">Name</label><input class="form-input" placeholder="e.g. New lead onboarding"></div>
+      <div class="form-field"><label class="form-label">Description</label><textarea class="form-textarea" style="min-height:60px;" placeholder="What does this workflow do?"></textarea></div>
+      <div class="form-field">
+        <label class="form-label">Trigger type</label>
+        <select class="form-select" style="width:100%;"><option>Manual</option><option>Scheduled</option><option>Event</option></select>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('new-workflow-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Create and open editor</button>
+    </div>
+  </div>
+</div>
+
+<!-- New automation drawer -->
 <div id="new-auto-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
   <div class="drawer" style="width:520px;">
     <div class="drawer-header">
@@ -251,42 +1083,21 @@
       <button class="drawer-close" onclick="document.getElementById('new-auto-drawer').style.display='none'">&times;</button>
     </div>
     <div class="drawer-body">
-      <div class="form-field">
-        <label class="form-label">Name</label>
-        <input class="form-input" placeholder="e.g. HubSpot contact sync">
-      </div>
-      <div class="form-field">
-        <label class="form-label">Description</label>
-        <textarea class="form-textarea" style="min-height:60px;" placeholder="What does this automation do?"></textarea>
-      </div>
+      <div class="form-field"><label class="form-label">Name</label><input class="form-input" placeholder="e.g. HubSpot contact sync"></div>
+      <div class="form-field"><label class="form-label">Description</label><textarea class="form-textarea" style="min-height:60px;" placeholder="What does this automation do?"></textarea></div>
+      <div class="form-field"><label class="form-label">Trigger description</label><input class="form-input" placeholder="e.g. When new HubSpot contact is created"></div>
+      <div class="form-field"><label class="form-label">Action description</label><input class="form-input" placeholder="e.g. Send welcome email via Gmail"></div>
       <div class="form-field">
         <label class="form-label">Engine</label>
-        <select class="form-select" style="width:100%;">
-          <option>n8n</option>
-          <option>internal</option>
-        </select>
+        <select class="form-select" style="width:100%;"><option>n8n</option><option>Make</option><option>internal</option></select>
       </div>
       <div class="form-field">
         <label class="form-label">Tag</label>
-        <select class="form-select" style="width:100%;">
-          <option value="">None</option>
-          <option>crm</option>
-          <option>outreach</option>
-          <option>reporting</option>
-        </select>
-        <div class="form-hint">Tags are managed in Manage Org.</div>
+        <select class="form-select" style="width:100%;"><option value="">None</option><option>crm</option><option>outreach</option><option>billing</option><option>notifications</option></select>
       </div>
       <div class="form-field">
         <label class="form-label">Webhook path <span style="font-weight:400;color:var(--slate-400);">(optional)</span></label>
         <input class="form-input" placeholder="e.g. /webhooks/crm-sync" style="font-family:monospace;font-size:12px;">
-      </div>
-      <div class="form-field">
-        <label class="form-label">Input schema <span style="font-weight:400;color:var(--slate-400);">(JSON)</span></label>
-        <textarea class="form-textarea" style="font-family:monospace;font-size:11.5px;min-height:80px;" placeholder='{"type":"object","properties":{"contactId":{"type":"string"}}}'></textarea>
-      </div>
-      <div class="form-field" style="margin-bottom:0;">
-        <label class="form-label">Output schema <span style="font-weight:400;color:var(--slate-400);">(JSON)</span></label>
-        <textarea class="form-textarea" style="font-family:monospace;font-size:11.5px;min-height:80px;" placeholder='{"type":"object","properties":{"success":{"type":"boolean"}}}'></textarea>
       </div>
     </div>
     <div class="drawer-footer">
@@ -295,6 +1106,106 @@
     </div>
   </div>
 </div>
+
+<!-- New trigger drawer -->
+<div id="new-trigger-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:520px;">
+    <div class="drawer-header">
+      <h2>New trigger</h2>
+      <button class="drawer-close" onclick="document.getElementById('new-trigger-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-field"><label class="form-label">Name</label><input class="form-input" placeholder="e.g. HubSpot deal closed"></div>
+      <div class="form-field">
+        <label class="form-label">Source</label>
+        <select class="form-select" style="width:100%;"><option>Webhook</option><option>Schedule</option><option>HubSpot event</option><option>Stripe event</option><option>Email received</option><option>Manual</option></select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Event filter <span style="font-weight:400;color:var(--slate-400);">(optional)</span></label>
+        <input class="form-input" placeholder="e.g. deal_stage = closed_won" style="font-family:monospace;font-size:12px;">
+        <div class="form-hint">Leave blank to fire on all events from this source.</div>
+      </div>
+      <div class="form-field" style="margin-bottom:0;">
+        <label class="form-label">Fires targets <span style="font-weight:400;color:var(--slate-400);">(choose after creation)</span></label>
+        <div class="form-hint">Link automations and workflows to this trigger after saving.</div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('new-trigger-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Create trigger</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" style="display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--slate-800);color:white;padding:9px 18px;border-radius:6px;font-size:13px;z-index:1000;box-shadow:var(--shadow-md);pointer-events:none;"></div>
+
+<script>
+  /* ── Tab switching ────────────────────────────────────── */
+  const CTA_LABELS = { workflows: 'New workflow', automations: 'New automation', triggers: 'New trigger' };
+  let activeTab = 'workflows';
+
+  function switchTab(tab) {
+    ['workflows', 'automations', 'triggers'].forEach(t => {
+      document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+      document.getElementById('panel-' + t).classList.toggle('active', t === tab);
+    });
+    document.getElementById('primary-cta-label').textContent = CTA_LABELS[tab];
+    activeTab = tab;
+  }
+
+  /* ── Context-aware primary CTA ───────────────────────── */
+  function openNewDrawer() {
+    const ids = { workflows: 'new-workflow-drawer', automations: 'new-auto-drawer', triggers: 'new-trigger-drawer' };
+    document.getElementById(ids[activeTab]).style.display = 'flex';
+  }
+
+  /* ── Workflow drawer ─────────────────────────────────── */
+  function openWorkflowDrawer(name) {
+    document.getElementById('wf-drawer-title').textContent = name;
+    document.getElementById('workflow-drawer').style.display = 'flex';
+    // Reset to steps tab
+    switchDrawerTab('wf', 'steps', document.querySelector('#workflow-drawer .drawer-tab'));
+  }
+
+  /* ── Trigger drawer ──────────────────────────────────── */
+  function openTriggerDrawer(name) {
+    document.getElementById('trig-drawer-title').textContent = name;
+    document.getElementById('trigger-drawer').style.display = 'flex';
+    switchDrawerTab('trig', 'detail', document.querySelector('#trigger-drawer .drawer-tab'));
+  }
+
+  /* ── Cross-tab navigation ────────────────────────────── */
+  function crossTabNavigate(tab, itemName) {
+    // Close any open drawers
+    document.querySelectorAll('.drawer-overlay').forEach(d => d.style.display = 'none');
+    // Switch to the target tab
+    switchTab(tab);
+    // Show toast
+    showToast('Navigated to ' + tab + ': ' + itemName);
+  }
+
+  /* ── Drawer tab switching ────────────────────────────── */
+  function switchDrawerTab(prefix, panel, clickedEl) {
+    const container = clickedEl ? clickedEl.closest('.drawer') : document.getElementById(prefix === 'wf' ? 'workflow-drawer' : 'trigger-drawer').querySelector('.drawer');
+    const allTabs = (container || document).querySelectorAll('.drawer-tab');
+    const allPanels = (container || document).querySelectorAll('.drawer-tab-panel');
+    allTabs.forEach(t => t.classList.remove('active'));
+    allPanels.forEach(p => p.classList.remove('active'));
+    if (clickedEl) clickedEl.classList.add('active');
+    const panelEl = document.getElementById(prefix + '-panel-' + panel);
+    if (panelEl) panelEl.classList.add('active');
+  }
+
+  /* ── Toast ───────────────────────────────────────────── */
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.display = 'none'; }, 2200);
+  }
+</script>
 
 </body>
 </html>
