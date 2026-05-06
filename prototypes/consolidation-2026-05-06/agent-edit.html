@@ -269,6 +269,17 @@
   }
   .scope-option input { margin: 0; }
 
+  /* Scope option: disabled state (workspace-user demo) */
+  .scope-option.scope-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--slate-400);
+  }
+  .scope-option.scope-disabled input {
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
   /* Icon picker */
   .icon-picker-grid {
     display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
@@ -1056,12 +1067,48 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
       </div><!-- /creator-tab-test -->
 
     </div><!-- /creator-drawer-body -->
+
+    <!-- ── Demo controls (scope permission demo) ──────────────────── -->
+    <div id="creator-demo-controls" style="background:#f8fafc;border-top:1px solid var(--slate-100);padding:8px 20px;">
+      <button
+        id="creator-demo-toggle-btn"
+        onclick="toggleCreatorDemoControls()"
+        style="display:flex;align-items:center;gap:5px;background:none;border:none;padding:0;cursor:pointer;font-size:11px;font-weight:600;color:var(--slate-400);letter-spacing:0.02em;"
+      >
+        <svg id="creator-demo-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="6 9 12 15 18 9"/></svg>
+        Demo controls
+      </button>
+      <div id="creator-demo-inner" style="display:none;margin-top:8px;">
+        <div style="font-size:11px;color:var(--slate-500);margin-bottom:6px;">Simulate scope permission profile:</div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;color:var(--slate-600);cursor:pointer;">
+            <input type="radio" name="creator-scope-demo" value="org-admin" checked onchange="applyCreatorScopeDemo(this.value)"> Org admin
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;color:var(--slate-600);cursor:pointer;">
+            <input type="radio" name="creator-scope-demo" value="workspace-user" onchange="applyCreatorScopeDemo(this.value)"> Workspace user
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="creator-drawer-footer">
-      <!-- Scope toggle -->
-      <div style="display:flex;align-items:center;gap:6px;margin-right:auto;font-size:12px;color:var(--slate-500);">
+      <!-- Scope toggle (Org admin state: both options enabled) -->
+      <div id="creator-scope-row" style="display:flex;align-items:center;gap:6px;margin-right:auto;font-size:12px;color:var(--slate-500);">
         <span>Save to:</span>
-        <label class="scope-option"><input type="radio" name="creator-scope" value="client" checked> This client</label>
-        <label class="scope-option"><input type="radio" name="creator-scope" value="org"> Organisation</label>
+        <label class="scope-option" id="scope-client-label">
+          <input type="radio" name="creator-scope" id="scope-client-radio" value="client" checked> This client
+        </label>
+        <label class="scope-option" id="scope-org-label" title="">
+          <input type="radio" name="creator-scope" id="scope-org-radio" value="org">
+          <span id="scope-org-lock-icon" style="display:none;margin-right:2px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--slate-400);vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </span>
+          Organisation
+        </label>
+      </div>
+      <!-- Workspace-user fallback: static label (shown only when scope demo = workspace-user) -->
+      <div id="creator-scope-static" style="display:none;margin-right:auto;font-size:12px;color:var(--slate-500);">
+        Saved to: <strong style="color:var(--slate-700);">This client</strong>
       </div>
       <button class="btn btn-secondary btn-sm" onclick="closeSkillCreator()">Cancel</button>
       <button class="btn btn-secondary btn-sm" onclick="saveSkillDraft()">Save as draft</button>
@@ -1276,6 +1323,48 @@ function openSkillCreator() {
 function closeSkillCreator() {
   document.getElementById('skill-creator-overlay').classList.remove('open');
 }
+
+/* Demo: scope permission controls ------------------------------------ */
+function toggleCreatorDemoControls() {
+  var inner = document.getElementById('creator-demo-inner');
+  var caret = document.getElementById('creator-demo-caret');
+  var isOpen = inner.style.display !== 'none';
+  inner.style.display = isOpen ? 'none' : 'block';
+  caret.style.transform = isOpen ? '' : 'rotate(-90deg)';
+}
+
+function applyCreatorScopeDemo(profile) {
+  var orgLabel  = document.getElementById('scope-org-label');
+  var orgRadio  = document.getElementById('scope-org-radio');
+  var clientRadio = document.getElementById('scope-client-radio');
+  var lockIcon  = document.getElementById('scope-org-lock-icon');
+  var scopeRow  = document.getElementById('creator-scope-row');
+  var scopeStatic = document.getElementById('creator-scope-static');
+  var headerLabel = document.getElementById('creator-scope-label');
+
+  if (profile === 'workspace-user') {
+    // Disable org scope: grey out, add lock icon, force client selection, show static label
+    orgLabel.classList.add('scope-disabled');
+    orgLabel.title = 'Requires org admin permission to save skills at the organisation level';
+    orgRadio.disabled = true;
+    clientRadio.checked = true;
+    lockIcon.style.display = 'inline';
+    // Swap radio row for static label
+    scopeRow.style.display = 'none';
+    scopeStatic.style.display = 'flex';
+    if (headerLabel) headerLabel.textContent = 'Acme Corp workspace';
+  } else {
+    // Org admin: restore both options
+    orgLabel.classList.remove('scope-disabled');
+    orgLabel.title = '';
+    orgRadio.disabled = false;
+    lockIcon.style.display = 'none';
+    scopeRow.style.display = 'flex';
+    scopeStatic.style.display = 'none';
+    if (headerLabel) headerLabel.textContent = 'Acme Corp workspace';
+  }
+}
+
 function switchCreatorTab(id, btn) {
   document.querySelectorAll('#creator-tabs .tab-btn').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');

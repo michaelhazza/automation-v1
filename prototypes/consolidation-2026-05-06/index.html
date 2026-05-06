@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-11 — 7b chain COMPLETE
+    Prototype Round 7c
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-11 (FINAL round of 7b chain): project-edit.html and before-project-edit.html added. Demonstrates the Goals retirement and per-project Objective field swap (user decision a). Objective field receives large textarea, helper band explaining agent runtime injection, word-count indicator, "Show example objectives" expandable, migration notice card for projects that had a goal_id. before-project-edit.html shows split-panel: left = current project edit page (no Objective, only free-form description), right = GoalsPage OKR tree being retired (Mission / Objective / Key Result hierarchy, annotated as never read by agent execution code).</p>
+  <p>Round 7c: permission demos added to two surfaces. (1) Sidebar mode switcher: a "Demo: viewing as" dropdown above the pill row simulates System admin (all three pills), Org admin (Workspace + Org), and Workspace operator (pill row hidden). Profile persists via localStorage. If the active mode is unavailable for the selected profile, sidebar falls back to Workspace. (2) Skill creator drawer in agent-edit.html: collapsible "Demo controls" section above the footer with two radio states (Org admin vs Workspace user). Workspace user disables the Organisation scope radio, adds a lock icon, and swaps the radio row for a static "Saved to: This client" label. Round 7b-11 (7b chain) remains complete.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-11 (chain complete)</div>
+    <div class="meta-item"><strong>Round:</strong> 7c</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 54+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -136,6 +136,7 @@
     <li>Round 7b-9: Capabilities tab is inheritance-aware. Skills assigned realistic tiers (System / Org / This client). Tier chip on every skill row. Three-dot overflow menu builds dynamically per tier: System (View source, Configure, Disable only), Org (adds Override locally and Edit at org level link), This client (full: Edit, Configure, View parameters, Disable, Delete). Skill creator drawer with 4 tabs (Basic info, Parameters, Implementation, Test). Scope breadcrumb above skill list. Scope toggle in footer (This client / Organisation). Save and enable adds skill row live.</li>
     <li>Round 7b-10: org-agent-edit.html added as the org-level agent definition editor. Two-tier Capabilities view (System skills read-only, Org-custom skills full edit). Deployments tab new: table of 4 workspaces with status badge, override count, custom skill count, last run, 30-day run count. Row click opens 520px drawer with side-by-side org vs workspace override comparison, custom skills list, recent runs, and force re-sync action. "Deploy to additional workspaces" modal with workspace checklist. Skill creator drawer scope locked to Organisation. _sidebar.js Agents link in Org/Build section promoted from stub to org-agent-edit.html. before-org-agent-edit.html added with simulated production flat editor and 8-item problems list.</li>
     <li>Round 7b-11 (FINAL): Goals tree retired. Per-project Objective field added to project-edit.html. Objective textarea (larger font, helper band explaining agent runtime injection, word count, expandable example objectives). Migration notice card for projects that had a goal_id. before-project-edit.html depicts split: left = project edit with no Objective (only description), right = GoalsPage OKR tree annotated as zero hits in server/services/agent*/. Goals already removed from sidebar in 7b-1. 7b chain complete.</li>
+    <li>Round 7c: permission demos for mode switcher and skill creator scope toggle (production gates these via real permission checks, not demo toggles). Sidebar "Demo: viewing as" dropdown simulates three profiles: System admin sees all three mode pills, Org admin sees Workspace + Org, Workspace operator sees no pill row. Skill creator drawer adds collapsible "Demo controls" with Org admin vs Workspace user states; Workspace user disables Organisation scope option with lock icon and tooltip, auto-selects This client, shows static scope label.</li>
   </ul>
 </div>
 
@@ -1055,6 +1056,56 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="agent-edit.html#capabilities">Open mockup &#8594;</a>
         <a href="before-agent-edit.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7c: Permission demos ─────────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#0891b2"></div>
+    Round 7c: Permission demos (mode switcher + skill creator scope)
+  </div>
+
+  <div style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#0e7490;line-height:1.55;">
+    <strong>What these demos show:</strong> Production gates the sidebar mode pills and the skill creator scope option via real permission checks (<code style="font-family:monospace;font-size:11.5px;background:#cffafe;padding:1px 5px;border-radius:3px;">org.*</code> permission for Org mode, <code style="font-family:monospace;font-size:11.5px;background:#cffafe;padding:1px 5px;border-radius:3px;">user.isSystemAdmin</code> for System mode, and org-admin role for the Organisation scope option). These prototype demos simulate those states without wiring real auth, so reviewers can see the collapsed and restricted UI states.
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card" style="border-color:#a5f3fc;">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Sidebar: mode switcher permission demo <span style="font-size:10px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7c</span></div>
+        <div class="proto-card-file">_sidebar.js</div>
+      </div>
+      <div class="proto-card-desc">The shared sidebar JS now includes a "Demo: viewing as" dropdown above the mode pill row. Three profiles: System admin (all three pills shown, default), Org admin (Workspace + Org pills only, System hidden), Workspace operator (pill row hidden entirely). Profile persists in localStorage under <code style="font-family:monospace;font-size:11px;">prototype.sidebar.demoProfile</code>. If the active mode is incompatible with the selected profile, the sidebar falls back to Workspace mode automatically. A muted note below the dropdown reads: "Production hides modes a user has no permission to access."</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Updates</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill">_sidebar.js (shared, affects all pages)</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="home.html">Open any page (sidebar is shared) &#8594;</a>
+      </div>
+    </div>
+
+    <div class="proto-card" style="border-color:#a5f3fc;">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Skill creator scope permission demo <span style="font-size:10px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle;margin-left:4px;">NEW 7c</span></div>
+        <div class="proto-card-file">agent-edit.html</div>
+      </div>
+      <div class="proto-card-desc">Inside the skill creator drawer (Capabilities tab, "+ Add custom skill"), a collapsible "Demo controls" section above the footer has two radio states: Org admin (default, both scope options enabled) and Workspace user (Organisation scope disabled: greyed out, lock icon, tooltip "Requires org admin permission to save skills at the organisation level"; This client auto-selected; footer shows static "Saved to: This client" label instead of radio row). State is in-session only, not persisted.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Updates</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill">Skill creator drawer in agent-edit.html</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="agent-edit.html">Open agent-edit (go to Capabilities tab) &#8594;</a>
       </div>
     </div>
 

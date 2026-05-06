@@ -909,6 +909,55 @@ Index and log updates:
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions, card added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
 
+## Round 7c — 2026-05-06
+
+**Operator feedback:** Two small permission-state demos. (1) Sidebar mode switcher: add a "Demo: viewing as" dropdown above the pill row to simulate System admin / Org admin / Workspace operator profiles, gating which mode pills render. (2) Skill creator drawer in agent-edit.html: add a collapsible "Demo controls" section above the footer, with Org admin vs Workspace user states that disable the Organisation scope radio when set to Workspace user.
+
+**Changes made:**
+
+Change 1 (_sidebar.js mode switcher permission demo):
+- Added `DEMO_PROFILE_MODES` map: `system-admin` allows all three modes, `org-admin` allows workspace + org, `workspace-operator` allows workspace only.
+- Added `getDemoProfile()` helper reading `localStorage['prototype.sidebar.demoProfile']` (default `'system-admin'`).
+- Added `buildDemoProfileSelector(mode, activeHref)`: renders a small `<label> + <select>` above the pill row. Three options: "System admin" (default), "Org admin", "Workspace operator". On change, saves profile to localStorage, resolves whether current mode is still allowed (falls back to workspace if not), and calls `renderSidebar(nextMode, activeHref, newProfile)`.
+- Updated `buildModeSwitcher(mode, activeHref, demoProfile)`: now accepts `demoProfile` parameter; filters pill list to only the allowed modes for that profile; returns `null` (no element) when only one mode is allowed (Workspace operator case) so the pill row is hidden entirely.
+- Updated `renderSidebar(mode, activeHref, demoProfile)` signature to accept third parameter; resolves profile from param > localStorage > default; validates mode against profile's allowed list (falls back to workspace if incompatible); calls `buildDemoProfileSelector` before `buildModeSwitcher`.
+- A muted note below the dropdown: "Production hides modes a user has no permission to access."
+- Profile persists in `localStorage` under key `prototype.sidebar.demoProfile`.
+- Updated comment block at top of file documenting Round 7c additions.
+
+Change 2 (agent-edit.html skill creator scope toggle demo):
+- Added `.scope-disabled` CSS class: `opacity:0.45`, `cursor:not-allowed`, `color:var(--slate-400)`. Applied via JS to the Organisation scope label when Workspace user profile is active.
+- Added collapsible "Demo controls" panel in HTML between `/creator-drawer-body` and `creator-drawer-footer`: a toggle button (caret icon + "Demo controls" label), collapsed by default, containing two radio inputs: "Org admin" (default, checked) and "Workspace user".
+- Wired `toggleCreatorDemoControls()` JS function: toggles `creator-demo-inner` visibility and rotates the caret icon.
+- Wired `applyCreatorScopeDemo(profile)` JS function: when `'workspace-user'` is selected, adds `.scope-disabled` to `scope-org-label`, sets `orgRadio.disabled = true`, force-checks the client radio, shows the lock icon SVG next to "Organisation" label, hides the radio row, and shows the static `creator-scope-static` div ("Saved to: This client"). When `'org-admin'` is selected, reverses all of the above.
+- Added lock icon SVG inline in `scope-org-label`: `display:none` by default, shown when profile is workspace-user.
+- Added `id="scope-org-label"`, `id="scope-client-radio"`, `id="scope-org-radio"`, `id="scope-org-lock-icon"`, `id="creator-scope-row"`, `id="creator-scope-static"` attributes to the relevant elements for reliable JS targeting.
+- The `title` attribute on `scope-org-label` is set to "Requires org admin permission to save skills at the organisation level" when workspace-user is active (acts as browser tooltip on hover/focus).
+- Demo controls section background is `#f8fafc` (slate-50) with `border-top:1px solid var(--slate-100)` to separate it from the drawer body without adding visual weight.
+- State is in-session only (no localStorage persistence). Default is always "Org admin" on drawer open.
+
+index.html:
+- Masthead eyebrow changed from "Prototype Round 7b-11 - 7b chain COMPLETE" to "Prototype Round 7c".
+- Masthead description paragraph updated to describe both permission demos.
+- Meta-row Round field updated to "7c".
+- Decisions box: Round 7c bullet added.
+- New "Round 7c: Permission demos" section added at bottom with two cards (sidebar demo and skill creator scope demo, both in cyan/teal accent color to distinguish from prior rounds).
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- the demo toggles are purely secondary controls for prototype review; they do not appear on the primary task path. The demo selector sits above the mode switcher (not blocking nav). The "Demo controls" in the drawer are collapsed by default and placed outside the primary task flow (above the footer).
+- Default to hidden: yes -- demo controls in the drawer are collapsed by default. The demo profile selector is visible but small (two lines, muted typography). No new dashboards or KPI tiles introduced.
+- One primary action: yes -- no change to any primary action. Sidebar primary action remains clicking a nav item. Skill creator primary action remains "Save and enable".
+- Inline state: yes -- the disabled Organisation scope is shown inline on the existing radio label (greyed opacity + lock icon). No separate panel or explanation box required beyond the existing drawer context.
+- Re-check passed: yes -- a non-technical operator reviewing the prototype sees the demos as contextual prototype aids, not as confusing UI elements. The muted note "Production hides modes a user has no permission to access" is concise and plain.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/_sidebar.js` (demoProfile system: DEMO_PROFILE_MODES, getDemoProfile, buildDemoProfileSelector, updated buildModeSwitcher + renderSidebar signatures, updated header comment)
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (scope-disabled CSS, demo controls HTML panel, lock icon SVG, applyCreatorScopeDemo + toggleCreatorDemoControls JS, id attributes on scope elements)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, meta-row, decisions bullet, Round 7c section with two cards)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
 ## Round 7b-11 — 2026-05-06 (FINAL round of 7b chain)
 
 **Operator feedback:** Build project-edit.html (AFTER: Goals retired, per-project Objective field added) and before-project-edit.html (BEFORE: no Objective field, separate GoalsPage). Decision (a) approved: retire Goals tree, add projects.objective field. Goals were never read by agent execution code (zero hits in server/services/agent*/). Objective IS read at runtime. Subaccount-level strategy lives in Memory blocks.

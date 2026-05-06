@@ -17,6 +17,14 @@
  *   Removed: Workflows (into Automations), Health (into Activity), Team+Teams (one Team), Spending Budgets+Spend Ledger (one Spending).
  *   System mode: grouped into Inventory / Operate / Setup sections.
  *   Removed: Diagnostics+Job Queues (merged into Queues). LLM P&L renamed Financials.
+ *
+ * Round 7c: Demo permission profiles added.
+ *   demoProfile: 'system-admin' | 'org-admin' | 'workspace-operator'
+ *   Persists to localStorage under key 'prototype.sidebar.demoProfile'.
+ *   System admin: all three mode pills visible (default).
+ *   Org admin: Workspace + Org pills only (no System pill).
+ *   Workspace operator: Workspace pill only; pill row hidden (single pill adds no value).
+ *   If current mode is incompatible with selected profile, falls back to workspace mode.
  */
 
 /* ── Icons (inline SVG strings) ──────────────────────────────────────── */
@@ -292,8 +300,120 @@ function buildLink(item, activeHref) {
   return a;
 }
 
+/* ── Demo permission profile — which mode pills are visible ──────────── */
+/*
+ * demoProfile controls which mode pills are shown.
+ *   'system-admin'       => workspace + org + system  (default)
+ *   'org-admin'          => workspace + org
+ *   'workspace-operator' => workspace only (pill row hidden)
+ *
+ * Production gates these via real permission checks.
+ */
+var DEMO_PROFILE_MODES = {
+  'system-admin':       ['workspace', 'org', 'system'],
+  'org-admin':          ['workspace', 'org'],
+  'workspace-operator': ['workspace'],
+};
+
+function getDemoProfile() {
+  return localStorage.getItem('prototype.sidebar.demoProfile') || 'system-admin';
+}
+
+/* ── Build demo profile selector (above mode switcher) ───────────────── */
+function buildDemoProfileSelector(currentMode, activeHref) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = [
+    'padding:8px 12px 6px',
+    'border-bottom:1px solid rgba(255,255,255,0.06)',
+  ].join(';');
+
+  // Row: label + select
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;';
+
+  const label = document.createElement('label');
+  label.style.cssText = [
+    'font-size:9.5px',
+    'font-weight:600',
+    'color:rgba(255,255,255,0.3)',
+    'letter-spacing:0.04em',
+    'text-transform:uppercase',
+    'white-space:nowrap',
+    'flex-shrink:0',
+  ].join(';');
+  label.textContent = 'Demo: viewing as';
+
+  const select = document.createElement('select');
+  select.id = 'sidebar-demo-profile-select';
+  select.style.cssText = [
+    'flex:1',
+    'background:#1e293b',
+    'border:1px solid rgba(255,255,255,0.12)',
+    'border-radius:5px',
+    'color:#e2e8f0',
+    'font-size:10.5px',
+    'font-family:Inter,ui-sans-serif,system-ui,sans-serif',
+    'font-weight:500',
+    'padding:3px 6px',
+    'cursor:pointer',
+    'outline:none',
+  ].join(';');
+
+  const currentProfile = getDemoProfile();
+  [
+    ['system-admin',       'System admin'],
+    ['org-admin',          'Org admin'],
+    ['workspace-operator', 'Workspace operator'],
+  ].forEach(([val, text]) => {
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = text;
+    if (val === currentProfile) opt.selected = true;
+    select.appendChild(opt);
+  });
+
+  select.addEventListener('change', () => {
+    const newProfile = select.value;
+    localStorage.setItem('prototype.sidebar.demoProfile', newProfile);
+
+    // Determine which modes are visible for the new profile
+    const allowedModes = DEMO_PROFILE_MODES[newProfile] || ['workspace'];
+
+    // If current mode is no longer available, fall back to workspace
+    let nextMode = currentMode;
+    if (!allowedModes.includes(nextMode)) {
+      nextMode = 'workspace';
+      localStorage.setItem('prototype.sidebar.mode', 'workspace');
+    }
+
+    renderSidebar(nextMode, activeHref, newProfile);
+  });
+
+  row.appendChild(label);
+  row.appendChild(select);
+  wrap.appendChild(row);
+
+  // Muted note below
+  const note = document.createElement('div');
+  note.style.cssText = [
+    'font-size:9px',
+    'color:rgba(255,255,255,0.2)',
+    'margin-top:4px',
+    'line-height:1.4',
+  ].join(';');
+  note.textContent = 'Production hides modes a user has no permission to access.';
+  wrap.appendChild(note);
+
+  return wrap;
+}
+
 /* ── Build mode-switcher pill row ────────────────────────────────────── */
-function buildModeSwitcher(currentMode, activeHref) {
+function buildModeSwitcher(currentMode, activeHref, demoProfile) {
+  const allowedModes = DEMO_PROFILE_MODES[demoProfile] || ['workspace', 'org', 'system'];
+
+  // Workspace-operator sees only one mode: hide the pill row entirely
+  if (allowedModes.length <= 1) return null;
+
   const wrap = document.createElement('div');
   wrap.style.cssText = [
     'display:flex',
@@ -303,7 +423,7 @@ function buildModeSwitcher(currentMode, activeHref) {
     'border-bottom:1px solid rgba(255,255,255,0.06)',
   ].join(';');
 
-  ['workspace', 'org', 'system'].forEach((mode) => {
+  allowedModes.forEach((mode) => {
     const pill = document.createElement('button');
     const isActiveMode = mode === currentMode;
     pill.style.cssText = [
@@ -325,7 +445,7 @@ function buildModeSwitcher(currentMode, activeHref) {
 
     pill.addEventListener('click', () => {
       localStorage.setItem('prototype.sidebar.mode', mode);
-      renderSidebar(mode, activeHref);
+      renderSidebar(mode, activeHref, demoProfile);
     });
 
     wrap.appendChild(pill);
@@ -394,12 +514,21 @@ function buildProfileLink() {
 }
 
 /* ── Main render function ────────────────────────────────────────────── */
-function renderSidebar(mode, activeHref) {
+function renderSidebar(mode, activeHref, demoProfile) {
   const mount = document.getElementById('sidebar-mount');
   if (!mount) return;
 
-  // Normalise mode
+  // Resolve demoProfile: parameter > localStorage > default
+  if (!demoProfile) {
+    demoProfile = getDemoProfile();
+  }
+  // Normalise demoProfile
+  if (!DEMO_PROFILE_MODES[demoProfile]) demoProfile = 'system-admin';
+
+  // Normalise mode; also ensure mode is allowed for the current demoProfile
   if (!['workspace', 'org', 'system'].includes(mode)) mode = 'workspace';
+  const allowedModes = DEMO_PROFILE_MODES[demoProfile];
+  if (!allowedModes.includes(mode)) mode = 'workspace';
 
   // Clear
   mount.innerHTML = '';
@@ -425,15 +554,19 @@ function renderSidebar(mode, activeHref) {
   ].join('');
   nav.appendChild(logo);
 
-  // 2. Mode switcher
-  nav.appendChild(buildModeSwitcher(mode, activeHref));
+  // 2. Demo profile selector (above mode switcher)
+  nav.appendChild(buildDemoProfileSelector(mode, activeHref));
 
-  // 3. Client switcher (workspace mode only)
+  // 3. Mode switcher pill row (hidden when only one mode available)
+  const modeSwitcher = buildModeSwitcher(mode, activeHref, demoProfile);
+  if (modeSwitcher) nav.appendChild(modeSwitcher);
+
+  // 4. Client switcher (workspace mode only)
   if (mode === 'workspace') {
     nav.appendChild(buildClientSwitcher());
   }
 
-  // 4. Sections
+  // 5. Sections
   const config = NAV[mode];
   config.sections.forEach((section) => {
     const sectionEl = document.createElement('div');
@@ -453,7 +586,7 @@ function renderSidebar(mode, activeHref) {
     nav.appendChild(sectionEl);
   });
 
-  // 5. Bottom section (Profile only -- Manage is now in Setup section)
+  // 6. Bottom section (Profile only -- Manage is now in Setup section)
   const bottomWrap = document.createElement('div');
   bottomWrap.style.cssText = 'margin-top:auto;display:flex;flex-direction:column;';
 
