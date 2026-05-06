@@ -67,13 +67,13 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 | 2b. Branch-sync S1 freshness (resume) | NOTED 2026-05-06 | Re-fetched origin/main. Two new main commits since last S1: `56577989` (spec-reviewer iter 2 — narrow `pre-launch-phase-3` spec) and `a9852133` (spec-reviewer final report). Both touch ONLY `tasks/builds/pre-launch-phase-3/spec.md` and `tasks/review-logs/*pre-launch-phase-3*` — files outside our build's scope (we build from `pre-launch-phase-3-deferred-backlog/`). Merge attempted; surfaced conflict on the narrow spec from divergent edits (our branch did chatgpt-spec-review rounds 1+2 on it; main did spec-reviewer iter 2). Aborted merge — narrow-spec divergence is owned by main's effort, not ours; resolving here would bias their work. Migration collision detection ran clean. Code-file overlap with main: NONE (only `KNOWLEDGE.md` differs, additive entries from our spec review). Proceeding with architect invocation against current branch HEAD `aebf5384`. |
 | 3. architect invocation | DONE 2026-05-06 | Architect playbook executed inline (Task/Agent sub-agent tool unavailable in this session). Plan written to `tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md` — 1021 lines / ~86kB. Sections: architecture notes (1), model-collapse check (2 — rejected, hardening is not an ingest→render pipeline), primitives-reuse confirmation (3), file inventory cross-reference (4 — three corrections recorded vs spec: `limits.ts` vs `systemLimits.ts`, `server/lib/orgScoping.ts` vs `server/middleware/orgScoping.ts`, migration `0285`), contracts (5 — TS-level signatures for `AppError`, `auditEvent` factory, `NormalisedEmail`, GHL job payload, D.3 assertions), chunk decomposition (6 — A→B, A→C, A→D.3+D.5; D and E independent of A elsewhere), per-chunk detail (7 — 4-7 file modifications per chunk + acceptance criteria), risks (8 — 9 named risks with mitigations), system invariants (9 — 20 invariants), self-consistency (10), executor notes (11). |
 | 4. chatgpt-plan-review (MANUAL) | DONE 2026-05-06 | 3 rounds; APPROVED. Round 1: 10 findings (6 high-impact + 4 minor) — all applied (D.5 idempotency, D.5 restart-safe totals, D.3 isSystemContext guard, B.1 gate precision, E.3 time-based LRU eviction, D.5 classifyError, A.2 stack capture, B.4 indirect string pass, D.1 all-buckets-independent, E.5 orgId assert). Round 2: 6 polish notes — all applied (D.5 partial-index hint, D.5 totals scaling note, D.3 sync-by-design comment, B.4 dynamic-string scope, E.3 concurrency note, migration 0285 backfill safety check). Round 3: CLEAN — no findings; final sign-off. Plan LOCKED. See review log `tasks/review-logs/chatgpt-plan-review-pre-launch-phase-3-deferred-backlog-2026-05-05T21-45-44Z.md`. |
-| 5. plan-gate | AWAITING OPERATOR | Plan is LOCKED. Operator reviews `tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md` and approves before chunk loop begins. |
-| 6. Per-chunk loop (A → B → C → D → E) | IN PROGRESS | Chunk A DONE 2026-05-06 — see Chunk A section below |
-| 7. G2 integrated-state static-check gate | PENDING | |
-| 8. Branch-level review pass | PENDING | spec-conformance → adversarial-reviewer → pr-reviewer → fix-loop → dual-reviewer |
-| 9. Doc-sync gate | PENDING | |
-| 10. Handoff (Phase 2 section) | PENDING | |
-| 11. current-focus → REVIEWING | PENDING | |
+| 5. plan-gate | DONE | Operator approved plan 2026-05-06 before chunk loop |
+| 6. Per-chunk loop (A → B → C → D → E) | DONE 2026-05-06 | All 5 chunks built — see chunk sections below |
+| 7. G2 integrated-state static-check gate | DONE 2026-05-06 | `npm run lint` exit 0 (0 errors, 872 warnings pre-existing); `npm run typecheck` exit 0 |
+| 8. Branch-level review pass | DONE 2026-05-06 | spec-conformance NON_CONFORMANT → CONFORMANT_AFTER_FIXES (DG-1/DG-2/DG-3 deferred to todo.md); adversarial-reviewer ADVISORY — 2 confirmed holes closed (F-1 = RLS bypass → B-1 fix; F-2 = OAuth audit events → B-4 fix), 2 advisory deferred (A-1 in-memory queue / S-4, A-2 = B-2); pr-reviewer CHANGES_REQUESTED → 4 blocking fixed + 2 strong deferred (S-1, S-4). Re-check: APPROVED. dual-reviewer SKIPPED (Codex CLI unavailable — REVIEW_GAP). |
+| 9. Doc-sync gate | DONE 2026-05-06 | KNOWLEDGE.md: yes (2 new entries — external_id_namespace bypass gotcha, migration safety-check scoping rule). architecture.md: no — checked setOrgGUC, orgScoping, external_id_namespace, setSystemWorkerContext; zero stale references. capabilities.md: n/a. integration-reference.md: n/a. CLAUDE.md / DEVELOPMENT_GUIDELINES.md: n/a — no rule changes. frontend-design-principles.md: n/a. |
+| 10. Handoff (Phase 2 section) | DONE 2026-05-06 | This section is the handoff. Phase 3: open new session and type `launch finalisation`. |
+| 11. current-focus → REVIEWING | DONE 2026-05-06 | Parallel block updated to REVIEWING in tasks/current-focus.md |
 
 ## Chunk A — Canonical types (foundation) — DONE 2026-05-06
 
@@ -223,6 +223,43 @@ Operator-confirmed deferrals: Phase 4 raw-DB-writes gate (co-located with R3-2 b
 - `npm run build:client` — exit 0 (built in 14.57s)
 - `npx tsx server/routes/__tests__/clientErrorsLruPure.test.ts` — 4/4 PASS
 - `bash scripts/verify-skill-error-envelope.sh` — EXIT:0 (OK; fixture self-check confirmed)
+
+## B-1 through B-4 fix pass — DONE 2026-05-06
+
+After the initial pr-reviewer pass (CHANGES_REQUESTED — 4 blocking), fixes were applied in-session:
+
+### B-1 — GHL pagination job INSERT bypasses FORCE RLS
+- **Root cause:** `ghlAutoEnrolLocationsPageJob.ts` per-location INSERTs ran on the module-level pool connection with no `app.organisation_id` GUC set. FORCE RLS WITH CHECK silently rejected every INSERT; the job emitted progress/completion events while writing zero subaccount rows.
+- **Fix:** Wrapped each per-location INSERT in `db.transaction(async (tx) => { await setOrgGUC(tx, organisationId); await tx.execute(sql\`INSERT...\`); })`. The per-location try/catch error boundary wraps the full transaction call so non-fatal per-location errors log and continue.
+
+### B-2 — `external_id_namespace` omitted from inline and webhook INSERT paths
+- **Root cause:** `ghlAgencyOauthService.ts` (autoEnrolAgencyLocations) and `ghlWebhookMutationsService.ts` (location_create branch) inserted subaccounts without `external_id_namespace = 'ghl_location'`, causing migration 0285's partial unique index to be bypassed entirely for those paths.
+- **Fix:** Added `external_id_namespace: 'ghl_location'` to both INSERT column lists and updated ON CONFLICT target from old `(connector_config_id, external_id)` to new `(organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`.
+
+### B-3 — Migration backfill safety check too broad
+- **Root cause:** The `RAISE EXCEPTION` check in `migrations/0285_subaccounts_external_id_namespace.sql` used `WHERE external_id IS NOT NULL AND external_id_namespace IS NULL` — too broad, would fire on manually-created subaccounts and future non-GHL providers.
+- **Fix:** Scoped to GHL rows only: added `AND connector_config_id IN (SELECT id FROM connector_configs WHERE connector_type = 'ghl')`.
+
+### B-4 — OAuth state audit events have null userAgent/ip
+- **Root cause:** `setGhlOAuthState` and `consumeGhlOAuthState` called without the `context` argument in `server/routes/ghl.ts` and `server/routes/oauthIntegrations.ts`.
+- **Fix:** Added `{ userAgent: req.get('user-agent') ?? null, ip: req.ip ?? null }` as trailing context arg at both call sites.
+
+### Verification after fixes
+- `npm run lint` — exit 0 (0 errors)
+- `npm run typecheck` — exit 0
+
+### Deferred items from review pass
+- S-1 / S-4 — routed to `tasks/todo.md` (inline test copy, in-memory queue setSystemWorkerContext)
+- Non-blocking style note: inline `SELECT set_config(...)` calls in ghlAgencyOauthService.ts and ghlWebhookMutationsService.ts vs. `setOrgGUC` helper — functionally equivalent, inconsistent in style. Deferred to follow-up.
+
+## Review logs
+
+| Log | Verdict |
+|-----|---------|
+| `tasks/review-logs/spec-conformance-log-pre-launch-phase-3-deferred-backlog-2026-05-06T02-10-53Z.md` | NON_CONFORMANT → CONFORMANT_AFTER_FIXES (DG-1/DG-2/DG-3 deferred) |
+| `tasks/review-logs/adversarial-review-log-pre-launch-phase-3-deferred-backlog-2026-05-06T03-10-00Z.md` | ADVISORY — 2 confirmed holes closed (F-1, F-2), 2 advisory deferred (A-1, A-2) |
+| `tasks/review-logs/pr-review-log-pre-launch-phase-3-deferred-backlog-2026-05-06T03-00-00Z.md` | CHANGES_REQUESTED — 4 blocking (B-1 through B-4) + 2 strong (S-1, S-4) |
+| `tasks/review-logs/pr-review-log-pre-launch-phase-3-deferred-backlog-recheck-2026-05-06T03-30-00Z.md` | APPROVED — all 4 fixes verified correct |
 
 ## Phase 3 SC-COVERAGE-BASELINE
 

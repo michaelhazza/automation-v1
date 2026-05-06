@@ -3203,3 +3203,24 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
   - Spec section: §7.7
   - Gap: `connectionTokenService.ts:50-54` reads via `getOrgTxContext()` from `server/instrumentation.ts`, treating its `organisationId` as the principal org. Spec §7.7 wanted reads via the `PrincipalContext` ALS specifically. Builder noted in `progress.md` that `withPrincipalContext.ts` does not export a principal-org accessor, so the substitution was made. Three-state contract (undefined/null/string) is preserved. Conflating principal context with org-tx context means a future principal-context-without-org-tx flow would not be caught by D-5.
   - Suggested approach: If the org-tx context IS the principal context in all current call sites (verified true today), accept the substitution and add a one-line note in `connectionTokenService.ts` near `getPrincipalOrgId` explaining the substitution and the future-caller risk. Otherwise, introduce a `getPrincipalOrgId()` export on `withPrincipalContext.ts` and switch the helper to use it.
+
+---
+
+## Deferred from pr-reviewer + adversarial-reviewer — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+**Captured:** 2026-05-06T03:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-pre-launch-phase-3-deferred-backlog-2026-05-06T03-00-00Z.md` (S-1, S-4); `tasks/review-logs/adversarial-review-log-pre-launch-phase-3-deferred-backlog-2026-05-06T03-10-00Z.md` (A-1)
+**Branch:** `claude/pre-launch-phase-3`
+
+- [ ] **S-1 — Test defines `decideTokenRefreshAssertion` inline rather than importing production function**
+  - File: `server/services/__tests__/connectionTokenServiceAssertionsPure.test.ts`
+  - Gap: The test defines its own copy of the assertion logic inline. Any change to the production function signature or behaviour will not be caught — the test tests its own copy, not the real function.
+  - Suggested approach: Import the production `decideTokenRefreshAssertion` from `connectionTokenService` (or a pure helper module) and assert its output directly. Retire the inline copy.
+  - Priority: medium. No functional regression today; creates coverage gap on future refactors.
+
+- [ ] **S-4 / A-1 — `setSystemWorkerContext(true)` not called in in-memory queue fallback**
+  - File: `server/services/queueService.ts`
+  - Gap: `setSystemWorkerContext(true)` is called at pg-boss bootstrap but the in-memory queue fallback path (used in dev/test without a database) never calls it. Workers registered on the in-memory queue will throw `MISSING_PRINCIPAL_CONTEXT` (or equivalent) on any operation that checks `isSystemWorkerContext()`.
+  - Blast radius: dev/test only — in-memory queue is not used in production.
+  - Suggested approach: Call `setSystemWorkerContext(true)` in the in-memory queue initialisation path, parallel to the pg-boss boot path.
+  - Priority: low. Masks bugs in test environments; no production impact.

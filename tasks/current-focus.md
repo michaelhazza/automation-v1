@@ -17,8 +17,8 @@ active_spec: tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md
 active_plan: tasks/builds/pre-launch-phase-3-deferred-backlog/plan.md
 build_slug: pre-launch-phase-3-deferred-backlog
 branch: claude/pre-launch-phase-3
-status: BUILDING
-last_updated: 2026-05-05
+status: REVIEWING
+last_updated: 2026-05-06
 -->
 
 # Current Focus
@@ -38,7 +38,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active build slug:** `baseline-capture`
 **Status:** **REVIEWING** — F3 baseline-capture build implemented + spec-conformance CONFORMANT (re-run) + pr-reviewer APPROVED + adversarial-reviewer ALL_CLOSED. HEAD `b516e26a`. Phase 2 handoff at `tasks/builds/baseline-capture/handoff.md`. Next step: launch finalisation-coordinator. **REVIEW_GAP:** dual-reviewer skipped (Codex CLI unavailable in this Claude Code web session); chatgpt-pr-review will be the second-opinion pass during Phase 3.
 
-**Parallel build (BUILDING):** `pre-launch-phase-3-deferred-backlog` on branch `claude/pre-launch-phase-3` (forked from `main` at `a7ad66fc`; build slug renamed from `pre-launch-phase-3` → `pre-launch-phase-3-deferred-backlog` 2026-05-05 to resolve S1 collision with main's parallel `pre-launch-phase-3` spec under `dd08e9a9`, which uses the same directory for a narrower 7-item scope). Spec at `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md` is locked + APPROVED FINAL. Phase 1 (SPEC) complete: spec-reviewer 3/5 iterations READY_FOR_BUILD + chatgpt-spec-review 5 rounds APPROVED FINAL (commit `35179a4f`); 33 technical findings auto-applied, 2 escalated-to-defer per recommendation, 0 directional findings, 0 blockers. Phase 2 handoff at `tasks/builds/pre-launch-phase-3-deferred-backlog/handoff.md`. Charter: close the 24-item deferred backlog from Pre-Launch Phases 1 (PR #261) + 2 (PR #264) — final pre-launch hardening pass before UAT. 5 chunks (A canonical types → B grep gates → C observability → D independent hardening → E cleanup); minimal schema delta (one column + one partial-unique index + one inline backfill on `subaccounts`). **Next step:** open a new Claude Code session and type `launch feature coordinator`.
+**Parallel build (REVIEWING):** `pre-launch-phase-3-deferred-backlog` on branch `claude/pre-launch-phase-3`. Phase 2 (BUILD) complete 2026-05-06: all 5 chunks (A→E) built; G2 gate clean (lint + typecheck exit 0); branch-level review pass complete — spec-conformance CONFORMANT_AFTER_FIXES (DG-1/DG-2/DG-3 deferred); adversarial-reviewer 2 confirmed holes closed (RLS bypass B-1, OAuth audit B-4); pr-reviewer CHANGES_REQUESTED → 4 blocking fixed (B-1 through B-4) → re-check APPROVED; dual-reviewer SKIPPED (Codex CLI unavailable — REVIEW_GAP); doc-sync gate DONE (2 KNOWLEDGE.md entries, no architecture.md updates required). Phase 2 handoff at `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md`. **Next step:** open new session and type `launch finalisation`.
 
 ---
 
@@ -72,7 +72,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06
 
 ---
 

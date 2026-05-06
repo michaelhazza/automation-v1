@@ -2488,6 +2488,44 @@ The terminal round IS logged with full session-log structure (raw response, deci
 
 `pg_try_advisory_xact_lock` in `workflowEngineService.ts` `tick()` is NOT in the same transaction as `pgboss.send()`. The lock runs in auto-commit mode via `db.execute` (no wrapping `db.transaction`), so it releases at statement end — it does NOT span the full tick() handler. `pgboss.send()` runs on a separate auto-commit connection. Contention detection still works (two concurrent handlers racing on the same runId will observe `got=false`), but there is no serialisation gate. A full fix (wrapping tick() in a single `db.transaction`) is deferred — tracked in `tasks/todo.md` under `## Deferred`. AR-3.1 noted in-situ in the source file.
 
+### [2026-05-06] Gotcha — GHL subaccount INSERTs that omit `external_id_namespace` bypass the partial unique index entirely
+
+Migration 0285 added a partial unique index on `subaccounts` scoped to `WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. The index only covers rows where both predicates are true. An INSERT that writes a row without `external_id_namespace` (leaving it NULL) satisfies neither predicate — the index is never consulted, and the ON CONFLICT clause that references it never fires.
+
+**Practical failure mode:** `ghlAgencyOauthService.ts` (inline enrol path) and `ghlWebhookMutationsService.ts` (`location_create` branch) originally omitted `external_id_namespace` from their INSERT column lists. Re-running either path with the same GHL location ID silently created duplicate subaccount rows instead of hitting the ON CONFLICT DO UPDATE path. The deduplication guarantee was completely inactive for these two paths despite the migration having run.
+
+**Fix:** add `external_id_namespace: 'ghl_location'` to both the INSERT VALUES list and the ON CONFLICT target:
+```sql
+INSERT INTO subaccounts (
+  id, organisation_id, name, slug, status,
+  connector_config_id, external_id, external_id_namespace, created_at, updated_at
+) VALUES (...)
+ON CONFLICT (organisation_id, external_id)
+  WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL
+DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+```
+
+**Detection rule:** any INSERT into a table with a partial unique index should include every column in the index predicate in the INSERT column list. An INSERT that omits a predicate column silently prevents the index from enforcing the invariant. Grep for `INSERT INTO subaccounts` in any new writer; confirm `external_id_namespace` is present.
+
+### [2026-05-06] Pattern — Migration RAISE EXCEPTION safety checks must be scoped to the rows the migration targets
+
+A `DO $$ ... IF remaining > 0 THEN RAISE EXCEPTION ...; END IF; $$` block in a migration is a pre-flight guard that aborts deployment if the preceding data migration (backfill) left any rows in a bad state. These blocks fail correctly only if the `WHERE` clause in the `SELECT COUNT(*)` is scoped to the exact set of rows the migration actually touched.
+
+**Failure mode:** migration 0285 originally used `WHERE external_id IS NOT NULL AND external_id_namespace IS NULL` to verify the GHL backfill. On any database with manually-created subaccounts, subaccounts from disconnected connectors, or future non-GHL subaccounts that have `external_id` set but no `external_id_namespace`, the guard fires on rows the migration never touched and never intended to fix — causing `RAISE EXCEPTION 'backfill incomplete'` for state that is entirely expected and correct.
+
+**Fix:** add `AND connector_config_id IN (SELECT id FROM connector_configs WHERE connector_type = 'ghl')` to scope the check to GHL-linked rows only:
+```sql
+SELECT COUNT(*) INTO remaining
+  FROM subaccounts
+ WHERE external_id IS NOT NULL
+   AND external_id_namespace IS NULL
+   AND connector_config_id IN (
+     SELECT id FROM connector_configs WHERE connector_type = 'ghl'
+   );
+```
+
+**Rule:** for any migration `RAISE EXCEPTION` safety check, derive the WHERE predicate from the UPDATE/backfill statement in the same migration — not from a general "this column should be set" condition. The check certifies that THIS migration's work is complete; broader conditions produce false-positive failures on rows outside the migration's scope.
+
 ### E.5 setOrgGUC — canonical replacement for the withOrgTx({tx:db}) anti-pattern (2026-05-06)
 
 **Date:** 2026-05-06
