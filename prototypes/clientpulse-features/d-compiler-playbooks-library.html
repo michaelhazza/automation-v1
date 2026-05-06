@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>D-Compiler — Playbooks Library with + New Automation</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 216px; flex-shrink: 0;
+    background: #fff; border-right: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; padding: 16px 12px;
+  }
+  .sidebar-logo {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 8px 14px; margin-bottom: 8px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .sidebar-logo .mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; color: #475569; text-decoration: none;
+  }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #64748b;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+
+  .page-content { flex: 1; padding: 28px 32px; overflow-y: auto; }
+
+  /* Page header */
+  .page-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .page-title { font-size: 20px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+  .page-subtitle { font-size: 13px; color: #64748b; margin-top: 3px; }
+
+  /* THE PRIMARY ACTION — highlighted */
+  .btn-new-automation {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 20px; border-radius: 9px;
+    background: #4f46e5; color: #fff;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    border: 1px solid #4338ca; text-decoration: none;
+    box-shadow: 0 2px 8px rgba(79,70,229,0.3);
+    transition: background 0.1s, box-shadow 0.1s;
+    flex-shrink: 0;
+    /* Callout ring to draw attention */
+    animation: cta-pulse 2.4s ease-in-out 3;
+  }
+  .btn-new-automation:hover {
+    background: #4338ca;
+    box-shadow: 0 4px 14px rgba(79,70,229,0.35);
+  }
+  @keyframes cta-pulse {
+    0%, 100% { box-shadow: 0 2px 8px rgba(79,70,229,0.3); }
+    50%       { box-shadow: 0 0 0 6px rgba(79,70,229,0.12), 0 2px 8px rgba(79,70,229,0.3); }
+  }
+
+  /* Filter row */
+  .filter-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
+  }
+  .filter-chip {
+    padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #475569;
+    transition: all 0.1s;
+  }
+  .filter-chip.active { background: #eef2ff; border-color: #4f46e5; color: #4f46e5; }
+  .search-input {
+    margin-left: auto; padding: 6px 11px; border: 1px solid #e2e8f0; border-radius: 7px;
+    font-size: 13px; font-family: inherit; color: #1e293b; outline: none;
+    background: #fff; width: 200px;
+  }
+  .search-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+
+  /* Template grid */
+  .template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+
+  .template-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+    cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s;
+    text-decoration: none;
+    display: flex; flex-direction: column;
+  }
+  .template-card:hover {
+    border-color: #c7d2fe;
+    box-shadow: 0 2px 8px rgba(79,70,229,0.08);
+  }
+
+  .template-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 12px; flex-shrink: 0;
+  }
+  .template-name { font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px; }
+  .template-desc { font-size: 12px; color: #64748b; line-height: 1.45; flex: 1; }
+  .template-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9;
+  }
+  .template-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 7px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .tag-system { background: #f1f5f9; color: #64748b; }
+  .tag-org { background: #eef2ff; color: #4f46e5; }
+  .template-runs { font-size: 11px; color: #94a3b8; }
+
+  .section-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #94a3b8; margin-bottom: 12px; margin-top: 24px;
+  }
+  .section-label:first-of-type { margin-top: 0; }
+
+  .proto-banner {
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  D-Compiler · Playbooks Library with "+ New Automation" entry point · the button links to the existing workflow studio prototype
+</div>
+
+<div class="app-shell">
+
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="mark">A</div>
+      <div class="name">Automation OS</div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#">Pulse</a>
+      <a href="#">Clients</a>
+      <a href="#" class="active">Playbooks</a>
+      <a href="#">Agents</a>
+      <a href="#">Reports</a>
+    </nav>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-current">Playbooks</span>
+    </div>
+
+    <div class="page-content">
+
+      <div class="page-header">
+        <div>
+          <div class="page-title">Playbooks</div>
+          <div class="page-subtitle">Automation templates you can run or customise for any client.</div>
+        </div>
+        <!-- PRIMARY ACTION -->
+        <a href="../../workflows/01-studio-chat-with-live-preview.html" class="btn-new-automation">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New automation
+        </a>
+      </div>
+
+      <!-- Filter row -->
+      <div class="filter-row">
+        <button class="filter-chip active" onclick="setFilter(this, 'all')">All</button>
+        <button class="filter-chip" onclick="setFilter(this, 'reporting')">Reporting</button>
+        <button class="filter-chip" onclick="setFilter(this, 'lead-management')">Lead management</button>
+        <button class="filter-chip" onclick="setFilter(this, 'outreach')">Outreach</button>
+        <button class="filter-chip" onclick="setFilter(this, 'my')">My automations</button>
+        <input class="search-input" type="text" placeholder="Search playbooks…" />
+      </div>
+
+      <!-- System templates -->
+      <div class="section-label">System templates</div>
+      <div class="template-grid">
+
+        <div class="template-card">
+          <div class="template-icon" style="background:#d1fae5;color:#059669;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+          </div>
+          <div class="template-name">Weekly performance report</div>
+          <div class="template-desc">Sent every Monday. Pipeline movement, new leads, and key changes from the prior week.</div>
+          <div class="template-footer">
+            <span class="template-tag tag-system">System</span>
+            <span class="template-runs">847 runs</span>
+          </div>
+        </div>
+
+        <div class="template-card">
+          <div class="template-icon" style="background:#fef3c7;color:#b45309;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          </div>
+          <div class="template-name">Stale deal alert</div>
+          <div class="template-desc">Flags deals that haven't moved stages in 14+ days. Sent as a Pulse notification.</div>
+          <div class="template-footer">
+            <span class="template-tag tag-system">System</span>
+            <span class="template-runs">512 runs</span>
+          </div>
+        </div>
+
+        <div class="template-card">
+          <div class="template-icon" style="background:#ede9fe;color:#6d28d9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div class="template-name">New lead follow-up sequence</div>
+          <div class="template-desc">Sends a personalised intro email to new leads within 30 minutes of creation in GHL.</div>
+          <div class="template-footer">
+            <span class="template-tag tag-system">System</span>
+            <span class="template-runs">1,204 runs</span>
+          </div>
+        </div>
+
+        <div class="template-card">
+          <div class="template-icon" style="background:#fee2e2;color:#b91c1c;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          </div>
+          <div class="template-name">Pipeline drop alert</div>
+          <div class="template-desc">Fires when a client's pipeline value drops more than 20% in a 7-day window.</div>
+          <div class="template-footer">
+            <span class="template-tag tag-system">System</span>
+            <span class="template-runs">278 runs</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Org templates -->
+      <div class="section-label">Your automations</div>
+      <div class="template-grid">
+
+        <div class="template-card">
+          <div class="template-icon" style="background:#eef2ff;color:#4f46e5;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+          </div>
+          <div class="template-name">Monthly ROI briefing</div>
+          <div class="template-desc">Custom report for Acme Corp comparing this month's pipeline against their baseline.</div>
+          <div class="template-footer">
+            <span class="template-tag tag-org">Mine</span>
+            <span class="template-runs">12 runs</span>
+          </div>
+        </div>
+
+        <div class="template-card" style="border-style:dashed;border-color:#c7d2fe;background:#fafbff;">
+          <div class="template-icon" style="background:#f0f4ff;color:#a5b4fc;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+          <div class="template-name" style="color:#94a3b8;">Build something new</div>
+          <div class="template-desc" style="color:#94a3b8;">Describe what you want in plain language and the AI will build it for you.</div>
+          <div class="template-footer">
+            <a href="../../workflows/01-studio-chat-with-live-preview.html" style="font-size:12px;color:#4f46e5;font-weight:500;text-decoration:none;">Open Studio</a>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  function setFilter(btn, filter) {
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+  }
+</script>
+</body>
+</html>

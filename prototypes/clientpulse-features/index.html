@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ClientPulse features — Comprehensive review set</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    background: #f5f6f8;
+    color: #1e293b;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .page-wrap { max-width: 920px; margin: 0 auto; padding: 40px 24px 64px; }
+
+  /* Page header */
+  .page-header { margin-bottom: 36px; }
+  .page-title { font-size: 24px; font-weight: 800; color: #0f172a; letter-spacing: -0.4px; margin-bottom: 8px; }
+  .page-desc { font-size: 13.5px; color: #64748b; line-height: 1.7; max-width: 640px; margin-bottom: 12px; }
+  .page-meta { font-size: 12px; color: #94a3b8; }
+
+  /* Section headings */
+  .section { margin-bottom: 40px; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  .section-letter {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800;
+    flex-shrink: 0;
+  }
+  .section-title-text {
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .section-desc-text {
+    font-size: 12.5px;
+    color: #64748b;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* Section A — NEW (teal) */
+  .sect-a .section-letter { background: #ccfbf1; color: #0f766e; }
+  .sect-a .section-header { border-bottom-color: #99f6e4; }
+
+  /* Section B — MODIFIES (indigo) */
+  .sect-b .section-letter { background: #e0e7ff; color: #3730a3; }
+  .sect-b .section-header { border-bottom-color: #c7d2fe; }
+
+  /* Section C — REUSED (slate) */
+  .sect-c .section-letter { background: #f1f5f9; color: #475569; }
+  .sect-c .section-header { border-bottom-color: #e2e8f0; }
+
+  /* Section D — DEFERRED (amber) */
+  .sect-d .section-letter { background: #fef3c7; color: #92400e; }
+  .sect-d .section-header { border-bottom-color: #fde68a; }
+
+  /* Section E — STATE VARIANTS (grey-slate) */
+  .sect-e .section-letter { background: #f1f5f9; color: #334155; }
+  .sect-e .section-header { border-bottom-color: #cbd5e1; }
+
+  /* State variant card */
+  .state-card {
+    background: #fff;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .state-card:hover {
+    border-color: #94a3b8;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.08);
+  }
+
+  .state-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    background: #f1f5f9;
+    color: #334155;
+    border-radius: 5px;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .state-badge.empty { background: #e2e8f0; color: #334155; }
+  .state-badge.failure { background: #fee2e2; color: #991b1b; }
+  .state-badge.edge { background: #fef3c7; color: #92400e; }
+  .state-badge.current { background: #f1f5f9; color: #475569; }
+  .state-badge.downstream { background: #ede9fe; color: #5b21b6; }
+  .state-badge.modifies-b { background: #e0e7ff; color: #3730a3; }
+
+  /* ── NEW card ── */
+  .new-card {
+    background: #fff;
+    border: 1.5px solid #99f6e4;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .new-card:hover {
+    border-color: #2dd4bf;
+    box-shadow: 0 2px 8px rgba(45,212,191,0.12);
+  }
+
+  .new-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    background: #ccfbf1;
+    color: #0f766e;
+    border-radius: 5px;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ── MODIFIES card ── */
+  .modifies-card {
+    background: #fff;
+    border: 1.5px solid #c7d2fe;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+  }
+
+  .modifies-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    background: #e0e7ff;
+    color: #3730a3;
+    border-radius: 5px;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .card-icon {
+    width: 38px; height: 38px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .card-meta { flex: 1; min-width: 0; }
+  .card-name { font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 3px; }
+  .card-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* Two-button row for modifies cards */
+  .modifies-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .modifies-card-icon {
+    width: 38px; height: 38px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .modifies-card-meta { flex: 1; min-width: 0; }
+  .modifies-card-name { font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 3px; }
+  .modifies-card-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  .diff-buttons {
+    display: flex;
+    gap: 10px;
+    padding-top: 4px;
+  }
+  .diff-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 7px;
+    font-size: 12.5px;
+    font-weight: 500;
+    text-decoration: none;
+    border: 1px solid;
+    transition: background 0.1s;
+  }
+  .diff-btn-today {
+    background: #fff;
+    color: #64748b;
+    border-color: #e2e8f0;
+  }
+  .diff-btn-today:hover { background: #f8fafc; }
+  .diff-btn-proposed {
+    background: #4f46e5;
+    color: #fff;
+    border-color: #4338ca;
+  }
+  .diff-btn-proposed:hover { background: #4338ca; }
+
+  /* Feature code pills */
+  .fc {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    font-family: ui-monospace, monospace;
+    text-transform: uppercase;
+  }
+  .fc-b-artefacts { background: #eef2ff; color: #4f46e5; }
+  .fc-b-metrics   { background: #d1fae5; color: #065f46; }
+  .fc-o-intake    { background: #fef3c7; color: #92400e; }
+  .fc-d-compiler  { background: #ede9fe; color: #5b21b6; }
+  .fc-r-polish    { background: #fce7f3; color: #9d174d; }
+
+  /* Reused card (section C) */
+  .reused-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 13px 18px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    text-decoration: none;
+    color: inherit;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.03);
+    transition: border-color 0.1s;
+  }
+  .reused-card:hover { border-color: #cbd5e1; }
+
+  /* Deferred notice */
+  .deferred-card {
+    background: #fff;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 14px 18px;
+    color: #94a3b8;
+    font-size: 13px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .deferred-icon { flex-shrink: 0; color: #cbd5e1; margin-top: 1px; }
+
+  /* Feature section label with divider */
+  .feature-divider {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #94a3b8;
+    margin: 20px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .feature-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #f1f5f9;
+  }
+
+  /* Walkthrough flow guide */
+  .flow-guide {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 36px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .flow-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #94a3b8;
+    margin-bottom: 10px;
+  }
+  .flow-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+  .flow-step {
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-weight: 500;
+    background: #f1f5f9;
+    color: #475569;
+    text-decoration: none;
+  }
+  .flow-step:hover { background: #e0e7ff; color: #4f46e5; }
+  .flow-arrow { color: #94a3b8; }
+
+  .footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; }
+
+  /* Screen link arrow for new cards */
+  .screen-link { font-size: 12px; font-weight: 500; color: #0f766e; white-space: nowrap; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+  <div class="page-header">
+    <div class="page-title">ClientPulse features — Comprehensive review set</div>
+    <div class="page-desc">
+      Round 3 review set. Adds Section E: empty states, failure states, edge states, the knowledge-management surface (current + proposed), and downstream Pulse inbox landings. Sections A–D are unchanged from round 2. Use the "Today" and "Proposed" buttons to diff any modified surface. Section E files carry amber badges and footer scenario labels.
+    </div>
+    <div class="page-meta">5 features · 6 modified surfaces · 7 net-new surfaces · 14 state-variant screens · Round 3 · 2026-05-06</div>
+  </div>
+
+  <!-- Suggested walkthrough -->
+  <div class="flow-guide">
+    <div class="flow-title">Suggested reviewer walkthrough — full onboarding flow (proposed)</div>
+    <div class="flow-steps">
+      <a href="b-artefacts-capture-step.html" class="flow-step">Step 4: Knowledge capture</a>
+      <span class="flow-arrow">→</span>
+      <a href="o-intake-celebration.html" class="flow-step">Celebration (with CTA)</a>
+      <span class="flow-arrow">→</span>
+      <a href="o-intake-conversation.html" class="flow-step">Automation wishes chat</a>
+      <span class="flow-arrow">→</span>
+      <a href="o-intake-summary.html" class="flow-step">Wishes summary</a>
+      <span class="flow-arrow">→</span>
+      <a href="d-compiler-from-onboarding.html" class="flow-step">Studio (wish prefilled)</a>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SECTION A — Net-new surfaces                        -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div class="section sect-a">
+    <div class="section-header">
+      <div class="section-letter">A</div>
+      <div class="section-title-text">Net-new surfaces — no current equivalent</div>
+      <div class="section-desc-text">5 screens</div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-o-intake">O-Intake</span> Automation wishes conversation</div>
+
+    <a href="o-intake-conversation.html" class="new-card">
+      <div class="card-icon" style="background:#fffbeb;color:#b45309;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Automation wishes conversation</div>
+        <div class="card-desc">Full-screen LLM chat capturing automation intent. Operator types free-form; capability match cards surface inline. "I'm done" exits to summary. No equivalent surface exists today.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="o-intake-summary.html" class="new-card">
+      <div class="card-icon" style="background:#fef9c3;color:#92400e;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Wishes summary</div>
+        <div class="card-desc">Lists captured wishes. Per-wish state (queued / saved). "Set this up now" routes to D-Compiler studio with wish prefilled. Done routes to dashboard. No equivalent surface exists today.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> Baseline knowledge artefacts</div>
+
+    <a href="b-artefacts-edit-drawer.html" class="new-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Edit drawer — triggered from Knowledge badge</div>
+        <div class="card-desc">Slide-out drawer with all 6 artefacts accessible in-place. Each filled row shows last-updated timestamp and "Revert to baseline". The drawer itself is new; the trigger lives on a modified page.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <div class="feature-divider"><span class="fc fc-b-metrics">B-Metrics</span> Numeric baseline and ROI delta</div>
+
+    <a href="b-metrics-manual-entry.html" class="new-card">
+      <div class="card-icon" style="background:#d1fae5;color:#059669;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Manual baseline entry form</div>
+        <div class="card-desc">Fires when auto-capture fails. Tier-1 (pipeline value, revenue) required; Tier-2 optional. Confidence toggle (Confirmed / Estimated). Single primary action: Save baseline. No equivalent surface today.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <div class="feature-divider"><span class="fc fc-d-compiler">D-Compiler</span> Demonstration-to-DAG</div>
+
+    <a href="d-compiler-from-onboarding.html" class="new-card">
+      <div class="card-icon" style="background:#ede9fe;color:#6d28d9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Studio opened from O-Intake wish (bridge state)</div>
+        <div class="card-desc">Workflow studio in mid-generation state with the operator's O-Intake wish prefilled and a blue origin-context banner. Reuses existing studio chrome with a new prefilled + in-progress state. Not accessible today.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+  </div>
+  <!-- END Section A -->
+
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SECTION B — Modifies existing surfaces              -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div class="section sect-b">
+    <div class="section-header">
+      <div class="section-letter">B</div>
+      <div class="section-title-text">Modifies existing surfaces — current vs proposed</div>
+      <div class="section-desc-text">7 surfaces</div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> OnboardingWizard step 4</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">OnboardingWizard — step 4 "Tell us"</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: status dot grid per client, "Start capture" links out to a workflow run page. No inline input. Proposed: full artefact capture UI inline, tier-grouped accordion, Tier-1 required fields open by default, default value chips for Tier-2, progress gated on Tier-1.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-onboarding-wizard-step4.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="b-artefacts-capture-step.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-o-intake">O-Intake</span> OnboardingCelebration screen</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#fef3c7;color:#b45309;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">OnboardingCelebration screen</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: one CTA "View your dashboard" only. Proposed: adds a second CTA "Now, let's set up some automation" (primary) with a "Skip for now" escape, routing to the O-Intake conversation.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-onboarding-celebration.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="o-intake-celebration.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> Subaccount detail page (Knowledge tab)</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Subaccount Knowledge page (artefacts area)</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: flat list of 6 artefact rows, status dot only, "Edit" link navigates away. No summary badge. Proposed: compact "Knowledge: 4 of 6 Edit" badge on page header triggers a slide-out drawer with inline editing, timestamps, and revert option.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-subaccount-detail.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="b-artefacts-edit-drawer.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-d-compiler">D-Compiler</span> Playbooks Library page</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#ede9fe;color:#6d28d9;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Workflows / Playbooks Library</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: flat table of workflow templates, developer-facing, "New Workflow" button links to admin studio, page titled "Workflows". Proposed: visual card grid, "Automations" branding, animated "New automation" as primary CTA, template categories, "+ Build something new" dashed card.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-playbooks-library.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="d-compiler-playbooks-library.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-b-metrics">B-Metrics</span> ReportDetailPage (ROI section)</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#d1fae5;color:#059669;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Report detail page (ROI delta section)</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: no ROI or baseline section. Report shows only health KPI tiles and HTML report body. Proposed: adds "Since onboarding" section below report body with narration line and two delta cards (pipeline, revenue). Fallback state shown when no baseline set.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-report-detail.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="b-metrics-roi-delta.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> SubaccountKnowledgePage (all-artefacts overview)</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">SubaccountKnowledgePage — artefacts overview</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: flat artefact list with status dots, Edit button only on completed rows, no last-updated or captured-by info. Proposed: 3-column artefact card grid with last-updated, captured-by, and inline Edit/Capture. Page title anchors to primary task ("everything we know about…"). Badge in header triggers edit drawer.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-subaccount-knowledge-tab.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="subaccount-knowledge-page-proposed.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span class="fc fc-r-polish">R-Polish</span> Research deliverable (citations)</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#fce7f3;color:#9d174d;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Research deliverable (TaskModal deliverables tab)</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: plain prose card with title, type badge, and description. No source attribution. Operator cannot verify facts. Proposed: inline citation markers [1][2][3], hover tooltips showing source URL and snippet, "Sources" list at bottom with title, URL, fetched-at timestamp.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-deliverable-no-citations.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="r-polish-deliverable-citations.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+  </div>
+  <!-- END Section B -->
+
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SECTION C — Reused unchanged                        -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div class="section sect-c">
+    <div class="section-header">
+      <div class="section-letter">C</div>
+      <div class="section-title-text">Reused unchanged — context surfaces this branch interacts with</div>
+      <div class="section-desc-text">Not modified</div>
+    </div>
+
+    <a href="../workflows/01-studio-chat-with-live-preview.html" class="reused-card" target="_blank">
+      <div class="card-icon" style="background:#f1f5f9;color:#64748b;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Workflow Studio — existing chrome (workflows/01-studio-chat-with-live-preview.html)</div>
+        <div class="card-desc">The existing 3-pane studio. D-Compiler reuses this chrome exactly — the proposed d-compiler-from-onboarding.html screen is the same chrome with a prefilled wish and a blue origin-context banner added.</div>
+      </div>
+      <div style="font-size:12px;color:#94a3b8;white-space:nowrap;flex-shrink:0;">Not modified ↗</div>
+    </a>
+
+    <a href="../pulse/clientpulse-mockup-drilldown.html" class="reused-card" target="_blank">
+      <div class="card-icon" style="background:#f1f5f9;color:#64748b;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">ClientPulse drilldown page (pulse/clientpulse-mockup-drilldown.html)</div>
+        <div class="card-desc">The existing subaccount drilldown page with health score, band pill, signal panel, and band transitions. This is the broader context page that links into the Knowledge tab where B-Artefacts badges appear.</div>
+      </div>
+      <div style="font-size:12px;color:#94a3b8;white-space:nowrap;flex-shrink:0;">Not modified ↗</div>
+    </a>
+
+    <a href="../pulse/clientpulse-mockup-onboarding-orgadmin.html" class="reused-card" target="_blank">
+      <div class="card-icon" style="background:#f1f5f9;color:#64748b;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Onboarding wizard (steps 1-3) — org admin view (pulse/clientpulse-mockup-onboarding-orgadmin.html)</div>
+        <div class="card-desc">The existing wizard mockup covering steps 1-3 (Connect GHL, Select clients, Syncing). Steps 1-3 are not modified by this branch — only step 4 changes.</div>
+      </div>
+      <div style="font-size:12px;color:#94a3b8;white-space:nowrap;flex-shrink:0;">Not modified ↗</div>
+    </a>
+
+  </div>
+  <!-- END Section C -->
+
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SECTION D — Deferred                                -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div class="section sect-d">
+    <div class="section-header">
+      <div class="section-letter">D</div>
+      <div class="section-title-text">Deferred to next round</div>
+    </div>
+
+    <div class="deferred-card">
+      <div class="deferred-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.8" fill="currentColor"/></svg>
+      </div>
+      <div>
+        <strong>B-Metrics — admin baseline reset action.</strong> The system-admin-only "Reset baseline" button with confirmation modal was deferred in round 1 and remains deferred. It is low-traffic (admin-only), does not affect the primary operator flow, and can be designed in isolation. Flag for round 3 if the operator wants to see it.
+      </div>
+    </div>
+
+  </div>
+  <!-- END Section D -->
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SECTION E — Empty, failure, and edge states         -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div class="section sect-e">
+    <div class="section-header">
+      <div class="section-letter">E</div>
+      <div class="section-title-text">Empty, failure, and edge states — first-experience and error paths</div>
+      <div class="section-desc-text">14 screens</div>
+    </div>
+
+    <!-- ── O-INTAKE ── -->
+    <div class="feature-divider"><span class="fc fc-o-intake">O-Intake</span> Automation wishes conversation</div>
+
+    <a href="empty-onboarding-wizard.html" class="state-card">
+      <div class="card-icon" style="background:#f1f5f9;color:#94a3b8;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Onboarding wizard — brand new agency (2 scenarios)</div>
+        <div class="card-desc">Step 2: GHL connected but zero locations exist in the account. Step 4: wizard complete but zero artefacts auto-captured. Toggle between scenarios on the page.</div>
+      </div>
+      <div class="state-badge empty">Empty</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="empty-o-intake-summary.html" class="state-card">
+      <div class="card-icon" style="background:#fffbeb;color:#b45309;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">O-Intake summary — zero wishes captured</div>
+        <div class="card-desc">Operator clicked "I'm done" immediately with nothing captured. No shaming. Single action: Done. Escape back to conversation available. Tips for next time shown low-key.</div>
+      </div>
+      <div class="state-badge empty">Empty</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="o-intake-cost-cap-warning.html" class="state-card">
+      <div class="card-icon" style="background:#fffbeb;color:#d97706;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.5" r="0.8" fill="currentColor"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">O-Intake — cost cap warning (80% consumed)</div>
+        <div class="card-desc">Warning surfaces inline in the chat thread as a system message. Conversation continues unblocked. Budget bar visible. Operator not interrupted from typing.</div>
+      </div>
+      <div class="state-badge edge">Edge</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="o-intake-cost-cap-reached.html" class="state-card">
+      <div class="card-icon" style="background:#fff7ed;color:#c2410c;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">O-Intake — soft cap reached, conversation paused</div>
+        <div class="card-desc">Session fully consumed. Inline pause message with wish count. Two actions: "Review my N wishes" (primary) or "Continue anyway" (secondary). Input disabled.</div>
+      </div>
+      <div class="state-badge edge">Edge</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="o-intake-im-done-confirmation.html" class="state-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">O-Intake — "I'm done" confirmation (3 wishes captured)</div>
+        <div class="card-desc">Operator clicks "I'm done" mid-thread with 3 wishes. Confirmation appears inline in chat: compact wish list + two actions ("Review summary" / "Keep going"). No modal.</div>
+      </div>
+      <div class="state-badge edge">Edge</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <!-- ── B-ARTEFACTS ── -->
+    <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> Baseline knowledge artefacts</div>
+
+    <a href="empty-subaccount-knowledge.html" class="state-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Subaccount Knowledge page — zero artefacts (fresh client)</div>
+        <div class="card-desc">All 6 artefact rows show "Not started" with a "Capture" CTA. Tabs show 0 counts. No KPI tiles, no skeleton stub cards. Faithful to current code structure.</div>
+      </div>
+      <div class="state-badge empty">Empty</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <!-- ── B-METRICS ── -->
+    <div class="feature-divider"><span class="fc fc-b-metrics">B-Metrics</span> Numeric baseline and ROI delta</div>
+
+    <a href="b-metrics-capture-failed-notification.html" class="state-card">
+      <div class="card-icon" style="background:#fee2e2;color:#ef4444;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.5" r="0.8" fill="currentColor"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">B-Metrics auto-capture failed (inline on subaccount detail)</div>
+        <div class="card-desc">After 3 failed capture attempts, an inline notice with red left-border appears on the subaccount detail page. Single CTA: "Enter baseline manually" → b-metrics-manual-entry.html. Not a modal.</div>
+      </div>
+      <div class="state-badge failure">Failure</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <!-- ── D-COMPILER ── -->
+    <div class="feature-divider"><span class="fc fc-d-compiler">D-Compiler</span> Demonstration-to-DAG</div>
+
+    <a href="d-compiler-validation-rejected.html" class="state-card">
+      <div class="card-icon" style="background:#ede9fe;color:#6d28d9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.5" r="0.8" fill="currentColor"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">D-Compiler — validation rejected (missing required field)</div>
+        <div class="card-desc">DAG compilation fails because a required field is missing (Slack channel). System asks one plain-English question with one inline input field. Blocked step shown in DAG preview. No modal.</div>
+      </div>
+      <div class="state-badge failure">Failure</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="d-compiler-missing-integration.html" class="state-card">
+      <div class="card-icon" style="background:#ede9fe;color:#6d28d9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">D-Compiler — missing integration (Google Ads not connected)</div>
+        <div class="card-desc">Wish requires a connector that isn't linked. System explains what's missing, shows the integration row, offers "Connect Google Ads" or "Save for later". Compilation does not attempt to proceed.</div>
+      </div>
+      <div class="state-badge failure">Failure</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="empty-playbooks-library.html" class="state-card">
+      <div class="card-icon" style="background:#ede9fe;color:#6d28d9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Playbooks library — zero automations (first experience)</div>
+        <div class="card-desc">Empty library with inviting copy and a primary "+ New automation" CTA. No empty table, no stub rows, no zero counts. Added in round 2; listed here for completeness.</div>
+      </div>
+      <div class="state-badge empty">Empty</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <!-- ── PULSE INBOX ── -->
+    <div class="feature-divider">Pulse inbox — downstream landings</div>
+
+    <a href="empty-pulse-inbox.html" class="state-card">
+      <div class="card-icon" style="background:#f1f5f9;color:#94a3b8;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Pulse inbox — zero items (brand new agency)</div>
+        <div class="card-desc">Inbox with Attention: 0. Single CTA: "Set up your first automation". No zeros shown as KPI tiles, no skeleton loaders. Existing pulse/index.html shows the populated state.</div>
+      </div>
+      <div class="state-badge empty">Empty</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="pulse-inbox-with-o-intake-task.html" class="state-card">
+      <div class="card-icon" style="background:#fef3c7;color:#b45309;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Pulse inbox — "save for later" task from O-Intake wish</div>
+        <div class="card-desc">New "Saved for later" lane. Row shows origin context chip ("From onboarding chat") and original wish text. "Set up now" opens D-Compiler with wish prefilled.</div>
+      </div>
+      <div class="state-badge downstream">Downstream</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="pulse-inbox-with-baseline-failed.html" class="state-card">
+      <div class="card-icon" style="background:#fee2e2;color:#ef4444;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.5" r="0.8" fill="currentColor"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Pulse inbox — "Baseline capture failed for [Client]"</div>
+        <div class="card-desc">Red-accented row with "3 attempts failed" badge, plain-English description, single CTA: "Enter manually" → b-metrics-manual-entry.html. Dismiss available.</div>
+      </div>
+      <div class="state-badge downstream">Downstream</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <!-- ── RESEARCH ── -->
+    <div class="feature-divider">Research deliverables</div>
+
+    <a href="empty-deliverables.html" class="state-card">
+      <div class="card-icon" style="background:#fce7f3;color:#9d174d;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Deliverables tab — zero research output (fresh sub-account)</div>
+        <div class="card-desc">Deliverables tab before any agent has produced output. Single CTA: "Run a research task". No stub cards, no zero counts displayed as tiles.</div>
+      </div>
+      <div class="state-badge empty">Empty</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <!-- ── PRIORITY 2 DEFERRED ── -->
+    <div class="feature-divider" style="margin-top:20px;">Priority 2 — deferred</div>
+    <div class="deferred-card">
+      <div class="deferred-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.8" fill="currentColor"/></svg>
+      </div>
+      <div>
+        <strong>b-artefacts-validation-error.html</strong> — Operator progresses wizard step 4 without filling a required Tier-1 field. Inline error styling, CTA disabled with explainer. Deferred: rounds 1–3 have sufficient coverage of the happy path; validation styling is a polish pass for round 4.<br>
+        <strong>d-compiler-reject-and-regenerate.html</strong> — Operator revises a wish mid-thread ("change schedule to Tuesdays"). Shows DAG preview updating. Deferred: dependent on D-Compiler live state which isn't prototyped yet.<br>
+        <strong>multi-wish-set-up-now.html</strong> — Operator queues three "Set this up now" requests in sequence from the O-Intake summary. Per architect plan: each creates an independent task routed to orchestrator. Deferred: requires orchestrator routing flow to be designed first.
+      </div>
+    </div>
+
+  </div>
+  <!-- END Section E -->
+
+  <div class="footer">
+    Prototype · round 3 · 2026-05-06 · ClientPulse features · mock data throughout · current-state mockups represent production code as read on 2026-05-06
+  </div>
+
+</div>
+
+</body>
+</html>

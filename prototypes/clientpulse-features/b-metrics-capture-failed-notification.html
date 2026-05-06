@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Failure state — B-Metrics auto-capture failed (inline notification)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #64748b; }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+  .page-content { flex: 1; padding: 28px 32px; max-width: 860px; }
+  .sub-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
+  .sub-name { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.3px; }
+  .sub-meta { font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 10px; }
+  .band-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px; font-size: 11.5px; font-weight: 600; }
+  .band-amber { background: #fef3c7; color: #92400e; }
+  /* Inline failure state — not a modal, sits on the page inline */
+  .capture-failed-notice {
+    background: #fff;
+    border: 1.5px solid #fca5a5;
+    border-left: 4px solid #ef4444;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .fail-icon-ring { width: 32px; height: 32px; border-radius: 50%; background: #fee2e2; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .fail-body { flex: 1; }
+  .fail-title { font-size: 13.5px; font-weight: 600; color: #991b1b; margin-bottom: 4px; }
+  .fail-desc { font-size: 13px; color: #7f1d1d; line-height: 1.55; }
+  .fail-cta { margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; border-radius: 7px; background: #ef4444; color: #fff; font-size: 12.5px; font-weight: 500; border: none; cursor: pointer; }
+  .fail-cta:hover { background: #dc2626; }
+  .page-tabs { display: flex; gap: 1px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px; }
+  .tab-btn { padding: 10px 16px; font-size: 13px; font-weight: 500; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; color: #64748b; }
+  .tab-btn.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+  /* Overview section content */
+  .metrics-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+  .section-header { padding: 12px 16px; background: #fafbfc; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
+  .section-header h3 { font-size: 13px; font-weight: 600; color: #475569; margin: 0; }
+  .metric-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; border-bottom: 1px solid #f8fafc; }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label { font-size: 13.5px; color: #334155; font-weight: 500; }
+  .metric-status-empty { font-size: 12.5px; color: #94a3b8; display: flex; align-items: center; gap: 5px; }
+  .dot-empty { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+  .dot-fail { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; }
+  .metric-status-fail { font-size: 12.5px; color: #ef4444; display: flex; align-items: center; gap: 5px; }
+  .proto-footer { margin-top: 28px; font-size: 11.5px; color: #94a3b8; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <a href="#" style="color:#64748b;text-decoration:none;">Clients</a>
+      <span class="topbar-slash">/</span>
+      <span class="topbar-current">Gamma Holdings</span>
+    </div>
+    <div class="page-content">
+      <div class="sub-header">
+        <div>
+          <div class="sub-name">Gamma Holdings</div>
+          <div class="sub-meta">
+            <span class="band-pill band-amber">
+              <span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;"></span>
+              Amber
+            </span>
+            <span>score 52</span>
+            <span style="color:#e2e8f0">|</span>
+            <span>Connected 3 days ago</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inline failure notice — appears on subaccount detail page, not a modal -->
+      <div class="capture-failed-notice">
+        <div class="fail-icon-ring">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.5" r="0.8" fill="currentColor"/></svg>
+        </div>
+        <div class="fail-body">
+          <div class="fail-title">Baseline capture failed — enter manually</div>
+          <div class="fail-desc">We tried to pull pipeline and revenue data from your GHL account 3 times but couldn't read the required fields. Your numbers won't appear in ROI reports until the baseline is set.</div>
+          <button class="fail-cta" onclick="alert('Would navigate to b-metrics-manual-entry.html')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>
+            Enter baseline manually
+          </button>
+        </div>
+      </div>
+
+      <div class="page-tabs">
+        <button class="tab-btn active">Overview</button>
+        <button class="tab-btn">Deliverables</button>
+        <button class="tab-btn">Automations</button>
+        <button class="tab-btn">Knowledge</button>
+        <button class="tab-btn">Reports</button>
+      </div>
+
+      <div class="metrics-section">
+        <div class="section-header">
+          <h3>Baseline metrics</h3>
+          <span style="font-size:12px;color:#ef4444;font-weight:500;">Capture failed</span>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">Pipeline value</div>
+          <div class="metric-status-fail"><div class="dot-fail"></div>Not captured</div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">Monthly recurring revenue</div>
+          <div class="metric-status-fail"><div class="dot-fail"></div>Not captured</div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">Contacts synced</div>
+          <div class="metric-status-empty"><div class="dot-empty"></div>Not set</div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">Active deals</div>
+          <div class="metric-status-empty"><div class="dot-empty"></div>Not set</div>
+        </div>
+      </div>
+
+      <div class="proto-footer">
+        Failure state — auto-capture failed (3 attempts) · SubaccountDetailPage<br>
+        Inline notice with left red border, not a modal. Single action: "Enter baseline manually" links to the manual entry form. No error codes, no technical details. Operator sees what's missing and what to do.
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

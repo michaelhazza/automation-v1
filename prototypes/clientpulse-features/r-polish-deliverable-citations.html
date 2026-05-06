@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>R-Polish — Deliverable with inline citations</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 216px; flex-shrink: 0;
+    background: #fff; border-right: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; padding: 16px 12px;
+  }
+  .sidebar-logo {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 8px 14px; margin-bottom: 8px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .sidebar-logo .mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; color: #475569; text-decoration: none;
+  }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #64748b;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+
+  .page-content {
+    flex: 1; padding: 28px 32px; overflow-y: auto;
+    display: flex; gap: 28px; align-items: flex-start;
+  }
+
+  /* Deliverable column */
+  .deliverable-col { flex: 1; min-width: 0; }
+  .deliverable-header { margin-bottom: 20px; }
+  .del-eyebrow {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #94a3b8; margin-bottom: 5px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .del-type-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 5px;
+    font-size: 11px; font-weight: 600; background: #ede9fe; color: #5b21b6;
+    text-transform: none; letter-spacing: 0;
+  }
+  .del-title {
+    font-size: 20px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; margin-bottom: 4px;
+  }
+  .del-meta { font-size: 12px; color: #94a3b8; }
+
+  /* Rich text body */
+  .del-body {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 24px 28px; line-height: 1.75; font-size: 14px; color: #1e293b;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .del-body h3 {
+    font-size: 15px; font-weight: 600; color: #0f172a; margin: 20px 0 8px;
+  }
+  .del-body h3:first-child { margin-top: 0; }
+  .del-body p { margin-bottom: 14px; }
+  .del-body p:last-child { margin-bottom: 0; }
+
+  /* Inline citation superscript */
+  .cite {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 3px;
+    background: #eef2ff; color: #4f46e5;
+    font-size: 10px; font-weight: 700;
+    cursor: pointer; text-decoration: none;
+    position: relative; top: -3px; margin: 0 1px;
+    transition: background 0.1s;
+    /* For hover tooltip */
+  }
+  .cite:hover { background: #c7d2fe; }
+  .cite.active { background: #4f46e5; color: #fff; }
+
+  /* Hover tooltip */
+  .cite-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 260px;
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 200;
+    box-shadow: 0 4px 16px rgba(15,23,42,0.2);
+    white-space: normal;
+  }
+  .cite-tooltip::after {
+    content: '';
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #1e293b;
+  }
+  .cite:hover .cite-tooltip { opacity: 1; }
+  .cite-tooltip .tt-title { font-weight: 600; color: #fff; margin-bottom: 3px; }
+  .cite-tooltip .tt-url { color: #94a3b8; font-size: 11px; word-break: break-all; margin-bottom: 4px; }
+  .cite-tooltip .tt-snippet { color: #cbd5e1; font-size: 11px; }
+
+  /* Sources section */
+  .sources-section {
+    margin-top: 24px; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .sources-head {
+    padding: 12px 18px; border-bottom: 1px solid #f1f5f9;
+    font-size: 12px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .source-row {
+    padding: 12px 18px; border-bottom: 1px solid #f8fafc;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .source-row:last-child { border-bottom: none; }
+  .source-num {
+    width: 20px; height: 20px; border-radius: 4px;
+    background: #eef2ff; color: #4f46e5;
+    font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .source-meta { flex: 1; min-width: 0; }
+  .source-title { font-size: 13px; font-weight: 600; color: #1e293b; margin-bottom: 2px; }
+  .source-url {
+    font-size: 11px; color: #4f46e5; text-decoration: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+    max-width: 340px; margin-bottom: 3px;
+  }
+  .source-url:hover { text-decoration: underline; }
+  .source-timestamp { font-size: 11px; color: #94a3b8; }
+
+  /* Right sidebar (toc / actions) */
+  .sidebar-col {
+    width: 220px; flex-shrink: 0; position: sticky; top: 28px;
+  }
+  .action-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .action-card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 10px; }
+  .action-btn {
+    display: flex; align-items: center; gap: 7px;
+    padding: 7px 10px; border-radius: 7px; margin-bottom: 6px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    border: 1px solid #e2e8f0; background: #fff; color: #475569;
+    width: 100%; text-align: left;
+    transition: background 0.1s;
+  }
+  .action-btn:hover { background: #f8fafc; }
+  .action-btn:last-child { margin-bottom: 0; }
+
+  .proto-banner {
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  R-Polish · Deliverable detail with inline citations [1][2][3] · hover a citation to see tooltip preview · sources listed below body
+</div>
+
+<div class="app-shell">
+
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="mark">A</div>
+      <div class="name">Automation OS</div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#">Pulse</a>
+      <a href="#">Clients</a>
+      <a href="#">Tasks</a>
+      <a href="#" class="active">Intelligence</a>
+    </nav>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span>Intelligence</span>
+      <span class="topbar-slash">/</span>
+      <span>Gamma Holdings</span>
+      <span class="topbar-slash">/</span>
+      <span class="topbar-current">Competitor brief: CRM tools for property management</span>
+    </div>
+
+    <div class="page-content">
+
+      <!-- Deliverable column -->
+      <div class="deliverable-col">
+
+        <div class="deliverable-header">
+          <div class="del-eyebrow">
+            <span class="del-type-badge">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+              Competitor brief
+            </span>
+          </div>
+          <div class="del-title">CRM tools for property management agencies</div>
+          <div class="del-meta">Strategic Intelligence Agent &middot; Generated 6 May 2026 &middot; 3 sources</div>
+        </div>
+
+        <div class="del-body">
+
+          <h3>Market overview</h3>
+          <p>
+            The CRM market for property management agencies is consolidating around a handful of vertical SaaS players. Buildium and AppFolio continue to lead on feature depth, while newer entrants like Propertyware are competing on integration breadth.
+            <span class="cite" style="position:relative;" tabindex="0">1
+              <span class="cite-tooltip">
+                <div class="tt-title">State of PropTech CRM 2025</div>
+                <div class="tt-url">proptech-review.com/reports/crm-2025</div>
+                <div class="tt-snippet">"AppFolio grew market share in the 50-500 unit segment by 12 percentage points in 2024..."</div>
+              </span>
+            </span>
+            Mid-market agencies (50-500 units) remain underserved by the enterprise tools and overpriced by SMB options.
+            <span class="cite" style="position:relative;" tabindex="0">2
+              <span class="cite-tooltip">
+                <div class="tt-title">PM Software Buyer Survey Q4 2025</div>
+                <div class="tt-url">g2.com/categories/property-management</div>
+                <div class="tt-snippet">"63% of mid-market PM agencies report dissatisfaction with current CRM pricing relative to features used..."</div>
+              </span>
+            </span>
+          </p>
+
+          <h3>Key competitors for Gamma Holdings</h3>
+          <p>
+            Based on Gamma's current portfolio size (220 units) and geographic focus (South East), the most relevant competitive options are AppFolio Property Manager Pro, Buildium Essential, and Rent Manager. All three offer GHL-style pipeline management but none have native AI-driven outreach automation.
+            <span class="cite" style="position:relative;" tabindex="0">3
+              <span class="cite-tooltip">
+                <div class="tt-title">AppFolio Product Comparison 2025</div>
+                <div class="tt-url">appfolio.com/pricing</div>
+                <div class="tt-snippet">"AppFolio Pro starts at $3/unit/month for portfolios over 200 units, with AI maintenance predictions included..."</div>
+              </span>
+            </span>
+          </p>
+
+          <p>
+            Rent Manager stands out for its open API, which makes integration with Gamma's existing stack straightforward. However, their support model is US-only, which creates a risk for Gamma's planned expansion into the EU market.
+          </p>
+
+          <h3>Positioning opportunity</h3>
+          <p>
+            Gamma's differentiation is in client communication speed: their average lead response time is 1.8 hours vs. the industry median of 6.4 hours.
+            <span class="cite" style="position:relative;" tabindex="0">1
+              <span class="cite-tooltip">
+                <div class="tt-title">State of PropTech CRM 2025</div>
+                <div class="tt-url">proptech-review.com/reports/crm-2025</div>
+                <div class="tt-snippet">"Median lead response time across PM agencies surveyed was 6.4 hours..."</div>
+              </span>
+            </span>
+            No current competitor is marketing this as a feature. Gamma should lead with it.
+          </p>
+
+        </div>
+
+        <!-- Sources section -->
+        <div class="sources-section">
+          <div class="sources-head">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Sources
+          </div>
+
+          <div class="source-row">
+            <div class="source-num">1</div>
+            <div class="source-meta">
+              <div class="source-title">State of PropTech CRM 2025</div>
+              <a href="#" class="source-url">proptech-review.com/reports/crm-2025</a>
+              <div class="source-timestamp">Fetched 5 May 2026 at 14:32 UTC</div>
+            </div>
+            <a href="#" style="font-size:12px;color:#4f46e5;text-decoration:none;font-weight:500;white-space:nowrap;margin-top:2px;">View source</a>
+          </div>
+
+          <div class="source-row">
+            <div class="source-num">2</div>
+            <div class="source-meta">
+              <div class="source-title">PM Software Buyer Survey Q4 2025</div>
+              <a href="#" class="source-url">g2.com/categories/property-management</a>
+              <div class="source-timestamp">Fetched 5 May 2026 at 14:33 UTC</div>
+            </div>
+            <a href="#" style="font-size:12px;color:#4f46e5;text-decoration:none;font-weight:500;white-space:nowrap;margin-top:2px;">View source</a>
+          </div>
+
+          <div class="source-row">
+            <div class="source-num">3</div>
+            <div class="source-meta">
+              <div class="source-title">AppFolio Product Comparison 2025</div>
+              <a href="#" class="source-url">appfolio.com/pricing</a>
+              <div class="source-timestamp">Fetched 5 May 2026 at 14:35 UTC</div>
+            </div>
+            <a href="#" style="font-size:12px;color:#4f46e5;text-decoration:none;font-weight:500;white-space:nowrap;margin-top:2px;">View source</a>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Right sidebar: actions -->
+      <div class="sidebar-col">
+
+        <div class="action-card">
+          <div class="action-card-title">Actions</div>
+          <button class="action-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download as PDF
+          </button>
+          <button class="action-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            Share with client
+          </button>
+          <button class="action-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>
+            Request update
+          </button>
+        </div>
+
+        <div class="action-card">
+          <div class="action-card-title">Citation guide</div>
+          <div style="font-size:12px;color:#64748b;line-height:1.5;">
+            Hover any <span class="cite" style="display:inline-flex;font-size:9px;top:0;">1</span> in the text to preview the source. Click "View source" below to open the full page.
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

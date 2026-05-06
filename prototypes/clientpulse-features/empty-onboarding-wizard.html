@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Empty state — Onboarding wizard (brand new agency)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background:#f5f6f8; }
+
+  .wizard-shell {
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+
+  .topbar {
+    background:#fff; border-bottom:1px solid #e2e8f0;
+    padding:10px 24px; display:flex; align-items:center; gap:10px;
+    font-size:13px; color:#64748b; flex-shrink:0;
+  }
+  .topbar-logo {
+    width:26px;height:26px;border-radius:6px;background:#4f46e5;color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0;
+  }
+  .topbar-slash { color:#cbd5e1; margin:0 2px; }
+  .topbar-current { color:#1e293b; font-weight:500; }
+
+  /* Step rail */
+  .step-rail {
+    background:#fff; border-bottom:1px solid #e2e8f0;
+    padding:0 32px;
+    display:flex; align-items:center; gap:0;
+    height:52px; flex-shrink:0;
+  }
+  .step-item {
+    display:flex; align-items:center; gap:8px;
+    padding:0 16px; height:100%;
+    font-size:13px; font-weight:500;
+    color:#94a3b8; border-bottom:2px solid transparent;
+    transition:color 0.15s;
+  }
+  .step-item.done { color:#10b981; }
+  .step-item.active { color:#4f46e5; border-bottom-color:#4f46e5; }
+  .step-num {
+    width:20px;height:20px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;
+    background:#f1f5f9; color:#94a3b8;
+  }
+  .step-item.done .step-num { background:#d1fae5; color:#065f46; }
+  .step-item.active .step-num { background:#4f46e5; color:#fff; }
+  .step-arrow { color:#e2e8f0; margin:0 4px; font-size:16px; }
+
+  /* Body */
+  .wizard-body {
+    flex:1; overflow-y:auto;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:40px 24px;
+  }
+
+  /* Step 2 empty — locations selector */
+  .step-container {
+    background:#fff; border:1px solid #e2e8f0; border-radius:14px;
+    width:100%; max-width:680px;
+    box-shadow:0 2px 8px rgba(15,23,42,0.05);
+    overflow:hidden;
+  }
+  .step-header {
+    padding:24px 28px 0;
+  }
+  .step-label {
+    font-size:11px;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.6px;color:#94a3b8;margin-bottom:6px;
+  }
+  .step-title { font-size:20px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;margin-bottom:6px; }
+  .step-desc { font-size:13.5px;color:#64748b;line-height:1.6; }
+
+  .step-body { padding:24px 28px; }
+
+  /* Empty state area */
+  .empty-state-box {
+    border:1.5px dashed #e2e8f0;
+    border-radius:10px;
+    padding:48px 24px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center;
+    background:#f8fafc;
+    min-height:220px;
+  }
+  .empty-icon {
+    width:52px;height:52px;border-radius:14px;
+    background:#eef2ff; color:#4f46e5;
+    display:flex;align-items:center;justify-content:center;
+    margin-bottom:16px;
+  }
+  .empty-title { font-size:15px;font-weight:600;color:#1e293b;margin-bottom:6px; }
+  .empty-hint { font-size:13px;color:#64748b;line-height:1.6;max-width:320px;margin-bottom:0; }
+
+  /* CTA area */
+  .step-footer {
+    padding:16px 28px 24px;
+    display:flex; justify-content:space-between; align-items:center;
+    border-top:1px solid #f1f5f9;
+  }
+  .ghl-connected {
+    display:flex; align-items:center; gap:8px;
+    font-size:13px; color:#065f46;
+    background:#d1fae5; padding:6px 12px; border-radius:7px;
+  }
+
+  /* Connected badge row */
+  .connected-notice {
+    background:#f0fdf4; border:1px solid #bbf7d0;
+    border-radius:9px; padding:10px 14px;
+    display:flex; align-items:center; gap:10px;
+    margin-bottom:20px;
+    font-size:13px; color:#15803d;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  Empty state — first experience · Step 2 "Select locations" with zero GHL sub-accounts loaded yet
+</div>
+
+<div class="wizard-shell">
+
+  <div class="topbar">
+    <div class="topbar-logo">A</div>
+    <span class="topbar-slash">/</span>
+    <span>Setup</span>
+    <span class="topbar-slash">/</span>
+    <span class="topbar-current">Connect clients</span>
+  </div>
+
+  <!-- Step rail -->
+  <div class="step-rail">
+    <div class="step-item done">
+      <div class="step-num">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      Connect GHL
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item active">
+      <div class="step-num">2</div>
+      Select clients
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item">
+      <div class="step-num">3</div>
+      Sync data
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item">
+      <div class="step-num">4</div>
+      Capture knowledge
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="wizard-body">
+
+    <div class="step-container">
+      <div class="step-header">
+        <div class="step-label">Step 2 of 4</div>
+        <div class="step-title">Select which clients to monitor</div>
+        <div class="step-desc">Choose the GHL sub-accounts you want to track with ClientPulse. You can add more later.</div>
+      </div>
+
+      <div class="step-body">
+
+        <div class="connected-notice">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          GoHighLevel connected
+          <span style="color:#64748b;font-size:12px;margin-left:4px;">· pulling locations…</span>
+        </div>
+
+        <!-- Empty state — no locations loaded yet -->
+        <div class="empty-state-box">
+          <div class="empty-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <div class="empty-title">No locations found yet</div>
+          <div class="empty-hint">
+            Your GHL account has just connected. Locations usually appear within a few seconds.
+            If you're expecting clients here, check your GHL account permissions.
+          </div>
+          <div style="margin-top:20px;">
+            <button class="btn btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:6px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="step-footer">
+        <button class="btn btn-ghost btn-sm" style="color:#94a3b8;">
+          Back
+        </button>
+        <button class="btn btn-primary btn-sm" disabled style="opacity:0.4;cursor:not-allowed;">
+          Next: Sync data
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

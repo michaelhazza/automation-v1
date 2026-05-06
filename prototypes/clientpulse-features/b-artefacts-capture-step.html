@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>B-Artefacts — Capture step (OnboardingWizard step 4)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  .wizard-shell {
+    min-height: 100vh; display: flex; flex-direction: column;
+    background: #f5f6f8;
+  }
+
+  /* Step bar */
+  .step-bar-wrap {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 16px 32px;
+  }
+  .step-bar {
+    display: flex; align-items: center; max-width: 640px; margin: 0 auto;
+  }
+  .step-item {
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    flex: 1; position: relative;
+  }
+  .step-item:not(:last-child)::after {
+    content: '';
+    position: absolute; top: 13px; left: calc(50% + 14px);
+    width: calc(100% - 28px); height: 2px;
+    background: #e2e8f0;
+  }
+  .step-item.done:not(:last-child)::after { background: #4f46e5; }
+  .step-num {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    background: #e2e8f0; color: #94a3b8;
+    position: relative; z-index: 1;
+  }
+  .step-item.done .step-num { background: #4f46e5; color: #fff; }
+  .step-item.active .step-num { background: #4f46e5; color: #fff; box-shadow: 0 0 0 3px #e0e7ff; }
+  .step-label { font-size: 11px; font-weight: 500; color: #94a3b8; white-space: nowrap; }
+  .step-item.done .step-label, .step-item.active .step-label { color: #4f46e5; }
+
+  /* Page body */
+  .page-body {
+    flex: 1; padding: 36px 24px;
+    display: flex; justify-content: center;
+  }
+  .content-wrap { width: 100%; max-width: 640px; }
+
+  .step-header { margin-bottom: 28px; }
+  .step-eyebrow {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; color: #94a3b8; margin-bottom: 5px;
+  }
+  .step-title {
+    font-size: 22px; font-weight: 700; color: #0f172a;
+    letter-spacing: -0.3px; margin-bottom: 8px;
+  }
+  .step-desc { font-size: 14px; color: #64748b; line-height: 1.6; }
+
+  /* Tier labels */
+  .tier-heading {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; margin-bottom: 10px; margin-top: 20px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .tier-heading:first-of-type { margin-top: 0; }
+  .tier-label { color: #4f46e5; }
+  .tier-note { color: #94a3b8; font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 12px; }
+
+  /* Artefact cards */
+  .artefact-grid { display: flex; flex-direction: column; gap: 10px; }
+
+  .art-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 18px;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+    transition: border-color 0.12s;
+  }
+  .art-card.required { border-left: 3px solid #4f46e5; }
+  .art-card.optional { border-left: 3px solid #e2e8f0; }
+  .art-card.complete { border-left: 3px solid #10b981; }
+
+  .art-top {
+    display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px;
+  }
+  .art-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #eef2ff; color: #4f46e5;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .art-icon.optional-icon { background: #f8fafc; color: #64748b; }
+  .art-icon.done-icon { background: #d1fae5; color: #059669; }
+
+  .art-meta { flex: 1; min-width: 0; }
+  .art-name { font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 2px; }
+  .art-desc { font-size: 12px; color: #64748b; line-height: 1.45; }
+
+  .art-badge {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+    flex-shrink: 0;
+  }
+  .art-badge.required { background: #eef2ff; color: #4f46e5; }
+  .art-badge.optional { background: #f1f5f9; color: #64748b; }
+  .art-badge.complete { background: #d1fae5; color: #059669; }
+
+  /* Fields inside card */
+  .art-fields { display: flex; flex-direction: column; gap: 10px; }
+  .field-row { display: flex; flex-direction: column; gap: 4px; }
+  .field-label { font-size: 12px; font-weight: 500; color: #475569; }
+  .field-input, .field-textarea, .field-select {
+    padding: 8px 11px; border: 1px solid #e2e8f0; border-radius: 7px;
+    font-size: 13px; color: #1e293b; background: #fff;
+    font-family: inherit; outline: none;
+    transition: border-color 0.12s;
+  }
+  .field-input:focus, .field-textarea:focus, .field-select:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+  }
+  .field-textarea { resize: vertical; min-height: 64px; line-height: 1.5; }
+  .field-hint { font-size: 11px; color: #94a3b8; }
+
+  /* Card expand toggle */
+  .art-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none;
+  }
+  .art-toggle-chevron {
+    transition: transform 0.2s;
+    color: #94a3b8;
+  }
+  .art-toggle-chevron.open { transform: rotate(180deg); }
+
+  .art-body { padding-top: 12px; border-top: 1px solid #f1f5f9; margin-top: 12px; }
+  .art-body.hidden { display: none; }
+
+  /* Default value chip */
+  .default-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 6px;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    font-size: 12px; color: #64748b; margin-bottom: 8px;
+  }
+  .default-chip .chip-label { color: #94a3b8; font-size: 11px; }
+
+  /* Bottom nav */
+  .wizard-nav {
+    background: #fff; border-top: 1px solid #e2e8f0;
+    padding: 16px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .required-note { font-size: 12px; color: #94a3b8; }
+  .required-note strong { color: #1e293b; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 20px; border-radius: 8px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    border: 1px solid transparent; text-decoration: none;
+    transition: background 0.1s;
+  }
+  .btn-primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-primary:disabled { background: #c7d2fe; border-color: #c7d2fe; cursor: not-allowed; }
+  .btn-secondary { background: #fff; color: #475569; border-color: #e2e8f0; }
+  .btn-secondary:hover { background: #f8fafc; }
+
+  .proto-banner {
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  B-Artefacts · OnboardingWizard Step 4 · Tier-1 artefacts (required) must be saved before advancing. Tier-2/3 are optional.
+</div>
+
+<div class="wizard-shell">
+
+  <!-- Step bar -->
+  <div class="step-bar-wrap">
+    <div class="step-bar">
+      <div class="step-item done">
+        <div class="step-num">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="step-label">Connect GHL</div>
+      </div>
+      <div class="step-item done">
+        <div class="step-num">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="step-label">Select clients</div>
+      </div>
+      <div class="step-item done">
+        <div class="step-num">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="step-label">Syncing</div>
+      </div>
+      <div class="step-item active">
+        <div class="step-num">4</div>
+        <div class="step-label">Your knowledge</div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">5</div>
+        <div class="step-label">Done</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page body -->
+  <div class="page-body">
+    <div class="content-wrap">
+
+      <div class="step-header">
+        <div class="step-eyebrow">Step 4 of 5</div>
+        <div class="step-title">Tell us about your agency</div>
+        <div class="step-desc">
+          This helps the AI produce work that sounds like you. The first two are required — the rest improve quality but aren't blocking.
+        </div>
+      </div>
+
+      <!-- Tier 1: Required -->
+      <div class="tier-heading">
+        <span class="tier-label">Required</span>
+        <span class="tier-note">Complete these before continuing</span>
+      </div>
+
+      <div class="artefact-grid">
+
+        <!-- Brand identity -->
+        <div class="art-card required" id="card-brand">
+          <div class="art-toggle" onclick="toggleCard('brand')">
+            <div class="art-top" style="margin-bottom:0; flex:1;">
+              <div class="art-icon" id="icon-brand">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M3 21v-2a7 7 0 0 1 14 0v2"/></svg>
+              </div>
+              <div class="art-meta">
+                <div class="art-name">Brand identity</div>
+                <div class="art-desc">Agency name, tagline, what you do, and who you serve.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="art-badge required" id="badge-brand">Required</span>
+              <svg class="art-toggle-chevron open" id="chevron-brand" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+          </div>
+
+          <div class="art-body" id="body-brand">
+            <div class="art-fields">
+              <div class="field-row">
+                <label class="field-label">Agency name</label>
+                <input class="field-input" type="text" placeholder="e.g. Bright Side Agency" value="Bright Side Agency" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">Tagline or one-line description</label>
+                <input class="field-input" type="text" placeholder="e.g. Growth marketing for service businesses" value="Growth marketing for local service businesses" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">What you do (2-3 sentences)</label>
+                <textarea class="field-textarea" placeholder="Describe your core offering…">We help local service businesses grow through paid ads, SEO, and marketing automation. Our typical client is a home services company with 5-50 employees looking to scale their inbound leads.</textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Voice / tone -->
+        <div class="art-card required" id="card-voice">
+          <div class="art-toggle" onclick="toggleCard('voice')">
+            <div class="art-top" style="margin-bottom:0; flex:1;">
+              <div class="art-icon" id="icon-voice">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div class="art-meta">
+                <div class="art-name">Voice and tone</div>
+                <div class="art-desc">How your agency communicates. Guides all AI-generated copy.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="art-badge required" id="badge-voice">Required</span>
+              <svg class="art-toggle-chevron" id="chevron-voice" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+          </div>
+
+          <div class="art-body hidden" id="body-voice">
+            <div class="art-fields">
+              <div class="field-row">
+                <label class="field-label">Tone in three words</label>
+                <input class="field-input" type="text" placeholder="e.g. Friendly, direct, confident" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">Communication style</label>
+                <select class="field-select">
+                  <option value="">Select…</option>
+                  <option selected>Friendly and approachable</option>
+                  <option>Professional and formal</option>
+                  <option>Casual and conversational</option>
+                  <option>Direct and no-nonsense</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label class="field-label">Things we never say (optional)</label>
+                <textarea class="field-textarea" placeholder="e.g. 'synergy', 'leverage', jargon…" style="min-height:48px;"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tier-1 -->
+
+      <!-- Tier 2: Optional -->
+      <div class="tier-heading">
+        <span style="color:#64748b;">Optional</span>
+        <span class="tier-note">Improve quality but not required to continue</span>
+      </div>
+
+      <div class="artefact-grid">
+
+        <!-- Offer / positioning -->
+        <div class="art-card optional" id="card-offer">
+          <div class="art-toggle" onclick="toggleCard('offer')">
+            <div class="art-top" style="margin-bottom:0; flex:1;">
+              <div class="art-icon optional-icon" id="icon-offer">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              </div>
+              <div class="art-meta">
+                <div class="art-name">Offer and positioning</div>
+                <div class="art-desc">Your core packages, pricing tier, and how you're different from competitors.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="art-badge optional" id="badge-offer">Optional</span>
+              <svg class="art-toggle-chevron" id="chevron-offer" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+          </div>
+          <div class="art-body hidden" id="body-offer">
+            <div class="art-fields">
+              <div class="field-row">
+                <label class="field-label">Core service or package name</label>
+                <input class="field-input" type="text" placeholder="e.g. Growth Engine, Local Domination Package" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">What makes you different (1-2 sentences)</label>
+                <textarea class="field-textarea" placeholder="What do clients get from you that they won't get elsewhere?"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audience ICP -->
+        <div class="art-card optional" id="card-icp">
+          <div class="art-toggle" onclick="toggleCard('icp')">
+            <div class="art-top" style="margin-bottom:0; flex:1;">
+              <div class="art-icon optional-icon" id="icon-icp">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </div>
+              <div class="art-meta">
+                <div class="art-name">Audience (ICP)</div>
+                <div class="art-desc">Your ideal client profile. Industry, size, pain points, goals.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="art-badge optional" id="badge-icp">Optional</span>
+              <svg class="art-toggle-chevron" id="chevron-icp" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+          </div>
+          <div class="art-body hidden" id="body-icp">
+            <div class="default-chip">
+              <span class="chip-label">Default:</span>
+              Local service business · 5-50 employees · wants more inbound leads
+            </div>
+            <div class="art-fields">
+              <div class="field-row">
+                <label class="field-label">Industry or niche</label>
+                <input class="field-input" type="text" placeholder="e.g. Home services, legal, dental" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">Main pain point you solve</label>
+                <textarea class="field-textarea" placeholder="What keeps your ideal client up at night?" style="min-height:52px;"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Operating constraints -->
+        <div class="art-card optional" id="card-constraints">
+          <div class="art-toggle" onclick="toggleCard('constraints')">
+            <div class="art-top" style="margin-bottom:0; flex:1;">
+              <div class="art-icon optional-icon" id="icon-constraints">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div class="art-meta">
+                <div class="art-name">Operating constraints</div>
+                <div class="art-desc">Budget limits, compliance notes, or things the AI should never do.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="art-badge optional" id="badge-constraints">Optional</span>
+              <svg class="art-toggle-chevron" id="chevron-constraints" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+          </div>
+          <div class="art-body hidden" id="body-constraints">
+            <div class="art-fields">
+              <div class="field-row">
+                <label class="field-label">Things the AI should never do</label>
+                <textarea class="field-textarea" placeholder="e.g. Never disclose client names in public content. Never approve budget changes over $500 without confirmation." style="min-height:64px;"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Proof library -->
+        <div class="art-card optional" id="card-proof">
+          <div class="art-toggle" onclick="toggleCard('proof')">
+            <div class="art-top" style="margin-bottom:0; flex:1;">
+              <div class="art-icon optional-icon" id="icon-proof">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              </div>
+              <div class="art-meta">
+                <div class="art-name">Proof library</div>
+                <div class="art-desc">Key results, case study highlights, or testimonials to use in outreach.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="art-badge optional" id="badge-proof">Optional</span>
+              <svg class="art-toggle-chevron" id="chevron-proof" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+          </div>
+          <div class="art-body hidden" id="body-proof">
+            <div class="art-fields">
+              <div class="field-row">
+                <label class="field-label">Best result you've achieved for a client (anonymised is fine)</label>
+                <textarea class="field-textarea" placeholder="e.g. Grew a roofing company's inbound calls from 12/mo to 74/mo in 4 months."></textarea>
+              </div>
+              <div class="field-row">
+                <label class="field-label">Client testimonial (optional)</label>
+                <textarea class="field-textarea" placeholder="Paste a quote from a happy client…" style="min-height:52px;"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tier-2 -->
+
+    </div>
+  </div>
+
+  <!-- Wizard nav -->
+  <div class="wizard-nav">
+    <div class="required-note">
+      <strong>2 of 2</strong> required artefacts filled
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-secondary">Back</button>
+      <button class="btn btn-primary" onclick="window.location.href='o-intake-celebration.html'">
+        Save and continue
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const openCards = new Set(['brand']);
+
+  function toggleCard(id) {
+    const body = document.getElementById('body-' + id);
+    const chevron = document.getElementById('chevron-' + id);
+    if (body.classList.contains('hidden')) {
+      body.classList.remove('hidden');
+      chevron.classList.add('open');
+    } else {
+      body.classList.add('hidden');
+      chevron.classList.remove('open');
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CURRENT STATE — WorkflowsLibraryPage</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  .proto-banner {
+    background: #fef3c7;
+    color: #78350f;
+    padding: 8px 20px;
+    font-size: 11.5px;
+    font-weight: 500;
+    text-align: center;
+    border-bottom: 1px solid #fde68a;
+  }
+  .proto-banner strong { font-weight: 700; }
+
+  .content-area { max-width: 760px; }
+
+  /* Page header row */
+  .page-hdr {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .page-hdr-text h1 { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 2px; }
+  .page-hdr-text p { font-size: 13px; color: #64748b; }
+
+  /* "New Workflow" button — the existing button in production */
+  .new-workflow-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 7px;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .new-workflow-btn:hover { background: #4338ca; }
+
+  /* Table */
+  .wf-table {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .wf-table-header {
+    display: grid;
+    grid-template-columns: 1fr 120px 80px 60px;
+    gap: 16px;
+    padding: 10px 16px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .wf-table-header span {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+  }
+
+  .wf-row {
+    display: grid;
+    grid-template-columns: 1fr 120px 80px 60px;
+    gap: 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    align-items: center;
+  }
+  .wf-row:last-child { border-bottom: none; }
+  .wf-row:hover { background: #f8fafc; }
+
+  .wf-name { font-size: 13.5px; font-weight: 500; color: #1e293b; }
+  .wf-desc { font-size: 12px; color: #94a3b8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wf-kind {
+    font-size: 12.5px;
+    color: #475569;
+    text-transform: capitalize;
+  }
+  .wf-version { font-size: 12px; color: #94a3b8; }
+  .wf-run-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .wf-run-btn:hover { background: #4338ca; }
+
+  /* Modal overlay (closed by default — shown here for reference) */
+  .modal-note {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 16px;
+    line-height: 1.6;
+  }
+
+  .annotation {
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #78350f;
+    margin-top: 20px;
+    line-height: 1.5;
+  }
+  .annotation strong { font-weight: 700; }
+
+  .footer-stamp { font-size: 11px; color: #94a3b8; margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  <strong>CURRENT STATE</strong> — WorkflowsLibraryPage ("Workflows" in the nav) — as at 2026-05-06. Compare with: <a href="d-compiler-playbooks-library.html" style="color:#92400e;text-decoration:underline;">Proposed state (D-Compiler Playbooks Library)</a>
+</div>
+
+<div class="app-shell">
+
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="mark">CP</div>
+      <span class="name">ClientPulse</span>
+    </div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </a>
+      <a href="#">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Clients
+      </a>
+      <a href="#">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Reports
+      </a>
+      <a href="#" class="active">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Workflows
+      </a>
+    </div>
+    <div class="sidebar-footer">Agency OS · v2.1</div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="current">Workflows</span>
+    </div>
+
+    <div class="page-content">
+      <div class="content-area">
+
+        <div class="page-hdr">
+          <div class="page-hdr-text">
+            <h1>Workflows</h1>
+            <p>Multi-step flows your agents run.</p>
+          </div>
+          <!--
+            TODAY: The button in production is "New Workflow" (small, top right, links to /system/workflow-studio).
+            It is a plain indigo button with a "+" icon. It is NOT the primary action visually.
+            There is no "Automations" or "Playbooks" framing — just "Workflows".
+          -->
+          <a href="/system/workflow-studio" class="new-workflow-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            New Workflow
+          </a>
+        </div>
+
+        <!--
+          TODAY: A flat table with columns Name / Type / Version / (Run button).
+          System templates and org templates are listed together, not grouped or badged.
+          No grid cards. No "template" style cards. No empty "Build something new" dashed card.
+          No category labels (Client outreach / Report generation / etc.).
+          No animated CTA. No icon per template.
+        -->
+        <div class="wf-table">
+          <div class="wf-table-header">
+            <span>Name</span>
+            <span>Type</span>
+            <span>Version</span>
+            <span></span>
+          </div>
+
+          <div class="wf-row">
+            <div>
+              <div class="wf-name">Baseline artefacts capture</div>
+              <div class="wf-desc">Collects foundational client knowledge across tiers.</div>
+            </div>
+            <div class="wf-kind">System</div>
+            <div class="wf-version">v1</div>
+            <div><button class="wf-run-btn">Run</button></div>
+          </div>
+
+          <div class="wf-row">
+            <div>
+              <div class="wf-name">Weekly client report</div>
+              <div class="wf-desc">Generates a formatted client health report.</div>
+            </div>
+            <div class="wf-kind">System</div>
+            <div class="wf-version">v3</div>
+            <div><button class="wf-run-btn">Run</button></div>
+          </div>
+
+          <div class="wf-row">
+            <div>
+              <div class="wf-name">Competitor analysis</div>
+              <div class="wf-desc">Deep research brief on up to 5 competitors.</div>
+            </div>
+            <div class="wf-kind">System</div>
+            <div class="wf-version">v2</div>
+            <div><button class="wf-run-btn">Run</button></div>
+          </div>
+
+          <div class="wf-row">
+            <div>
+              <div class="wf-name">Monthly review email</div>
+              <div class="wf-desc">Drafts a client-facing monthly results summary.</div>
+            </div>
+            <div class="wf-kind">Org</div>
+            <div class="wf-version">v1</div>
+            <div><button class="wf-run-btn">Run</button></div>
+          </div>
+
+        </div>
+        <!-- END table -->
+
+        <div class="modal-note">
+          <strong>Note:</strong> Clicking "Run" on any row opens a modal asking for: (1) a subaccount dropdown and (2) a JSON textarea for initial input. There are no pre-filled values, no template cards, no "Start from onboarding context" option. The modal is functional but developer-facing (raw JSON input).
+        </div>
+
+        <div class="annotation">
+          <strong>What the operator sees today:</strong> A flat table titled "Workflows" listing system and org templates with Name, Type (System/Org), Version, and a "Run" button per row. The "New Workflow" button is small, top-right, links to the admin workflow studio. There are no visual template cards, no category grouping, no animated primary CTA, no "Playbooks" branding, no "Build something new" affordance. The entry point for creating an automation is labelled "New Workflow" and goes to a developer-facing studio — not a natural-language conversation.
+        </div>
+
+        <div class="footer-stamp">Current state · 2026-05-06 · Prototype reference only · not production HTML</div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

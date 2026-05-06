@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>O-Intake — Summary of captured wishes</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: #64748b;
+  }
+  .topbar-logo {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+
+  .page-wrap {
+    max-width: 640px; margin: 0 auto; padding: 36px 24px 48px;
+  }
+
+  .page-header { margin-bottom: 28px; }
+  .page-eyebrow {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; color: #94a3b8; margin-bottom: 6px;
+  }
+  .page-title {
+    font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; margin-bottom: 8px;
+  }
+  .page-summary-line {
+    font-size: 14px; color: #64748b; line-height: 1.5;
+  }
+  .page-summary-line strong { color: #1e293b; }
+
+  /* Wish cards */
+  .wish-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
+
+  .wish-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .wish-card.setup-now { border-left: 3px solid #4f46e5; }
+  .wish-card.saved-later { border-left: 3px solid #e2e8f0; }
+
+  .wish-top {
+    display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px;
+  }
+  .wish-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #eef2ff; color: #4f46e5;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .wish-icon.custom { background: #f8fafc; color: #64748b; }
+
+  .wish-content { flex: 1; min-width: 0; }
+  .wish-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+  .wish-text { font-size: 14px; color: #1e293b; line-height: 1.5; margin-bottom: 4px; }
+  .wish-match { font-size: 12px; color: #4f46e5; font-weight: 500; }
+  .wish-match.custom { color: #64748b; }
+
+  .wish-actions {
+    display: flex; gap: 8px; margin-top: 10px;
+    padding-top: 10px; border-top: 1px solid #f1f5f9;
+  }
+
+  /* Status badge on wish card */
+  .wish-status {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+  }
+  .wish-status.queued  { background: #eef2ff; color: #4f46e5; }
+  .wish-status.saved   { background: #f1f5f9; color: #64748b; }
+
+  /* Bottom bar */
+  .bottom-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.05);
+  }
+  .bottom-info { font-size: 13px; color: #64748b; }
+  .bottom-info strong { color: #1e293b; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 18px; border-radius: 8px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    border: 1px solid transparent; text-decoration: none;
+    transition: background 0.1s;
+  }
+  .btn-primary  { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn-primary:hover  { background: #4338ca; }
+  .btn-secondary { background: #fff; color: #475569; border-color: #e2e8f0; }
+  .btn-secondary:hover { background: #f8fafc; }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+  .proto-note {
+    text-align: center; font-size: 11px; color: #94a3b8;
+    padding: 10px 0; margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-logo">A</div>
+  <span>Automation OS</span>
+  <span class="topbar-slash">/</span>
+  <span>Acme Corp</span>
+  <span class="topbar-slash">/</span>
+  <span class="topbar-current">Your automation wishes</span>
+</div>
+
+<div class="page-wrap">
+
+  <div class="page-header">
+    <div class="page-eyebrow">O-Intake complete</div>
+    <div class="page-title">Your automation wishes</div>
+    <div class="page-summary-line">
+      Captured <strong>3 wishes.</strong> Setting up <strong>2</strong> now, saving <strong>1</strong> for later.
+    </div>
+  </div>
+
+  <div class="wish-list">
+
+    <!-- Wish 1: matched, set up now -->
+    <div class="wish-card setup-now" id="wish-1">
+      <div class="wish-top">
+        <div class="wish-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        </div>
+        <div class="wish-content">
+          <div class="wish-label">Your words</div>
+          <div class="wish-text">"I want a weekly summary of how their pipeline is doing, especially if anything has changed a lot."</div>
+          <div class="wish-match">Matched: Weekly performance report</div>
+        </div>
+      </div>
+      <div class="wish-actions">
+        <button class="btn btn-primary btn-sm" onclick="setWishState('wish-1', 'queued')">Set this up now</button>
+        <button class="btn btn-secondary btn-sm" onclick="setWishState('wish-1', 'saved')">Save for later</button>
+        <span class="wish-status queued" id="status-wish-1" style="display:none;"></span>
+      </div>
+    </div>
+
+    <!-- Wish 2: matched, set up now -->
+    <div class="wish-card setup-now" id="wish-2">
+      <div class="wish-top">
+        <div class="wish-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        </div>
+        <div class="wish-content">
+          <div class="wish-label">Your words</div>
+          <div class="wish-text">"If a deal has been sitting in the same stage for more than 2 weeks, I want to get a heads up."</div>
+          <div class="wish-match">Matched: Stale deal alert</div>
+        </div>
+      </div>
+      <div class="wish-actions">
+        <button class="btn btn-primary btn-sm" onclick="setWishState('wish-2', 'queued')">Set this up now</button>
+        <button class="btn btn-secondary btn-sm" onclick="setWishState('wish-2', 'saved')">Save for later</button>
+        <span class="wish-status queued" id="status-wish-2" style="display:none;"></span>
+      </div>
+    </div>
+
+    <!-- Wish 3: custom, no match -->
+    <div class="wish-card saved-later" id="wish-3">
+      <div class="wish-top">
+        <div class="wish-icon custom">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.5 6.5H21l-5.5 4 2 6.5L12 15l-5.5 4 2-6.5L3 8.5h6.5z"/></svg>
+        </div>
+        <div class="wish-content">
+          <div class="wish-label">Your words</div>
+          <div class="wish-text">"When a new lead comes in from Facebook, automatically send them our intro email sequence."</div>
+          <div class="wish-match custom">Custom — we'll handle this manually for now</div>
+        </div>
+      </div>
+      <div class="wish-actions">
+        <button class="btn btn-primary btn-sm" onclick="setWishState('wish-3', 'queued')">Set this up now</button>
+        <button class="btn btn-secondary btn-sm" onclick="setWishState('wish-3', 'saved')">Save for later</button>
+        <span class="wish-status saved" id="status-wish-3" style="display:none;"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom action bar -->
+  <div class="bottom-bar">
+    <div class="bottom-info">
+      <strong id="setup-count">0</strong> setting up now &middot; <strong id="saved-count">0</strong> saved for later &middot; <strong id="pending-count">3</strong> pending
+    </div>
+    <a href="d-compiler-from-onboarding.html" class="btn btn-primary" id="done-btn">
+      Done
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </a>
+  </div>
+
+  <div class="proto-note">Prototype · O-Intake summary · mock data — choose an action for each wish, then click Done</div>
+</div>
+
+<script>
+  const states = { 'wish-1': null, 'wish-2': null, 'wish-3': null };
+
+  function setWishState(id, state) {
+    states[id] = state;
+    const card = document.getElementById(id);
+    const statusEl = document.getElementById('status-' + id);
+    const buttons = card.querySelectorAll('button');
+
+    buttons.forEach(b => b.style.display = 'none');
+    statusEl.style.display = 'inline-flex';
+
+    if (state === 'queued') {
+      statusEl.className = 'wish-status queued';
+      statusEl.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Setting up`;
+      card.style.borderLeftColor = '#4f46e5';
+    } else {
+      statusEl.className = 'wish-status saved';
+      statusEl.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v14z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg> Saved for later`;
+      card.style.borderLeftColor = '#cbd5e1';
+    }
+
+    updateCounts();
+  }
+
+  function updateCounts() {
+    const vals = Object.values(states);
+    const setupCount = vals.filter(v => v === 'queued').length;
+    const savedCount = vals.filter(v => v === 'saved').length;
+    const pendingCount = vals.filter(v => v === null).length;
+
+    document.getElementById('setup-count').textContent = setupCount;
+    document.getElementById('saved-count').textContent = savedCount;
+    document.getElementById('pending-count').textContent = pendingCount;
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>B-Metrics — ROI delta in report</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  /* Simulate report detail page context */
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 216px; flex-shrink: 0;
+    background: #fff; border-right: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; padding: 16px 12px;
+  }
+  .sidebar-logo {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 8px 14px; margin-bottom: 8px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .sidebar-logo .mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; color: #475569; text-decoration: none;
+  }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #64748b;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+
+  .page-content { flex: 1; padding: 28px 32px; overflow-y: auto; max-width: 820px; }
+
+  /* Report header */
+  .report-header { margin-bottom: 28px; }
+  .report-title { font-size: 20px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; margin-bottom: 6px; }
+  .report-meta { font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 10px; }
+  .report-pill {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 5px;
+    font-size: 11px; font-weight: 500; background: #eef2ff; color: #4f46e5;
+  }
+
+  /* Report sections (stubbed) */
+  .report-section { margin-bottom: 24px; }
+  .section-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #94a3b8; margin-bottom: 12px;
+  }
+  .placeholder-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .placeholder-row { height: 13px; background: #f1f5f9; border-radius: 4px; margin-bottom: 9px; }
+  .placeholder-row.short { width: 50%; }
+  .placeholder-row.mid { width: 75%; }
+  .placeholder-row.long { width: 90%; }
+
+  /* THE FEATURE: since-onboarding section */
+  .roi-section {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    overflow: hidden; margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.05);
+  }
+  .roi-head {
+    padding: 14px 18px; border-bottom: 1px solid #f1f5f9;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .roi-head-left { display: flex; align-items: center; gap: 8px; }
+  .roi-icon {
+    width: 28px; height: 28px; border-radius: 6px;
+    background: #d1fae5; color: #059669;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .roi-title { font-size: 14px; font-weight: 600; color: #1e293b; }
+  .roi-since { font-size: 12px; color: #94a3b8; }
+
+  .roi-body { padding: 16px 18px; }
+
+  /* Narration line */
+  .roi-narration {
+    font-size: 14px; color: #1e293b; line-height: 1.65; margin-bottom: 16px;
+    padding: 12px 14px; background: #f0fdf4; border-radius: 8px;
+    border-left: 3px solid #10b981;
+  }
+
+  /* Metric deltas */
+  .delta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .delta-card {
+    background: #f8fafc; border: 1px solid #f1f5f9; border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .delta-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 8px; }
+  .delta-row { display: flex; align-items: baseline; gap: 8px; }
+  .delta-value { font-size: 24px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+  .delta-pct {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 13px; font-weight: 600; padding: 2px 7px;
+    border-radius: 5px;
+  }
+  .delta-pct.up { background: #dcfce7; color: #16a34a; }
+  .delta-pct.down { background: #fee2e2; color: #dc2626; }
+  .delta-baseline { font-size: 11px; color: #94a3b8; margin-top: 5px; }
+
+  /* Confidence note */
+  .confidence-note {
+    font-size: 11px; color: #94a3b8; margin-top: 12px;
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  /* Fallback state */
+  .roi-fallback {
+    padding: 20px 18px;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .fallback-icon { flex-shrink: 0; color: #f59e0b; }
+  .fallback-text { font-size: 13px; color: #64748b; line-height: 1.5; }
+  .fallback-link { color: #4f46e5; text-decoration: none; font-weight: 500; cursor: pointer; }
+  .fallback-link:hover { text-decoration: underline; }
+
+  /* State toggle for demo */
+  .demo-toggle {
+    position: fixed; bottom: 20px; right: 20px;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 10px 14px; font-size: 12px; color: #475569;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.1);
+    z-index: 50;
+  }
+  .demo-toggle label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .demo-toggle span { font-weight: 500; }
+
+  .proto-banner {
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  B-Metrics · ROI delta section extending the existing ReportDetailPage · toggle bottom-right to see fallback state when baseline missing
+</div>
+
+<div class="app-shell">
+
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="mark">A</div>
+      <div class="name">Automation OS</div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#">Pulse</a>
+      <a href="#">Clients</a>
+      <a href="#" class="active">Reports</a>
+      <a href="#">Playbooks</a>
+    </nav>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span>Reports</span>
+      <span class="topbar-slash">/</span>
+      <span>Acme Corp</span>
+      <span class="topbar-slash">/</span>
+      <span class="topbar-current">May 2026 performance report</span>
+    </div>
+
+    <div class="page-content">
+
+      <div class="report-header">
+        <div class="report-title">May 2026 performance report</div>
+        <div class="report-meta">
+          Acme Corp &middot; Generated 6 May 2026
+          <span class="report-pill">Monthly</span>
+        </div>
+      </div>
+
+      <!-- Stubbed section: key wins this month -->
+      <div class="report-section">
+        <div class="section-label">Key wins this month</div>
+        <div class="placeholder-card">
+          <div class="placeholder-row long"></div>
+          <div class="placeholder-row mid"></div>
+          <div class="placeholder-row short"></div>
+        </div>
+      </div>
+
+      <!-- THE FEATURE: Since onboarding section -->
+      <div class="section-label">Since onboarding</div>
+
+      <!-- WITH baseline data -->
+      <div class="roi-section" id="roi-with-data">
+        <div class="roi-head">
+          <div class="roi-head-left">
+            <div class="roi-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            </div>
+            <div class="roi-title">Progress since day one</div>
+          </div>
+          <div class="roi-since">Baseline set 6 Feb 2026 · 89 days ago</div>
+        </div>
+        <div class="roi-body">
+          <div class="roi-narration">
+            Since you brought Acme Corp on board, their pipeline has grown by <strong>32%</strong> and monthly revenue is up <strong>$5,200</strong>. Both metrics are confirmed figures from their GHL account.
+          </div>
+          <div class="delta-grid">
+            <div class="delta-card">
+              <div class="delta-label">Pipeline value</div>
+              <div class="delta-row">
+                <div class="delta-value">$63.2k</div>
+                <div class="delta-pct up">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+                  +32%
+                </div>
+              </div>
+              <div class="delta-baseline">From $47.9k at baseline</div>
+            </div>
+            <div class="delta-card">
+              <div class="delta-label">Monthly revenue</div>
+              <div class="delta-row">
+                <div class="delta-value">$27.2k</div>
+                <div class="delta-pct up">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+                  +24%
+                </div>
+              </div>
+              <div class="delta-baseline">From $22.0k at baseline</div>
+            </div>
+          </div>
+          <div class="confidence-note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.8" fill="currentColor"/></svg>
+            Both metrics are confirmed figures pulled directly from GHL.
+          </div>
+        </div>
+      </div>
+
+      <!-- WITHOUT baseline (fallback) — hidden by default -->
+      <div class="roi-section" id="roi-fallback" style="display:none;">
+        <div class="roi-fallback">
+          <div class="fallback-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="fallback-text">
+            <strong>No baseline set for Acme Corp.</strong><br>
+            Set a starting point now and we'll track progress from today.
+            <br><br>
+            <a class="fallback-link" href="b-metrics-manual-entry.html">Set baseline now</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stubbed section: campaign performance -->
+      <div class="report-section" style="margin-top:8px;">
+        <div class="section-label">Campaign performance</div>
+        <div class="placeholder-card">
+          <div class="placeholder-row long"></div>
+          <div class="placeholder-row mid"></div>
+          <div class="placeholder-row long"></div>
+          <div class="placeholder-row short"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Demo toggle -->
+<div class="demo-toggle">
+  <label>
+    <input type="checkbox" id="toggle-fallback" onchange="toggleFallback(this)" />
+    <span>Show: no baseline (fallback state)</span>
+  </label>
+</div>
+
+<script>
+  function toggleFallback(checkbox) {
+    document.getElementById('roi-with-data').style.display = checkbox.checked ? 'none' : 'block';
+    document.getElementById('roi-fallback').style.display = checkbox.checked ? 'block' : 'none';
+  }
+</script>
+</body>
+</html>

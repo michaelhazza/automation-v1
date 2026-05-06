@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Downstream — Pulse inbox with O-Intake "save for later" task</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .topbar-title { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+  .topbar-sub { font-size: 12px; color: #94a3b8; }
+  .inbox-tabs { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 0 24px; display: flex; }
+  .tab-btn { padding: 12px 16px; font-size: 13px; font-weight: 500; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; color: #64748b; }
+  .tab-btn.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+  .tab-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 9px; font-size: 10px; font-weight: 700; padding: 0 5px; margin-left: 6px; background: #f1f5f9; color: #64748b; }
+  .tab-btn.active .tab-count { background: #e0e7ff; color: #4f46e5; }
+  .inbox-content { flex: 1; padding: 20px 24px; }
+  /* Lane header */
+  .lane-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .lane-label::after { content:''; flex:1; height:1px; background:#f1f5f9; }
+  /* Inbox row */
+  .inbox-row { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 12px; cursor: pointer; transition: border-color 0.1s; }
+  .inbox-row:hover { border-color: #c7d2fe; box-shadow: 0 1px 4px rgba(79,70,229,0.07); }
+  .inbox-row.highlighted { border-color: #c7d2fe; background: linear-gradient(135deg, #fafbff 0%, #fff 100%); }
+  .row-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .icon-task { background: #eef2ff; }
+  .icon-fail { background: #fee2e2; }
+  .row-body { flex: 1; min-width: 0; }
+  .row-title { font-size: 14px; font-weight: 500; color: #1e293b; margin-bottom: 4px; line-height: 1.4; }
+  .row-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11.5px; font-weight: 500; }
+  .chip-client { background: #f1f5f9; color: #475569; }
+  .chip-origin { background: #fef3c7; color: #92400e; font-style: italic; }
+  .chip-fail { background: #fee2e2; color: #991b1b; }
+  .row-time { font-size: 11.5px; color: #94a3b8; margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+  /* Origin context — the key new element on the O-Intake task row */
+  .origin-context { margin-top: 7px; padding: 6px 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 12px; color: #78350f; display: flex; align-items: flex-start; gap: 6px; }
+  .origin-icon { flex-shrink: 0; margin-top: 1px; }
+  .origin-wish { flex: 1; line-height: 1.5; }
+  .origin-wish strong { color: #92400e; }
+  /* Open button */
+  .btn-open { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 6px; background: #4f46e5; color: #fff; font-size: 12px; font-weight: 500; border: none; cursor: pointer; margin-top: 10px; }
+  .btn-open:hover { background: #4338ca; }
+  .btn-dismiss { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 6px; background: transparent; color: #64748b; font-size: 12px; font-weight: 500; border: 1px solid #e2e8f0; cursor: pointer; margin-top: 10px; margin-left: 6px; }
+  .btn-dismiss:hover { background: #f8fafc; }
+  .proto-footer { padding: 16px 24px; background: #fff; border-top: 1px solid #e2e8f0; font-size: 11.5px; color: #94a3b8; }
+  /* Regular inbox row styling */
+  .reg-row { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; opacity: 0.75; }
+  .reg-row .row-title { font-size: 13px; margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">Pulse</div>
+        <div class="topbar-sub">Good morning, Sam</div>
+      </div>
+    </div>
+    <div class="inbox-tabs">
+      <button class="tab-btn active">Attention <span class="tab-count">3</span></button>
+      <button class="tab-btn">History <span class="tab-count">12</span></button>
+    </div>
+    <div class="inbox-content">
+
+      <div class="lane-label">Saved for later</div>
+
+      <!-- O-Intake "save for later" task — the highlighted new row type -->
+      <div class="inbox-row highlighted">
+        <div class="row-icon icon-task">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        </div>
+        <div class="row-body">
+          <div class="row-title">Set up automation: Google Ads spend report</div>
+          <div class="row-meta">
+            <span class="chip chip-client">
+              <span style="width:5px;height:5px;border-radius:50%;background:#3b82f6;"></span>
+              Beta Industries
+            </span>
+            <span class="chip chip-origin">From onboarding chat</span>
+            <span class="row-time">2h ago</span>
+          </div>
+          <!-- Origin context — shows the original wish text so reviewer knows what it is -->
+          <div class="origin-context">
+            <div class="origin-icon">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <div class="origin-wish"><strong>Original wish:</strong> "Send me a Google Ads spend report every Monday morning with last week's results." — Google Ads wasn't connected, saved to set up later.</div>
+          </div>
+          <div>
+            <button class="btn-open" onclick="alert('Would open d-compiler-from-onboarding.html with wish prefilled')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              Set up now
+            </button>
+            <button class="btn-dismiss">Dismiss</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lane-label" style="margin-top:16px;">Internal</div>
+
+      <!-- Regular inbox rows for context -->
+      <div class="reg-row">
+        <div class="row-icon" style="background:#f1f5f9;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="row-body">
+          <div class="row-title">Blog draft "10 GEO mistakes most agencies make" is ready</div>
+          <div class="row-meta">
+            <span class="chip chip-client"><span style="width:5px;height:5px;border-radius:50%;background:#10b981;"></span>Acme Corp</span>
+            <span style="font-size:11.5px;color:#94a3b8;">Content Agent</span>
+            <span class="row-time">35m ago</span>
+          </div>
+        </div>
+        <button style="padding:5px 12px;border-radius:6px;background:#4f46e5;color:#fff;font-size:12px;font-weight:500;border:none;cursor:pointer;flex-shrink:0;">Approve</button>
+      </div>
+      <div class="reg-row">
+        <div class="row-icon" style="background:#f1f5f9;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5M8 17h8"/></svg>
+        </div>
+        <div class="row-body">
+          <div class="row-title">Memory block "acme-positioning" updated with new messaging</div>
+          <div class="row-meta">
+            <span class="chip chip-client"><span style="width:5px;height:5px;border-radius:50%;background:#10b981;"></span>Acme Corp</span>
+            <span style="font-size:11.5px;color:#94a3b8;">Knowledge Agent</span>
+            <span class="row-time">1h ago</span>
+          </div>
+        </div>
+        <button style="padding:5px 12px;border-radius:6px;background:#4f46e5;color:#fff;font-size:12px;font-weight:500;border:none;cursor:pointer;flex-shrink:0;">Approve</button>
+      </div>
+
+    </div>
+    <div class="proto-footer">
+      Downstream landing — Pulse inbox row for an O-Intake "save for later" task<br>
+      New row type: "Saved for later" lane. Origin context chip "From onboarding chat" plus the original wish text inline. Click "Set up now" opens D-Compiler with wish prefilled (d-compiler-from-onboarding.html).
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Empty state — Pulse inbox (no items)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .topbar-title { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+  .topbar-sub { font-size: 12px; color: #94a3b8; margin-top: 1px; }
+  .page-content { flex: 1; display: flex; flex-direction: column; }
+  .inbox-tabs { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 0 24px; display: flex; gap: 0; }
+  .tab-btn { padding: 12px 16px; font-size: 13px; font-weight: 500; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; color: #64748b; }
+  .tab-btn.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+  .tab-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 9px; font-size: 10px; font-weight: 700; padding: 0 5px; margin-left: 6px; background: #f1f5f9; color: #64748b; }
+  .tab-btn.active .tab-count { background: #e0e7ff; color: #4f46e5; }
+  .empty-pane { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px; text-align: center; }
+  .empty-ring { width: 72px; height: 72px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; }
+  .empty-headline { font-size: 17px; font-weight: 600; color: #1e293b; margin-bottom: 8px; }
+  .empty-body { font-size: 13.5px; color: #64748b; max-width: 380px; line-height: 1.65; margin-bottom: 24px; }
+  .btn-primary { display: inline-flex; align-items: center; gap: 7px; padding: 9px 20px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 13.5px; font-weight: 500; border: none; cursor: pointer; }
+  .btn-primary:hover { background: #4338ca; }
+  .prototype-footer { padding: 20px 24px; background: #fff; border-top: 1px solid #e2e8f0; font-size: 11.5px; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">Pulse</div>
+        <div class="topbar-sub">Good morning, Sam</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div style="position:relative;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:9px;top:9px;"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.5-3.5"/></svg>
+          <input placeholder="Search" style="padding:7px 12px 7px 30px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;width:200px;outline:none;" />
+        </div>
+      </div>
+    </div>
+    <div class="inbox-tabs">
+      <button class="tab-btn active">Attention <span class="tab-count">0</span></button>
+      <button class="tab-btn">History <span class="tab-count">0</span></button>
+    </div>
+    <div class="empty-pane">
+      <div class="empty-ring">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      </div>
+      <div class="empty-headline">Nothing needs attention right now</div>
+      <div class="empty-body">When agents complete work or need your input, items will appear here. Your first automations will start showing up once you set them up.</div>
+      <button class="btn-primary" onclick="alert('Would navigate to Automations library')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Set up your first automation
+      </button>
+    </div>
+    <div class="prototype-footer">
+      Empty state — first experience · Pulse inbox with zero items<br>
+      Single action routes to the automations library. No zeros shown, no skeleton loaders, no "all caught up" language.
+    </div>
+  </div>
+</div>
+</body>
+</html>

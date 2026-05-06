@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>B-Metrics — Manual baseline entry</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  /* Minimal centered layout for a focused form */
+  .page-wrap {
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start;
+    padding: 40px 24px 60px;
+  }
+
+  /* Topbar breadcrumb */
+  .topbar {
+    width: 100%; background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #64748b;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  }
+  .topbar-logo {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+
+  .form-card {
+    width: 100%; max-width: 560px; margin-top: 64px;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+    overflow: hidden;
+  }
+
+  .form-head {
+    padding: 24px 28px 20px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .form-eyebrow {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; color: #f59e0b; margin-bottom: 6px;
+  }
+  .form-title {
+    font-size: 18px; font-weight: 700; color: #0f172a;
+    letter-spacing: -0.2px; margin-bottom: 6px;
+  }
+  .form-desc { font-size: 13px; color: #64748b; line-height: 1.5; }
+
+  .form-body { padding: 24px 28px; }
+
+  /* Tier labels */
+  .tier-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .tier-row.required { color: #4f46e5; }
+  .tier-row.optional { color: #94a3b8; }
+  .tier-note { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  /* Field groups */
+  .field-group { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; }
+
+  .field-row { display: flex; flex-direction: column; gap: 5px; }
+  .field-label { font-size: 12px; font-weight: 500; color: #475569; }
+  .field-label .req { color: #4f46e5; margin-left: 2px; }
+
+  .field-input-wrap { position: relative; }
+  .field-prefix {
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    font-size: 13px; color: #94a3b8; pointer-events: none;
+  }
+  .field-input {
+    width: 100%; padding: 9px 11px;
+    border: 1px solid #e2e8f0; border-radius: 7px;
+    font-size: 14px; color: #1e293b; background: #fff;
+    font-family: inherit; outline: none;
+    transition: border-color 0.12s;
+  }
+  .field-input.has-prefix { padding-left: 22px; }
+  .field-input:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+  }
+  .field-input.error { border-color: #f43f5e; }
+  .field-input.error:focus { box-shadow: 0 0 0 3px rgba(244,63,94,0.1); }
+  .field-error { font-size: 11px; color: #f43f5e; }
+  .field-hint { font-size: 11px; color: #94a3b8; }
+
+  /* Confidence toggle */
+  .confidence-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 2px;
+  }
+  .confidence-label { font-size: 12px; color: #64748b; }
+  .conf-toggle { display: flex; gap: 4px; }
+  .conf-btn {
+    padding: 4px 12px; border-radius: 5px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #475569;
+    transition: all 0.1s;
+  }
+  .conf-btn.active { background: #eef2ff; border-color: #4f46e5; color: #4f46e5; }
+
+  /* Divider */
+  .form-divider { border: none; border-top: 1px solid #f1f5f9; margin: 6px 0 22px; }
+
+  /* Bottom */
+  .form-footer {
+    padding: 16px 28px; border-top: 1px solid #f1f5f9;
+    display: flex; align-items: center; justify-content: space-between;
+    background: #fafbfc;
+  }
+  .footer-note { font-size: 12px; color: #94a3b8; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 20px; border-radius: 8px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    border: 1px solid transparent; text-decoration: none;
+    transition: background 0.1s;
+  }
+  .btn-primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-secondary { background: #fff; color: #475569; border-color: #e2e8f0; }
+  .btn-secondary:hover { background: #f8fafc; }
+
+  /* Alert banner */
+  .alert {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 14px; border-radius: 8px; margin-bottom: 20px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .alert-amber { background: #fffbeb; border: 1px solid #fde68a; color: #78350f; }
+  .alert-icon { flex-shrink: 0; margin-top: 1px; }
+
+  .proto-banner {
+    width: 100%; background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+  }
+
+  body { padding-top: 28px; }
+  .topbar { top: 28px; }
+  .form-card { margin-top: 90px; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  B-Metrics · Manual baseline entry · fires when auto-capture fails or operator backfills an existing client
+</div>
+
+<div class="topbar">
+  <div class="topbar-logo">A</div>
+  <span>Clients</span>
+  <span class="topbar-slash">/</span>
+  <span>Acme Corp</span>
+  <span class="topbar-slash">/</span>
+  <span class="topbar-current">Set baseline</span>
+</div>
+
+<div class="page-wrap">
+  <div class="form-card">
+
+    <div class="form-head">
+      <div class="form-eyebrow">Baseline capture</div>
+      <div class="form-title">Set a starting point for Acme Corp</div>
+      <div class="form-desc">
+        These numbers are the baseline we'll compare against to show you what's improved. Estimates are fine — mark them as such and update later.
+      </div>
+    </div>
+
+    <div class="form-body">
+
+      <!-- Auto-capture failure alert -->
+      <div class="alert alert-amber">
+        <div class="alert-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#92400e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <strong>Auto-capture couldn't read GHL data</strong> for this client. Enter what you know — even rough numbers help. You can always update this later.
+        </div>
+      </div>
+
+      <!-- Tier 1: Required -->
+      <div class="tier-row required">
+        Required
+        <span class="tier-note" style="color:#94a3b8;">· These two fields unlock ROI tracking</span>
+      </div>
+
+      <div class="field-group">
+
+        <div class="field-row">
+          <label class="field-label">Pipeline value <span class="req">*</span></label>
+          <div class="field-input-wrap">
+            <span class="field-prefix">$</span>
+            <input class="field-input has-prefix" type="text" id="field-pipeline"
+              placeholder="e.g. 48000" oninput="validateField(this, 'err-pipeline')" />
+          </div>
+          <div class="confidence-row">
+            <span class="confidence-label">Confidence:</span>
+            <div class="conf-toggle">
+              <button class="conf-btn active" id="conf-pipeline-confirmed" onclick="setConf('pipeline', 'confirmed')">Confirmed</button>
+              <button class="conf-btn" id="conf-pipeline-estimated" onclick="setConf('pipeline', 'estimated')">Estimated</button>
+            </div>
+          </div>
+          <div class="field-error" id="err-pipeline" style="display:none;">Enter a number without commas or symbols</div>
+          <div class="field-hint">Total value of open deals in their pipeline right now</div>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label">Monthly revenue <span class="req">*</span></label>
+          <div class="field-input-wrap">
+            <span class="field-prefix">$</span>
+            <input class="field-input has-prefix" type="text" id="field-revenue"
+              placeholder="e.g. 22000" oninput="validateField(this, 'err-revenue')" />
+          </div>
+          <div class="confidence-row">
+            <span class="confidence-label">Confidence:</span>
+            <div class="conf-toggle">
+              <button class="conf-btn active" id="conf-revenue-confirmed" onclick="setConf('revenue', 'confirmed')">Confirmed</button>
+              <button class="conf-btn" id="conf-revenue-estimated" onclick="setConf('revenue', 'estimated')">Estimated</button>
+            </div>
+          </div>
+          <div class="field-error" id="err-revenue" style="display:none;">Enter a number without commas or symbols</div>
+          <div class="field-hint">Average monthly revenue at start of engagement</div>
+        </div>
+
+      </div>
+
+      <hr class="form-divider" />
+
+      <!-- Tier 2: Optional -->
+      <div class="tier-row optional">
+        Optional
+        <span class="tier-note">· Adds more detail to your ROI view</span>
+      </div>
+
+      <div class="field-group">
+
+        <div class="field-row">
+          <label class="field-label">Monthly lead count</label>
+          <input class="field-input" type="text" placeholder="e.g. 34 leads per month" />
+          <div class="field-hint">New leads entering the pipeline each month</div>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label">Average response time</label>
+          <input class="field-input" type="text" placeholder="e.g. 4h · leave blank if unknown" />
+          <div class="field-hint">Time from lead creation to first response</div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <div class="form-footer">
+      <span class="footer-note">All figures are private and only visible to your agency.</span>
+      <button class="btn btn-primary" onclick="saveBaseline()">Save baseline</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function setConf(field, value) {
+    ['confirmed','estimated'].forEach(v => {
+      const btn = document.getElementById('conf-' + field + '-' + v);
+      btn.classList.toggle('active', v === value);
+    });
+  }
+
+  function validateField(input, errId) {
+    const val = input.value.replace(/[$,\s]/g, '');
+    const isValid = val === '' || /^\d+(\.\d{0,2})?$/.test(val);
+    const errEl = document.getElementById(errId);
+    input.classList.toggle('error', !isValid && val !== '');
+    errEl.style.display = (!isValid && val !== '') ? 'block' : 'none';
+  }
+
+  function saveBaseline() {
+    const pipelineVal = document.getElementById('field-pipeline').value.trim();
+    const revenueVal  = document.getElementById('field-revenue').value.trim();
+
+    let valid = true;
+    if (!pipelineVal) {
+      document.getElementById('field-pipeline').classList.add('error');
+      document.getElementById('err-pipeline').style.display = 'block';
+      document.getElementById('err-pipeline').textContent = 'Pipeline value is required';
+      valid = false;
+    }
+    if (!revenueVal) {
+      document.getElementById('field-revenue').classList.add('error');
+      document.getElementById('err-revenue').style.display = 'block';
+      document.getElementById('err-revenue').textContent = 'Monthly revenue is required';
+      valid = false;
+    }
+
+    if (valid) {
+      window.location.href = 'b-metrics-roi-delta.html';
+    }
+  }
+</script>
+</body>
+</html>

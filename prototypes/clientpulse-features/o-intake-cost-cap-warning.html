@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Edge state — O-Intake cost cap warning (80% consumed)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px 10px; display: flex; align-items: center; gap: 8px; }
+  .topbar-back { font-size: 13px; color: #64748b; text-decoration: none; display: flex; align-items: center; gap: 5px; }
+  .topbar-title { font-size: 14px; font-weight: 600; color: #0f172a; margin-left: 4px; }
+  .chat-shell { flex: 1; display: flex; flex-direction: column; max-width: 720px; width: 100%; margin: 0 auto; padding: 24px 24px 0; }
+  .chat-context-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 10px 14px; font-size: 12.5px; color: #4338ca; display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+  .messages { flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; padding-bottom: 0; }
+  /* User bubble */
+  .msg-user { display: flex; justify-content: flex-end; }
+  .msg-user .bubble { background: #4f46e5; color: #fff; padding: 10px 14px; border-radius: 14px 14px 4px 14px; font-size: 13.5px; max-width: 480px; line-height: 1.55; }
+  /* Agent bubble */
+  .msg-agent { display: flex; gap: 10px; }
+  .agent-avatar { width: 30px; height: 30px; border-radius: 50%; background: #f1f5f9; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+  .agent-content { flex: 1; }
+  .agent-bubble { background: #fff; border: 1px solid #e2e8f0; padding: 10px 14px; border-radius: 4px 14px 14px 14px; font-size: 13.5px; color: #1e293b; max-width: 540px; line-height: 1.6; box-shadow: 0 1px 3px rgba(15,23,42,0.04); }
+  .wish-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 12.5px; display: flex; align-items: flex-start; gap: 8px; }
+  .wish-icon { width: 20px; height: 20px; border-radius: 5px; background: #d1fae5; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  /* Inline warning message — this is the key state */
+  .inline-warning { background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px 14px 14px 14px; padding: 12px 14px; font-size: 13.5px; color: #78350f; max-width: 540px; line-height: 1.6; }
+  .inline-warning .warn-row { display: flex; align-items: flex-start; gap: 9px; }
+  .warn-icon { flex-shrink: 0; margin-top: 1px; color: #d97706; }
+  .inline-warning .warn-body { flex: 1; }
+  .inline-warning strong { color: #92400e; }
+  .budget-bar { margin-top: 10px; height: 6px; background: #fde68a; border-radius: 3px; overflow: hidden; }
+  .budget-fill { height: 100%; width: 80%; background: #f59e0b; border-radius: 3px; }
+  .budget-label { font-size: 11px; color: #92400e; margin-top: 4px; }
+  /* Input area */
+  .input-area { background: #fff; border-top: 1px solid #e2e8f0; padding: 14px 24px; display: flex; gap: 10px; align-items: flex-end; }
+  .input-box { flex: 1; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; font-size: 13.5px; color: #1e293b; resize: none; outline: none; min-height: 42px; max-height: 120px; font-family: inherit; line-height: 1.5; }
+  .input-box:focus { border-color: #a5b4fc; }
+  .send-btn { width: 38px; height: 38px; border-radius: 9px; background: #4f46e5; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .send-btn:hover { background: #4338ca; }
+  .done-btn { padding: 9px 18px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; }
+  .done-btn:hover { background: #f8fafc; }
+  .proto-footer { padding: 12px 24px; background: #fff; border-top: 1px solid #e2e8f0; font-size: 11.5px; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <a href="#" class="topbar-back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </a>
+      <span class="topbar-title">What automations would help you?</span>
+    </div>
+    <div class="chat-shell">
+      <div class="chat-context-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Setting up automations for Acme Corp
+      </div>
+      <div class="messages">
+        <!-- Prior messages -->
+        <div class="msg-agent">
+          <div class="agent-avatar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+          <div class="agent-content">
+            <div class="agent-bubble">Hi! Tell me about the repetitive tasks in your agency. What takes up the most time each week?</div>
+          </div>
+        </div>
+        <div class="msg-user">
+          <div class="bubble">We spend a lot of time sending weekly reports to clients and following up on unpaid invoices.</div>
+        </div>
+        <div class="msg-agent">
+          <div class="agent-avatar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+          <div class="agent-content">
+            <div class="agent-bubble">
+              Got it. I've noted two wishes:
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Send weekly performance reports to clients automatically</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Follow up on unpaid invoices on a schedule</span></div>
+              What else?
+            </div>
+          </div>
+        </div>
+        <div class="msg-user">
+          <div class="bubble">Also we need to track competitor activity for clients and alert them if something important happens. And social scheduling, posting to LinkedIn automatically when we have new case studies.</div>
+        </div>
+        <div class="msg-agent">
+          <div class="agent-avatar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+          <div class="agent-content">
+            <div class="agent-bubble">
+              Added two more. You have 4 wishes captured so far. Any others?
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Monitor competitors and alert clients to major news</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Auto-post new case studies to LinkedIn</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="msg-user">
+          <div class="bubble">Yes — CRM data enrichment. We want contact records automatically enriched when a new lead comes in.</div>
+        </div>
+
+        <!-- INLINE WARNING — appears as a system message in the thread -->
+        <div class="msg-agent">
+          <div class="agent-avatar" style="background:#fffbeb;border-color:#fde68a;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.5" r="0.8" fill="currentColor"/></svg>
+          </div>
+          <div class="agent-content">
+            <div class="inline-warning">
+              <div class="warn-row">
+                <div class="warn-body">
+                  <strong>You've used most of the exploration budget for this session.</strong> I've captured your 5 wishes and can keep going, but we're getting close to the limit.
+                  <div class="budget-bar"><div class="budget-fill"></div></div>
+                  <div class="budget-label">About 80% used</div>
+                </div>
+              </div>
+            </div>
+            <div class="agent-bubble" style="margin-top:8px;">Added: CRM enrichment on new lead. That's 5 wishes now. Do you have a couple more or shall we review what we have?</div>
+          </div>
+        </div>
+      </div>
+      <div style="height:16px;"></div>
+    </div>
+    <div class="input-area">
+      <button class="done-btn" onclick="alert('Would exit to summary with 5 wishes')">I'm done</button>
+      <textarea class="input-box" placeholder="Keep going or say 'I'm done'…" rows="1"></textarea>
+      <button class="send-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+    <div class="proto-footer">
+      Edge state — cost cap warning (80% consumed) · O-Intake conversation<br>
+      Warning surfaces inline as a system message in the thread, not a modal or toast. Conversation continues unblocked. Operator stays in flow.
+    </div>
+  </div>
+</div>
+</body>
+</html>

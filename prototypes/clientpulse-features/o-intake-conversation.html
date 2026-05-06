@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>O-Intake — Automation wishes conversation</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body {
+    background: #f5f6f8;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Topbar */
+  .topbar {
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: #64748b;
+    flex-shrink: 0;
+  }
+  .topbar-logo {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px; flex-shrink: 0;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .progress-label { font-size: 12px; color: #94a3b8; }
+  .wish-counter {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #eef2ff; color: #4f46e5;
+    padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 500;
+  }
+
+  /* Chat container */
+  .chat-wrap {
+    flex: 1; overflow: hidden;
+    display: flex; flex-direction: column;
+    max-width: 720px; width: 100%; margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  .chat-thread {
+    flex: 1; overflow-y: auto;
+    padding: 28px 0 16px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+
+  /* Message rows */
+  .msg-row { display: flex; align-items: flex-end; gap: 10px; }
+  .msg-row.agent { align-items: flex-start; }
+  .msg-row.user  { flex-direction: row-reverse; }
+
+  .agent-avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #eef2ff; color: #4f46e5;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 2px;
+  }
+
+  .bubble-agent {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px 14px 14px 4px;
+    padding: 12px 15px;
+    font-size: 14px; color: #1e293b; line-height: 1.65;
+    max-width: 76%;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+
+  .bubble-user {
+    background: #4f46e5; color: #fff;
+    border-radius: 14px 14px 4px 14px;
+    padding: 12px 15px;
+    font-size: 14px; line-height: 1.65;
+    max-width: 76%;
+  }
+
+  /* Inline capability suggestion card */
+  .cap-suggest {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex; align-items: flex-start; gap: 10px;
+    max-width: 76%;
+    margin-top: 8px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .cap-icon {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: #eef2ff; color: #4f46e5;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .cap-body { flex: 1; min-width: 0; }
+  .cap-name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .cap-desc { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+  .cap-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .cap-add {
+    padding: 4px 12px; border-radius: 6px;
+    background: #4f46e5; color: #fff;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    border: none;
+  }
+  .cap-add:hover { background: #4338ca; }
+  .cap-dismiss {
+    padding: 4px 10px; border-radius: 6px;
+    background: transparent; color: #94a3b8;
+    font-size: 12px; cursor: pointer;
+    border: 1px solid #e2e8f0;
+  }
+  .cap-dismiss:hover { background: #f8fafc; }
+
+  /* Wish added confirmation inline */
+  .wish-added {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #dcfce7; color: #16a34a;
+    padding: 3px 10px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+    margin-top: 6px;
+  }
+
+  /* Thinking indicator */
+  .thinking {
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .thinking-dots {
+    background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 14px 14px 14px 4px;
+    padding: 12px 15px;
+    display: flex; gap: 4px; align-items: center;
+  }
+  .dot-pulse {
+    width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1;
+    animation: dotpulse 1.4s ease-in-out infinite;
+  }
+  .dot-pulse:nth-child(2) { animation-delay: 0.2s; }
+  .dot-pulse:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dotpulse {
+    0%, 60%, 100% { opacity: 0.4; transform: scale(1); }
+    30% { opacity: 1; transform: scale(1.2); }
+  }
+
+  /* Input area */
+  .input-area {
+    padding: 16px 0 24px;
+    display: flex; flex-direction: column; gap: 10px;
+    flex-shrink: 0;
+  }
+  .input-row {
+    display: flex; align-items: flex-end; gap: 8px;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 8px 12px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.05);
+  }
+  .input-row:focus-within { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+  .chat-input {
+    flex: 1; resize: none; border: none; outline: none;
+    font-family: inherit; font-size: 14px; color: #1e293b;
+    background: transparent; line-height: 1.5;
+    max-height: 120px; overflow-y: auto;
+  }
+  .chat-input::placeholder { color: #94a3b8; }
+  .send-btn {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; border: none; flex-shrink: 0;
+    transition: background 0.1s;
+  }
+  .send-btn:hover { background: #4338ca; }
+
+  .done-row {
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .turn-count { font-size: 12px; color: #94a3b8; }
+  .btn-done {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 18px; border-radius: 8px;
+    background: #fff; border: 1px solid #e2e8f0;
+    color: #475569; font-size: 13px; font-weight: 500;
+    cursor: pointer; text-decoration: none;
+    transition: background 0.1s;
+  }
+  .btn-done:hover { background: #f8fafc; }
+
+  .proto-note {
+    text-align: center; font-size: 11px; color: #94a3b8;
+    padding: 6px; background: #fff; border-top: 1px solid #f1f5f9;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<div class="topbar">
+  <div class="topbar-logo">A</div>
+  <span>Automation OS</span>
+  <span class="topbar-slash">/</span>
+  <span>Acme Corp</span>
+  <span class="topbar-slash">/</span>
+  <span class="topbar-current">Automation setup</span>
+  <div class="topbar-right">
+    <span class="progress-label">Wishes captured:</span>
+    <span class="wish-counter" id="wish-counter">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      2 of 5
+    </span>
+  </div>
+</div>
+
+<!-- Chat -->
+<div class="chat-wrap">
+  <div class="chat-thread" id="chat-thread">
+
+    <!-- Agent opening -->
+    <div class="msg-row agent">
+      <div class="agent-avatar">AI</div>
+      <div>
+        <div class="bubble-agent">
+          Hi! I'm here to help you set up automation for <strong>Acme Corp</strong>.<br><br>
+          What would you like to happen automatically for this client? There's no wrong answer — just describe it in your own words, like you'd tell a new team member.
+        </div>
+      </div>
+    </div>
+
+    <!-- User message 1 -->
+    <div class="msg-row user">
+      <div class="bubble-user">
+        I want to get a weekly summary of how their pipeline is doing, especially if anything has changed a lot.
+      </div>
+    </div>
+
+    <!-- Agent response 1 + capability card -->
+    <div class="msg-row agent">
+      <div class="agent-avatar">AI</div>
+      <div>
+        <div class="bubble-agent">
+          A weekly pipeline summary — that makes sense for staying on top of client momentum without checking in manually every day.
+        </div>
+        <div class="cap-suggest" id="cap-1">
+          <div class="cap-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+          </div>
+          <div class="cap-body">
+            <div class="cap-name">Weekly performance report</div>
+            <div class="cap-desc">Sent every Monday. Covers pipeline movement, new leads, and any significant changes from the prior week.</div>
+            <div class="cap-actions">
+              <button class="cap-add" onclick="addWish('cap-1', 'Weekly performance report')">Add to my list</button>
+              <button class="cap-dismiss" onclick="dismissCap('cap-1')">Not quite</button>
+            </div>
+            <div class="wish-added" id="added-cap-1" style="display:none;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Added to your list
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- User message 2 -->
+    <div class="msg-row user">
+      <div class="bubble-user">
+        Yes that's exactly it. Also, if a deal has been sitting in the same stage for more than 2 weeks, I want to get a heads up.
+      </div>
+    </div>
+
+    <!-- Agent response 2 + capability card -->
+    <div class="msg-row agent">
+      <div class="agent-avatar">AI</div>
+      <div>
+        <div class="bubble-agent">
+          Got it — a stale deal alert. That's useful for catching deals before they go cold.
+        </div>
+        <div class="cap-suggest" id="cap-2">
+          <div class="cap-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          </div>
+          <div class="cap-body">
+            <div class="cap-name">Stale deal alert</div>
+            <div class="cap-desc">Flags deals that haven't moved stages in 14+ days. Sent as a Pulse notification with the deal name and days since last activity.</div>
+            <div class="cap-actions">
+              <button class="cap-add" onclick="addWish('cap-2', 'Stale deal alert')">Add to my list</button>
+              <button class="cap-dismiss" onclick="dismissCap('cap-2')">Not quite</button>
+            </div>
+            <div class="wish-added" id="added-cap-2" style="display:none;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Added to your list
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thinking indicator (current state) -->
+    <div class="thinking" id="thinking-indicator" style="display:none;">
+      <div class="agent-avatar">AI</div>
+      <div class="thinking-dots">
+        <div class="dot-pulse"></div>
+        <div class="dot-pulse"></div>
+        <div class="dot-pulse"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Input area -->
+  <div class="input-area">
+    <div class="input-row">
+      <textarea class="chat-input" id="chat-input" rows="1"
+        placeholder="Describe what you'd like to happen automatically…"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this)"></textarea>
+      <button class="send-btn" onclick="sendMessage()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+      </button>
+    </div>
+    <div class="done-row">
+      <span class="turn-count" id="turn-count">2 wishes captured · up to 5</span>
+      <a href="o-intake-summary.html" class="btn-done">
+        I'm done
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="proto-note">Prototype · O-Intake conversation · mock data — click "Add to my list" then "I'm done" to continue</div>
+
+<script>
+  let wishCount = 2;
+  const MAX_WISHES = 5;
+
+  function addWish(capId, name) {
+    const addedEl = document.getElementById('added-' + capId);
+    const capEl = document.getElementById(capId);
+    // Hide buttons, show confirmation
+    capEl.querySelectorAll('button').forEach(b => b.style.display = 'none');
+    addedEl.style.display = 'inline-flex';
+  }
+
+  function dismissCap(capId) {
+    const capEl = document.getElementById(capId);
+    capEl.style.opacity = '0.45';
+    capEl.querySelector('.cap-actions').innerHTML = '<span style="font-size:12px;color:#94a3b8;">Skipped</span>';
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const thread = document.getElementById('chat-thread');
+    const thinking = document.getElementById('thinking-indicator');
+
+    // Add user bubble
+    const userRow = document.createElement('div');
+    userRow.className = 'msg-row user';
+    userRow.innerHTML = `<div class="bubble-user">${escHtml(text)}</div>`;
+    thread.insertBefore(userRow, thinking);
+
+    input.value = '';
+    input.style.height = 'auto';
+
+    // Show thinking
+    thinking.style.display = 'flex';
+    thread.scrollTop = thread.scrollHeight;
+
+    // Simulate agent response
+    setTimeout(() => {
+      thinking.style.display = 'none';
+
+      if (wishCount < MAX_WISHES) {
+        wishCount++;
+        updateCounter();
+
+        const agentRow = document.createElement('div');
+        agentRow.className = 'msg-row agent';
+        agentRow.innerHTML = `
+          <div class="agent-avatar">AI</div>
+          <div>
+            <div class="bubble-agent">
+              That sounds like a custom workflow. I've noted it as a wish — we'll handle the specifics once we're done here.
+            </div>
+            <div class="cap-suggest">
+              <div class="cap-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.5 6.5H21l-5.5 4 2 6.5L12 15l-5.5 4 2-6.5L3 8.5h6.5z"/></svg>
+              </div>
+              <div class="cap-body">
+                <div class="cap-name">Custom automation</div>
+                <div class="cap-desc">We'll scope this out after setup and build it for you. Saved as a wish for now.</div>
+                <div class="wish-added" style="display:inline-flex;margin-top:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Saved to your list
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        thread.insertBefore(agentRow, thinking);
+      } else {
+        const agentRow = document.createElement('div');
+        agentRow.className = 'msg-row agent';
+        agentRow.innerHTML = `
+          <div class="agent-avatar">AI</div>
+          <div>
+            <div class="bubble-agent">
+              You've captured 5 wishes, which is the max for now. Click <strong>I'm done</strong> to review your list and set up what you'd like to start with.
+            </div>
+          </div>
+        `;
+        thread.insertBefore(agentRow, thinking);
+      }
+
+      thread.scrollTop = thread.scrollHeight;
+    }, 1200);
+  }
+
+  function updateCounter() {
+    document.getElementById('wish-counter').innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      ${wishCount} of ${MAX_WISHES}
+    `;
+    document.getElementById('turn-count').textContent = `${wishCount} wishes captured · up to ${MAX_WISHES}`;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>

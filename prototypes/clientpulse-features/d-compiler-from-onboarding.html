@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>D-Compiler — Studio opened from O-Intake wish</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* Top app bar — matches workflow studio chrome */
+  .app-bar {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 8px 20px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: #64748b; flex-shrink: 0;
+  }
+  .app-bar-logo {
+    width: 24px; height: 24px; border-radius: 5px;
+    background: linear-gradient(135deg, #4f46e5, #6366f1);
+    color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .app-bar-name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .app-bar-slash { color: #cbd5e1; }
+  .app-bar-link { color: #64748b; cursor: pointer; }
+  .app-bar-link:hover { color: #1e293b; }
+  .app-bar-current { color: #1e293b; font-weight: 500; }
+  .app-bar-right { margin-left: auto; font-size: 12px; color: #94a3b8; }
+
+  /* Studio header */
+  .studio-header {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 12px;
+    flex-shrink: 0;
+  }
+  .studio-name { font-size: 14px; font-weight: 600; color: #1e293b; }
+  .studio-badge {
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    background: #fef3c7; color: #92400e;
+  }
+  .studio-subtitle { font-size: 12px; color: #94a3b8; }
+  .studio-header-right { margin-left: auto; display: flex; gap: 8px; }
+
+  /* 3-pane layout (matches workflow studio) */
+  .studio-panes {
+    flex: 1; display: flex; overflow: hidden;
+  }
+
+  /* Left: chat */
+  .pane-chat {
+    width: 360px; flex-shrink: 0; border-right: 1px solid #e2e8f0;
+    background: #fff; display: flex; flex-direction: column;
+  }
+  .pane-chat-header {
+    padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .agent-avatar-sm {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #eef2ff; color: #4f46e5;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .agent-name { font-size: 12px; font-weight: 600; color: #1e293b; }
+  .agent-session { font-size: 10px; color: #94a3b8; }
+
+  .chat-thread {
+    flex: 1; overflow-y: auto; padding: 16px 14px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+
+  /* Origin context banner */
+  .origin-banner {
+    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; color: #4f46e5;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .origin-banner-icon { flex-shrink: 0; margin-top: 1px; }
+  .origin-label { color: #6366f1; font-weight: 600; font-size: 11px; }
+
+  .msg-agent {
+    background: #f1f5f9; border-radius: 12px 12px 12px 3px;
+    padding: 10px 12px; font-size: 13px; color: #1e293b; line-height: 1.6;
+    max-width: 86%;
+  }
+  .msg-user {
+    background: #4f46e5; color: #fff;
+    border-radius: 12px 12px 3px 12px;
+    padding: 10px 12px; font-size: 13px; line-height: 1.6;
+    max-width: 86%; align-self: flex-end;
+  }
+
+  /* Thinking state */
+  .thinking-bubble {
+    background: #f1f5f9; border-radius: 12px 12px 12px 3px;
+    padding: 10px 14px;
+    display: inline-flex; gap: 4px; align-items: center;
+  }
+  .dot-think {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #94a3b8;
+    animation: think 1.4s ease-in-out infinite;
+  }
+  .dot-think:nth-child(2) { animation-delay: 0.2s; }
+  .dot-think:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes think {
+    0%, 60%, 100% { opacity: 0.4; transform: scale(1); }
+    30% { opacity: 1; transform: scale(1.2); }
+  }
+
+  .chat-input-area {
+    padding: 10px 12px; border-top: 1px solid #f1f5f9;
+    display: flex; gap: 6px;
+  }
+  .chat-input-box {
+    flex: 1; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 8px;
+    font-size: 13px; font-family: inherit; color: #1e293b; outline: none;
+    resize: none; background: #fff;
+  }
+  .chat-input-box:focus { border-color: #4f46e5; }
+  .send-btn-sm {
+    width: 32px; height: 32px; border-radius: 7px;
+    background: #4f46e5; color: #fff; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .send-btn-sm:hover { background: #4338ca; }
+
+  /* Centre: canvas */
+  .pane-canvas {
+    flex: 1; background: #f8fafc; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .canvas-toolbar {
+    padding: 8px 14px; border-bottom: 1px solid #e2e8f0; background: #fff;
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: #64748b;
+  }
+  .canvas-status {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 5px;
+    font-size: 11px; font-weight: 500; background: #fef3c7; color: #92400e;
+  }
+  .canvas-area {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+
+  /* DAG placeholder — mid-generation state */
+  .dag-wrap { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .dag-step {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 10px 16px; min-width: 200px; text-align: center;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+    position: relative;
+  }
+  .dag-step.thinking-step {
+    border: 1.5px dashed #c7d2fe; background: #f5f8ff;
+    animation: stepfade 1.8s ease-in-out infinite;
+  }
+  @keyframes stepfade {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  .dag-connector {
+    width: 2px; height: 20px; background: #e2e8f0; margin: 0 auto;
+  }
+  .dag-connector.thinking { background: #c7d2fe; }
+  .step-type-badge {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    padding: 2px 6px; border-radius: 3px; margin-bottom: 4px; display: inline-block;
+  }
+  .badge-action { background: #ecfdf5; color: #047857; }
+  .badge-agent  { background: #faf5ff; color: #6b21a8; }
+  .badge-ask    { background: #fff7ed; color: #9a3412; }
+  .badge-thinking { background: #eef2ff; color: #4f46e5; }
+  .step-name { font-size: 12px; font-weight: 600; color: #1e293b; }
+  .step-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+  /* Just-added ring pulse */
+  @keyframes ring-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+    50%       { box-shadow: 0 0 0 7px rgba(99,102,241,0.06); }
+  }
+  .step-just-added { animation: ring-pulse 2.4s ease-in-out infinite; border-color: #6366f1; }
+
+  /* Right: inspector (hidden, just placeholder) */
+  .pane-inspector {
+    width: 260px; flex-shrink: 0; border-left: 1px solid #e2e8f0;
+    background: #fff; display: flex; flex-direction: column;
+    font-size: 13px; color: #64748b;
+  }
+  .inspector-header {
+    padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+    font-size: 12px; font-weight: 600; color: #1e293b;
+  }
+  .inspector-body { padding: 14px; flex: 1; }
+  .inspector-hint {
+    background: #f8fafc; border-radius: 8px; padding: 12px;
+    font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5;
+  }
+
+  /* Btn styles */
+  .btn-sm-secondary {
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+    background: #fff; border: 1px solid #e2e8f0; color: #475569;
+    cursor: pointer;
+  }
+  .btn-sm-secondary:hover { background: #f8fafc; }
+
+  .btn-sm-primary {
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+    background: #4f46e5; border: 1px solid #4338ca; color: #fff;
+    cursor: pointer;
+  }
+  .btn-sm-primary:hover { background: #4338ca; }
+
+  .proto-banner {
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  D-Compiler bridge from O-Intake · Studio opens with wish prefilled in chat thread · compiler is mid-thinking
+</div>
+
+<!-- App bar -->
+<div class="app-bar">
+  <div class="app-bar-logo">A</div>
+  <div class="app-bar-name">Automation OS</div>
+  <span class="app-bar-slash">/</span>
+  <span class="app-bar-link">Playbooks</span>
+  <span class="app-bar-slash">/</span>
+  <span class="app-bar-current">Studio</span>
+  <div class="app-bar-right">Acme Corp</div>
+</div>
+
+<!-- Studio header -->
+<div class="studio-header">
+  <div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="studio-name">Weekly pipeline Slack summary</div>
+      <span class="studio-badge">Building</span>
+    </div>
+    <div class="studio-subtitle">From your automation wish · just now</div>
+  </div>
+  <div class="studio-header-right">
+    <button class="btn-sm-secondary">Validate</button>
+    <button class="btn-sm-secondary">Simulate</button>
+    <button class="btn-sm-primary" disabled style="opacity:0.5;cursor:not-allowed;">Save and open PR</button>
+  </div>
+</div>
+
+<!-- Studio panes -->
+<div class="studio-panes">
+
+  <!-- LEFT: Chat -->
+  <div class="pane-chat">
+    <div class="pane-chat-header">
+      <div class="agent-avatar-sm">S</div>
+      <div>
+        <div class="agent-name">Studio agent</div>
+        <div class="agent-session">Building from wish</div>
+      </div>
+    </div>
+
+    <div class="chat-thread">
+
+      <!-- Origin context banner -->
+      <div class="origin-banner">
+        <div class="origin-banner-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+        </div>
+        <div>
+          <div class="origin-label">From your O-Intake wish</div>
+          "I want to send a weekly Slack summary of the client's GHL pipeline activity"
+        </div>
+      </div>
+
+      <!-- User wish (prefilled as first message) -->
+      <div class="msg-user">
+        I want to send a weekly Slack summary of the client's GHL pipeline activity
+      </div>
+
+      <!-- Agent acknowledges + starts building -->
+      <div class="msg-agent">
+        On it. I'll build a workflow that pulls pipeline data from GHL every Monday morning and posts a formatted summary to your Slack channel.
+        <br><br>
+        Building the steps now — a few questions as I go:
+      </div>
+
+      <!-- Agent follow-up question -->
+      <div class="msg-agent">
+        Which Slack channel should the summary go to? (e.g. #client-acme or #weekly-updates)
+      </div>
+
+      <!-- Thinking indicator: compiler is mid-working -->
+      <div>
+        <div class="thinking-bubble">
+          <div class="dot-think"></div>
+          <div class="dot-think"></div>
+          <div class="dot-think"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="chat-input-area">
+      <textarea class="chat-input-box" rows="1" placeholder="Reply…"></textarea>
+      <button class="send-btn-sm">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- CENTRE: Canvas (mid-generation state) -->
+  <div class="pane-canvas">
+    <div class="canvas-toolbar">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      Canvas
+      <span style="margin-left:4px;">·</span>
+      <span class="canvas-status">
+        <span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+        Building…
+      </span>
+      <span style="margin-left:auto;font-size:11px;color:#94a3b8;">Steps appear as the compiler works</span>
+    </div>
+    <div class="canvas-area">
+      <div class="dag-wrap">
+
+        <!-- Step 1: confirmed -->
+        <div class="dag-step">
+          <div class="step-type-badge badge-action">Schedule</div>
+          <div class="step-name">Every Monday 8am</div>
+          <div class="step-desc">Cron: weekly trigger</div>
+        </div>
+
+        <div class="dag-connector"></div>
+
+        <!-- Step 2: confirmed -->
+        <div class="dag-step">
+          <div class="step-type-badge badge-agent">Agent</div>
+          <div class="step-name">Fetch GHL pipeline</div>
+          <div class="step-desc">Pull open deals + stage changes (7d)</div>
+        </div>
+
+        <div class="dag-connector"></div>
+
+        <!-- Step 3: just added, highlighted -->
+        <div class="dag-step step-just-added">
+          <div class="step-type-badge badge-agent" style="background:#eef2ff;color:#4f46e5;">Just added</div>
+          <div class="step-name">Summarise activity</div>
+          <div class="step-desc">Format key moves + new deals</div>
+        </div>
+
+        <div class="dag-connector thinking"></div>
+
+        <!-- Step 4: thinking / not yet confirmed -->
+        <div class="dag-step thinking-step">
+          <div class="step-type-badge badge-thinking">Building…</div>
+          <div class="step-name">Post to Slack</div>
+          <div class="step-desc">Waiting for channel config</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Inspector -->
+  <div class="pane-inspector">
+    <div class="inspector-header">Step inspector</div>
+    <div class="inspector-body">
+      <div class="inspector-hint">
+        Click any step on the canvas to inspect and edit its configuration.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

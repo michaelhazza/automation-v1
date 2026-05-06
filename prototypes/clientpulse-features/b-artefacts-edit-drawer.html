@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>B-Artefacts — Edit drawer (Subaccount detail)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+
+  /* App shell */
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 216px; flex-shrink: 0;
+    background: #fff; border-right: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; padding: 16px 12px;
+  }
+  .sidebar-logo {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 8px 14px; margin-bottom: 8px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .sidebar-logo .mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; color: #475569; text-decoration: none;
+  }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* Topbar breadcrumb */
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #64748b;
+  }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+
+  /* Page content */
+  .page-content { flex: 1; padding: 28px 32px; overflow-y: auto; }
+
+  /* Subaccount header */
+  .sub-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .sub-name { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.3px; }
+  .sub-meta { font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 10px; }
+  .health-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block; }
+
+  /* Inline status badges strip */
+  .status-strip {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px;
+  }
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 7px;
+    font-size: 12px; font-weight: 500;
+    background: #fff; border: 1px solid #e2e8f0;
+    cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s;
+    text-decoration: none; color: inherit;
+  }
+  .status-badge:hover { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.1); }
+  .status-badge .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .status-badge .badge-label { color: #94a3b8; }
+  .status-badge .badge-value { color: #1e293b; }
+  .status-badge .badge-action { color: #4f46e5; font-size: 11px; }
+
+  /* Section cards */
+  .section-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    overflow: hidden; margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .section-head {
+    padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .section-head-left { display: flex; align-items: center; gap: 8px; }
+  .section-title { font-size: 14px; font-weight: 600; color: #1e293b; }
+  .section-body { padding: 16px 18px; }
+  .placeholder-row {
+    height: 14px; background: #f1f5f9; border-radius: 4px; margin-bottom: 10px;
+  }
+  .placeholder-row.short { width: 60%; }
+  .placeholder-row.mid { width: 80%; }
+
+  /* Drawer overlay */
+  .drawer-overlay {
+    position: fixed; inset: 0;
+    background: rgba(15,23,42,0.45);
+    z-index: 100;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .drawer-overlay.open { opacity: 1; pointer-events: all; }
+
+  /* Drawer panel */
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: 480px; background: #fff;
+    z-index: 101; display: flex; flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: -4px 0 24px rgba(15,23,42,0.1);
+  }
+  .drawer.open { transform: translateX(0); }
+
+  .drawer-header {
+    padding: 16px 20px; border-bottom: 1px solid #e2e8f0;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .drawer-title { font-size: 15px; font-weight: 600; color: #1e293b; }
+  .drawer-close {
+    width: 30px; height: 30px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: none; cursor: pointer;
+    color: #94a3b8; transition: background 0.1s;
+  }
+  .drawer-close:hover { background: #f1f5f9; color: #64748b; }
+
+  .drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+  .drawer-footer {
+    padding: 14px 20px; border-top: 1px solid #e2e8f0;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0; background: #fff;
+  }
+
+  /* Artefact rows in drawer */
+  .art-row {
+    border: 1px solid #e2e8f0; border-radius: 9px;
+    margin-bottom: 10px; overflow: hidden;
+  }
+  .art-row-head {
+    padding: 12px 14px; display: flex; align-items: center; gap: 10px;
+    cursor: pointer; user-select: none;
+    transition: background 0.1s;
+  }
+  .art-row-head:hover { background: #f8fafc; }
+  .art-row-icon {
+    width: 30px; height: 30px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .art-row-icon.complete { background: #d1fae5; color: #059669; }
+  .art-row-icon.empty    { background: #f1f5f9; color: #94a3b8; }
+  .art-row-icon.required { background: #eef2ff; color: #4f46e5; }
+
+  .art-row-meta { flex: 1; min-width: 0; }
+  .art-row-name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .art-row-status { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+  .art-row-status.filled { color: #059669; }
+
+  .art-row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .art-row-chevron { color: #cbd5e1; transition: transform 0.15s; }
+  .art-row-chevron.open { transform: rotate(180deg); }
+
+  .art-row-body { padding: 0 14px 14px; border-top: 1px solid #f1f5f9; }
+  .art-row-body.hidden { display: none; }
+
+  /* Last updated timestamp */
+  .art-timestamp { font-size: 11px; color: #94a3b8; padding: 8px 0 4px; }
+
+  /* Revert link */
+  .revert-link {
+    font-size: 11px; color: #94a3b8; cursor: pointer;
+    text-decoration: underline; text-underline-offset: 2px;
+    transition: color 0.1s;
+  }
+  .revert-link:hover { color: #64748b; }
+
+  .field-row { margin-bottom: 10px; }
+  .field-label { font-size: 12px; font-weight: 500; color: #475569; margin-bottom: 4px; display: block; }
+  .field-input, .field-textarea, .field-select {
+    width: 100%; padding: 7px 10px;
+    border: 1px solid #e2e8f0; border-radius: 7px;
+    font-size: 13px; color: #1e293b; background: #fff;
+    font-family: inherit; outline: none;
+  }
+  .field-input:focus, .field-textarea:focus, .field-select:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+  }
+  .field-textarea { resize: vertical; min-height: 60px; line-height: 1.5; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 7px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    border: 1px solid transparent; text-decoration: none;
+    transition: background 0.1s;
+  }
+  .btn-primary  { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .btn-primary:hover  { background: #4338ca; }
+  .btn-secondary { background: #fff; color: #475569; border-color: #e2e8f0; }
+  .btn-secondary:hover { background: #f8fafc; }
+
+  .proto-banner {
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    color: #78350f; padding: 7px 20px;
+    font-size: 11.5px; font-weight: 500; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  B-Artefacts · Subaccount detail page with Knowledge status badge and edit drawer · click "Knowledge: 4 of 6" to open drawer
+</div>
+
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="mark">A</div>
+      <div class="name">Automation OS</div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Pulse
+      </a>
+      <a href="#" class="active">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Clients
+      </a>
+      <a href="#">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Playbooks
+      </a>
+    </nav>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <span>Clients</span>
+      <span class="topbar-slash">/</span>
+      <span class="topbar-current">Acme Corp</span>
+    </div>
+
+    <div class="page-content">
+
+      <!-- Subaccount header -->
+      <div class="sub-header">
+        <div>
+          <div class="sub-name">Acme Corp</div>
+          <div class="sub-meta">
+            <span class="health-dot"></span>
+            Healthy &middot; GHL connected &middot; 8 agents active
+          </div>
+        </div>
+        <button class="btn btn-secondary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+      </div>
+
+      <!-- Status badges strip (the key surface) -->
+      <div class="status-strip">
+
+        <button class="status-badge" onclick="openDrawer()">
+          <span class="dot" style="background:#4f46e5;"></span>
+          <span class="badge-label">Knowledge</span>
+          <span class="badge-value">4 of 6</span>
+          <span class="badge-action">Edit</span>
+        </button>
+
+        <div class="status-badge" style="cursor:default;">
+          <span class="dot" style="background:#10b981;"></span>
+          <span class="badge-label">Baseline</span>
+          <span class="badge-value">Complete</span>
+        </div>
+
+        <div class="status-badge" style="cursor:default;">
+          <span class="dot" style="background:#10b981;"></span>
+          <span class="badge-label">Agents</span>
+          <span class="badge-value">8 active</span>
+        </div>
+
+        <div class="status-badge" style="cursor:default;">
+          <span class="dot" style="background:#f59e0b;"></span>
+          <span class="badge-label">Last report</span>
+          <span class="badge-value">2 days ago</span>
+        </div>
+
+      </div>
+
+      <!-- Page sections (stubbed for context) -->
+      <div class="section-card">
+        <div class="section-head">
+          <div class="section-head-left">
+            <span class="section-title">Recent activity</span>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="placeholder-row mid"></div>
+          <div class="placeholder-row short"></div>
+          <div class="placeholder-row mid"></div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-head">
+          <div class="section-head-left">
+            <span class="section-title">Automation</span>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="placeholder-row short"></div>
+          <div class="placeholder-row mid"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Drawer overlay -->
+<div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+
+<!-- Knowledge edit drawer -->
+<div class="drawer" id="knowledge-drawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title">Knowledge artefacts</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Acme Corp · 4 of 6 captured</div>
+    </div>
+    <button class="drawer-close" onclick="closeDrawer()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <div class="drawer-body">
+
+    <!-- Brand identity — filled -->
+    <div class="art-row">
+      <div class="art-row-head" onclick="toggleArt('a-brand')">
+        <div class="art-row-icon complete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="art-row-meta">
+          <div class="art-row-name">Brand identity</div>
+          <div class="art-row-status filled">Captured · updated 3 days ago</div>
+        </div>
+        <div class="art-row-right">
+          <svg class="art-row-chevron" id="chev-a-brand" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="art-row-body hidden" id="body-a-brand">
+        <div class="art-timestamp">Last updated: 3 May 2026 · <span class="revert-link">Revert to captured baseline</span></div>
+        <div class="field-row" style="margin-top:8px;">
+          <label class="field-label">Agency name</label>
+          <input class="field-input" type="text" value="Bright Side Agency" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">Tagline</label>
+          <input class="field-input" type="text" value="Growth marketing for local service businesses" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">What you do</label>
+          <textarea class="field-textarea">We help local service businesses grow through paid ads, SEO, and marketing automation.</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Voice / tone — filled -->
+    <div class="art-row">
+      <div class="art-row-head" onclick="toggleArt('a-voice')">
+        <div class="art-row-icon complete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="art-row-meta">
+          <div class="art-row-name">Voice and tone</div>
+          <div class="art-row-status filled">Captured · updated 3 days ago</div>
+        </div>
+        <div class="art-row-right">
+          <svg class="art-row-chevron" id="chev-a-voice" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="art-row-body hidden" id="body-a-voice">
+        <div class="art-timestamp">Last updated: 3 May 2026 · <span class="revert-link">Revert to captured baseline</span></div>
+        <div class="field-row" style="margin-top:8px;">
+          <label class="field-label">Tone in three words</label>
+          <input class="field-input" type="text" value="Friendly, direct, results-focused" />
+        </div>
+        <div class="field-row">
+          <label class="field-label">Communication style</label>
+          <select class="field-select"><option selected>Friendly and approachable</option></select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Offer / positioning — filled -->
+    <div class="art-row">
+      <div class="art-row-head" onclick="toggleArt('a-offer')">
+        <div class="art-row-icon complete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="art-row-meta">
+          <div class="art-row-name">Offer and positioning</div>
+          <div class="art-row-status filled">Captured · updated 3 days ago</div>
+        </div>
+        <div class="art-row-right">
+          <svg class="art-row-chevron" id="chev-a-offer" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="art-row-body hidden" id="body-a-offer">
+        <div class="art-timestamp">Last updated: 3 May 2026 · <span class="revert-link">Revert to captured baseline</span></div>
+        <div class="field-row" style="margin-top:8px;">
+          <label class="field-label">Core service name</label>
+          <input class="field-input" type="text" value="Growth Engine Package" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Audience ICP — filled -->
+    <div class="art-row">
+      <div class="art-row-head" onclick="toggleArt('a-icp')">
+        <div class="art-row-icon complete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="art-row-meta">
+          <div class="art-row-name">Audience (ICP)</div>
+          <div class="art-row-status filled">Captured · updated 3 days ago</div>
+        </div>
+        <div class="art-row-right">
+          <svg class="art-row-chevron" id="chev-a-icp" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="art-row-body hidden" id="body-a-icp">
+        <div class="art-timestamp">Last updated: 3 May 2026 · <span class="revert-link">Revert to captured baseline</span></div>
+        <div class="field-row" style="margin-top:8px;">
+          <label class="field-label">Industry or niche</label>
+          <input class="field-input" type="text" value="Home services" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Operating constraints — empty -->
+    <div class="art-row">
+      <div class="art-row-head" onclick="toggleArt('a-constraints')">
+        <div class="art-row-icon empty">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <div class="art-row-meta">
+          <div class="art-row-name">Operating constraints</div>
+          <div class="art-row-status">Not yet captured</div>
+        </div>
+        <div class="art-row-right">
+          <svg class="art-row-chevron" id="chev-a-constraints" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="art-row-body hidden" id="body-a-constraints">
+        <div class="field-row" style="margin-top:8px;">
+          <label class="field-label">Things the AI should never do</label>
+          <textarea class="field-textarea" placeholder="e.g. Never disclose client names in public content."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Proof library — empty -->
+    <div class="art-row">
+      <div class="art-row-head" onclick="toggleArt('a-proof')">
+        <div class="art-row-icon empty">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <div class="art-row-meta">
+          <div class="art-row-name">Proof library</div>
+          <div class="art-row-status">Not yet captured</div>
+        </div>
+        <div class="art-row-right">
+          <svg class="art-row-chevron" id="chev-a-proof" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="art-row-body hidden" id="body-a-proof">
+        <div class="field-row" style="margin-top:8px;">
+          <label class="field-label">Best result (anonymised is fine)</label>
+          <textarea class="field-textarea" placeholder="e.g. Grew inbound calls from 12/mo to 74/mo in 4 months."></textarea>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="drawer-footer">
+    <span style="font-size:12px;color:#94a3b8;">4 of 6 artefacts captured</span>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" onclick="closeDrawer()">Cancel</button>
+      <button class="btn btn-primary">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openDrawer() {
+    document.getElementById('drawer-overlay').classList.add('open');
+    document.getElementById('knowledge-drawer').classList.add('open');
+  }
+  function closeDrawer() {
+    document.getElementById('drawer-overlay').classList.remove('open');
+    document.getElementById('knowledge-drawer').classList.remove('open');
+  }
+  function toggleArt(id) {
+    const body = document.getElementById('body-' + id);
+    const chev = document.getElementById('chev-' + id);
+    body.classList.toggle('hidden');
+    chev.classList.toggle('open');
+  }
+</script>
+</body>
+</html>

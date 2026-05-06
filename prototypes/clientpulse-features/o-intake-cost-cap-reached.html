@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Edge state — O-Intake soft cap reached (conversation paused)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px; display: flex; align-items: center; gap: 8px; }
+  .topbar-back { font-size: 13px; color: #64748b; text-decoration: none; display: flex; align-items: center; gap: 5px; }
+  .topbar-title { font-size: 14px; font-weight: 600; color: #0f172a; margin-left: 4px; }
+  .chat-shell { flex: 1; display: flex; flex-direction: column; max-width: 720px; width: 100%; margin: 0 auto; padding: 24px 24px 0; }
+  .chat-context-banner { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 10px 14px; font-size: 12.5px; color: #4338ca; display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+  .messages { flex: 1; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; padding-bottom: 0; }
+  .msg-user { display: flex; justify-content: flex-end; }
+  .msg-user .bubble { background: #4f46e5; color: #fff; padding: 10px 14px; border-radius: 14px 14px 4px 14px; font-size: 13.5px; max-width: 480px; line-height: 1.55; }
+  .msg-agent { display: flex; gap: 10px; }
+  .agent-avatar { width: 30px; height: 30px; border-radius: 50%; background: #f1f5f9; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+  .agent-content { flex: 1; }
+  .agent-bubble { background: #fff; border: 1px solid #e2e8f0; padding: 10px 14px; border-radius: 4px 14px 14px 14px; font-size: 13.5px; color: #1e293b; max-width: 540px; line-height: 1.6; box-shadow: 0 1px 3px rgba(15,23,42,0.04); }
+  .wish-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; margin-top: 6px; font-size: 12.5px; display: flex; align-items: flex-start; gap: 8px; }
+  .wish-icon { width: 20px; height: 20px; border-radius: 5px; background: #d1fae5; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  /* Pause state — caps reached, full conversation stop */
+  .inline-pause { background: #fff7ed; border: 1.5px solid #fed7aa; border-radius: 4px 14px 14px 14px; padding: 16px 16px; font-size: 13.5px; color: #7c2d12; max-width: 540px; line-height: 1.6; }
+  .pause-title { font-weight: 600; color: #9a3412; margin-bottom: 6px; font-size: 14px; }
+  .pause-body { margin-bottom: 14px; color: #78350f; }
+  .pause-wish-count { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #fed7aa; border-radius: 6px; padding: 5px 10px; font-size: 12.5px; color: #7c2d12; font-weight: 500; margin-bottom: 14px; }
+  .pause-actions { display: flex; gap: 10px; }
+  .btn-wrap-up { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 7px; background: #0f172a; color: #fff; font-size: 13px; font-weight: 500; border: none; cursor: pointer; }
+  .btn-wrap-up:hover { background: #1e293b; }
+  .btn-continue { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; background: transparent; color: #92400e; font-size: 13px; font-weight: 500; border: 1px solid #fed7aa; cursor: pointer; }
+  .btn-continue:hover { background: #fff7ed; }
+  /* Input area — disabled at cap */
+  .input-area { background: #fff; border-top: 1px solid #e2e8f0; padding: 14px 24px; display: flex; gap: 10px; align-items: flex-end; }
+  .input-box { flex: 1; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; font-size: 13.5px; color: #94a3b8; resize: none; outline: none; min-height: 42px; font-family: inherit; line-height: 1.5; background: #f8fafc; cursor: not-allowed; }
+  .proto-footer { padding: 12px 24px; background: #fff; border-top: 1px solid #e2e8f0; font-size: 11.5px; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <a href="#" class="topbar-back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </a>
+      <span class="topbar-title">What automations would help you?</span>
+    </div>
+    <div class="chat-shell">
+      <div class="chat-context-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Setting up automations for Acme Corp
+      </div>
+      <div class="messages">
+        <div class="msg-agent">
+          <div class="agent-avatar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+          <div class="agent-content">
+            <div class="agent-bubble">Hi! Tell me what takes up the most time in your agency week.</div>
+          </div>
+        </div>
+        <div class="msg-user">
+          <div class="bubble">Lots of things — reports, invoices, social, CRM, competitor monitoring, client onboarding emails, content creation for campaigns…</div>
+        </div>
+        <div class="msg-agent">
+          <div class="agent-avatar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+          <div class="agent-content">
+            <div class="agent-bubble">
+              Great, I've been capturing as we go. Here's what I have so far:
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Weekly performance reports sent automatically</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Invoice follow-up on a schedule</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Auto-post case studies to LinkedIn</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>CRM enrichment on new leads</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Competitor monitoring with client alerts</span></div>
+              <div class="wish-card"><div class="wish-icon"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></div><span>Onboarding email sequence for new clients</span></div>
+              Tell me more about the content creation?
+            </div>
+          </div>
+        </div>
+        <div class="msg-user">
+          <div class="bubble">We want the AI to draft blog posts based on client briefs and then a human reviews before publishing. Also pull together research on industry topics monthly.</div>
+        </div>
+        <!-- CAP REACHED — inline pause message, input disabled -->
+        <div class="msg-agent">
+          <div class="agent-avatar" style="background:#fff7ed;border-color:#fed7aa;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div class="agent-content">
+            <div class="inline-pause">
+              <div class="pause-title">You've explored quite a bit — time to wrap up this session.</div>
+              <div class="pause-body">We've had a rich conversation and I've captured everything so far. I can't go further in this session, but nothing is lost.</div>
+              <div class="pause-wish-count">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                8 wishes captured
+              </div>
+              <div class="pause-actions">
+                <button class="btn-wrap-up" onclick="alert('Would route to summary with 8 wishes')">
+                  Review my 8 wishes
+                </button>
+                <button class="btn-continue" onclick="alert('Would extend session and allow more conversation')">
+                  Continue anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="height:16px;"></div>
+    </div>
+    <div class="input-area">
+      <textarea class="input-box" placeholder="Session paused — choose an option above" rows="1" disabled></textarea>
+    </div>
+    <div class="proto-footer">
+      Edge state — soft cap reached · O-Intake conversation paused<br>
+      Primary action: "Review my N wishes" (routes to summary). Secondary: "Continue anyway" (extends session). Input disabled at cap. No error codes, no technical language.
+    </div>
+  </div>
+</div>
+</body>
+</html>

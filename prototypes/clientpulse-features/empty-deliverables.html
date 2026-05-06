@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Empty state — Sub-account deliverables (no research output yet)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #64748b; }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+  .page-content { flex: 1; padding: 28px 32px; }
+  .sub-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+  .sub-name { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.3px; }
+  .sub-meta { font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 10px; }
+  .band-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px; font-size: 11.5px; font-weight: 600; }
+  .band-green { background: #d1fae5; color: #065f46; }
+  .page-tabs { display: flex; gap: 1px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px; }
+  .tab-btn { padding: 10px 16px; font-size: 13px; font-weight: 500; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; color: #64748b; }
+  .tab-btn.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+  .empty-pane { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 56px 32px; text-align: center; }
+  .empty-ring { width: 64px; height: 64px; border-radius: 50%; background: #f8fafc; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; border: 1.5px dashed #e2e8f0; }
+  .empty-headline { font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 8px; }
+  .empty-body { font-size: 13.5px; color: #64748b; max-width: 380px; margin: 0 auto 24px; line-height: 1.65; }
+  .btn-primary { display: inline-flex; align-items: center; gap: 7px; padding: 9px 20px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 13.5px; font-weight: 500; border: none; cursor: pointer; }
+  .btn-primary:hover { background: #4338ca; }
+  .proto-footer { margin-top: 28px; font-size: 11.5px; color: #94a3b8; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="topbar">
+      <a href="#" style="color:#64748b;text-decoration:none;">Clients</a>
+      <span class="topbar-slash">/</span>
+      <span class="topbar-current">Acme Corp</span>
+    </div>
+    <div class="page-content">
+      <div class="sub-header">
+        <div>
+          <div class="sub-name">Acme Corp</div>
+          <div class="sub-meta">
+            <span class="band-pill band-green">
+              <span style="width:6px;height:6px;border-radius:50%;background:#10b981;"></span>
+              Green
+            </span>
+            <span>score 78</span>
+            <span style="color:#e2e8f0">|</span>
+            <span>Connected 2 days ago</span>
+          </div>
+        </div>
+      </div>
+      <div class="page-tabs">
+        <button class="tab-btn">Overview</button>
+        <button class="tab-btn active">Deliverables</button>
+        <button class="tab-btn">Automations</button>
+        <button class="tab-btn">Knowledge</button>
+        <button class="tab-btn">Reports</button>
+      </div>
+      <div class="empty-pane">
+        <div class="empty-ring">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="empty-headline">No deliverables yet</div>
+        <div class="empty-body">Research deliverables appear here once an agent completes a task for this client. Run a research task or set up an automation to get started.</div>
+        <button class="btn-primary" onclick="alert('Would open task creation for this client')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Run a research task
+        </button>
+      </div>
+      <div class="proto-footer">
+        Empty state — first experience · Deliverables tab on a fresh sub-account<br>
+        Single action surfaces the path forward. No count tiles, no stub cards.
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

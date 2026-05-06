@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Failure state — D-Compiler missing integration (Google Ads not connected)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; overflow: hidden; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .studio { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .studio-topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 20px; display: flex; align-items: center; gap: 10px; }
+  .studio-title { font-size: 14px; font-weight: 600; color: #0f172a; }
+  .studio-panes { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+  .chat-pane { width: 380px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid #e2e8f0; background: #fff; }
+  .chat-pane-header { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+  .messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .msg-user { display: flex; justify-content: flex-end; }
+  .msg-user .bubble { background: #4f46e5; color: #fff; padding: 9px 13px; border-radius: 13px 13px 3px 13px; font-size: 13px; max-width: 260px; line-height: 1.5; }
+  .msg-agent { display: flex; gap: 8px; }
+  .agent-avatar { width: 26px; height: 26px; border-radius: 50%; background: #f1f5f9; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+  .agent-bubble { background: #f8fafc; border: 1px solid #e2e8f0; padding: 9px 13px; border-radius: 3px 13px 13px 13px; font-size: 13px; color: #1e293b; max-width: 290px; line-height: 1.55; }
+  /* Missing integration inline message */
+  .missing-integration { background: #fff; border: 1px solid #c7d2fe; border-left: 3px solid #4f46e5; border-radius: 3px 13px 13px 13px; padding: 12px 13px; font-size: 13px; color: #1e293b; max-width: 300px; line-height: 1.55; }
+  .missing-label { font-size: 11.5px; font-weight: 600; color: #4f46e5; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .missing-body { color: #334155; margin-bottom: 10px; }
+  .integration-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; margin-bottom: 10px; }
+  .integration-icon { width: 24px; height: 24px; border-radius: 5px; background: #fff; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; }
+  .integration-name { font-size: 13px; font-weight: 500; color: #1e293b; flex: 1; }
+  .integration-status { font-size: 11.5px; color: #ef4444; font-weight: 500; }
+  .connect-btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 16px; border-radius: 7px; background: #4f46e5; color: #fff; font-size: 12.5px; font-weight: 500; border: none; cursor: pointer; }
+  .connect-btn:hover { background: #4338ca; }
+  .save-btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px; border-radius: 7px; background: transparent; color: #64748b; font-size: 12.5px; font-weight: 500; border: 1px solid #e2e8f0; cursor: pointer; margin-left: 7px; }
+  .save-btn:hover { background: #f8fafc; }
+  .chat-input-row { padding: 10px 12px; border-top: 1px solid #f1f5f9; display: flex; gap: 8px; }
+  .chat-input { flex: 1; border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; font-family: inherit; color: #94a3b8; background: #f8fafc; cursor: not-allowed; }
+  .preview-pane { flex: 1; display: flex; flex-direction: column; background: #f8fafc; }
+  .preview-header { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; background: #fff; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: space-between; }
+  .dag-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 14px; }
+  .dag-node { background: #fff; border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 8px 14px; font-size: 12px; font-weight: 500; color: #334155; display: flex; align-items: center; gap: 7px; }
+  .dag-node.blocked { border-color: #cbd5e1; background: #f8fafc; opacity: 0.5; }
+  .dag-arrow { color: #94a3b8; font-size: 18px; }
+  .blocked-badge { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 10px; font-size: 11.5px; color: #64748b; display: flex; align-items: center; gap: 5px; }
+  .proto-footer { padding: 10px 16px; background: #fff; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="studio">
+    <div class="studio-topbar">
+      <a href="#" style="display:flex;align-items:center;gap:4px;color:#64748b;font-size:13px;text-decoration:none;margin-right:4px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </a>
+      <div class="studio-title">Studio — Google Ads spend report</div>
+      <div style="margin-left:auto;">
+        <span style="font-size:11.5px;color:#94a3b8;background:#f1f5f9;padding:3px 8px;border-radius:4px;">Beta Industries</span>
+      </div>
+    </div>
+    <div class="studio-panes">
+      <div class="chat-pane">
+        <div class="chat-pane-header">Conversation</div>
+        <div class="messages">
+          <div class="msg-user">
+            <div class="bubble">Send me a Google Ads spend report every Monday morning with last week's results.</div>
+          </div>
+          <!-- Missing integration — system explains clearly, offers connect path, offers save-for-later -->
+          <div class="msg-agent">
+            <div class="agent-avatar" style="background:#eef2ff;border-color:#c7d2fe;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </div>
+            <div>
+              <div class="missing-integration">
+                <div class="missing-label">Connection needed</div>
+                <div class="missing-body">To pull Google Ads data I need your account connected. Beta Industries hasn't linked Google Ads yet.</div>
+                <div class="integration-row">
+                  <div class="integration-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4285f4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M8 12h8"/></svg>
+                  </div>
+                  <div class="integration-name">Google Ads</div>
+                  <div class="integration-status">Not connected</div>
+                </div>
+                <div style="display:flex;align-items:center;">
+                  <button class="connect-btn" onclick="alert('Would open Google Ads OAuth flow in new tab')">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                    Connect Google Ads
+                  </button>
+                  <button class="save-btn" onclick="alert('Would save wish to Pulse inbox for later')">Save for later</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="chat-input-row">
+          <input class="chat-input" placeholder="Connect Google Ads to continue…" disabled />
+        </div>
+      </div>
+      <!-- Preview pane — shows blocked state -->
+      <div class="preview-pane">
+        <div class="preview-header">
+          Automation preview
+          <div class="blocked-badge">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Waiting on connection
+          </div>
+        </div>
+        <div class="dag-placeholder">
+          <div class="dag-node">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/></svg>
+            Trigger: Every Monday 9am
+          </div>
+          <div class="dag-arrow">↓</div>
+          <div class="dag-node blocked">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Pull Google Ads report
+            <span style="font-size:11px;color:#94a3b8;margin-left:auto;background:#f1f5f9;padding:1px 6px;border-radius:4px;">Blocked</span>
+          </div>
+          <div class="dag-arrow" style="opacity:0.3;">↓</div>
+          <div class="dag-node blocked">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Email summary to Sam
+          </div>
+          <div style="font-size:11.5px;color:#94a3b8;text-align:center;margin-top:8px;max-width:280px;">Connect Google Ads to activate this automation. It'll be saved and ready once connected.</div>
+        </div>
+      </div>
+    </div>
+    <div class="proto-footer">
+      Failure state — D-Compiler missing integration (Google Ads not linked) · Studio<br>
+      System explains exactly what's missing and why compilation can't proceed. Two paths: connect now or save for later. No error codes. Compilation does not attempt to proceed.
+    </div>
+  </div>
+</div>
+</body>
+</html>

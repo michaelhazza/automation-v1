@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Empty state — O-Intake summary (zero wishes captured)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; }
+  .summary-card { width: 100%; max-width: 560px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 2px 12px rgba(15,23,42,0.07); overflow: hidden; }
+  .card-header { padding: 28px 28px 20px; text-align: center; border-bottom: 1px solid #f1f5f9; }
+  .card-header .icon-ring { width: 56px; height: 56px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+  .card-header h2 { font-size: 19px; font-weight: 700; color: #0f172a; margin-bottom: 6px; letter-spacing: -0.3px; }
+  .card-header p { font-size: 13.5px; color: #64748b; line-height: 1.6; }
+  .card-body { padding: 24px 28px; }
+  .empty-note { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; font-size: 13.5px; color: #475569; line-height: 1.65; }
+  .empty-note strong { color: #1e293b; }
+  .tip-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .tip-item { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: #64748b; }
+  .tip-dot { width: 5px; height: 5px; border-radius: 50%; background: #c7d2fe; flex-shrink: 0; margin-top: 6px; }
+  .card-footer { padding: 16px 28px 20px; border-top: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
+  .btn-primary { display: inline-flex; align-items: center; gap: 7px; padding: 9px 20px; border-radius: 8px; background: #0f172a; color: #fff; font-size: 13.5px; font-weight: 500; border: none; cursor: pointer; }
+  .btn-primary:hover { background: #1e293b; }
+  .btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 8px; background: transparent; color: #64748b; font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0; cursor: pointer; }
+  .btn-ghost:hover { background: #f8fafc; }
+  .proto-footer { margin-top: 24px; font-size: 11.5px; color: #94a3b8; text-align: center; line-height: 1.7; max-width: 560px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+  <div class="main">
+    <div class="summary-card">
+      <div class="card-header">
+        <div class="icon-ring">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <h2>No automations captured yet</h2>
+        <p>That's fine. You can come back to this whenever you're ready. Agents will get started on what's already set up.</p>
+      </div>
+      <div class="card-body">
+        <div class="empty-note">
+          <strong>Whenever you have ideas, just start the conversation.</strong>
+          <div class="tip-list">
+            <div class="tip-item"><div class="tip-dot"></div><span>Describe what you'd like to automate in plain language, no technical terms needed</span></div>
+            <div class="tip-item"><div class="tip-dot"></div><span>It works best when you describe a specific outcome, like "email me when a deal closes"</span></div>
+            <div class="tip-item"><div class="tip-dot"></div><span>You can run this conversation again at any time from the Automations page</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <button class="btn-ghost" onclick="alert('Would return to conversation')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Go back
+        </button>
+        <button class="btn-primary" onclick="alert('Would navigate to dashboard')">
+          Done
+        </button>
+      </div>
+    </div>
+    <div class="proto-footer">
+      Empty state — first experience · O-Intake summary with zero captured wishes<br>
+      No shaming, no "you didn't do anything" language. Single primary action: Done. Escape back into conversation available.
+    </div>
+  </div>
+</div>
+</body>
+</html>
