@@ -142,6 +142,73 @@
   .chip-enabled { background: var(--emerald-50); color: var(--emerald-700); border: 1px solid #a7f3d0; }
   .chip-unavail { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-200); }
 
+  /* Skill state classes */
+  .skill-row-broken {
+    opacity: 0.72;
+    background: var(--slate-50);
+  }
+  .skill-row-broken .skill-name { color: var(--slate-500); }
+  .skill-row-broken .skill-desc { color: var(--slate-300); }
+  .skill-row-broken .toggle-track { background: var(--indigo-200); cursor: not-allowed; }
+  .skill-row-broken .toggle-track::after { background: white; }
+
+  .skill-row-locked {
+    opacity: 0.55;
+    cursor: not-allowed !important;
+  }
+  .skill-row-locked .skill-name { color: var(--slate-400); }
+  .skill-row-locked .toggle-track { cursor: not-allowed; }
+  .skill-row-locked .btn { cursor: not-allowed; opacity: 0.6; pointer-events: none; }
+
+  .skill-row-destructive .skill-name { color: var(--slate-800); }
+
+  /* Dependency broken chip */
+  .chip-broken {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    background: #fffbeb; color: var(--amber-700); border: 1px solid #fde68a;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  /* Destructive chip */
+  .chip-destructive {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa;
+    white-space: nowrap; flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 3px;
+  }
+  /* Lock icon for locked/destructive */
+  .lock-icon {
+    color: var(--amber-500); flex-shrink: 0;
+  }
+
+  /* Destructive confirm modal */
+  .destruct-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+    z-index: 800; display: none; align-items: center; justify-content: center;
+  }
+  .destruct-modal-overlay.open { display: flex; }
+  .destruct-modal {
+    background: white; border-radius: 12px; padding: 28px 32px;
+    width: 400px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  }
+  .destruct-modal-title { font-size: 15px; font-weight: 700; color: var(--slate-900); margin-bottom: 10px; }
+  .destruct-modal-body { font-size: 13px; color: var(--slate-600); line-height: 1.6; margin-bottom: 20px; }
+  .destruct-modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* CSS tooltip */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 6px); left: 0;
+    background: var(--slate-800); color: white;
+    font-size: 11.5px; font-weight: 400; line-height: 1.4;
+    padding: 6px 10px; border-radius: 6px;
+    white-space: pre-wrap; max-width: 260px; width: max-content;
+    z-index: 9999; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  [data-tip]:hover::after { opacity: 1; }
+
   /* Tier chips per skill row */
   .tier-chip {
     display: inline-flex; align-items: center; gap: 3px;
@@ -586,6 +653,27 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
 
+              <!-- Gmail: send email -- Active but dependency broken (Salesforce token expired) -->
+              <div class="skill-toggle-row skill-row-broken" data-tip="Gmail integration disconnected. Re-connect at Connections and Integrations." style="cursor:default;" onclick="event.stopPropagation()">
+                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Gmail: send email</div>
+                    <span class="chip-broken">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:#d97706;vertical-align:-1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      Disconnected
+                    </span>
+                  </div>
+                  <div class="skill-desc">Gmail · Skill is on but Gmail connection is broken -- will not fire</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-gmail-broken" checked disabled style="cursor:not-allowed;">
+                  <label class="toggle-track" for="tog-en-gmail-broken" style="cursor:not-allowed;" title="Gmail integration disconnected. Skill is preserved but will not run until reconnected."></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
             </div>
           </div><!-- /enabled skills -->
 
@@ -787,6 +875,39 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                     <div class="skill-desc">SQL · Read-only queries against connected databases</div>
                   </div>
                   <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Database: query','system')">Add</button>
+                </div>
+
+                <!-- HubSpot: create deal -- Locked (dependency missing) -->
+                <div class="skill-toggle-row skill-row-locked lib-skill-row" data-tier="system" data-name="hubspot create deal" data-tip="Requires HubSpot integration. Connect HubSpot at Connections to enable this skill." style="cursor:not-allowed;">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon" style="background:var(--slate-50);border-color:var(--slate-200);color:var(--slate-400);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:5px;">
+                      <div class="skill-name">HubSpot: create deal</div>
+                      <svg class="lock-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                    </div>
+                    <div class="skill-desc">HubSpot · Requires HubSpot integration</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" disabled style="cursor:not-allowed;opacity:0.4;" title="Connect HubSpot first">Add</button>
+                </div>
+
+                <!-- Gmail: delete emails -- Destructive skill -->
+                <div class="skill-toggle-row skill-row-destructive lib-skill-row" data-tier="system" data-name="gmail delete emails destructive" data-tip="Destructive actions are disabled by default. Click to enable for this agent.">
+                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                  <div class="skill-icon" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                      <div class="skill-name">Gmail: delete emails</div>
+                      <span class="chip-destructive">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                        Destructive
+                      </span>
+                    </div>
+                    <div class="skill-desc">Gmail · Permanently removes emails from connected Gmail accounts</div>
+                  </div>
+                  <button class="btn btn-xs" style="border:1px solid #fed7aa;background:#fff7ed;color:#c2410c;font-size:11px;padding:3px 8px;" onclick="openDestructiveConfirm('Gmail: delete emails','can permanently remove emails from connected Gmail accounts')">Enable</button>
                 </div>
 
                 <!-- Show all link -->
@@ -1356,6 +1477,18 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
 
 <!-- ── SKILL CONTEXT MENU ─────────────────────────────────────────── -->
 <div id="skill-ctx-menu" class="skill-ctx-menu" role="menu"></div>
+
+<!-- ── DESTRUCTIVE SKILL CONFIRM MODAL ───────────────────────────── -->
+<div class="destruct-modal-overlay" id="destruct-modal-overlay" onclick="if(event.target===this)closeDestructiveConfirm()">
+  <div class="destruct-modal">
+    <div class="destruct-modal-title" id="destruct-modal-title">Enable destructive action</div>
+    <div class="destruct-modal-body" id="destruct-modal-body">This skill can permanently remove emails from connected Gmail accounts. Are you sure?</div>
+    <div class="destruct-modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeDestructiveConfirm()">Cancel</button>
+      <button class="btn btn-sm" style="background:#dc2626;color:white;border-color:#dc2626;" onclick="confirmDestructiveEnable()">Yes, enable</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── SKILL CREATOR DRAWER ──────────────────────────────────────── -->
 <div id="skill-creator-overlay" class="creator-drawer-overlay" onclick="if(event.target===this)closeSkillCreator()">
@@ -2135,6 +2268,22 @@ function selectVisCard(radio) {
 document.querySelectorAll('[name="skill-visibility"]').forEach(function(r) {
   r.addEventListener('change', function() { selectVisCard(r); });
 });
+
+// ---- Destructive skill confirm ----
+var destructiveTargetBtn = null;
+function openDestructiveConfirm(skillName, sideEffect) {
+  document.getElementById('destruct-modal-title').textContent = 'Enable destructive action: ' + skillName;
+  document.getElementById('destruct-modal-body').textContent = skillName + ' ' + sideEffect + '. Are you sure?';
+  document.getElementById('destruct-modal-overlay').classList.add('open');
+}
+function closeDestructiveConfirm() {
+  document.getElementById('destruct-modal-overlay').classList.remove('open');
+}
+function confirmDestructiveEnable() {
+  closeDestructiveConfirm();
+  // In prototype: just close modal -- in production would enable the skill
+  alert('Skill enabled. In production this would add it to the Enabled section with a Destructive badge.');
+}
 </script>
 </body>
 </html>

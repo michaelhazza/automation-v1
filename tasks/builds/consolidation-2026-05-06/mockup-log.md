@@ -1229,3 +1229,38 @@ index.html:
 - `prototypes/consolidation-2026-05-06/_sidebar.js` (Recurring tasks nav item added)
 - `prototypes/consolidation-2026-05-06/index.html` (round metadata updated, Recurring tasks card added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7 — 2026-05-06 (final-A)
+
+**Operator feedback:** Three changes: (1) Rebuild integrations.html as Connections page with two sub-tabs (Integrations/Logins), universal search, plain-language connection method chips, and NO Tools/MCP tab. (2) Onboarding multi-select restructure across steps 2-5. (3) Skill state polish across agent-edit.html and org-agent-edit.html with broken-dependency, locked, and destructive states.
+
+**Changes made:**
+- `integrations.html` — complete rebuild as Connections page. Page title and subtitle updated (Connections, Acme Corp 8 connected 3 with errors). Universal search bar above sub-tabs with cross-tab chip (shows "Also found N matches in Logins" and jumps on click). Two sub-tabs: Integrations (default) and Logins. Integrations tab: 8 connected app cards in auto-fill grid with logo, name, label, status dot, "Verified Xh ago" text, and connection method chip (Sign in / Key -- plain language, no OAuth/API key). Cards are error-bordered for Salesforce (amber, token expired) and Linear (red, invalid key). Add a connection section with category filter chips (All/Email/CRM/Messaging/Payments/Storage/Custom) and 16 available app cards each with + Connect button that triggers 2s connecting overlay. Logins tab: table view with service name, URL (monospace), masked username, last verified, status dot. Click row opens detail drawer with full fields, masked password with show/hide, verification history. + Add web login button opens modal with URL prefix indicator, show/hide password, optional label. + Connect top-right dropdown (Connect an app / Add a web login). No MCP/Tools sub-tab anywhere.
+- `before-integrations.html` — banner text updated to describe actual UX problems (OAuth jargon leaked, MCP confusion, web logins not differentiated). Problems list added as red-bordered box with 6 specific bullet points.
+- `onboarding.html` — Step nav updated with Step 2b (Connecting...) added. Step 2 rebuilt: title "Pick the integrations you'll use", subtitle about ticking. Radio cards replaced with checkbox cards (multi-select). Live summary panel updates as user ticks: N active connections / skills list / background pull count. Continue button: "Connect (N) integrations". Step 2b added: mini-flow view with done/spinning/waiting rows, each with Skip option. Background sync banner showing HubSpot CRM 47% pull. Step 3 rebuilt: title "Choose your worker agents", subtitle about manager/orchestrator auto-inclusion. Six worker-only checkbox cards (Outreach Agent, Lead Qualifier, Account Health Agent, Demo Scheduler, Support Triage, CRM Sync Agent). Live hierarchy preview updates on selection showing auto-included managers. Background sync banner visible steps 3+. Continue button: "Set up (N) agents". Step 4 rebuilt: title "Pick the automations to enable", six automation checkbox cards with trigger type badges. Background sync shows 91% complete. Continue button: "Set up (N) automations". Step 5 updated: multi-count summary (3 integrations, 2 agents, 2 automations), background pull status section showing 3 connections established + pulls in progress + Slack complete. Button text: "Go to dashboard". JavaScript: updateS2Summary(), updateS3Hierarchy(), updateS4Count() functions with live count/label updates.
+- `agent-edit.html` — CSS: added .skill-row-broken, .skill-row-locked, .skill-row-destructive, .chip-broken, .chip-destructive, .lock-icon, .destruct-modal-overlay/.destruct-modal, CSS tooltip via [data-tip]::after. Enabled section: added "Gmail: send email" row with .skill-row-broken, amber Disconnected chip, toggle preserved-on but disabled/cursor-not-allowed. Add section (system library): added "HubSpot: create deal" with .skill-row-locked (lock icon, greyed, Add button disabled) and "Gmail: delete emails" with .skill-row-destructive (amber Destructive chip, Enable button triggers confirm modal). Destructive confirm modal added (title, body, Yes enable red button / Cancel). JS: openDestructiveConfirm(), closeDestructiveConfirm(), confirmDestructiveEnable().
+- `org-agent-edit.html` — Same CSS block added. Enabled section: added "Slack: post message" with .skill-row-broken and Disconnected chip. Add section: added "Calendly: schedule meeting" with .skill-row-locked and "Stripe: refund payment" with .skill-row-destructive. Destructive confirm modal added (org-prefixed IDs). JS: openOrgDestructiveConfirm(), closeOrgDestructiveConfirm(), confirmOrgDestructiveEnable().
+
+**Mandatory completion checks:**
+- Check 1 (plain-language terms in integrations.html): 15 matches (Sign in, Web login, Connection method) -- PASS (target: >= 3)
+- Check 2 (OAuth/API key jargon): 1 match -- only in HTML comment at top, not in any visible UI copy -- PASS (target: 0 in UI)
+- Check 3 (multi-select terms in onboarding.html): 9 matches -- PASS (target: >= 2)
+- Check 4 (skill state classes in agent-edit.html): 19 matches -- PASS (target: >= 3)
+- Check 5 (skill state classes in org-agent-edit.html): 15 matches -- PASS (target: >= 2)
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Connections opens on app cards ready to click; no credential-type dashboard or health report visible by default. Onboarding starts from user intent (what will you use), not data model (credential types). Skill states communicate dependency status exactly at point of use.
+- Default to hidden: yes -- MCP/Tools tab not surfaced to operators at all. Destructive skills require an extra confirmation step before enabling. Detail drawer for web logins is on-click.
+- One primary action: yes -- Connections: + Connect (dropdown). Onboarding each step: one Continue/Connect/Set-up button. Skills tab: skill toggle or Add button (one action per row).
+- Inline state: yes -- Connection status (dot + verified time) inline on card. Broken dependency shown inline on skill row without navigating away. Cross-tab search chip shows inline below search.
+- Re-check passed: yes -- non-technical operator can tell the difference between "Sign in" and "Key" connections without needing to know OAuth. Disconnected skill row tells the operator exactly what to do (Re-connect at Connections). Locked skill tells the operator what integration to add. Destructive action requires deliberate confirmation.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/integrations.html` (rebuilt)
+- `prototypes/consolidation-2026-05-06/before-integrations.html` (banner and problems list updated)
+- `prototypes/consolidation-2026-05-06/onboarding.html` (steps 2-5 restructured for multi-select)
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (skill state CSS + rows + modal added)
+- `prototypes/consolidation-2026-05-06/org-agent-edit.html` (skill state CSS + rows + modal added)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

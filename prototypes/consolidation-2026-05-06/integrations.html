@@ -1,949 +1,1077 @@
 <!DOCTYPE html>
 <!--
-  FIELD AUDIT, Connections
-  Sources: IntegrationsAndCredentialsPage, AdminHealthFindingsPage
-  Consolidation decisions:
-  - Organise by SERVICE (one row per external service), not by credential type
-  - Multiple credential types per service: API key, OAuth, Web login (URL/user/pass/TOTP), Cookie session, Certificate
-  - Per-connection drawer: Credential detail, Agent tool access, Data sync, Issues, Audit log
-  - Issues tab absorbs AdminHealthFindingsPage (health findings inline per connection + aggregated)
-  - "Connect integration" is the primary action (top right)
-  - Health badge shown inline on each row (no separate health page needed)
+  Connections page — Round 7-final-A rebuild
+  Decision locks:
+  - Page name: "Connections"
+  - Two sub-tabs: Integrations | Logins (NO Tools/MCP tab -- MCP lives inside agent Skills)
+  - Universal search above sub-tabs, filters active tab + shows cross-tab chip
+  - Integrations tab: Connected (8) card grid + Add a connection card grid with filter chips
+  - Logins tab: table view with drawer
+  - + Connect dropdown (Connect an app / Add a web login)
+  - Connection method chips: Sign in / Key / Web login (plain language, no OAuth/API key jargon)
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Connections</title>
+<title>Connections | Automation OS</title>
 <link rel="stylesheet" href="_shared.css">
 <style>
+/* Page shell */
+.page-header {
+  padding: 20px 24px 0;
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.page-title { font-size: 20px; font-weight: 700; color: var(--slate-900); }
+.page-subtitle { font-size: 13px; color: var(--slate-500); margin-top: 3px; }
+
+/* Universal search */
+.universal-search-wrap {
+  padding: 14px 24px 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.universal-search-inner {
+  position: relative;
+}
+.universal-search-inner svg {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--slate-400); pointer-events: none;
+}
+.universal-search-box {
+  width: 100%; padding: 9px 12px 9px 36px; font-size: 14px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: white; color: var(--slate-800); outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.universal-search-box:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.cross-tab-chip {
+  display: none; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--indigo-600); font-weight: 500;
+  cursor: pointer; width: fit-content;
+  padding: 4px 10px; border: 1px solid var(--indigo-200);
+  border-radius: 20px; background: var(--indigo-50);
+}
+.cross-tab-chip:hover { background: var(--indigo-100); }
+
+/* Sub-tabs */
+.sub-tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border);
+  margin: 12px 24px 0; padding: 0;
+}
+.sub-tab {
+  padding: 8px 18px; font-size: 14px; color: var(--slate-500); cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500;
+  transition: color 0.1s;
+}
+.sub-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.sub-tab:hover:not(.active) { color: var(--slate-700); }
+
+/* Tab panels */
+.tab-panel { display: none; padding: 20px 24px; }
+.tab-panel.active { display: block; }
+
+/* Section header */
+.section-hdr {
+  font-size: 13px; font-weight: 700; color: var(--slate-700);
+  margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+}
+.section-hdr .count {
+  font-weight: 400; color: var(--slate-400); font-size: 12px;
+}
+
+/* App card grid */
+.app-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+/* Connected app card */
+.app-card {
+  background: white; border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; position: relative;
+  transition: box-shadow 0.15s;
+}
+.app-card:hover { box-shadow: var(--shadow-md); }
+.app-card-top {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+}
+.app-logo {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 800; color: white;
+  flex-shrink: 0;
+}
+.app-card-meta { flex: 1; min-width: 0; }
+.app-name { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+.app-label { font-size: 12px; color: var(--slate-400); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-status-row {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate-500);
+  margin-bottom: 8px;
+}
+.app-method-chip {
+  display: inline-block; font-size: 11px; font-weight: 500;
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200);
+}
+.app-overflow-btn {
+  position: absolute; top: 10px; right: 10px;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--slate-400); font-size: 17px; line-height: 1;
+  padding: 3px 5px; border-radius: 4px;
+}
+.app-overflow-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+
+/* Error/warning card states */
+.app-card.card-error { border-color: #fca5a5; }
+.app-card.card-warning { border-color: #fcd34d; }
+
+/* Available app card (add section) */
+.avail-card {
+  background: white; border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+  transition: box-shadow 0.12s;
+}
+.avail-card:hover { box-shadow: var(--shadow-sm); }
+.avail-card-top {
+  display: flex; align-items: center; gap: 10px;
+}
+.avail-name { font-size: 13px; font-weight: 700; color: var(--slate-900); flex: 1; }
+.avail-desc { font-size: 12px; color: var(--slate-500); line-height: 1.4; }
+.avail-connect-btn {
+  align-self: flex-start;
+  font-size: 12px; font-weight: 600; padding: 5px 12px;
+  border: 1px solid var(--indigo-300); border-radius: 6px;
+  background: var(--indigo-50); color: var(--indigo-700); cursor: pointer;
+  transition: all 0.1s;
+}
+.avail-connect-btn:hover { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+/* Filter chips (add section) */
+.filter-chips-row {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.filter-chip {
+  padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--slate-200); background: white; cursor: pointer;
+  color: var(--slate-600); transition: all 0.1s;
+}
+.filter-chip:hover { background: var(--slate-50); }
+.filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+/* Logins table */
+.logins-table {
+  width: 100%; border-collapse: collapse;
+  background: white; border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden;
+}
+.logins-table thead tr {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+}
+.logins-table th {
+  padding: 9px 14px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--slate-500); text-align: left;
+}
+.logins-table td {
+  padding: 11px 14px; border-bottom: 1px solid var(--slate-100);
+  vertical-align: middle; font-size: 13px; color: var(--slate-700);
+}
+.logins-table tbody tr:last-child td { border-bottom: none; }
+.logins-table tbody tr { cursor: pointer; transition: background 0.1s; }
+.logins-table tbody tr:hover { background: var(--slate-50); }
+.login-url { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--slate-500); }
+.login-user-masked { font-size: 12px; color: var(--slate-600); }
+
+/* Overflow context menu */
+.ctx-menu {
+  position: fixed; z-index: 9999; background: white;
+  border: 1px solid var(--slate-200); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 180px; padding: 4px 0; display: none;
+}
+.ctx-menu.open { display: block; }
+.ctx-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; font-size: 13px; color: var(--slate-700);
+  cursor: pointer; border: none; background: transparent;
+  width: 100%; text-align: left;
+}
+.ctx-item:hover { background: var(--slate-50); }
+.ctx-item.danger { color: var(--red-500); }
+.ctx-item.danger:hover { background: #fef2f2; }
+.ctx-separator { border: none; border-top: 1px solid var(--slate-100); margin: 3px 0; }
+
+/* Drawer overlay */
+.drawer-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+  z-index: 400; display: none; align-items: stretch; justify-content: flex-end;
+}
+.drawer-overlay.open { display: flex; }
+.drawer {
+  width: 480px; background: white; display: flex; flex-direction: column;
+  height: 100%; overflow: hidden; box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+}
+.drawer-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.drawer-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+.drawer-close {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--slate-400); font-size: 20px; line-height: 1; padding: 2px 6px;
+}
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+.drawer-footer {
+  padding: 12px 20px; border-top: 1px solid var(--border);
+  display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+}
+.drawer-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--slate-400); margin: 16px 0 8px;
+}
+.drawer-field { margin-bottom: 12px; }
+.drawer-field label { display: block; font-size: 12px; font-weight: 600; color: var(--slate-600); margin-bottom: 4px; }
+.drawer-field .val { font-size: 13px; color: var(--slate-800); }
+.drawer-field .val-mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--slate-700); }
+.drawer-field .val-masked { font-size: 13px; color: var(--slate-800); letter-spacing: 0.08em; }
+.verify-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate-500); margin-bottom: 4px; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+  z-index: 500; display: none; align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: white; border-radius: 12px; padding: 28px 32px;
+  width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+.modal-title { font-size: 16px; font-weight: 700; color: var(--slate-900); margin-bottom: 8px; }
+.modal-body { font-size: 13px; color: var(--slate-600); line-height: 1.6; margin-bottom: 20px; }
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+.form-row { margin-bottom: 14px; }
+.form-label { display: block; font-size: 12px; font-weight: 600; color: var(--slate-700); margin-bottom: 5px; }
+.form-input {
+  width: 100%; padding: 8px 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 7px; outline: none;
+  color: var(--slate-800); box-sizing: border-box;
+}
+.form-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.input-prefix-wrap { position: relative; }
+.input-prefix {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; color: var(--slate-400); pointer-events: none;
+}
+.input-with-prefix { padding-left: 62px; }
+.show-hide-wrap { position: relative; }
+.show-hide-wrap .form-input { padding-right: 50px; }
+.show-hide-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; cursor: pointer;
+  font-size: 11px; font-weight: 600; color: var(--indigo-500);
+}
+
+/* Connecting overlay (post-click flow) */
+.connecting-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+  z-index: 600; display: none; align-items: center; justify-content: center;
+}
+.connecting-overlay.open { display: flex; }
+.connecting-box {
+  background: white; border-radius: 12px; padding: 32px 40px;
+  text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.18); min-width: 300px;
+}
+.connecting-spinner {
+  width: 40px; height: 40px; border: 3px solid var(--indigo-100);
+  border-top-color: var(--indigo-600); border-radius: 50%;
+  animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Status dots */
+.dot-g { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+.dot-a { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; flex-shrink: 0; }
+.dot-r { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
+
+/* + Connect dropdown */
+.connect-dropdown-wrap { position: relative; }
+.connect-dropdown-menu {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  background: white; border: 1px solid var(--slate-200); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); min-width: 190px; padding: 4px 0;
+  display: none; z-index: 200;
+}
+.connect-dropdown-menu.open { display: block; }
+.connect-drop-item {
+  padding: 9px 14px; font-size: 13px; color: var(--slate-700);
+  cursor: pointer; display: flex; align-items: center; gap: 8px;
+}
+.connect-drop-item:hover { background: var(--slate-50); }
+
+/* Replaces bar */
 .replaces-bar {
   background: var(--indigo-50); border-bottom: 1px solid var(--indigo-200);
   padding: 8px 24px; font-size: 12px; color: var(--indigo-700);
   display: flex; align-items: center; gap: 8px;
 }
 .replaces-bar a { color: var(--indigo-600); font-weight: 600; }
-.page-header {
-  padding: 20px 24px 0; display: flex; align-items: center; justify-content: space-between;
-}
-.page-title { font-size: 20px; font-weight: 700; color: var(--slate-900); }
-.page-subtitle { font-size: 13px; color: var(--slate-500); margin-top: 2px; }
-.main-tabs {
-  display: flex; gap: 0; border-bottom: 1px solid var(--border);
-  margin: 16px 24px 0; padding: 0;
-}
-.main-tab {
-  padding: 8px 16px; font-size: 14px; color: var(--slate-500); cursor: pointer;
-  border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500;
-  display: flex; align-items: center; gap: 6px;
-}
-.main-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
-.main-tab .cnt {
-  background: var(--slate-200); color: var(--slate-600); border-radius: 10px;
-  padding: 1px 7px; font-size: 11px; font-weight: 700;
-}
-.main-tab.active .cnt { background: var(--indigo-100); color: var(--indigo-700); }
-.main-tab .warn-cnt {
-  background: var(--red-100); color: var(--red-700); border-radius: 10px;
-  padding: 1px 7px; font-size: 11px; font-weight: 700;
-}
-.tab-panel { display: none; padding: 20px 24px; }
-.tab-panel.active { display: block; }
-/* Decision 1: Dense connection table -- ~44px row height */
-.conn-table {
-  width: 100%; border-collapse: collapse;
-  background: white; border: 1px solid var(--border); border-radius: 10px;
-  overflow: hidden;
-}
-.conn-table thead tr {
-  background: var(--slate-50); border-bottom: 1px solid var(--border);
-}
-.conn-table th {
-  padding: 9px 14px; font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--slate-500); text-align: left;
-}
-.conn-table td {
-  padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
-  vertical-align: middle; font-size: 13px;
-}
-.conn-table tbody tr:last-child td { border-bottom: none; }
-.conn-table tbody tr {
-  transition: background 0.1s; cursor: pointer;
-}
-.conn-table tbody tr:hover { background: var(--slate-50); }
-.conn-table tbody tr.row-issue { border-left: 3px solid var(--red-400); }
-.conn-table tbody tr.row-warning { border-left: 3px solid var(--amber-400); }
-
-.conn-icon-sm {
-  width: 28px; height: 28px; border-radius: 6px; background: var(--slate-100);
-  display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 10px; color: var(--slate-500); flex-shrink: 0;
-  vertical-align: middle; margin-right: 8px;
-}
-.conn-name-cell { display: flex; align-items: center; gap: 0; }
-.conn-service-name { font-size: 13px; font-weight: 600; color: var(--slate-800); }
-.conn-service-desc { font-size: 11px; color: var(--slate-400); }
-
-/* Filter chips (pill-style, single-select) */
-.conn-filter-chips { display: flex; gap: 6px; }
-.conn-chip {
-  padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
-  border: 1px solid var(--slate-200); color: var(--slate-600);
-  background: white; cursor: pointer; transition: all 0.12s;
-}
-.conn-chip:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
-.conn-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
-
-/* Overflow menu button */
-.overflow-btn {
-  background: transparent; border: none; cursor: pointer;
-  color: var(--slate-400); font-size: 16px; padding: 2px 6px;
-  border-radius: 4px; transition: all 0.12s; line-height: 1;
-}
-.overflow-btn:hover { background: var(--slate-100); color: var(--slate-700); }
-
-/* Available row connect button */
-.connect-row-btn {
-  font-size: 12px; font-weight: 500; color: var(--indigo-600);
-  background: var(--indigo-50); border: 1px solid var(--indigo-200);
-  border-radius: 6px; padding: 4px 12px; cursor: pointer;
-  transition: all 0.12s;
-}
-.connect-row-btn:hover { background: var(--indigo-100); }
-
-/* Compat with old chips still in drawers */
-.cred-chip {
-  display: inline-flex; align-items: center; gap: 3px;
-  border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px;
-  font-size: 11px; color: var(--slate-600); background: var(--slate-50);
-}
-.cred-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
-.cred-chip .dot.green { background: var(--emerald-500); }
-.cred-chip .dot.amber { background: var(--amber-500); }
-.cred-chip .dot.red { background: var(--red-500); }
-.cred-chip .dot.slate { background: var(--slate-400); }
-/* Issues tab */
-.issues-header {
-  display: flex; gap: 12px; margin-bottom: 20px;
-}
-.severity-card {
-  border-radius: 8px; border: 1px solid; padding: 12px 16px; text-align: center; min-width: 100px;
-}
-.severity-card.critical { background: var(--red-50); border-color: var(--red-200); }
-.severity-card.warning { background: var(--amber-50); border-color: var(--amber-200); }
-.severity-card.info { background: var(--slate-50); border-color: var(--border); }
-.severity-card .num { font-size: 28px; font-weight: 700; }
-.severity-card.critical .num { color: var(--red-600); }
-.severity-card.warning .num { color: var(--amber-600); }
-.severity-card.info .num { color: var(--slate-500); }
-.severity-card .lbl { font-size: 11px; color: var(--slate-500); margin-top: 2px; }
-.finding-card {
-  background: white; border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 16px; margin-bottom: 10px;
-}
-.finding-card.critical { border-left: 3px solid var(--red-500); }
-.finding-card.warning { border-left: 3px solid var(--amber-400); }
-.finding-card.info { border-left: 3px solid var(--sky-400); }
-.finding-title { font-size: 14px; font-weight: 600; color: var(--slate-800); }
-.finding-detail { font-size: 12px; color: var(--slate-500); margin-top: 4px; }
-.finding-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
-/* Drawer */
-.drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; }
-.drawer-overlay.open { display: block; }
-.drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 560px; background: white; z-index: 101; display: flex; flex-direction: column; box-shadow: -4px 0 24px rgba(0,0,0,0.15); transform: translateX(100%); transition: transform 0.25s; }
-.drawer.open { transform: translateX(0); }
-.drawer-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-.drawer-header h3 { font-size: 16px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
-.drawer-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 20px; flex-shrink: 0; }
-.drawer-tab { padding: 8px 12px; font-size: 13px; color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.drawer-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
-.drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
-.drawer-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-.drawer-section { margin-bottom: 20px; }
-.drawer-section h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate-500); margin: 0 0 10px; }
-.drawer-field { margin-bottom: 10px; }
-.drawer-field label { display: block; font-size: 12px; font-weight: 600; color: var(--slate-600); margin-bottom: 4px; }
-.drawer-field .val { font-size: 13px; color: var(--slate-800); }
-.drawer-field .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--slate-100); padding: 4px 8px; border-radius: 4px; word-break: break-all; }
-.agent-access-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px 0;
-  border-bottom: 1px solid var(--slate-100);
-}
-.agent-access-row:last-child { border-bottom: none; }
-.audit-row {
-  display: flex; gap: 10px; padding: 8px 0;
-  border-bottom: 1px solid var(--slate-100); font-size: 12px;
-}
-.audit-row:last-child { border-bottom: none; }
-.audit-row .time { color: var(--slate-400); white-space: nowrap; font-size: 11px; }
-.cred-type-block {
-  border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 10px;
-}
-.cred-type-block .type-hdr {
-  font-size: 12px; font-weight: 700; color: var(--slate-700); margin-bottom: 8px;
-  display: flex; align-items: center; justify-content: space-between;
-}
-.cred-input {
-  display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; align-items: center; font-size: 12px;
-}
-.cred-input label { color: var(--slate-500); font-weight: 600; }
-.cred-input input {
-  border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px;
-  font-size: 12px; color: var(--slate-700); width: 100%;
-}
-.cred-input input[type="password"] { font-family: monospace; letter-spacing: 0.1em; }
-.sync-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px 0;
-  border-bottom: 1px solid var(--slate-100); font-size: 12px;
-}
-.sync-row:last-child { border-bottom: none; }
-
-/* App logo icons -- 24px inline SVG monograms (Round 7b-1) */
-.app-logo {
-  width: 28px; height: 28px; border-radius: 6px;
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0; vertical-align: middle; margin-right: 8px;
-  overflow: hidden;
-}
 </style>
 </head>
 <body>
 
-<div class="app-shell">
-  <!-- Sidebar (three-mode shared) -->
-  <div id="sidebar-mount"></div>
-  <script src="_sidebar.js"></script>
-  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'integrations.html');</script>
+<!-- Sidebar -->
+<script src="_sidebar.js"></script>
 
-  <div class="main">
-    <div class="replaces-bar">
-      Replaces 2 pages:
-      <a href="before-integrations.html">IntegrationsAndCredentialsPage + AdminHealthFindingsPage</a>
+<div class="main-content">
+
+<!-- Replaces bar -->
+<div class="replaces-bar">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/></svg>
+  Replaces: <a href="before-integrations.html">IntegrationsAndCredentialsPage + AdminHealthFindingsPage</a>
+</div>
+
+<!-- Page header -->
+<div class="page-header">
+  <div>
+    <div class="page-title">Connections</div>
+    <div class="page-subtitle">Acme Corp &middot; 8 connected &middot; 3 with errors</div>
+  </div>
+  <div class="connect-dropdown-wrap">
+    <button class="btn btn-primary" onclick="toggleConnectDropdown(event)">
+      + Connect
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="connect-dropdown-menu" id="connect-dropdown">
+      <div class="connect-drop-item" onclick="closeDropdown();showAddModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Connect an app
+      </div>
+      <div class="connect-drop-item" onclick="closeDropdown();switchToLoginsAndAddLogin()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        Add a web login
+      </div>
     </div>
-
-    <div class="page-header">
-      <div>
-        <div class="page-title">Connections</div>
-        <div class="page-subtitle">Services, credentials, and integration health</div>
-      </div>
-      <button class="btn btn-primary" onclick="openDrawer('new-conn')">Connect service</button>
-    </div>
-
-    <div class="main-tabs">
-      <button class="main-tab active" onclick="switchConnTab('connections',this)">
-        Connections <span class="cnt">8</span>
-      </button>
-      <button class="main-tab" onclick="switchConnTab('issues',this)">
-        Issues <span class="warn-cnt">3</span>
-      </button>
-    </div>
-
-    <!-- Connections tab -->
-    <div class="tab-panel active" id="tab-connections">
-      <!-- Filter chips + search (Decision 1) -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-        <div class="conn-filter-chips" id="conn-filter-chips">
-          <button class="conn-chip active" onclick="setConnFilter('all',this)">All</button>
-          <button class="conn-chip" onclick="setConnFilter('crm',this)">CRMs</button>
-          <button class="conn-chip" onclick="setConnFilter('comms',this)">Communications</button>
-          <button class="conn-chip" onclick="setConnFilter('analytics',this)">Analytics</button>
-          <button class="conn-chip" onclick="setConnFilter('other',this)">Other</button>
-        </div>
-        <div class="search-wrap" style="width:240px;">
-          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-box" placeholder="Search connections...">
-        </div>
-      </div>
-
-      <!-- Dense table (sort: Connected first, then Reauth needed, then Available) -->
-      <table class="conn-table" id="conn-table">
-        <thead>
-          <tr>
-            <th style="width:220px;">Service</th>
-            <th style="width:160px;">Status</th>
-            <th style="width:130px;">Scope</th>
-            <th style="width:120px;">Last used</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- Connected rows first -->
-          <tr data-category="comms" onclick="openDrawer('gmail')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#fce8e6;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#fce8e6"/><path d="M4 7h16v12H4z" fill="white" stroke="#fce8e6"/><path d="M4 7l8 6 8-6" stroke="#c5221f" stroke-width="1.8" fill="none"/><path d="M4 7v12h16V7L12 13 4 7z" fill="#fce8e6"/><path d="M4 7l8 6 8-6V7H4z" fill="#ea4335"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Gmail</div>
-                  <div class="conn-service-desc">Email sending and reading</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">2m ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn" title="More actions">&#8942;</button>
-            </td>
-          </tr>
-          <tr data-category="crm" onclick="openDrawer('salesforce')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#e8f4fd;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3.5C9.5 1.5 6 2 4.5 4.5 3 4 1.5 5 1.5 6.5 0 7 0 9 1.5 9.5 1 11.5 2.5 13 4.5 13h15c1.7 0 3-1.3 3-3 0-1.4-1-2.6-2.4-2.9C20.5 5.1 18.8 4 17 4c-1 0-2 .3-2.7.9C13.7 4 12.9 3.6 12 3.5z" fill="#0176d3"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Salesforce</div>
-                  <div class="conn-service-desc">CRM data read and write</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">14m ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-          <tr data-category="other" onclick="openDrawer('hubspot')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#fff3ec;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="16" cy="8" r="2.5" fill="#ff7a59"/><path d="M16 10.5V15" stroke="#ff7a59" stroke-width="2"/><path d="M10 15h12v2a3 3 0 0 1-3 3H13a3 3 0 0 1-3-3v-2z" fill="#ff7a59"/><circle cx="8" cy="15" r="3" fill="#ff7a59"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">HubSpot</div>
-                  <div class="conn-service-desc">Marketing and CRM sync</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">1h ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-          <tr data-category="other" onclick="openDrawer('portal')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#f0fdf4;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/><path d="M8 12h8M12 8v8" stroke="#16a34a" stroke-width="2" stroke-linecap="round"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Client portal</div>
-                  <div class="conn-service-desc">Acme Corp internal reporting</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">This client</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">3h ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-          <tr data-category="analytics" onclick="openDrawer('internal-api')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#eff6ff;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/><path d="M7 12h2l2-5 2 10 2-5h2" stroke="#1d4ed8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Internal data API</div>
-                  <div class="conn-service-desc">Company analytics and reporting</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">Yesterday</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-
-          <!-- Reauth needed rows second -->
-          <tr class="row-issue" data-category="other" onclick="openDrawer('s3')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#fdf2e9;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3l9 4.5v9L12 21l-9-4.5v-9L12 3z" fill="#ff9900" opacity=".18" stroke="#ff9900" stroke-width="1.5"/><text x="12" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="#e67e22" font-family="Arial,sans-serif">S3</text></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">AWS S3</div>
-                  <div class="conn-service-desc">File storage and retrieval</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-red"><span class="status-dot dot-red" style="margin-right:4px;"></span>Reauth needed</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">3 days ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-          <tr class="row-warning" data-category="other" onclick="openDrawer('zapier')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#fff5f0;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#fff5f0"/><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="900" fill="#ff4a00" font-family="Arial,sans-serif">Z</text></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Zapier</div>
-                  <div class="conn-service-desc">Automation workflow trigger</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-amber"><span class="status-dot dot-amber" style="margin-right:4px;"></span>Reauth needed</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">6h ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-          <tr class="row-warning" data-category="other" onclick="openDrawer('legal')">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#f5f3ff;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#ede9fe"/><path d="M7 6h10M7 10h10M7 14h7" stroke="#7c3aed" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="17" r="3" fill="#7c3aed"/><path d="M15 17l.8.8 1.8-1.8" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">LegalDocs Pro</div>
-                  <div class="conn-service-desc">Contract retrieval and status</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-amber"><span class="status-dot dot-amber" style="margin-right:4px;"></span>Reauth needed</span></td>
-            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
-            <td><span style="font-size:12px;color:var(--slate-500);">2 days ago</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="overflow-btn">&#8942;</button>
-            </td>
-          </tr>
-
-          <!-- Available rows last (MCP servers surface here under "Other") -->
-          <tr data-category="comms" onclick="void(0)" style="opacity:0.75;">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#f0f9ff;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#f0f9ff"/><rect x="6" y="6" width="4" height="4" rx="1" fill="#e01e5a"/><rect x="14" y="6" width="4" height="4" rx="1" fill="#36c5f0"/><rect x="6" y="14" width="4" height="4" rx="1" fill="#2eb67d"/><rect x="14" y="14" width="4" height="4" rx="1" fill="#ecb22e"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Slack</div>
-                  <div class="conn-service-desc">Team messaging and notifications</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-slate">Available</span></td>
-            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
-            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="connect-row-btn" onclick="openDrawer('new-conn')">+ Connect</button>
-            </td>
-          </tr>
-          <tr data-category="analytics" onclick="void(0)" style="opacity:0.75;">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#f5f5f5;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#f5f5f5"/><path d="M5 18l4-8 3 5 3-3 4 6" stroke="none"/><rect x="5" y="10" width="3.5" height="8" rx="1.5" fill="#f4b400"/><rect x="10" y="6" width="3.5" height="12" rx="1.5" fill="#34a853"/><rect x="15" y="3" width="3.5" height="15" rx="1.5" fill="#4285f4"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Google Analytics</div>
-                  <div class="conn-service-desc">Website and campaign analytics</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-slate">Available</span></td>
-            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
-            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="connect-row-btn" onclick="openDrawer('new-conn')">+ Connect</button>
-            </td>
-          </tr>
-          <tr data-category="other" onclick="void(0)" style="opacity:0.75;">
-            <td>
-              <div class="conn-name-cell">
-                <span class="app-logo" style="background:#f0fdf4;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#dcfce7"/><path d="M7 8h10M7 12h10M7 16h6" stroke="#059669" stroke-width="1.8" stroke-linecap="round"/></svg>
-                </span>
-                <div>
-                  <div class="conn-service-name">Filesystem server</div>
-                  <div class="conn-service-desc">Local file read/write via tool server</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="badge badge-slate">Available</span></td>
-            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
-            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
-            <td onclick="event.stopPropagation()" style="text-align:right;">
-              <button class="connect-row-btn" onclick="openDrawer('new-conn')">+ Connect</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-
-    <!-- Issues tab -->
-    <div class="tab-panel" id="tab-issues">
-      <div class="issues-header">
-        <div class="severity-card critical">
-          <div class="num">1</div>
-          <div class="lbl">Critical</div>
-        </div>
-        <div class="severity-card warning">
-          <div class="num">2</div>
-          <div class="lbl">Warning</div>
-        </div>
-        <div class="severity-card info">
-          <div class="num">3</div>
-          <div class="lbl">Info</div>
-        </div>
-        <div style="margin-left:auto;align-self:center;">
-          <button class="btn btn-secondary">Run health audit</button>
-        </div>
-      </div>
-
-      <div class="finding-card critical">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <span class="badge badge-red">Critical</span>
-          <div class="finding-title">AWS S3 API key expiring in 3 days</div>
-        </div>
-        <div class="finding-detail">The API key for AWS S3 expires on 2026-05-09. 4 agents use this connection (Outreach Agent, CRM Agent, Content Agent, Backup Agent). Failure to renew will halt data reads and writes for all affected agents.</div>
-        <div class="finding-actions">
-          <button class="btn btn-primary btn-sm" onclick="openDrawer('s3')">Renew credential</button>
-          <button class="btn btn-secondary btn-sm">Dismiss</button>
-          <span style="font-size:11px;color:var(--slate-400);margin-left:auto;">Found 1h ago</span>
-        </div>
-      </div>
-
-      <div class="finding-card warning">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <span class="badge badge-amber">Warning</span>
-          <div class="finding-title">Zapier webhook latency above threshold</div>
-        </div>
-        <div class="finding-detail">Average response time is 8.4s over the past 24 hours, above the 5s threshold. This is causing delays in the Lead Score Update automation. No failures recorded, but sustained degradation may cause timeouts.</div>
-        <div class="finding-actions">
-          <button class="btn btn-secondary btn-sm" onclick="openDrawer('zapier')">View connection</button>
-          <button class="btn btn-secondary btn-sm">Mark resolved</button>
-          <span style="font-size:11px;color:var(--slate-400);margin-left:auto;">Found 6h ago</span>
-        </div>
-      </div>
-
-      <div class="finding-card warning">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <span class="badge badge-amber">Warning</span>
-          <div class="finding-title">LegalDocs Pro cookie session expiring</div>
-        </div>
-        <div class="finding-detail">The cookie session used to access LegalDocs Pro will expire within 48 hours. A manual login refresh is required. Contract Retrieval Agent will fail if the session is not refreshed.</div>
-        <div class="finding-actions">
-          <button class="btn btn-secondary btn-sm" onclick="openDrawer('legal')">Refresh session</button>
-          <button class="btn btn-secondary btn-sm">Mark resolved</button>
-          <span style="font-size:11px;color:var(--slate-400);margin-left:auto;">Found 2h ago</span>
-        </div>
-      </div>
-
-      <div class="finding-card info">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <span class="badge badge-sky">Info</span>
-          <div class="finding-title">Salesforce OAuth token last refreshed 29 days ago</div>
-        </div>
-        <div class="finding-detail">Tokens refresh automatically but reviewing rotation policy is recommended. Tokens expire every 30 days if not used. Current usage: daily.</div>
-        <div class="finding-actions">
-          <button class="btn btn-secondary btn-sm">Mark resolved</button>
-          <span style="font-size:11px;color:var(--slate-400);margin-left:auto;">Found 1d ago</span>
-        </div>
-      </div>
-
-    </div>
-
   </div>
 </div>
 
-<!-- ====== DRAWER: Gmail ====== -->
-<div class="drawer-overlay" id="overlay-gmail" onclick="closeDrawer('gmail')"></div>
-<div class="drawer" id="drawer-gmail">
-  <div class="drawer-header">
-    <div style="width:36px;height:36px;border-radius:8px;background:#fce8e6;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#c5221f;">GM</div>
-    <h3>Gmail</h3>
-    <span class="badge badge-green">Healthy</span>
-    <button class="btn btn-ghost" style="margin-left:8px;" onclick="closeDrawer('gmail')">&#10005;</button>
+<!-- Universal search -->
+<div class="universal-search-wrap">
+  <div class="universal-search-inner">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input class="universal-search-box" id="universal-search" type="search" placeholder="Search apps and logins..." oninput="handleUniversalSearch(this.value)">
   </div>
-  <div class="drawer-tabs" id="drawer-tabs-gmail">
-    <button class="drawer-tab active" onclick="switchDTab('gmail','cred',this)">Credentials</button>
-    <button class="drawer-tab" onclick="switchDTab('gmail','agents',this)">Agent access</button>
-    <button class="drawer-tab" onclick="switchDTab('gmail','sync',this)">Data sync</button>
-    <button class="drawer-tab" onclick="switchDTab('gmail','issues',this)">Issues <span style="background:var(--slate-100);color:var(--slate-500);border-radius:8px;padding:0 5px;font-size:10px;margin-left:2px;">0</span></button>
-    <button class="drawer-tab" onclick="switchDTab('gmail','audit',this)">Audit log</button>
-  </div>
-  <div class="drawer-body">
-    <div id="dtab-gmail-cred">
-      <div class="cred-type-block">
-        <div class="type-hdr">
-          <span>OAuth 2.0 (workspace)</span>
-          <span class="badge badge-green">Valid</span>
-        </div>
-        <div class="drawer-field">
-          <label>Account</label>
-          <div class="val">workspace@acmecorp.com</div>
-        </div>
-        <div class="drawer-field">
-          <label>Scopes</label>
-          <div class="val" style="font-size:12px;">gmail.send, gmail.readonly, gmail.compose</div>
-        </div>
-        <div class="drawer-field">
-          <label>Token refresh</label>
-          <div class="val">Automatic (last refreshed 2h ago)</div>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button class="btn btn-secondary btn-sm">Reauthorise</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red-600);">Remove</button>
-        </div>
-      </div>
-      <div class="cred-type-block">
-        <div class="type-hdr">
-          <span>SMTP app password</span>
-          <span class="badge badge-green">Valid</span>
-        </div>
-        <div class="cred-input">
-          <label>SMTP host</label><input value="smtp.gmail.com" readonly>
-          <label>Port</label><input value="587" readonly>
-          <label>Username</label><input value="outreach@acmecorp.com" readonly>
-          <label>App password</label><input type="password" value="apppassword1234" readonly>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button class="btn btn-secondary btn-sm">Edit</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red-600);">Remove</button>
-        </div>
-      </div>
-      <button class="btn btn-secondary" style="width:100%;margin-top:4px;">+ Add another credential type</button>
-    </div>
-    <div id="dtab-gmail-agents" style="display:none;">
-      <div class="drawer-section">
-        <h4>Agents with access to Gmail tools</h4>
-        <div class="agent-access-row">
-          <div style="width:28px;height:28px;border-radius:6px;background:var(--indigo-100);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--indigo-700);">OA</div>
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;">Outreach Agent</div>
-            <div style="font-size:11px;color:var(--slate-500);">Tools: send_email, read_inbox</div>
-          </div>
-          <span class="badge badge-green">Active</span>
-        </div>
-        <div class="agent-access-row">
-          <div style="width:28px;height:28px;border-radius:6px;background:var(--violet-100);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--violet-700);">CA</div>
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;">Content Agent</div>
-            <div style="font-size:11px;color:var(--slate-500);">Tools: send_email</div>
-          </div>
-          <span class="badge badge-green">Active</span>
-        </div>
-        <div class="agent-access-row">
-          <div style="width:28px;height:28px;border-radius:6px;background:var(--emerald-100);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--emerald-700);">HA</div>
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;">HR Onboarding Agent</div>
-            <div style="font-size:11px;color:var(--slate-500);">Tools: send_email</div>
-          </div>
-          <span class="badge badge-green">Active</span>
-        </div>
-      </div>
-    </div>
-    <div id="dtab-gmail-sync" style="display:none;">
-      <div class="drawer-section">
-        <h4>Data sync</h4>
-        <div class="sync-row">
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;">Inbox read (unread emails)</div>
-            <div style="font-size:11px;color:var(--slate-500);">Syncs to knowledge: client.acme.emails</div>
-          </div>
-          <span class="badge badge-green">Every 15m</span>
-        </div>
-        <div class="sync-row">
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;">Sent items log</div>
-            <div style="font-size:11px;color:var(--slate-500);">Syncs to memory: outreach history</div>
-          </div>
-          <span class="badge badge-slate">On demand</span>
-        </div>
-      </div>
-    </div>
-    <div id="dtab-gmail-issues" style="display:none;">
-      <div style="text-align:center;padding:32px;color:var(--slate-400);">
-        <div style="font-size:24px;margin-bottom:8px;">&#10003;</div>
-        <div style="font-size:14px;font-weight:600;color:var(--slate-600);">No issues</div>
-        <div style="font-size:12px;margin-top:4px;">Gmail connection is healthy</div>
-      </div>
-    </div>
-    <div id="dtab-gmail-audit" style="display:none;">
-      <div class="drawer-section">
-        <h4>Audit log</h4>
-        <div class="audit-row">
-          <div style="flex:1">OAuth token refreshed automatically</div>
-          <div class="time">Today 12:14</div>
-        </div>
-        <div class="audit-row">
-          <div style="flex:1">Outreach Agent used send_email (3 calls)</div>
-          <div class="time">Today 11:47</div>
-        </div>
-        <div class="audit-row">
-          <div style="flex:1">SMTP password updated by admin@acme.com</div>
-          <div class="time">Yesterday 09:22</div>
-        </div>
-        <div class="audit-row">
-          <div style="flex:1">OAuth reauthorised by admin@acme.com</div>
-          <div class="time">Apr 28, 2026</div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="drawer-footer">
-    <button class="btn btn-ghost" style="color:var(--red-600);">Disconnect Gmail</button>
-    <button class="btn btn-secondary" onclick="closeDrawer('gmail')">Close</button>
+  <div class="cross-tab-chip" id="cross-tab-chip" onclick="jumpCrossTab()">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+    <span id="cross-tab-text">Also found 0 matches in Logins</span>
   </div>
 </div>
 
-<!-- ====== DRAWER: AWS S3 (shows expiry issue) ====== -->
-<div class="drawer-overlay" id="overlay-s3" onclick="closeDrawer('s3')"></div>
-<div class="drawer" id="drawer-s3">
-  <div class="drawer-header">
-    <div style="width:36px;height:36px;border-radius:8px;background:#fdf2e9;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#e67e22;">S3</div>
-    <h3>AWS S3</h3>
-    <span class="badge badge-red">Expiring</span>
-    <button class="btn btn-ghost" style="margin-left:8px;" onclick="closeDrawer('s3')">&#10005;</button>
+<!-- Sub-tabs -->
+<div class="sub-tabs">
+  <div class="sub-tab active" id="subtab-integrations" onclick="switchSubTab('integrations')">Integrations</div>
+  <div class="sub-tab" id="subtab-logins" onclick="switchSubTab('logins')">Logins</div>
+</div>
+
+<!-- ======================================================= -->
+<!-- INTEGRATIONS TAB -->
+<!-- ======================================================= -->
+<div class="tab-panel active" id="panel-integrations">
+
+  <!-- Connected section -->
+  <div class="section-hdr">Connected <span class="count">(8)</span></div>
+  <div class="app-card-grid" id="connected-grid">
+
+    <!-- Gmail: Sign in, green -->
+    <div class="app-card" data-search="gmail google workspace sign in acme outreach">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'Gmail')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#ea4335;">G</div>
+        <div class="app-card-meta">
+          <div class="app-name">Gmail / Google Workspace</div>
+          <div class="app-label">Acme Outreach</div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-g"></span>
+        <span>Connected</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Verified 2h ago</span>
+      </div>
+      <span class="app-method-chip">Sign in</span>
+    </div>
+
+    <!-- Slack: Sign in, green -->
+    <div class="app-card" data-search="slack sign in acme sales channel">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'Slack')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#4a154b;">S</div>
+        <div class="app-card-meta">
+          <div class="app-name">Slack</div>
+          <div class="app-label">Acme #sales channel</div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-g"></span>
+        <span>Connected</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Verified 3h ago</span>
+      </div>
+      <span class="app-method-chip">Sign in</span>
+    </div>
+
+    <!-- HubSpot: Sign in, green -->
+    <div class="app-card" data-search="hubspot crm sign in acme crm">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'HubSpot')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#ff7a59;">H</div>
+        <div class="app-card-meta">
+          <div class="app-name">HubSpot</div>
+          <div class="app-label">Acme CRM</div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-g"></span>
+        <span>Connected</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Verified 1h ago</span>
+      </div>
+      <span class="app-method-chip">Sign in</span>
+    </div>
+
+    <!-- GoHighLevel: Sign in, green -->
+    <div class="app-card" data-search="gohighlevel sign in acme ghl location">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'GoHighLevel')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#00b2ff;">GHL</div>
+        <div class="app-card-meta">
+          <div class="app-name">GoHighLevel</div>
+          <div class="app-label">Acme GHL location</div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-g"></span>
+        <span>Connected</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Verified 30m ago</span>
+      </div>
+      <span class="app-method-chip">Sign in</span>
+    </div>
+
+    <!-- Stripe: Key, green -->
+    <div class="app-card" data-search="stripe payments key acme live">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'Stripe')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#635bff;">St</div>
+        <div class="app-card-meta">
+          <div class="app-name">Stripe</div>
+          <div class="app-label">Acme Live</div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-g"></span>
+        <span>Connected</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Verified 5h ago</span>
+      </div>
+      <span class="app-method-chip">Key</span>
+    </div>
+
+    <!-- Google Drive: Sign in, green -->
+    <div class="app-card" data-search="google drive storage sign in">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'Google Drive')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#0f9d58;">D</div>
+        <div class="app-card-meta">
+          <div class="app-name">Google Drive</div>
+          <div class="app-label"></div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-g"></span>
+        <span>Connected</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Verified 4h ago</span>
+      </div>
+      <span class="app-method-chip">Sign in</span>
+    </div>
+
+    <!-- Salesforce: Sign in, amber warning -->
+    <div class="app-card card-warning" data-search="salesforce crm sign in">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'Salesforce')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#00a1e0;">SF</div>
+        <div class="app-card-meta">
+          <div class="app-name">Salesforce</div>
+          <div class="app-label"></div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-a"></span>
+        <span style="color:var(--amber-700);font-weight:500;">Token expired</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Reconnect needed</span>
+      </div>
+      <span class="app-method-chip">Sign in</span>
+    </div>
+
+    <!-- Linear: Key, red error -->
+    <div class="app-card card-error" data-search="linear key issue tracker">
+      <button class="app-overflow-btn" onclick="openCardCtx(event,'Linear')" title="More options">&#8942;</button>
+      <div class="app-card-top">
+        <div class="app-logo" style="background:#5e6ad2;">Li</div>
+        <div class="app-card-meta">
+          <div class="app-name">Linear</div>
+          <div class="app-label"></div>
+        </div>
+      </div>
+      <div class="app-status-row">
+        <span class="dot-r"></span>
+        <span style="color:var(--red-600);font-weight:500;">Invalid key</span>
+        <span style="color:var(--slate-300);">&middot;</span>
+        <span>Update your key</span>
+      </div>
+      <span class="app-method-chip">Key</span>
+    </div>
+
+  </div><!-- /connected-grid -->
+
+  <!-- Add a connection section -->
+  <div class="section-hdr" style="margin-top:4px;">Add a connection</div>
+
+  <!-- Filter chips -->
+  <div class="filter-chips-row" id="add-filter-chips">
+    <button class="filter-chip active" onclick="setAddFilter('all',this)">All</button>
+    <button class="filter-chip" onclick="setAddFilter('email',this)">Email</button>
+    <button class="filter-chip" onclick="setAddFilter('crm',this)">CRM</button>
+    <button class="filter-chip" onclick="setAddFilter('messaging',this)">Messaging</button>
+    <button class="filter-chip" onclick="setAddFilter('payments',this)">Payments</button>
+    <button class="filter-chip" onclick="setAddFilter('storage',this)">Storage</button>
+    <button class="filter-chip" onclick="setAddFilter('custom',this)">Custom</button>
   </div>
-  <div class="drawer-tabs" id="drawer-tabs-s3">
-    <button class="drawer-tab active" onclick="switchDTab('s3','cred',this)">Credentials</button>
-    <button class="drawer-tab" onclick="switchDTab('s3','agents',this)">Agent access</button>
-    <button class="drawer-tab" onclick="switchDTab('s3','sync',this)">Data sync</button>
-    <button class="drawer-tab" onclick="switchDTab('s3','issues',this)">Issues <span style="background:var(--red-100);color:var(--red-700);border-radius:8px;padding:0 5px;font-size:10px;margin-left:2px;">1</span></button>
-    <button class="drawer-tab" onclick="switchDTab('s3','audit',this)">Audit log</button>
+
+  <div class="app-card-grid" id="add-grid">
+
+    <!-- Email -->
+    <div class="avail-card" data-category="email" data-search="outlook microsoft email">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#0078d4;font-size:12px;">OL</div>
+        <div class="avail-name">Outlook</div>
+      </div>
+      <div class="avail-desc">Send and receive email using Microsoft Outlook or Office 365.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Outlook')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="email" data-search="protonmail email secure">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#6d4aff;font-size:12px;">PM</div>
+        <div class="avail-name">ProtonMail</div>
+      </div>
+      <div class="avail-desc">Connect a ProtonMail inbox for privacy-first email handling.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('ProtonMail')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="email" data-search="mailchimp email marketing campaigns">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#ffe01b;font-size:11px;color:#241c15;">MC</div>
+        <div class="avail-name">Mailchimp</div>
+      </div>
+      <div class="avail-desc">Read campaign stats and manage list members in Mailchimp.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Mailchimp')">+ Connect</button>
+    </div>
+
+    <!-- CRM -->
+    <div class="avail-card" data-category="crm" data-search="pipedrive crm sales pipeline">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#2e7d32;font-size:12px;">PD</div>
+        <div class="avail-name">Pipedrive</div>
+      </div>
+      <div class="avail-desc">Read deals and contacts from your Pipedrive sales pipeline.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Pipedrive')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="crm" data-search="close.io crm sales">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#1c6ef2;font-size:11px;">CL</div>
+        <div class="avail-name">Close.io</div>
+      </div>
+      <div class="avail-desc">Sync leads, contacts, and activities from Close CRM.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Close.io')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="crm" data-search="copper crm google workspace">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#f97316;font-size:11px;">Cu</div>
+        <div class="avail-name">Copper</div>
+      </div>
+      <div class="avail-desc">CRM built for Google Workspace. Read and update contacts.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Copper')">+ Connect</button>
+    </div>
+
+    <!-- Messaging -->
+    <div class="avail-card" data-category="messaging" data-search="microsoft teams messaging collaboration">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#5059c9;font-size:11px;">MS</div>
+        <div class="avail-name">Microsoft Teams</div>
+      </div>
+      <div class="avail-desc">Post messages and notifications to Teams channels.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Microsoft Teams')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="messaging" data-search="discord messaging community">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#5865f2;font-size:11px;">Di</div>
+        <div class="avail-name">Discord</div>
+      </div>
+      <div class="avail-desc">Send messages and notifications to Discord servers and channels.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Discord')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="messaging" data-search="intercom customer messaging support">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#1f8ded;font-size:11px;">In</div>
+        <div class="avail-name">Intercom</div>
+      </div>
+      <div class="avail-desc">Read and send customer conversations from your Intercom inbox.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Intercom')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="messaging" data-search="twilio sms text messaging">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#f22f46;font-size:11px;">Tw</div>
+        <div class="avail-name">Twilio (SMS)</div>
+      </div>
+      <div class="avail-desc">Send and receive SMS messages via Twilio.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Twilio')">+ Connect</button>
+    </div>
+
+    <!-- Payments -->
+    <div class="avail-card" data-category="payments" data-search="paypal payments checkout">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#003087;font-size:11px;">PP</div>
+        <div class="avail-name">PayPal</div>
+      </div>
+      <div class="avail-desc">Read transactions and manage PayPal account activity.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('PayPal')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="payments" data-search="square payments pos">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#000000;font-size:11px;">Sq</div>
+        <div class="avail-name">Square</div>
+      </div>
+      <div class="avail-desc">Access payments, invoices, and customer data from Square.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Square')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="payments" data-search="gocardless direct debit payments">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#009de0;font-size:11px;">GC</div>
+        <div class="avail-name">GoCardless</div>
+      </div>
+      <div class="avail-desc">Manage direct debit mandates and payment collections.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('GoCardless')">+ Connect</button>
+    </div>
+
+    <!-- Storage -->
+    <div class="avail-card" data-category="storage" data-search="dropbox file storage cloud">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#0061ff;font-size:11px;">Db</div>
+        <div class="avail-name">Dropbox</div>
+      </div>
+      <div class="avail-desc">Read and write files in Dropbox folders.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Dropbox')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="storage" data-search="box file storage enterprise">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#0061d5;font-size:12px;">Bx</div>
+        <div class="avail-name">Box</div>
+      </div>
+      <div class="avail-desc">Access and manage enterprise files stored in Box.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('Box')">+ Connect</button>
+    </div>
+
+    <div class="avail-card" data-category="storage" data-search="onedrive microsoft file storage">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:#0078d4;font-size:11px;">OD</div>
+        <div class="avail-name">OneDrive</div>
+      </div>
+      <div class="avail-desc">Read and write files in Microsoft OneDrive and SharePoint.</div>
+      <button class="avail-connect-btn" onclick="startConnecting('OneDrive')">+ Connect</button>
+    </div>
+
+    <!-- Custom footer card -->
+    <div class="avail-card" data-category="custom" data-search="custom web login other app">
+      <div class="avail-card-top">
+        <div class="app-logo" style="background:var(--slate-500);font-size:11px;">+</div>
+        <div class="avail-name">Don't see your app?</div>
+      </div>
+      <div class="avail-desc">Use a web login to connect any website with a username and password.</div>
+      <button class="avail-connect-btn" onclick="switchToLoginsAndAddLogin()">Add a web login</button>
+    </div>
+
+  </div><!-- /add-grid -->
+</div><!-- /panel-integrations -->
+
+<!-- ======================================================= -->
+<!-- LOGINS TAB -->
+<!-- ======================================================= -->
+<div class="tab-panel" id="panel-logins">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div class="section-hdr" style="margin-bottom:0;">Web logins <span class="count">(3)</span></div>
+    <button class="btn btn-primary btn-sm" onclick="openAddLoginModal()">+ Add web login</button>
   </div>
-  <div class="drawer-body">
-    <div id="dtab-s3-cred">
-      <div style="background:var(--red-50);border:1px solid var(--red-200);border-radius:6px;padding:10px 12px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start;">
-        <span style="color:var(--red-600);font-size:16px;">&#9888;</span>
-        <div style="font-size:12px;color:var(--red-800);">
-          <strong>API key expiring in 3 days</strong> (2026-05-09). 4 agents will lose access. Renew now to avoid disruption.
-        </div>
-      </div>
-      <div class="cred-type-block" style="border-color:var(--red-200);">
-        <div class="type-hdr">
-          <span>API key</span>
-          <span class="badge badge-red">Expiring 2026-05-09</span>
-        </div>
-        <div class="cred-input">
-          <label>Access key ID</label><input value="AKIAIOSFODNN7EXAMPLE" readonly>
-          <label>Secret key</label><input type="password" value="wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY" readonly>
-          <label>Region</label><input value="us-east-1" readonly>
-          <label>Bucket</label><input value="acme-agent-data" readonly>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:10px;">
-          <button class="btn btn-primary btn-sm">Renew key</button>
-          <button class="btn btn-secondary btn-sm">Edit</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red-600);">Remove</button>
-        </div>
-      </div>
+
+  <table class="logins-table" id="logins-table">
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th>URL</th>
+        <th>Username</th>
+        <th>Last verified</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr onclick="openLoginDrawer('wiki')" data-search="acme internal wiki ops">
+        <td style="font-weight:600;">Acme Internal Wiki</td>
+        <td><span class="login-url">https://wiki.acme.internal</span></td>
+        <td><span class="login-user-masked">ops@***.com</span></td>
+        <td>Yesterday</td>
+        <td><div style="display:flex;align-items:center;gap:5px;"><span class="dot-g"></span> Active</div></td>
+        <td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,'Acme Internal Wiki')">&#8942;</button></td>
+      </tr>
+      <tr onclick="openLoginDrawer('insurance')" data-search="vendor portal insuranceco sarah">
+        <td style="font-weight:600;">Vendor Portal - InsuranceCo</td>
+        <td><span class="login-url">https://portal.insuranceco.com</span></td>
+        <td><span class="login-user-masked">sarah@***.com</span></td>
+        <td>5 days ago</td>
+        <td><div style="display:flex;align-items:center;gap:5px;"><span class="dot-a"></span> <span style="color:var(--amber-700);font-weight:500;">Stale</span></div></td>
+        <td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,'Vendor Portal')">&#8942;</button></td>
+      </tr>
+      <tr onclick="openLoginDrawer('timetrack')" data-search="legacy time tracker admin">
+        <td style="font-weight:600;">Legacy Time Tracker</td>
+        <td><span class="login-url">https://timetrack.legacy.com</span></td>
+        <td><span class="login-user-masked">admin</span></td>
+        <td>30 days ago</td>
+        <td><div style="display:flex;align-items:center;gap:5px;"><span class="dot-r"></span> <span style="color:var(--red-600);font-weight:500;">Expired</span></div></td>
+        <td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,'Legacy Time Tracker')">&#8942;</button></td>
+      </tr>
+    </tbody>
+  </table>
+</div><!-- /panel-logins -->
+
+</div><!-- /main-content -->
+
+<!-- ======================================================= -->
+<!-- OVERFLOW CONTEXT MENU -->
+<!-- ======================================================= -->
+<div class="ctx-menu" id="card-ctx-menu">
+  <button class="ctx-item" onclick="closeCtxMenu()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6l-11 11-5-5"/></svg>
+    Verify
+  </button>
+  <button class="ctx-item" onclick="closeCtxMenu()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+    Reconnect
+  </button>
+  <button class="ctx-item" onclick="closeCtxMenu()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    Edit label
+  </button>
+  <hr class="ctx-separator">
+  <button class="ctx-item danger" onclick="closeCtxMenu()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+    Disconnect
+  </button>
+</div>
+
+<!-- ======================================================= -->
+<!-- LOGIN DETAIL DRAWER -->
+<!-- ======================================================= -->
+<div class="drawer-overlay" id="login-drawer-overlay" onclick="closeLoginDrawer(event)">
+  <div class="drawer" id="login-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title" id="login-drawer-title">Web login</div>
+      <button class="drawer-close" onclick="closeLoginDrawerDirect()">&times;</button>
     </div>
-    <div id="dtab-s3-agents" style="display:none;">
-      <div class="agent-access-row">
-        <div style="flex:1"><div style="font-size:13px;font-weight:600;">Outreach Agent</div><div style="font-size:11px;color:var(--slate-500);">Tools: s3_read, s3_write</div></div>
-        <span class="badge badge-red">Will break</span>
-      </div>
-      <div class="agent-access-row">
-        <div style="flex:1"><div style="font-size:13px;font-weight:600;">CRM Agent</div><div style="font-size:11px;color:var(--slate-500);">Tools: s3_read</div></div>
-        <span class="badge badge-red">Will break</span>
-      </div>
-      <div class="agent-access-row">
-        <div style="flex:1"><div style="font-size:13px;font-weight:600;">Content Agent</div><div style="font-size:11px;color:var(--slate-500);">Tools: s3_read, s3_write</div></div>
-        <span class="badge badge-red">Will break</span>
-      </div>
-      <div class="agent-access-row">
-        <div style="flex:1"><div style="font-size:13px;font-weight:600;">Backup Agent</div><div style="font-size:11px;color:var(--slate-500);">Tools: s3_write</div></div>
-        <span class="badge badge-red">Will break</span>
-      </div>
+    <div class="drawer-body" id="login-drawer-body">
+      <!-- populated by JS -->
     </div>
-    <div id="dtab-s3-sync" style="display:none;"><div style="font-size:13px;color:var(--slate-500);padding:16px 0;">No data sync configured for S3. Agents access it directly via tool calls.</div></div>
-    <div id="dtab-s3-issues" style="display:none;">
-      <div class="finding-card critical">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span class="badge badge-red">Critical</span><div style="font-size:14px;font-weight:600;">API key expiring 2026-05-09</div></div>
-        <div style="font-size:12px;color:var(--slate-500);">4 agents affected. Renew the key in the Credentials tab before expiry to avoid service interruption.</div>
-      </div>
+    <div class="drawer-footer">
+      <button class="btn btn-primary btn-sm" onclick="closeLoginDrawerDirect()">Save</button>
+      <button class="btn btn-secondary btn-sm" onclick="closeLoginDrawerDirect()">Cancel</button>
+      <button class="btn btn-sm" style="margin-left:auto;color:var(--red-500);border-color:#fca5a5;" onclick="closeLoginDrawerDirect()">Disconnect</button>
     </div>
-    <div id="dtab-s3-audit" style="display:none;">
-      <div class="audit-row"><div style="flex:1">Expiry warning triggered</div><div class="time">Today 08:00</div></div>
-      <div class="audit-row"><div style="flex:1">CRM Agent used s3_read (12 calls)</div><div class="time">Yesterday 16:40</div></div>
-      <div class="audit-row"><div style="flex:1">API key created by admin@acme.com</div><div class="time">Jan 10, 2026</div></div>
-    </div>
-  </div>
-  <div class="drawer-footer">
-    <button class="btn btn-ghost" style="color:var(--red-600);">Disconnect S3</button>
-    <button class="btn btn-primary">Renew key</button>
   </div>
 </div>
 
-<!-- ====== DRAWER: Client portal (Web login with TOTP) ====== -->
-<div class="drawer-overlay" id="overlay-portal" onclick="closeDrawer('portal')"></div>
-<div class="drawer" id="drawer-portal">
-  <div class="drawer-header">
-    <div style="width:36px;height:36px;border-radius:8px;background:#f0fdf4;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#16a34a;">CP</div>
-    <h3>Client portal</h3>
-    <span class="badge badge-green">Healthy</span>
-    <button class="btn btn-ghost" style="margin-left:8px;" onclick="closeDrawer('portal')">&#10005;</button>
-  </div>
-  <div class="drawer-tabs" id="drawer-tabs-portal">
-    <button class="drawer-tab active" onclick="switchDTab('portal','cred',this)">Credentials</button>
-    <button class="drawer-tab" onclick="switchDTab('portal','agents',this)">Agent access</button>
-    <button class="drawer-tab" onclick="switchDTab('portal','sync',this)">Data sync</button>
-    <button class="drawer-tab" onclick="switchDTab('portal','issues',this)">Issues <span style="background:var(--slate-100);color:var(--slate-500);border-radius:8px;padding:0 5px;font-size:10px;margin-left:2px;">0</span></button>
-    <button class="drawer-tab" onclick="switchDTab('portal','audit',this)">Audit log</button>
-  </div>
-  <div class="drawer-body">
-    <div id="dtab-portal-cred">
-      <div class="cred-type-block">
-        <div class="type-hdr">
-          <span>Web login (URL + username + password + TOTP)</span>
-          <span class="badge badge-green">Valid</span>
-        </div>
-        <div class="cred-input">
-          <label>Login URL</label><input value="https://portal.acmecorp.com/login" readonly>
-          <label>Username</label><input value="automation-bot@acmecorp.com" readonly>
-          <label>Password</label><input type="password" value="securepassword123" readonly>
-          <label>TOTP secret</label><input type="password" value="JBSWY3DPEHPK3PXP" readonly>
-        </div>
-        <div style="margin-top:8px;background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:4px;padding:8px;font-size:12px;color:var(--indigo-700);">
-          TOTP codes are generated automatically at login time. The agent uses the stored secret to compute the current 6-digit code.
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button class="btn btn-secondary btn-sm">Edit</button>
-          <button class="btn btn-secondary btn-sm">Test login</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red-600);">Remove</button>
-        </div>
+<!-- ======================================================= -->
+<!-- ADD WEB LOGIN MODAL -->
+<!-- ======================================================= -->
+<div class="modal-overlay" id="add-login-modal" onclick="closeAddLoginModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">Add a web login</div>
+    <div class="modal-body" style="margin-bottom:16px;">Connect any website that uses a username and password. Credentials are encrypted and stored securely.</div>
+    <div class="form-row">
+      <label class="form-label">Service name</label>
+      <input class="form-input" type="text" placeholder="e.g. Vendor Portal">
+    </div>
+    <div class="form-row">
+      <label class="form-label">URL</label>
+      <div class="input-prefix-wrap">
+        <span class="input-prefix">https://</span>
+        <input class="form-input input-with-prefix" type="text" placeholder="portal.example.com">
       </div>
     </div>
-    <div id="dtab-portal-agents" style="display:none;">
-      <div class="agent-access-row">
-        <div style="flex:1"><div style="font-size:13px;font-weight:600;">Reporting Agent</div><div style="font-size:11px;color:var(--slate-500);">Tools: portal_scrape, portal_download</div></div>
-        <span class="badge badge-green">Active</span>
+    <div class="form-row">
+      <label class="form-label">Username</label>
+      <input class="form-input" type="text" placeholder="your@email.com or username">
+    </div>
+    <div class="form-row">
+      <label class="form-label">Password</label>
+      <div class="show-hide-wrap">
+        <input class="form-input" type="password" id="add-login-pass" placeholder="Password">
+        <button class="show-hide-btn" onclick="togglePassword('add-login-pass',this)">Show</button>
       </div>
     </div>
-    <div id="dtab-portal-sync" style="display:none;"><div style="font-size:13px;color:var(--slate-500);padding:16px 0;">No automatic sync. Agent pulls data on demand using portal scraping tools.</div></div>
-    <div id="dtab-portal-issues" style="display:none;"><div style="text-align:center;padding:32px;color:var(--slate-400);"><div style="font-size:24px;">&#10003;</div><div style="font-size:14px;font-weight:600;color:var(--slate-600);margin-top:8px;">No issues</div></div></div>
-    <div id="dtab-portal-audit" style="display:none;">
-      <div class="audit-row"><div style="flex:1">Reporting Agent logged in via TOTP</div><div class="time">Today 09:14</div></div>
-      <div class="audit-row"><div style="flex:1">Credentials updated by admin@acme.com</div><div class="time">Apr 30, 2026</div></div>
+    <div class="form-row">
+      <label class="form-label">Label <span style="font-weight:400;color:var(--slate-400);">(optional)</span></label>
+      <input class="form-input" type="text" placeholder="e.g. InsuranceCo vendor access">
     </div>
-  </div>
-  <div class="drawer-footer">
-    <button class="btn btn-ghost" style="color:var(--red-600);">Disconnect</button>
-    <button class="btn btn-secondary" onclick="closeDrawer('portal')">Close</button>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeAddLoginModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="closeAddLoginModal()">Connect</button>
+    </div>
   </div>
 </div>
 
-<!-- Stub drawers for others -->
-<div class="drawer-overlay" id="overlay-salesforce" onclick="closeDrawer('salesforce')"></div>
-<div class="drawer" id="drawer-salesforce">
-  <div class="drawer-header"><div style="width:36px;height:36px;border-radius:8px;background:#e8f4fd;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#0176d3;">SF</div><h3>Salesforce</h3><span class="badge badge-green">Healthy</span><button class="btn btn-ghost" style="margin-left:auto;" onclick="closeDrawer('salesforce')">&#10005;</button></div>
-  <div class="drawer-body" style="padding:20px;color:var(--slate-500);font-size:13px;">[Salesforce drawer, same structure as Gmail: Credentials / Agent access / Data sync / Issues / Audit log]</div>
-</div>
-<div class="drawer-overlay" id="overlay-zapier" onclick="closeDrawer('zapier')"></div>
-<div class="drawer" id="drawer-zapier">
-  <div class="drawer-header"><div style="width:36px;height:36px;border-radius:8px;background:#fff5f0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#ff4a00;">ZP</div><h3>Zapier</h3><span class="badge badge-amber">Degraded</span><button class="btn btn-ghost" style="margin-left:auto;" onclick="closeDrawer('zapier')">&#10005;</button></div>
-  <div class="drawer-body" style="padding:20px;color:var(--slate-500);font-size:13px;">[Zapier drawer, shows API key + latency warning in Issues tab]</div>
-</div>
-<div class="drawer-overlay" id="overlay-hubspot" onclick="closeDrawer('hubspot')"></div>
-<div class="drawer" id="drawer-hubspot">
-  <div class="drawer-header"><div style="width:36px;height:36px;border-radius:8px;background:#fff3ec;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#ff7a59;">HS</div><h3>HubSpot</h3><span class="badge badge-green">Healthy</span><button class="btn btn-ghost" style="margin-left:auto;" onclick="closeDrawer('hubspot')">&#10005;</button></div>
-  <div class="drawer-body" style="padding:20px;color:var(--slate-500);font-size:13px;">[HubSpot drawer, API key credential, agent access, data sync]</div>
-</div>
-<div class="drawer-overlay" id="overlay-legal" onclick="closeDrawer('legal')"></div>
-<div class="drawer" id="drawer-legal">
-  <div class="drawer-header"><div style="width:36px;height:36px;border-radius:8px;background:#f5f3ff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#7c3aed;">LD</div><h3>LegalDocs Pro</h3><span class="badge badge-amber">Refresh needed</span><button class="btn btn-ghost" style="margin-left:auto;" onclick="closeDrawer('legal')">&#10005;</button></div>
-  <div class="drawer-body" style="padding:20px;color:var(--slate-500);font-size:13px;">[LegalDocs Pro drawer, Cookie session credential with expiry warning. Shows refresh instructions (re-login to capture new cookie).]</div>
-</div>
-<div class="drawer-overlay" id="overlay-internal-api" onclick="closeDrawer('internal-api')"></div>
-<div class="drawer" id="drawer-internal-api">
-  <div class="drawer-header"><div style="width:36px;height:36px;border-radius:8px;background:#eff6ff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#1d4ed8;">IA</div><h3>Internal data API</h3><span class="badge badge-green">Healthy</span><button class="btn btn-ghost" style="margin-left:auto;" onclick="closeDrawer('internal-api')">&#10005;</button></div>
-  <div class="drawer-body" style="padding:20px;color:var(--slate-500);font-size:13px;">[Internal API drawer, Client certificate (mTLS) credential. Shows certificate subject, expiry, fingerprint, PEM upload.]</div>
-</div>
-<div class="drawer-overlay" id="overlay-new-conn" onclick="closeDrawer('new-conn')"></div>
-<div class="drawer" id="drawer-new-conn">
-  <div class="drawer-header"><h3>Connect a service</h3><button class="btn btn-ghost" style="margin-left:auto;" onclick="closeDrawer('new-conn')">&#10005;</button></div>
-  <div class="drawer-body" style="padding:20px;">
-    <div class="drawer-section">
-      <h4>Service name</h4>
-      <input class="form-input" placeholder="e.g. Stripe, Notion, Jira..." style="width:100%;margin-bottom:16px;">
-    </div>
-    <div class="drawer-section">
-      <h4>Credential type</h4>
-      <div style="display:flex;flex-direction:column;gap:6px;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border:1px solid var(--border);border-radius:6px;"><input type="radio" name="credtype" value="apikey"> API key</label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border:1px solid var(--border);border-radius:6px;"><input type="radio" name="credtype" value="oauth"> OAuth 2.0</label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border:1px solid var(--indigo-300);background:var(--indigo-50);border-radius:6px;"><input type="radio" name="credtype" value="weblogin" checked> Web login (URL + username + password + optional TOTP)</label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border:1px solid var(--border);border-radius:6px;"><input type="radio" name="credtype" value="cookie"> Cookie session</label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 10px;border:1px solid var(--border);border-radius:6px;"><input type="radio" name="credtype" value="cert"> Client certificate (mTLS)</label>
-      </div>
-    </div>
-    <div class="drawer-section" style="margin-top:16px;">
-      <h4>Web login details</h4>
-      <div class="cred-input">
-        <label>Login URL</label><input class="form-input" placeholder="https://...">
-        <label>Username</label><input class="form-input" placeholder="user@example.com">
-        <label>Password</label><input class="form-input" type="password" placeholder="Password">
-        <label>TOTP secret</label><input class="form-input" placeholder="Optional: base32 secret for 2FA">
-      </div>
-    </div>
-  </div>
-  <div class="drawer-footer">
-    <button class="btn btn-secondary" onclick="closeDrawer('new-conn')">Cancel</button>
-    <button class="btn btn-primary">Save and test connection</button>
+<!-- ======================================================= -->
+<!-- CONNECTING OVERLAY (post-click) -->
+<!-- ======================================================= -->
+<div class="connecting-overlay" id="connecting-overlay">
+  <div class="connecting-box">
+    <div class="connecting-spinner"></div>
+    <div style="font-size:15px;font-weight:700;color:var(--slate-900);margin-bottom:6px;" id="connecting-title">Connecting to Outlook...</div>
+    <div style="font-size:13px;color:var(--slate-500);">You'll be redirected to sign in. This tab will update automatically.</div>
   </div>
 </div>
 
 <script>
-function switchConnTab(id, btn) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.main-tab').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + id).classList.add('active');
-  btn.classList.add('active');
-}
-function openDrawer(id) {
-  const overlay = document.getElementById('overlay-' + id);
-  const drawer = document.getElementById('drawer-' + id);
-  if (overlay) overlay.classList.add('open');
-  if (drawer) drawer.classList.add('open');
-}
-function closeDrawer(id) {
-  const overlay = document.getElementById('overlay-' + id);
-  const drawer = document.getElementById('drawer-' + id);
-  if (overlay) overlay.classList.remove('open');
-  if (drawer) drawer.classList.remove('open');
-}
-function switchDTab(drawer, tab, btn) {
-  const prefix = 'dtab-' + drawer + '-';
-  const tabs = ['cred','agents','sync','issues','audit'];
-  tabs.forEach(t => {
-    const el = document.getElementById(prefix + t);
-    if (el) el.style.display = (t === tab) ? 'block' : 'none';
+// ---- Sub-tab switching ----
+function switchSubTab(tab) {
+  ['integrations','logins'].forEach(t => {
+    document.getElementById('subtab-'+t).classList.toggle('active', t===tab);
+    document.getElementById('panel-'+t).classList.toggle('active', t===tab);
   });
-  document.querySelectorAll('#drawer-tabs-' + drawer + ' .drawer-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  // re-run search with new active tab
+  handleUniversalSearch(document.getElementById('universal-search').value);
 }
 
-// Decision 1: Category filter chips for connection table
-function setConnFilter(cat, el) {
-  document.querySelectorAll('#conn-filter-chips .conn-chip').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  const rows = document.querySelectorAll('#conn-table tbody tr');
-  rows.forEach(row => {
-    if (cat === 'all') {
-      row.style.display = '';
-    } else {
-      const rowCat = row.getAttribute('data-category');
-      row.style.display = (rowCat === cat) ? '' : 'none';
-    }
+// ---- + Connect dropdown ----
+function toggleConnectDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('connect-dropdown').classList.toggle('open');
+}
+function closeDropdown() {
+  document.getElementById('connect-dropdown').classList.remove('open');
+}
+document.addEventListener('click', closeDropdown);
+
+// ---- Universal search ----
+function getActiveTab() {
+  return document.getElementById('subtab-integrations').classList.contains('active') ? 'integrations' : 'logins';
+}
+
+function handleUniversalSearch(val) {
+  const q = val.toLowerCase().trim();
+  const active = getActiveTab();
+
+  if (active === 'integrations') {
+    // Filter connected cards
+    document.querySelectorAll('#connected-grid .app-card').forEach(card => {
+      const match = !q || card.dataset.search.includes(q);
+      card.style.display = match ? '' : 'none';
+    });
+    // Filter add cards
+    document.querySelectorAll('#add-grid .avail-card').forEach(card => {
+      const match = !q || card.dataset.search.includes(q);
+      card.style.display = match ? '' : 'none';
+    });
+    // Count logins matches
+    const loginMatches = q ? [...document.querySelectorAll('#logins-table tbody tr')].filter(r => r.dataset.search.includes(q)).length : 0;
+    showCrossTabChip(loginMatches, 'Logins');
+  } else {
+    // Filter login rows
+    document.querySelectorAll('#logins-table tbody tr').forEach(row => {
+      const match = !q || row.dataset.search.includes(q);
+      row.style.display = match ? '' : 'none';
+    });
+    // Count integrations matches
+    const intMatches = q ? [...document.querySelectorAll('#connected-grid .app-card')].filter(c => c.dataset.search.includes(q)).length + [...document.querySelectorAll('#add-grid .avail-card')].filter(c => c.dataset.search.includes(q)).length : 0;
+    showCrossTabChip(intMatches, 'Integrations');
+  }
+}
+
+function showCrossTabChip(count, tabLabel) {
+  const chip = document.getElementById('cross-tab-chip');
+  const txt = document.getElementById('cross-tab-text');
+  if (count > 0) {
+    txt.textContent = 'Also found ' + count + ' ' + (count === 1 ? 'match' : 'matches') + ' in ' + tabLabel;
+    chip.style.display = 'flex';
+    chip._targetTab = tabLabel.toLowerCase();
+  } else {
+    chip.style.display = 'none';
+  }
+}
+
+function jumpCrossTab() {
+  const chip = document.getElementById('cross-tab-chip');
+  const target = (chip._targetTab || 'logins').includes('login') ? 'logins' : 'integrations';
+  switchSubTab(target);
+}
+
+// ---- Add section filter chips ----
+function setAddFilter(cat, btn) {
+  document.querySelectorAll('#add-filter-chips .filter-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#add-grid .avail-card').forEach(card => {
+    const show = cat === 'all' || card.dataset.category === cat;
+    card.style.display = show ? '' : 'none';
   });
+}
+
+// ---- App card overflow menu ----
+let ctxTarget = null;
+function openCardCtx(e, name) {
+  e.stopPropagation();
+  ctxTarget = name;
+  const menu = document.getElementById('card-ctx-menu');
+  menu.classList.add('open');
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+  menu.style.top = Math.min(e.clientY + 4, window.innerHeight - 180) + 'px';
+}
+function closeCtxMenu() {
+  document.getElementById('card-ctx-menu').classList.remove('open');
+}
+document.addEventListener('click', closeCtxMenu);
+
+// ---- Connecting overlay ----
+function startConnecting(appName) {
+  const ov = document.getElementById('connecting-overlay');
+  document.getElementById('connecting-title').textContent = 'Connecting to ' + appName + '...';
+  ov.classList.add('open');
+  setTimeout(() => { ov.classList.remove('open'); }, 2200);
+}
+
+// ---- Login drawer ----
+const loginData = {
+  wiki: {
+    title: 'Acme Internal Wiki',
+    url: 'https://wiki.acme.internal',
+    user: 'ops@acme.com',
+    lastVerified: 'Yesterday at 3:42 PM',
+    status: 'green',
+    history: ['Verified 2026-05-05 15:42', 'Verified 2026-05-04 09:11', 'Verified 2026-05-03 14:28']
+  },
+  insurance: {
+    title: 'Vendor Portal - InsuranceCo',
+    url: 'https://portal.insuranceco.com',
+    user: 'sarah@acme.com',
+    lastVerified: '5 days ago',
+    status: 'amber',
+    history: ['Verified 2026-05-01 10:00', 'Failed 2026-04-30 10:00 (timeout)', 'Verified 2026-04-29 10:00']
+  },
+  timetrack: {
+    title: 'Legacy Time Tracker',
+    url: 'https://timetrack.legacy.com',
+    user: 'admin',
+    lastVerified: '30 days ago',
+    status: 'red',
+    history: ['Failed 2026-04-06 08:00 (session expired)', 'Verified 2026-04-05 08:00', 'Verified 2026-04-04 08:00']
+  }
+};
+
+function openLoginDrawer(key) {
+  const d = loginData[key];
+  document.getElementById('login-drawer-title').textContent = d.title;
+  const dotClass = d.status === 'green' ? 'dot-g' : d.status === 'amber' ? 'dot-a' : 'dot-r';
+  const statusLabel = d.status === 'green' ? 'Active' : d.status === 'amber' ? 'Stale' : 'Expired';
+  document.getElementById('login-drawer-body').innerHTML = `
+    <div class="drawer-section-label">Connection details</div>
+    <div class="drawer-field">
+      <label>URL</label>
+      <div class="val-mono">${d.url}</div>
+    </div>
+    <div class="drawer-field">
+      <label>Username</label>
+      <div class="val">${d.user}</div>
+    </div>
+    <div class="drawer-field">
+      <label>Password</label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="val-masked" id="drawer-pass-display">••••••••••••</span>
+        <button class="show-hide-btn" style="position:static;transform:none;" onclick="toggleDrawerPass(this)">Show</button>
+      </div>
+    </div>
+    <div class="drawer-field">
+      <label>Status</label>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span class="${dotClass}"></span>
+        <span class="val">${statusLabel}</span>
+      </div>
+    </div>
+    <div class="drawer-field">
+      <label>Last verified</label>
+      <div class="val">${d.lastVerified}</div>
+    </div>
+    <div class="drawer-section-label">Verification history</div>
+    ${d.history.map(h => `<div class="verify-row"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${h}</div>`).join('')}
+  `;
+  document.getElementById('login-drawer-overlay').classList.add('open');
+}
+
+function closeLoginDrawer(e) {
+  if (e.target === document.getElementById('login-drawer-overlay')) closeLoginDrawerDirect();
+}
+function closeLoginDrawerDirect() {
+  document.getElementById('login-drawer-overlay').classList.remove('open');
+}
+
+function toggleDrawerPass(btn) {
+  const el = document.getElementById('drawer-pass-display');
+  if (btn.textContent === 'Show') {
+    el.textContent = 'Acme$ecure2024!';
+    btn.textContent = 'Hide';
+  } else {
+    el.textContent = '••••••••••••';
+    btn.textContent = 'Show';
+  }
+}
+
+// ---- Add web login modal ----
+function openAddLoginModal() {
+  document.getElementById('add-login-modal').classList.add('open');
+}
+function closeAddLoginModal(e) {
+  if (!e || e.target === document.getElementById('add-login-modal')) {
+    document.getElementById('add-login-modal').classList.remove('open');
+  }
+}
+
+function switchToLoginsAndAddLogin() {
+  switchSubTab('logins');
+  setTimeout(openAddLoginModal, 150);
+}
+
+function togglePassword(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
+  else { inp.type = 'password'; btn.textContent = 'Show'; }
 }
 </script>
 </body>

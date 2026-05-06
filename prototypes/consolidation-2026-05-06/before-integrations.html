@@ -83,8 +83,7 @@ body { background: var(--slate-100); }
 <body>
 
 <div class="before-banner">
-  <span>CURRENT STATE</span>
-  <span style="font-weight:400;">2 separate pages replaced by Connections</span>
+  <span>BEFORE: integrations page used technical terminology (OAuth, API key, cookie session, client certificate). MCP servers were exposed as a separate concept alongside app connections, causing confusion (Gmail integration vs Gmail MCP server -- operators could not tell which to use). Web logins were lumped together with API integrations rather than being a distinct utility section.</span>
   <a href="integrations.html">View consolidated page &rarr;</a>
 </div>
 
@@ -214,9 +213,17 @@ body { background: var(--slate-100); }
       <div class="lbl">Organisation model (by cred type vs service)</div>
     </div>
   </div>
-  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
-    The consolidated Connections page organises by service (one row per service) rather than by credential type. Each row shows all credential types for that service, a health badge inline, and opens a drawer with credential detail, agent tool access, data sync settings, issues tab, and audit log. Multiple credential types (API key, OAuth, Web login, Cookie session, Certificate) are supported per service.
-  </p>
+  <div style="margin-top:12px;background:var(--red-50);border:1px solid #fca5a5;border-radius:8px;padding:12px 16px;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--red-600);margin-bottom:8px;">Problems fixed in Round 7-final-A rebuild</div>
+    <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--slate-700);line-height:1.7;">
+      <li>Technical jargon (OAuth, API key) leaked into the picker UI -- replaced with plain-language method chips: Sign in / Key / Web login</li>
+      <li>Cookie session and client certificate credential types were visible as options despite not being in the schema</li>
+      <li>MCP servers exposed alongside native connections caused confusion -- "which one am I using, Gmail integration or Gmail MCP server?" MCP is now invisible to operators (lives inside agent Skills tab)</li>
+      <li>No visual distinction between connection methods (all just labelled by credential type)</li>
+      <li>No universal search across connection types</li>
+      <li>Web logins not differentiated from full integrations -- now a separate Logins sub-tab with table view and detail drawer</li>
+    </ul>
+  </div>
 </div>
 
 </body>
