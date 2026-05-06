@@ -2236,3 +2236,11 @@ Migration 0277 added `memory_blocks.tier` (1=always-pinned, 2=domain-matched), `
 F1 to F2 contract: `memoryBlockService.getBaselineVoiceTone(orgId, subaccountId)` returns `BaselineVoiceTone | null` (null when voice_tone artefact status is not 'completed'). F2 imports from F1 only.
 
 JSONB shape locked by `shared/schemas/subaccount.ts:baselineArtefactsStatusSchema` with `version: 1` gate. Service code calls `assertVersionGate(raw, 1)` before mutating. Tier-1 and Tier-2 artefacts cannot be skipped. Tier-3 can be skipped with `markArtefactSkipped`. JSONB updates use atomic `jsonb_set` SQL, never JS read-modify-write.
+
+### [2026-05-06] MCP runtime is stdio-only — hosted MCPs not yet consumable
+
+`server/services/mcpClientManager.ts:579` keys on `if (config.transport === 'stdio' && config.command)` and only constructs `StdioClientTransport`. The preset schema in `server/config/mcpPresets.ts:27` types `transport: 'stdio'` as a literal — every one of the 30+ existing presets is stdio. To consume hosted MCPs (Meta Ads at `mcp.facebook.com/ads`, and the wave of HTTP/SSE-hosted MCPs shipping across SaaS in 2026), we must add `StreamableHTTPClientTransport` from `@modelcontextprotocol/sdk@^1.29.0`, widen the preset schema to `transport: 'stdio' | 'http'`, and branch in the connect path. Until that lands, hosted MCPs are un-consumable from agents.
+
+### [2026-05-06] Strategic — integration moat is moving to MCP-as-transport
+
+When a SaaS ships its own MCP, hand-coded adapter work for that vendor depreciates fast. automation-v1's durable differentiation against "user just connects Claude Desktop themselves" is the multi-tenant governance layer: per-subaccount OAuth + RLS isolation, approval gates wrapping MCP write tools (HITL queue + `approve_with_edits`), agentic-commerce spending policies enforced before MCP invocation (per-tx/daily/monthly limits, three-level kill switch), persistent memory (tier-1 voice + tier-2 domain), scheduled cron via pg-boss, and the `mcp_tool_invocations` audit ledger with org/subaccount attribution. Tier-1 ad-platform integration estimates in `tasks/builds/marketing-automation/growos-gap-analysis.md` were revised down (Meta + Google + LinkedIn from ~9 wk to ~3–4 wk total) conditional on hosted-MCP availability + adding HTTP/SSE transport (item A1, ~2–4 days).
