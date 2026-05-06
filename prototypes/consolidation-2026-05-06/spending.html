@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spending | Automation OS Consolidation 2026-05-06</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Page-specific styles ─────────────────────────────────────────── */
+
+.page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.page-header-row h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--slate-900);
+  letter-spacing: -0.02em;
+}
+.page-header-row p {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--slate-500);
+}
+
+/* ── Org cap card ─────────────────────────────────────────────────── */
+.org-cap-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 26px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 24px;
+}
+.org-cap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.org-cap-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.org-cap-big {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--slate-900);
+  letter-spacing: -0.03em;
+  margin-bottom: 4px;
+}
+.org-cap-sub {
+  font-size: 13px;
+  color: var(--slate-500);
+  margin-bottom: 14px;
+}
+.org-cap-bar-wrap {
+  position: relative;
+  height: 10px;
+  background: var(--slate-100);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  overflow: visible;
+}
+.org-cap-bar-fill {
+  height: 100%;
+  background: var(--indigo-500);
+  border-radius: 6px;
+  transition: width 0.3s;
+}
+.pace-line {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 18px;
+  background: var(--slate-400);
+  border-radius: 1px;
+  border: 2px dotted var(--slate-400);
+  background: none;
+  transform: translateX(-50%);
+}
+.org-cap-meta {
+  font-size: 13px;
+  color: var(--slate-600);
+}
+.org-cap-meta .over-pace {
+  color: var(--amber-600);
+  font-weight: 600;
+}
+.org-cap-link {
+  font-size: 13px;
+  color: var(--indigo-600);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.org-cap-link:hover { text-decoration: underline; }
+
+/* ── Subaccount caps table ─────────────────────────────────────────── */
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--slate-400);
+  margin-bottom: 10px;
+}
+
+.mini-bar-wrap {
+  width: 80px;
+  height: 5px;
+  background: var(--slate-100);
+  border-radius: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+.mini-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.mini-bar-fill.normal { background: var(--indigo-400); }
+.mini-bar-fill.amber  { background: var(--amber-500); }
+.mini-bar-fill.red    { background: var(--red-500); }
+
+.cap-spend-cell {
+  font-size: 13px;
+  color: var(--slate-700);
+}
+.cap-spend-cell .amount { font-weight: 600; }
+.cap-spend-cell .of-cap { color: var(--slate-400); font-size: 12px; }
+
+.inline-cap-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--slate-700);
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.inline-cap-edit:hover { background: var(--slate-100); }
+.inline-cap-edit .edit-icon { opacity: 0; transition: opacity 0.12s; font-size: 11px; color: var(--slate-400); }
+.inline-cap-edit:hover .edit-icon { opacity: 1; }
+
+/* ── Defaults panel ─────────────────────────────────────────────────── */
+.defaults-panel {
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.defaults-panel-left {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+.defaults-item {
+  font-size: 13px;
+  color: var(--slate-600);
+}
+.defaults-item strong { color: var(--slate-800); font-weight: 600; }
+.defaults-label { font-size: 11px; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-bottom: 2px; }
+
+/* ── Ledger filter bar ─────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 0 14px;
+  border-bottom: 1px solid var(--slate-200);
+  margin-bottom: 16px;
+}
+.filter-bar .form-select { font-size: 12.5px; padding: 6px 10px; }
+
+/* ── KPI strip ──────────────────────────────────────────────────────── */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.kpi-tile {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.kpi-tile-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--slate-400);
+  margin-bottom: 6px;
+}
+.kpi-tile-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--slate-900);
+  letter-spacing: -0.02em;
+  margin-bottom: 2px;
+}
+.kpi-tile-sub { font-size: 12px; color: var(--slate-500); }
+
+/* ── Ledger table ──────────────────────────────────────────────────── */
+.client-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+.type-llm     { background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+.type-tool    { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+.type-storage { background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a; }
+
+.run-id-link {
+  font-size: 11.5px;
+  font-family: monospace;
+  color: var(--indigo-500);
+  text-decoration: none;
+  cursor: pointer;
+}
+.run-id-link:hover { text-decoration: underline; }
+
+.cost-cell {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-800);
+  text-align: right;
+}
+
+.timestamp-cell {
+  font-size: 12.5px;
+  color: var(--slate-500);
+  white-space: nowrap;
+}
+
+/* ── Group-by views ─────────────────────────────────────────────────── */
+.group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--slate-100);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.group-row:hover { background: var(--slate-50); }
+.group-row:last-child { border-bottom: none; }
+.group-row-label { font-size: 13.5px; font-weight: 600; color: var(--slate-800); }
+.group-row-sub { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+.group-row-cost { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+.group-row-bar {
+  width: 120px;
+  height: 6px;
+  background: var(--slate-100);
+  border-radius: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.group-row-bar-fill { height: 100%; background: var(--indigo-400); border-radius: 3px; }
+
+/* ── Pagination ─────────────────────────────────────────────────────── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-top: 1px solid var(--slate-200);
+  margin-top: 4px;
+}
+.pagination-info { font-size: 12.5px; color: var(--slate-500); }
+.pagination-btns { display: flex; gap: 6px; }
+
+/* ── Transaction detail drawer ──────────────────────────────────────── */
+.detail-drawer {
+  width: 440px;
+}
+.drawer-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.drawer-meta-item .meta-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--slate-400);
+  margin-bottom: 4px;
+}
+.drawer-meta-item .meta-value {
+  font-size: 13.5px;
+  color: var(--slate-800);
+  font-weight: 500;
+}
+.cost-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--slate-100);
+  font-size: 13px;
+}
+.cost-breakdown-row:last-child { border-bottom: none; }
+.cost-breakdown-row .label { color: var(--slate-600); }
+.cost-breakdown-row .value { font-weight: 600; color: var(--slate-800); }
+.cost-breakdown-row .discount { color: var(--emerald-600); }
+.cost-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--slate-900);
+}
+
+/* ── Edit cap modal ─────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,0.45);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-box {
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  width: 400px;
+  overflow: hidden;
+}
+.modal-head {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-head h3 { font-size: 16px; font-weight: 700; color: var(--slate-900); }
+.modal-body { padding: 20px 22px; }
+.modal-footer {
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.input-prefix-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-prefix {
+  position: absolute;
+  left: 12px;
+  font-size: 13px;
+  color: var(--slate-500);
+  pointer-events: none;
+  font-weight: 500;
+}
+.input-with-prefix {
+  width: 100%;
+  padding: 8px 12px 8px 26px;
+  border: 1px solid var(--slate-300);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--slate-800);
+  background: white;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.input-with-prefix:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.modal-hint { font-size: 11.5px; color: var(--slate-400); margin-top: 5px; }
+.validation-msg { font-size: 12px; color: var(--red-600); margin-top: 5px; display: none; }
+
+/* ── Subaccount color dots ──────────────────────────────────────────── */
+.sa-acme    { background: #6366f1; }
+.sa-terra   { background: #f59e0b; }
+.sa-revel   { background: #ef4444; }
+.sa-globex  { background: #10b981; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar (mode=org, activeHref=spending.html) -->
+  <div id="sidebar-mount"></div>
+
+  <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Org</span>
+        <span>/</span>
+        <span class="topbar-breadcrumb-current">Spending</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="btn btn-primary" onclick="openOrgCapModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Edit org cap
+      </button>
+    </div>
+
+    <!-- Page body -->
+    <div class="page-body">
+
+      <!-- Page header -->
+      <div class="page-header-row">
+        <div>
+          <h1>Spending</h1>
+          <p>Acme Corp organisation &middot; 4 client workspaces</p>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="spend-tabs">
+        <button class="tab-btn active" id="tab-caps" onclick="switchSpendTab('caps', this)">Caps &amp; budgets</button>
+        <button class="tab-btn" id="tab-ledger" onclick="switchSpendTab('ledger', this)">Ledger</button>
+      </div>
+
+      <!-- ── TAB: Caps & budgets ───────────────────────────────────── -->
+      <div class="tab-panel active" id="panel-caps">
+
+        <!-- Org-level cap card -->
+        <div class="org-cap-card">
+          <div class="org-cap-header">
+            <h3>Organisation monthly cap</h3>
+            <a class="org-cap-link" onclick="openOrgCapModal()">Edit org cap</a>
+          </div>
+          <div class="org-cap-big">$5,000 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ month</span></div>
+          <div class="org-cap-sub">Budget for all client workspaces combined</div>
+          <!-- Progress bar with pace line -->
+          <div class="org-cap-bar-wrap">
+            <div class="org-cap-bar-fill" style="width:25.7%"></div>
+            <!-- Pace line: day 6 of 31 = 19.4% elapsed -->
+            <div class="pace-line" style="left:19.4%"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="org-cap-meta">
+              $1,283 used &middot; 25.7% &middot;
+              <span class="over-pace">on pace for $4,920 this month</span>
+            </div>
+            <div style="font-size:12px;color:var(--slate-400)">Day 6 of 31</div>
+          </div>
+        </div>
+
+        <!-- Per-subaccount caps table -->
+        <div class="section-label" style="margin-bottom:12px">Per-workspace caps</div>
+        <div class="card" style="margin-bottom:0">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Workspace</th>
+                <th>Daily cap</th>
+                <th>Monthly cap</th>
+                <th>This month</th>
+                <th>Today</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <!-- Row 1: Acme Corp — healthy -->
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span class="client-dot sa-acme"></span>
+                    <span style="font-weight:600">Acme Corp</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('Acme Corp')">
+                    $50 / day
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('Acme Corp')">
+                    $1,500 / mo
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount">$312</span>
+                    <span class="of-cap"> / $1,500</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill normal" style="width:20.8%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount">$9.50</span>
+                    <span class="of-cap"> / $50</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill normal" style="width:19%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Within cap</span></td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-ghost" onclick="openSubCapModal('Acme Corp')">Edit</button>
+                    <button class="btn btn-sm btn-ghost" onclick="alert('Pause stub')">Pause</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 2: TerraForm Partners — over-pace (amber) -->
+              <tr style="background:#fffbeb">
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span class="client-dot sa-terra"></span>
+                    <span style="font-weight:600">TerraForm Partners</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('TerraForm Partners')">
+                    $20 / day
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('TerraForm Partners')">
+                    $800 / mo
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount" style="color:var(--amber-700)">$245</span>
+                    <span class="of-cap"> / $800</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill amber" style="width:30.6%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount">$18.20</span>
+                    <span class="of-cap"> / $20</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill amber" style="width:91%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-amber"><span class="status-dot dot-amber"></span>Over-pace</span></td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-ghost" onclick="openSubCapModal('TerraForm Partners')">Edit</button>
+                    <button class="btn btn-sm btn-ghost" onclick="alert('Pause stub')">Pause</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 3: Revel Group — approaching cap (red tint) -->
+              <tr style="background:#fff5f5">
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span class="client-dot sa-revel"></span>
+                    <span style="font-weight:600">Revel Group</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('Revel Group')">
+                    $30 / day
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('Revel Group')">
+                    $1,200 / mo
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount" style="color:var(--red-600)">$1,055</span>
+                    <span class="of-cap"> / $1,200</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill red" style="width:87.9%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount">$22.40</span>
+                    <span class="of-cap"> / $30</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill red" style="width:74.7%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>Near cap</span></td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-ghost" onclick="openSubCapModal('Revel Group')">Edit</button>
+                    <button class="btn btn-sm btn-ghost" onclick="alert('Pause stub')">Pause</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 4: Globex Industries — healthy -->
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span class="client-dot sa-globex"></span>
+                    <span style="font-weight:600">Globex Industries</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('Globex Industries')">
+                    $25 / day
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-cap-edit" onclick="openSubCapModal('Globex Industries')">
+                    $1,000 / mo
+                    <span class="edit-icon">&#9998;</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount">$148</span>
+                    <span class="of-cap"> / $1,000</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill normal" style="width:14.8%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="cap-spend-cell">
+                    <span class="amount">$7.10</span>
+                    <span class="of-cap"> / $25</span>
+                    <div class="mini-bar-wrap">
+                      <div class="mini-bar-fill normal" style="width:28.4%"></div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>Within cap</span></td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-ghost" onclick="openSubCapModal('Globex Industries')">Edit</button>
+                    <button class="btn btn-sm btn-ghost" onclick="alert('Pause stub')">Pause</button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Defaults panel -->
+        <div class="defaults-panel">
+          <div class="defaults-panel-left">
+            <div class="defaults-item">
+              <div class="defaults-label">Default daily cap</div>
+              <strong>$50 / day</strong>
+            </div>
+            <div class="defaults-item">
+              <div class="defaults-label">Default monthly cap</div>
+              <strong>$1,500 / month</strong>
+            </div>
+            <div style="font-size:12.5px;color:var(--slate-400)">Applied to new workspaces on creation</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="openDefaultsModal()">Edit defaults</button>
+        </div>
+
+      </div>
+      <!-- END panel-caps -->
+
+      <!-- ── TAB: Ledger ───────────────────────────────────────────── -->
+      <div class="tab-panel" id="panel-ledger">
+
+        <!-- Filter bar -->
+        <div class="filter-bar">
+          <div class="search-wrap" style="width:200px">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="search-box" placeholder="Search agent, source..." style="width:200px">
+          </div>
+          <select class="form-select" id="filter-subaccount" style="min-width:155px">
+            <option value="all">All workspaces</option>
+            <option>Acme Corp</option>
+            <option>TerraForm Partners</option>
+            <option>Revel Group</option>
+            <option>Globex Industries</option>
+          </select>
+          <select class="form-select">
+            <option>This month</option>
+            <option>Last 7 days</option>
+            <option>Last 30 days</option>
+            <option>Custom range</option>
+          </select>
+          <select class="form-select">
+            <option>All types</option>
+            <option>LLM cost</option>
+            <option>Tool execution</option>
+            <option>Storage</option>
+          </select>
+          <select class="form-select" id="groupby-select" onchange="switchGroupBy(this.value)">
+            <option value="none">Group by: None</option>
+            <option value="day">Group by: Day</option>
+            <option value="subaccount">Group by: Subaccount</option>
+            <option value="agent">Group by: Agent</option>
+          </select>
+        </div>
+
+        <!-- KPI strip -->
+        <div class="kpi-strip">
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Total spend</div>
+            <div class="kpi-tile-value">$1,283.42</div>
+            <div class="kpi-tile-sub">This month (all workspaces)</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Average per day</div>
+            <div class="kpi-tile-value">$42.78</div>
+            <div class="kpi-tile-sub">Based on 30 days</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Largest single day</div>
+            <div class="kpi-tile-value">$89.50</div>
+            <div class="kpi-tile-sub">May 2, 2026</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Top spender</div>
+            <div class="kpi-tile-value" style="font-size:16px">Outreach Agent</div>
+            <div class="kpi-tile-sub">$312.50 this month</div>
+          </div>
+        </div>
+
+        <!-- Group-by: None (flat transaction table) -->
+        <div id="groupby-none">
+          <div class="card">
+            <table class="data-table" id="ledger-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Workspace</th>
+                  <th>Agent / Source</th>
+                  <th>Type</th>
+                  <th>Provider / Model</th>
+                  <th>Tokens in / out</th>
+                  <th style="text-align:right">Cost</th>
+                  <th>Run ID</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-tbody">
+                <!-- Rows injected by JS -->
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <div class="pagination-info">Showing 1-25 of 247 transactions</div>
+            <div class="pagination-btns">
+              <button class="btn btn-secondary btn-sm" disabled>Previous</button>
+              <button class="btn btn-secondary btn-sm">Next</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Group-by: Day -->
+        <div id="groupby-day" style="display:none">
+          <div class="card">
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">May 6, 2026 (today)</div>
+                <div class="group-row-sub">24 transactions across 3 workspaces</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:63.7%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$57.20</div>
+                <div style="font-size:12px;color:var(--slate-400)">63.7% of today's cap avg</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">May 5, 2026</div>
+                <div class="group-row-sub">31 transactions across 4 workspaces</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:82.4%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$73.90</div>
+                <div style="font-size:12px;color:var(--slate-400)">82.4% of daily cap avg</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">May 4, 2026</div>
+                <div class="group-row-sub">28 transactions across 4 workspaces</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:55.2%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$49.50</div>
+                <div style="font-size:12px;color:var(--slate-400)">55.2% of daily cap avg</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">May 3, 2026</div>
+                <div class="group-row-sub">38 transactions across 4 workspaces</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:99.4%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$89.50</div>
+                <div style="font-size:12px;color:var(--slate-400)">99.4% of daily cap avg (peak)</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">May 2, 2026</div>
+                <div class="group-row-sub">35 transactions across 4 workspaces</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:77.5%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$69.60</div>
+                <div style="font-size:12px;color:var(--slate-400)">77.5% of daily cap avg</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">May 1, 2026</div>
+                <div class="group-row-sub">29 transactions across 3 workspaces</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:48.9%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$43.90</div>
+                <div style="font-size:12px;color:var(--slate-400)">48.9% of daily cap avg</div>
+              </div>
+            </div>
+          </div>
+          <div class="pagination">
+            <div class="pagination-info">Showing 6 days. Full range: May 1 - May 6, 2026</div>
+            <div class="pagination-btns">
+              <button class="btn btn-secondary btn-sm" disabled>Previous</button>
+              <button class="btn btn-secondary btn-sm">Next</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Group-by: Subaccount -->
+        <div id="groupby-subaccount" style="display:none">
+          <div class="card">
+            <div class="group-row">
+              <div>
+                <div class="group-row-label"><span class="client-dot sa-revel" style="margin-right:6px"></span>Revel Group</div>
+                <div class="group-row-sub">142 transactions &middot; 11 agents</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:82.2%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$1,055.00</div>
+                <div style="font-size:12px;color:var(--red-500);font-weight:600">87.9% of monthly cap</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label"><span class="client-dot sa-acme" style="margin-right:6px"></span>Acme Corp</div>
+                <div class="group-row-sub">89 transactions &middot; 8 agents</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:24.4%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$312.00</div>
+                <div style="font-size:12px;color:var(--slate-400)">20.8% of monthly cap</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label"><span class="client-dot sa-terra" style="margin-right:6px"></span>TerraForm Partners</div>
+                <div class="group-row-sub">77 transactions &middot; 6 agents</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill amber" style="width:30.6%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$245.00</div>
+                <div style="font-size:12px;color:var(--amber-600);font-weight:600">30.6% of monthly cap (over-pace)</div>
+              </div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label"><span class="client-dot sa-globex" style="margin-right:6px"></span>Globex Industries</div>
+                <div class="group-row-sub">48 transactions &middot; 5 agents</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:11.6%"></div></div>
+              </div>
+              <div style="text-align:right">
+                <div class="group-row-cost">$148.00</div>
+                <div style="font-size:12px;color:var(--slate-400)">14.8% of monthly cap</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Group-by: Agent -->
+        <div id="groupby-agent" style="display:none">
+          <div class="card">
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Outreach Agent</div>
+                <div class="group-row-sub">Revel Group &middot; 58 LLM calls &middot; 4.2M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:100%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$312.50</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Proposal Writer</div>
+                <div class="group-row-sub">Revel Group &middot; 34 LLM calls &middot; 2.8M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:74%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$231.00</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">CRM Sync Agent</div>
+                <div class="group-row-sub">Acme Corp &middot; 21 tool calls &middot; 0.9M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:57%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$178.20</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Lead Qualifier</div>
+                <div class="group-row-sub">TerraForm Partners &middot; 43 LLM calls &middot; 1.5M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill amber" style="width:44%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$138.40</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Data Extractor</div>
+                <div class="group-row-sub">Globex Industries &middot; 18 tool calls &middot; 0.6M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:34%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$106.80</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Email Drafter</div>
+                <div class="group-row-sub">Acme Corp &middot; 27 LLM calls &middot; 0.7M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:28%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$87.60</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Research Agent</div>
+                <div class="group-row-sub">TerraForm Partners &middot; 15 LLM calls &middot; 0.5M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:20%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$62.30</div></div>
+            </div>
+            <div class="group-row">
+              <div>
+                <div class="group-row-label">Report Generator</div>
+                <div class="group-row-sub">Acme Corp &middot; 9 LLM calls &middot; 0.4M tokens</div>
+                <div class="group-row-bar"><div class="group-row-bar-fill" style="width:15%"></div></div>
+              </div>
+              <div style="text-align:right"><div class="group-row-cost">$46.20</div></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <!-- END panel-ledger -->
+
+    </div>
+    <!-- END page-body -->
+  </div>
+  <!-- END main -->
+</div>
+
+<!-- ── Transaction detail drawer ──────────────────────────────────── -->
+<div class="drawer-overlay" id="txn-drawer-overlay" style="display:none" onclick="closeTxnDrawer(event)">
+  <div class="drawer detail-drawer" id="txn-drawer">
+    <div class="drawer-header">
+      <h2 id="txn-drawer-title">Transaction Detail</h2>
+      <button class="drawer-close" onclick="closeTxnDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body" id="txn-drawer-body">
+      <!-- populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ── Org cap modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="org-cap-modal" style="display:none" onclick="closeOrgCapModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <h3>Edit organisation cap</h3>
+      <button class="drawer-close" onclick="closeOrgCapModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-field">
+        <label class="form-label">Monthly cap</label>
+        <div class="input-prefix-wrap">
+          <span class="input-prefix">$</span>
+          <input type="number" class="input-with-prefix" id="org-monthly-cap" value="5000" min="1" placeholder="e.g. 5000">
+        </div>
+        <div class="modal-hint">Maximum total spend across all workspaces in a calendar month.</div>
+        <div class="validation-msg" id="org-cap-err">Monthly cap must be greater than 0.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeOrgCapModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="applyOrgCap()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sub cap modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="sub-cap-modal" style="display:none" onclick="closeSubCapModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <h3 id="sub-cap-modal-title">Edit workspace cap</h3>
+      <button class="drawer-close" onclick="closeSubCapModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-field">
+        <label class="form-label">Daily cap</label>
+        <div class="input-prefix-wrap">
+          <span class="input-prefix">$</span>
+          <input type="number" class="input-with-prefix" id="sub-daily-cap" value="50" min="1" placeholder="e.g. 50">
+        </div>
+        <div class="modal-hint">Maximum spend per calendar day for this workspace.</div>
+        <div class="validation-msg" id="sub-daily-err">Daily cap must be greater than 0.</div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Monthly cap</label>
+        <div class="input-prefix-wrap">
+          <span class="input-prefix">$</span>
+          <input type="number" class="input-with-prefix" id="sub-monthly-cap" value="1500" min="1" placeholder="e.g. 1500">
+        </div>
+        <div class="modal-hint">Monthly cap must be at least equal to the daily cap.</div>
+        <div class="validation-msg" id="sub-monthly-err">Monthly cap must be greater than or equal to the daily cap.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeSubCapModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="applySubCap()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Defaults modal ───────────────────────────────────────────── -->
+<div class="modal-overlay" id="defaults-modal" style="display:none" onclick="closeDefaultsModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <h3>Edit defaults for new workspaces</h3>
+      <button class="drawer-close" onclick="closeDefaultsModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-field">
+        <label class="form-label">Default daily cap</label>
+        <div class="input-prefix-wrap">
+          <span class="input-prefix">$</span>
+          <input type="number" class="input-with-prefix" value="50" min="1">
+        </div>
+        <div class="modal-hint">Applied to every new workspace created in this organisation.</div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Default monthly cap</label>
+        <div class="input-prefix-wrap">
+          <span class="input-prefix">$</span>
+          <input type="number" class="input-with-prefix" value="1500" min="1">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeDefaultsModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="closeDefaultsModal(); showToast('Defaults saved')">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="spend-toast" style="
+  position:fixed;top:16px;right:20px;z-index:9999;
+  background:#1e293b;color:#f1f5f9;font-size:12.5px;
+  font-family:Inter,ui-sans-serif,system-ui,sans-serif;
+  padding:8px 14px;border-radius:8px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.22);
+  pointer-events:none;opacity:0;transition:opacity 0.3s;
+"></div>
+
+<script src="_sidebar.js"></script>
+<script>
+/* ── Init sidebar in org mode ──────────────────────────────────── */
+(function() {
+  var storedMode = localStorage.getItem('prototype.sidebar.mode') || 'org';
+  renderSidebar(storedMode, 'spending.html');
+})();
+
+/* ── Tab switching ──────────────────────────────────────────────── */
+function switchSpendTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+  btn.classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+/* ── Group-by switching ─────────────────────────────────────────── */
+function switchGroupBy(val) {
+  ['none','day','subaccount','agent'].forEach(function(v) {
+    document.getElementById('groupby-' + v).style.display = (v === val) ? '' : 'none';
+  });
+}
+
+/* ── Toast helper ───────────────────────────────────────────────── */
+function showToast(msg) {
+  var t = document.getElementById('spend-toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  setTimeout(function() { t.style.opacity = '0'; }, 2200);
+}
+
+/* ── Org cap modal ──────────────────────────────────────────────── */
+function openOrgCapModal() {
+  document.getElementById('org-cap-modal').style.display = 'flex';
+}
+function closeOrgCapModal(e) {
+  if (e && e.target !== document.getElementById('org-cap-modal')) return;
+  document.getElementById('org-cap-modal').style.display = 'none';
+}
+function applyOrgCap() {
+  var val = parseFloat(document.getElementById('org-monthly-cap').value);
+  var err = document.getElementById('org-cap-err');
+  if (!val || val <= 0) { err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  document.getElementById('org-cap-modal').style.display = 'none';
+  showToast('Org monthly cap updated to $' + val.toLocaleString());
+}
+
+/* ── Sub cap modal ──────────────────────────────────────────────── */
+function openSubCapModal(name) {
+  document.getElementById('sub-cap-modal-title').textContent = 'Edit cap: ' + name;
+  document.getElementById('sub-cap-modal').style.display = 'flex';
+}
+function closeSubCapModal(e) {
+  if (e && e.target !== document.getElementById('sub-cap-modal')) return;
+  document.getElementById('sub-cap-modal').style.display = 'none';
+}
+function applySubCap() {
+  var daily = parseFloat(document.getElementById('sub-daily-cap').value);
+  var monthly = parseFloat(document.getElementById('sub-monthly-cap').value);
+  var dErr = document.getElementById('sub-daily-err');
+  var mErr = document.getElementById('sub-monthly-err');
+  var ok = true;
+  if (!daily || daily <= 0) { dErr.style.display = 'block'; ok = false; } else { dErr.style.display = 'none'; }
+  if (!monthly || monthly < daily) { mErr.style.display = 'block'; ok = false; } else { mErr.style.display = 'none'; }
+  if (!ok) return;
+  document.getElementById('sub-cap-modal').style.display = 'none';
+  showToast('Caps updated: $' + daily + '/day, $' + monthly + '/month');
+}
+
+/* ── Defaults modal ─────────────────────────────────────────────── */
+function openDefaultsModal() {
+  document.getElementById('defaults-modal').style.display = 'flex';
+}
+function closeDefaultsModal(e) {
+  if (e && e.target !== document.getElementById('defaults-modal')) return;
+  document.getElementById('defaults-modal').style.display = 'none';
+}
+
+/* ── Transaction data ───────────────────────────────────────────── */
+var TRANSACTIONS = [
+  { id:'run_8f3a1', ts:'2m ago', tsAbs:'May 6, 2026 14:22 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'Outreach Agent', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'1,240', tokensOut:'820', cost:'$1.82', model:'claude-sonnet-4-6', inputCost:'$1.24', outputCost:'$0.74', cacheDiscount:'-$0.16', runId:'run_8f3a1' },
+  { id:'run_2b9c4', ts:'8m ago', tsAbs:'May 6, 2026 14:16 UTC', sa:'TerraForm Partners', saClass:'sa-terra', agent:'Lead Qualifier', type:'LLM', provider:'Anthropic claude-opus-4-5', tokensIn:'2,105', tokensOut:'430', cost:'$4.22', model:'claude-opus-4-5', inputCost:'$3.16', outputCost:'$1.29', cacheDiscount:'-$0.23', runId:'run_2b9c4' },
+  { id:'run_7e2d9', ts:'14m ago', tsAbs:'May 6, 2026 14:10 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Proposal Writer', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'3,400', tokensOut:'1,800', cost:'$4.50', model:'claude-sonnet-4-6', inputCost:'$3.40', outputCost:'$1.80', cacheDiscount:'-$0.70', runId:'run_7e2d9' },
+  { id:'run_0a5f2', ts:'21m ago', tsAbs:'May 6, 2026 14:03 UTC', sa:'Globex Industries', saClass:'sa-globex', agent:'Data Extractor', type:'Tool', provider:'Google Sheets API', tokensIn:'0', tokensOut:'0', cost:'$0.02', model:'n/a', inputCost:'$0.02', outputCost:'$0.00', cacheDiscount:'$0.00', runId:'run_0a5f2' },
+  { id:'run_4c1b7', ts:'35m ago', tsAbs:'May 6, 2026 13:49 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'CRM Sync Agent', type:'Tool', provider:'Salesforce REST', tokensIn:'0', tokensOut:'0', cost:'$0.05', model:'n/a', inputCost:'$0.05', outputCost:'$0.00', cacheDiscount:'$0.00', runId:'run_4c1b7' },
+  { id:'run_9d3e8', ts:'52m ago', tsAbs:'May 6, 2026 13:32 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Outreach Agent', type:'LLM', provider:'Anthropic claude-haiku-3-5', tokensIn:'880', tokensOut:'560', cost:'$0.28', model:'claude-haiku-3-5', inputCost:'$0.18', outputCost:'$0.11', cacheDiscount:'-$0.01', runId:'run_9d3e8' },
+  { id:'run_3f7a0', ts:'1h 10m ago', tsAbs:'May 6, 2026 13:14 UTC', sa:'TerraForm Partners', saClass:'sa-terra', agent:'Research Agent', type:'LLM', provider:'OpenAI gpt-4o', tokensIn:'1,650', tokensOut:'720', cost:'$2.14', model:'gpt-4o', inputCost:'$1.65', outputCost:'$0.72', cacheDiscount:'-$0.23', runId:'run_3f7a0' },
+  { id:'run_6b8c3', ts:'1h 28m ago', tsAbs:'May 6, 2026 12:56 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'Email Drafter', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'420', tokensOut:'380', cost:'$0.72', model:'claude-sonnet-4-6', inputCost:'$0.42', outputCost:'$0.38', cacheDiscount:'-$0.08', runId:'run_6b8c3' },
+  { id:'run_1e4d5', ts:'2h 5m ago', tsAbs:'May 6, 2026 12:19 UTC', sa:'Globex Industries', saClass:'sa-globex', agent:'Report Generator', type:'LLM', provider:'Anthropic claude-opus-4-5', tokensIn:'2,800', tokensOut:'1,200', cost:'$3.85', model:'claude-opus-4-5', inputCost:'$2.80', outputCost:'$1.20', cacheDiscount:'-$0.15', runId:'run_1e4d5' },
+  { id:'run_5g9h2', ts:'2h 44m ago', tsAbs:'May 6, 2026 11:40 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Proposal Writer', type:'Storage', provider:'AWS S3', tokensIn:'0', tokensOut:'0', cost:'$0.08', model:'n/a', inputCost:'$0.08', outputCost:'$0.00', cacheDiscount:'$0.00', runId:'run_5g9h2' },
+  { id:'run_2k3m1', ts:'3h 18m ago', tsAbs:'May 6, 2026 11:06 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'CRM Sync Agent', type:'LLM', provider:'Anthropic claude-haiku-3-5', tokensIn:'560', tokensOut:'240', cost:'$0.14', model:'claude-haiku-3-5', inputCost:'$0.11', outputCost:'$0.05', cacheDiscount:'-$0.02', runId:'run_2k3m1' },
+  { id:'run_8n4p7', ts:'4h 2m ago', tsAbs:'May 6, 2026 10:22 UTC', sa:'TerraForm Partners', saClass:'sa-terra', agent:'Lead Qualifier', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'1,920', tokensOut:'680', cost:'$2.56', model:'claude-sonnet-4-6', inputCost:'$1.92', outputCost:'$0.68', cacheDiscount:'-$0.04', runId:'run_8n4p7' },
+  { id:'run_7q5r3', ts:'5h 15m ago', tsAbs:'May 6, 2026 09:09 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Outreach Agent', type:'LLM', provider:'Anthropic claude-opus-4-5', tokensIn:'4,100', tokensOut:'2,200', cost:'$4.50', model:'claude-opus-4-5', inputCost:'$4.10', outputCost:'$2.20', cacheDiscount:'-$1.80', runId:'run_7q5r3' },
+  { id:'run_0s6t4', ts:'5h 48m ago', tsAbs:'May 6, 2026 08:36 UTC', sa:'Globex Industries', saClass:'sa-globex', agent:'Data Extractor', type:'Tool', provider:'REST API', tokensIn:'0', tokensOut:'0', cost:'$0.03', model:'n/a', inputCost:'$0.03', outputCost:'$0.00', cacheDiscount:'$0.00', runId:'run_0s6t4' },
+  { id:'run_4u7v9', ts:'6h 30m ago', tsAbs:'May 6, 2026 07:54 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'Email Drafter', type:'LLM', provider:'Anthropic claude-haiku-3-5', tokensIn:'310', tokensOut:'290', cost:'$0.09', model:'claude-haiku-3-5', inputCost:'$0.06', outputCost:'$0.06', cacheDiscount:'-$0.03', runId:'run_4u7v9' },
+  // yesterday rows
+  { id:'run_5w8x1', ts:'1d ago', tsAbs:'May 5, 2026 18:44 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Proposal Writer', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'2,750', tokensOut:'1,450', cost:'$3.78', model:'claude-sonnet-4-6', inputCost:'$2.75', outputCost:'$1.45', cacheDiscount:'-$0.42', runId:'run_5w8x1' },
+  { id:'run_6y9z2', ts:'1d ago', tsAbs:'May 5, 2026 15:22 UTC', sa:'TerraForm Partners', saClass:'sa-terra', agent:'Research Agent', type:'LLM', provider:'OpenAI gpt-4o', tokensIn:'2,200', tokensOut:'890', cost:'$2.85', model:'gpt-4o', inputCost:'$2.20', outputCost:'$0.89', cacheDiscount:'-$0.24', runId:'run_6y9z2' },
+  { id:'run_1a2b0', ts:'1d ago', tsAbs:'May 5, 2026 12:11 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'Outreach Agent', type:'LLM', provider:'Anthropic claude-opus-4-5', tokensIn:'1,980', tokensOut:'740', cost:'$2.92', model:'claude-opus-4-5', inputCost:'$1.98', outputCost:'$0.74', cacheDiscount:'-$0.80', runId:'run_1a2b0' },
+  { id:'run_3c4d8', ts:'1d ago', tsAbs:'May 5, 2026 09:55 UTC', sa:'Globex Industries', saClass:'sa-globex', agent:'Report Generator', type:'Storage', provider:'AWS S3', tokensIn:'0', tokensOut:'0', cost:'$0.12', model:'n/a', inputCost:'$0.12', outputCost:'$0.00', cacheDiscount:'$0.00', runId:'run_3c4d8' },
+  { id:'run_7e5f6', ts:'1d ago', tsAbs:'May 5, 2026 08:30 UTC', sa:'TerraForm Partners', saClass:'sa-terra', agent:'Lead Qualifier', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'1,100', tokensOut:'480', cost:'$1.48', model:'claude-sonnet-4-6', inputCost:'$1.10', outputCost:'$0.48', cacheDiscount:'-$0.10', runId:'run_7e5f6' },
+  { id:'run_9g6h4', ts:'2d ago', tsAbs:'May 4, 2026 20:12 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Outreach Agent', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'3,200', tokensOut:'1,600', cost:'$4.16', model:'claude-sonnet-4-6', inputCost:'$3.20', outputCost:'$1.60', cacheDiscount:'-$0.64', runId:'run_9g6h4' },
+  { id:'run_2i7j3', ts:'2d ago', tsAbs:'May 4, 2026 16:45 UTC', sa:'Acme Corp', saClass:'sa-acme', agent:'CRM Sync Agent', type:'Tool', provider:'HubSpot API', tokensIn:'0', tokensOut:'0', cost:'$0.04', model:'n/a', inputCost:'$0.04', outputCost:'$0.00', cacheDiscount:'$0.00', runId:'run_2i7j3' },
+  { id:'run_4k8l1', ts:'2d ago', tsAbs:'May 4, 2026 13:20 UTC', sa:'Globex Industries', saClass:'sa-globex', agent:'Data Extractor', type:'LLM', provider:'Anthropic claude-haiku-3-5', tokensIn:'740', tokensOut:'380', cost:'$0.22', model:'claude-haiku-3-5', inputCost:'$0.15', outputCost:'$0.15', cacheDiscount:'-$0.08', runId:'run_4k8l1' },
+  { id:'run_6m9n5', ts:'3d ago', tsAbs:'May 3, 2026 19:08 UTC', sa:'TerraForm Partners', saClass:'sa-terra', agent:'Lead Qualifier', type:'LLM', provider:'Anthropic claude-opus-4-5', tokensIn:'3,500', tokensOut:'1,900', cost:'$4.50', model:'claude-opus-4-5', inputCost:'$3.50', outputCost:'$1.90', cacheDiscount:'-$0.90', runId:'run_6m9n5' },
+  { id:'run_8o0p2', ts:'3d ago', tsAbs:'May 3, 2026 11:33 UTC', sa:'Revel Group', saClass:'sa-revel', agent:'Proposal Writer', type:'LLM', provider:'Anthropic claude-sonnet-4-6', tokensIn:'2,600', tokensOut:'1,350', cost:'$3.62', model:'claude-sonnet-4-6', inputCost:'$2.60', outputCost:'$1.35', cacheDiscount:'-$0.33', runId:'run_8o0p2' },
+];
+
+/* ── Render ledger table ─────────────────────────────────────────── */
+function renderLedger() {
+  var tbody = document.getElementById('ledger-tbody');
+  tbody.innerHTML = '';
+  TRANSACTIONS.forEach(function(tx, i) {
+    var tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = function() { openTxnDrawer(i); };
+    var typeBadgeClass = tx.type === 'LLM' ? 'type-llm' : tx.type === 'Tool' ? 'type-tool' : 'type-storage';
+    tr.innerHTML = [
+      '<td class="timestamp-cell" title="' + tx.tsAbs + '">' + tx.ts + '</td>',
+      '<td><span class="client-dot ' + tx.saClass + '"></span>' + tx.sa + '</td>',
+      '<td style="font-weight:500">' + tx.agent + '</td>',
+      '<td><span class="type-badge ' + typeBadgeClass + '">' + tx.type + '</span></td>',
+      '<td style="font-size:12.5px;color:var(--slate-500)">' + tx.provider + '</td>',
+      '<td style="font-size:12.5px;color:var(--slate-600)">' + (tx.type === 'LLM' ? tx.tokensIn + ' / ' + tx.tokensOut : '&#8212;') + '</td>',
+      '<td class="cost-cell">' + tx.cost + '</td>',
+      '<td><a class="run-id-link" href="run-trace.html" onclick="event.stopPropagation()">' + tx.runId + '</a></td>',
+    ].join('');
+    tbody.appendChild(tr);
+  });
+}
+renderLedger();
+
+/* ── Transaction drawer ──────────────────────────────────────────── */
+function openTxnDrawer(idx) {
+  var tx = TRANSACTIONS[idx];
+  document.getElementById('txn-drawer-title').textContent = tx.agent + ' transaction';
+  var body = document.getElementById('txn-drawer-body');
+  var typeBadgeClass = tx.type === 'LLM' ? 'type-llm' : tx.type === 'Tool' ? 'type-tool' : 'type-storage';
+  body.innerHTML = [
+    '<div class="drawer-meta-grid">',
+    '  <div class="drawer-meta-item"><div class="meta-label">Workspace</div><div class="meta-value"><span class="client-dot ' + tx.saClass + '" style="display:inline-block;margin-right:4px"></span>' + tx.sa + '</div></div>',
+    '  <div class="drawer-meta-item"><div class="meta-label">Agent</div><div class="meta-value">' + tx.agent + '</div></div>',
+    '  <div class="drawer-meta-item"><div class="meta-label">Type</div><div class="meta-value"><span class="type-badge ' + typeBadgeClass + '">' + tx.type + '</span></div></div>',
+    '  <div class="drawer-meta-item"><div class="meta-label">Provider / Model</div><div class="meta-value" style="font-size:12.5px">' + tx.provider + '</div></div>',
+    (tx.type === 'LLM' ? '  <div class="drawer-meta-item"><div class="meta-label">Tokens in</div><div class="meta-value">' + tx.tokensIn + '</div></div>' +
+      '  <div class="drawer-meta-item"><div class="meta-label">Tokens out</div><div class="meta-value">' + tx.tokensOut + '</div></div>' : ''),
+    '  <div class="drawer-meta-item"><div class="meta-label">Timestamp</div><div class="meta-value" style="font-size:12.5px">' + tx.tsAbs + '</div></div>',
+    '  <div class="drawer-meta-item"><div class="meta-label">Run ID</div><div class="meta-value"><a class="run-id-link" href="run-trace.html">' + tx.runId + '</a></div></div>',
+    '</div>',
+    '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:10px">Cost breakdown</div>',
+    '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:2px 12px">',
+    '  <div class="cost-breakdown-row"><span class="label">Input tokens</span><span class="value">' + tx.inputCost + '</span></div>',
+    '  <div class="cost-breakdown-row"><span class="label">Output tokens</span><span class="value">' + tx.outputCost + '</span></div>',
+    (tx.cacheDiscount !== '$0.00' ? '  <div class="cost-breakdown-row"><span class="label">Cache discount</span><span class="value discount">' + tx.cacheDiscount + '</span></div>' : ''),
+    '</div>',
+    '<div class="cost-total-row"><span>Total</span><span>' + tx.cost + '</span></div>',
+    '<hr style="border:none;border-top:1px solid var(--border);margin:18px 0">',
+    '<div style="display:flex;flex-direction:column;gap:8px">',
+    '  <a href="run-trace.html" class="btn btn-secondary btn-sm" style="width:fit-content">View run trace &#8594;</a>',
+    '  <a href="agents.html" class="btn btn-ghost btn-sm" style="width:fit-content">View agent definition &#8594;</a>',
+    '</div>',
+  ].join('');
+  document.getElementById('txn-drawer-overlay').style.display = 'flex';
+}
+function closeTxnDrawer(e) {
+  if (e && e.target !== document.getElementById('txn-drawer-overlay')) return;
+  document.getElementById('txn-drawer-overlay').style.display = 'none';
+}
+
+/* ── Keyboard close ─────────────────────────────────────────────── */
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('txn-drawer-overlay').style.display = 'none';
+    document.getElementById('org-cap-modal').style.display = 'none';
+    document.getElementById('sub-cap-modal').style.display = 'none';
+    document.getElementById('defaults-modal').style.display = 'none';
+  }
+});
+</script>
+</body>
+</html>

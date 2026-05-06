@@ -156,7 +156,7 @@ const NAV = {
         label: 'Setup',
         items: [
           { label: 'Team',        href: '#',                           icon: 'team',       stub: true },
-          { label: 'Spending',    href: '#',                           icon: 'spending',   stub: true },
+          { label: 'Spending',    href: 'spending.html',               icon: 'spending' },
           { label: 'Manage',      href: '#',                           icon: 'manage',     stub: true },
         ],
       },

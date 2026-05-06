@@ -87,15 +87,15 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7b-3
+    Prototype Round 7b-4
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7b-3: Queues page — consolidates JobQueueDashboardPage (system/job-queues) and SystemTaskQueuePage (system/task-queue) into a single two-tab surface. Queue health tab: KPI strip, 4 tier cards (agent execution, financial, maintenance, memory), per-queue table with drawer (sparkline, errors, DLQ retry, config). Execution log tab: filter bar with live tail toggle, 20-row execution table with drawer (timestamps, payloads, error, retry history, action buttons). Before companion page shows the two-page split with annotated problems.</p>
+  <p>Round 7b-4: Spending page — consolidates SpendingBudgetsPage (/admin/spending-budgets) and SpendLedgerPage (/admin/subaccounts/:id/spend-ledger) into a single spending.html with two tabs. Caps and budgets tab: org-level cap card with progress bar and pace indicator, per-workspace caps table with inline editing and status badges (within cap, over-pace amber, near cap red), defaults panel. Ledger tab: filter bar, KPI strip, flat transaction table with 25 rows, group-by switching (Day, Subaccount, Agent), row click opens 440px transaction detail drawer with cost breakdown and run trace link. Edit cap modal shared between tabs with validation. Before companion page shows the two-page split with annotated problems.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7b-3</div>
+    <div class="meta-item"><strong>Round:</strong> 7b-4</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
-    <div class="meta-item"><strong>Files:</strong> 46+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
+    <div class="meta-item"><strong>Files:</strong> 48+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
 </div>
 
@@ -128,6 +128,7 @@
     <li>Round 7b-1: Connections page: inline SVG monogram logos for all 8 connections (Gmail, Salesforce, HubSpot, Zapier, AWS S3, Slack, Google Analytics, generic servers).</li>
     <li>Round 7b-1: Inbox action buttons: uniform sizing (padding 7px 14px, font-size 13px) across all item types. Archive is now an outlined button, not a plain text link. Primary actions solid indigo, secondary actions outlined slate.</li>
     <li>Round 7b-2: Team page: SubaccountTeamPage and OrgChartPage merged into one page with Members + Org Chart tabs. Member detail drawer is shared across both tabs (click a row or an org card). Invite modal adds a pending row to the Members table. Org chart is CSS flexbox only (read view), no D3 or graph library.</li>
+    <li>Round 7b-4: Spending page: SpendingBudgetsPage and SpendLedgerPage merged into spending.html with two tabs. Org-level cap card with progress bar and pace line. Per-workspace caps table with inline edit, status badges (within cap, over-pace amber, near cap red). Ledger tab with 25+ transactions, KPI strip, group-by (None / Day / Subaccount / Agent). Transaction detail drawer with cost breakdown and run trace link. Edit cap modal with validation (daily and monthly). _sidebar.js Spending link in Org mode changed from stub to spending.html.</li>
   </ul>
 </div>
 
@@ -805,6 +806,53 @@
       <div class="proto-card-footer">
         <a class="proto-card-link" href="before-queues.html">Open before &#8594;</a>
         <a href="queues.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Round 7b-4: Spending page ─────────────────────────────────── -->
+<div class="section">
+  <div class="section-heading">
+    <div class="section-heading-dot" style="background:#059669"></div>
+    Round 7b-4: Spending (Caps + Ledger)
+  </div>
+
+  <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;color:#065f46;line-height:1.55;">
+    <strong>Consolidation:</strong> SpendingBudgetsPage (/admin/spending-budgets) and SpendLedgerPage (/admin/subaccounts/:id/spend-ledger) merged into a single spending.html with two tabs. Audience: org admin / finance person. Org mode sidebar "Spending" link now resolves to spending.html (was a stub). Before companion shows the two-page split, cents-based cap fields without context, and ledger limitations.
+  </div>
+
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Spending</div>
+        <div class="proto-card-file">spending.html</div>
+      </div>
+      <div class="proto-card-desc">Two-tab page for org admins and finance users. Caps and budgets tab: org cap card with $5,000/month big number, progress bar + dotted pace line, "$1,283 used, on pace for $4,920" inline metric. Per-workspace caps table: 4 rows with inline-edit daily and monthly caps, mini progress bars, status badges (within cap, over-pace amber for TerraForm Partners, near cap red for Revel Group at 88%). Defaults panel for new workspaces. Ledger tab: filter bar (workspace, date range, type, group-by, search), KPI strip (total spend $1,283, avg per day $42.78, largest day $89.50, top spender Outreach Agent). Flat transaction table with 25 rows spanning 7 days and 4 workspaces. Group-by switching: None / Day / Subaccount / Agent. Row click opens 440px drawer with workspace, agent, type, model, token counts, cost breakdown (input, output, cache discount), run trace link and agent definition link. Edit org cap modal (monthly only) and per-workspace cap modal (daily + monthly) with field validation.</div>
+      <div class="proto-card-replaces">
+        <div class="proto-card-replaces-label">Replaces 2 pages</div>
+        <div class="proto-card-replaces-list">
+          <span class="replace-pill strike">SpendingBudgetsPage</span>
+          <span class="replace-pill strike">SpendLedgerPage</span>
+        </div>
+      </div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="spending.html">Open mockup &#8594;</a>
+        <a href="before-spending.html" class="before-link">Before</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <div class="proto-card-title">Before: Spending Budgets + Spend Ledger</div>
+        <div class="proto-card-file">before-spending.html</div>
+      </div>
+      <div class="proto-card-desc">Side-by-side depiction of the two current production pages. Left: SpendingBudgetsPage: org cap form-field (cents), per-subaccount caps table (limits in cents, no spend context, no progress bars). Right: SpendLedgerPage: per-subaccount only (no org-wide view), requires deep navigation to reach, group-by limited to Day only, no row drill-down. Problems box lists 6 specific gaps: two pages for related data, no org-wide ledger, caps in cents without context, limited group-by, no row drill-down.</div>
+      <div class="proto-card-footer">
+        <a class="proto-card-link" href="before-spending.html">Open before &#8594;</a>
+        <a href="spending.html" class="before-link" style="background:#d1fae5;border-color:#a7f3d0;color:#065f46;">After</a>
       </div>
     </div>
 
