@@ -908,3 +908,28 @@ Index and log updates:
 - `prototypes/consolidation-2026-05-06/_sidebar.js` (Org Build Agents link updated)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions, card added)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7b-11 — 2026-05-06 (FINAL round of 7b chain)
+
+**Operator feedback:** Build project-edit.html (AFTER: Goals retired, per-project Objective field added) and before-project-edit.html (BEFORE: no Objective field, separate GoalsPage). Decision (a) approved: retire Goals tree, add projects.objective field. Goals were never read by agent execution code (zero hits in server/services/agent*/). Objective IS read at runtime. Subaccount-level strategy lives in Memory blocks.
+
+**Changes made:**
+- Created `prototypes/consolidation-2026-05-06/project-edit.html`: Single-page project edit form. Five sections: (1) Identity: name, 5-color swatch picker + custom color, description textarea, status dropdown. (2) Objective (NEW, indigo-accented header with "NEW" badge): blue helper band explaining agent runtime injection, large textarea (15px font, light indigo background), word/character counter with warn state at 220+ chars, tip about brevity, expandable "Show example objectives" with 4 click-to-use example objectives. (3) Project management: target date, budget with $ prefix formatting, warning threshold slider (50-95, default 75) with live % display. (4) Linked resources: repo URL with GitHub picker button, linked agent chips (Outreach Agent/Lead Qualifier/Demo Scheduler) each linking to agent-edit.html, Add agent button. (5) Migration notice card (blue info card): "Migrated from Goals" - shows once for projects that had a goal_id. Sticky footer with Save/Discard/Delete. Dirty-state topbar indicator shows unsaved changes dot + Save/Discard buttons when form is modified. Sidebar mode = workspace, activeHref = project-edit.html (page reached from list, not nav item).
+- Created `prototypes/consolidation-2026-05-06/before-project-edit.html`: Split-panel before state. Left panel: existing project edit page at /projects/:id/edit with no Objective field. Sections: Identity (name, description only - no color swatch, no signposting), goalId dropdown (sets projects.goalId metadata but does NOT push goal text to agents, annotated), project management (budget in cents, no $ formatting), linked resources. Amber annotation boxes inline on 2 sections. Right panel: GoalsPage (/admin/subaccounts/:id/goals). Full OKR tree: Mission 1 "Become the leading agent-OS for mid-market..." > Objective 1.1 "Q1 Outreach Campaign" (linked-to-project badge) > Key Results (30 qualified meetings 8/30, 5 closed deals 1/5) > Objective 1.2 "Customer success scaling" > Key Results. Mission 2 collapsed stub. Amber "zero hits in server/services/agent*/" badge at top. 4-item annotations panel. Problems-with-current-state footer listing 6 gaps. "After" link to project-edit.html.
+- Updated `prototypes/consolidation-2026-05-06/index.html`: masthead updated to "Round 7b-11 - 7b chain COMPLETE", description updated, files count to 54+, new decisions bullet for 7b-11, new Round 7b-11 section card pair (project-edit.html + before-project-edit.html) added.
+- Verified `prototypes/consolidation-2026-05-06/_sidebar.js`: Goals already absent from workspace mode (removed in 7b-1). No changes needed.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- Primary task is "set a focused objective so agents know what this project is trying to achieve". Page opens directly on the form, Objective section is section 2 (immediately visible after Identity). No dashboards, no tabs needed.
+- Default to hidden: yes -- Example objectives are behind a click-to-expand. Migration notice card is a compact info band, not a full panel. No KPI tiles, no run history, no cost panels.
+- One primary action: yes -- "Save changes" is the sole primary action. Discard and Delete are clearly secondary/destructive. Dirty-state CTA in topbar mirrors footer to reduce scroll friction.
+- Inline state: yes -- Character count inline below textarea. Dirty indicator inline in topbar. Migration notice is inline context, not a separate page or modal.
+- Re-check passed: yes -- A non-technical operator landing on this page sees: project name at top, Objective section clearly labelled with helper text explaining why it matters, example objectives to get started. No overwhelming panels. The form is scannable and the Save is obvious.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/project-edit.html` (created)
+- `prototypes/consolidation-2026-05-06/before-project-edit.html` (created)
+- `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions bullet, 7b-11 section added, chain marked complete)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

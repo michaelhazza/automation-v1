@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<!--
+  before-project-edit.html — Round 7b-11
+  Depicts the BEFORE state:
+    - Left half: existing Project edit page (no Objective field; description is the only freeform context)
+    - Right half: GoalsPage (subaccount-level OKR tree: Mission / Objective / Key Result)
+      that is NOT read by agent execution code.
+  Shows why the Goals tree was retired and the per-project Objective field introduced.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BEFORE: Project Edit + Goals Page | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+  background: #f1f5f9;
+}
+body { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ── "Before" banner ──────────────────────────────────────── */
+.before-banner {
+  background: #fef3c7;
+  border-bottom: 2px solid #f59e0b;
+  padding: 12px 28px;
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.55;
+  flex-shrink: 0;
+}
+.before-banner strong { color: #92400e; }
+
+/* ── Back link ───────────────────────────────────────────── */
+.back-row {
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.back-link {
+  font-size: 12.5px; font-weight: 600;
+  color: #4f46e5;
+  text-decoration: none;
+  display: flex; align-items: center; gap: 5px;
+}
+.back-link:hover { color: #3730a3; }
+
+/* ── Split layout ─────────────────────────────────────────── */
+.split-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  overflow: auto;
+}
+
+/* ── Panel shared ─────────────────────────────────────────── */
+.panel {
+  background: white;
+  border-right: 2px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.panel:last-child { border-right: none; }
+
+.panel-topbar {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 12px 20px;
+  flex-shrink: 0;
+}
+.panel-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-bottom: 4px;
+}
+.panel-label.before { color: #dc2626; }
+.panel-label.goals-label { color: #7c3aed; }
+
+.panel-route {
+  font-size: 11.5px; color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  background: #f1f5f9; border-radius: 4px;
+  padding: 2px 7px; display: inline-block;
+}
+
+.panel-header-title {
+  font-size: 15px; font-weight: 700; color: #0f172a;
+  margin-top: 8px;
+}
+.panel-header-sub {
+  font-size: 12px; color: #64748b; margin-top: 2px;
+}
+
+/* ── Left panel: Project edit (no Objective) ─────────────── */
+.proj-form { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field-row { display: flex; gap: 14px; }
+.field-row .field { flex: 1; }
+
+.field-label {
+  font-size: 12px; font-weight: 600; color: #334155;
+}
+.field-required { color: #ef4444; }
+.form-input, .form-textarea, .form-select {
+  width: 100%;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px; color: #1e293b;
+  background: white; border: 1px solid #e2e8f0;
+  border-radius: 7px; padding: 8px 11px;
+  outline: none;
+}
+.form-textarea { resize: vertical; }
+
+.section-card {
+  background: #f8fafc; border: 1px solid #e2e8f0;
+  border-radius: 9px; overflow: hidden;
+  margin-bottom: 4px;
+}
+.section-card-header {
+  padding: 10px 16px; border-bottom: 1px solid #e2e8f0;
+  font-size: 12.5px; font-weight: 700; color: #334155;
+}
+.section-card-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+.annotation {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: #fef9c3; border: 1px solid #fde68a;
+  border-radius: 7px; padding: 9px 12px;
+  font-size: 12px; color: #78350f; line-height: 1.5;
+}
+.annotation-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #f59e0b; margin-top: 4px; flex-shrink: 0;
+}
+
+.proj-form-footer {
+  padding: 14px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex; gap: 8px;
+  flex-shrink: 0;
+}
+.btn {
+  font-size: 12.5px; font-weight: 600;
+  padding: 7px 14px; border-radius: 7px;
+  cursor: pointer; font-family: 'Inter', sans-serif;
+}
+.btn-primary { background: #4f46e5; color: white; border: none; }
+.btn-outline { background: white; color: #475569; border: 1px solid #e2e8f0; }
+.btn-red-outline { background: white; color: #ef4444; border: 1.5px solid #fca5a5; margin-left: auto; }
+
+/* ── Right panel: Goals tree ─────────────────────────────── */
+.goals-panel { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+.goals-search-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.goals-search {
+  flex: 1; font-size: 13px; color: #1e293b;
+  border: 1px solid #e2e8f0; border-radius: 7px; padding: 7px 11px;
+  font-family: 'Inter', sans-serif; outline: none;
+}
+.goals-add-btn {
+  font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 7px;
+  background: #4f46e5; color: white; border: none; cursor: pointer;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Tree structure */
+.goal-tree { display: flex; flex-direction: column; gap: 0; }
+
+.goal-node {
+  display: flex; flex-direction: column;
+}
+
+/* Mission tier */
+.goal-mission {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer;
+}
+.goal-mission-icon {
+  width: 22px; height: 22px; border-radius: 6px;
+  background: #7c3aed; color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; flex-shrink: 0;
+  margin-top: 1px;
+}
+.goal-mission-body { flex: 1; }
+.goal-mission-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: #7c3aed; margin-bottom: 2px;
+}
+.goal-mission-title {
+  font-size: 13.5px; font-weight: 700; color: #0f172a; line-height: 1.35;
+}
+.goal-chevron { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+
+/* Objective tier */
+.goal-obj-group { padding-left: 20px; border-left: 2px solid #ddd6fe; margin-left: 10px; }
+.goal-obj {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 0 9px 10px;
+  border-bottom: 1px solid #ede9fe;
+  cursor: pointer;
+  position: relative;
+}
+.goal-obj::before {
+  content: '';
+  position: absolute;
+  left: -2px; top: 50%;
+  width: 10px; height: 2px;
+  background: #ddd6fe;
+}
+.goal-obj-icon {
+  width: 18px; height: 18px; border-radius: 4px;
+  background: #a78bfa; color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+}
+.goal-obj-body { flex: 1; }
+.goal-obj-label {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: #7c3aed; margin-bottom: 2px;
+}
+.goal-obj-title { font-size: 12.5px; font-weight: 600; color: #1e293b; }
+.goal-obj-link-badge {
+  font-size: 10px; background: #eff6ff; color: #1d4ed8;
+  border: 1px solid #bfdbfe; border-radius: 4px; padding: 1px 5px;
+  font-weight: 600; white-space: nowrap;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* Key Result tier */
+.goal-kr-group { padding-left: 20px; border-left: 2px solid #e0e7ff; margin-left: 10px; }
+.goal-kr {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 0 7px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  position: relative;
+}
+.goal-kr::before {
+  content: '';
+  position: absolute;
+  left: -2px; top: 50%;
+  width: 10px; height: 2px;
+  background: #e0e7ff;
+}
+.goal-kr-icon {
+  width: 14px; height: 14px; border-radius: 3px;
+  background: #c4b5fd; color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 700; flex-shrink: 0; margin-top: 2px;
+}
+.goal-kr-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 1px;
+}
+.goal-kr-title { font-size: 12px; color: #475569; }
+.goal-kr-progress {
+  margin-left: auto;
+  font-size: 11px; font-weight: 600; color: #94a3b8;
+  white-space: nowrap;
+}
+
+.goals-not-read-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: #fef3c7; border: 1px solid #fde68a;
+  border-radius: 6px; padding: 6px 10px;
+  font-size: 11.5px; color: #92400e; font-weight: 600;
+}
+.goals-not-read-badge::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #f59e0b; flex-shrink: 0;
+}
+
+/* ── Problems box at bottom ───────────────────────────────── */
+.problems-footer {
+  border-top: 2px solid #fca5a5;
+  background: #fef2f2;
+  padding: 18px 24px;
+  flex-shrink: 0;
+}
+.problems-footer-title {
+  font-size: 12.5px; font-weight: 700; color: #b91c1c;
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 7px;
+}
+.problems-list {
+  display: flex; flex-direction: column; gap: 6px;
+  list-style: none;
+}
+.problems-list li {
+  font-size: 12.5px; color: #7f1d1d;
+  display: flex; align-items: flex-start; gap: 8px;
+  line-height: 1.5;
+}
+.problems-list li::before {
+  content: '';
+  width: 4px; height: 4px; border-radius: 50%;
+  background: #ef4444; flex-shrink: 0; margin-top: 6px;
+}
+
+.after-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 700;
+  background: #4f46e5; color: white;
+  border-radius: 7px; padding: 8px 14px;
+  text-decoration: none;
+  margin-top: 14px;
+  transition: background 0.12s;
+}
+.after-link:hover { background: #3730a3; }
+
+/* code/monospace */
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  background: #f1f5f9; padding: 1px 5px; border-radius: 3px;
+  color: #475569;
+}
+</style>
+</head>
+<body>
+
+<!-- Banner -->
+<div class="before-banner">
+  <strong>BEFORE:</strong> Project edit page lacked an Objective field. Project context for agents came from a free-form description field.
+  Strategic intent lived in a separate Goals tree (subaccount-level, OKR-style with Mission / Objective / Key Result hierarchy)
+  that was <strong>NOT read by agent execution code</strong> (zero hits in <code>server/services/agent*/</code>).
+</div>
+
+<!-- Back row -->
+<div class="back-row">
+  <a href="project-edit.html" class="back-link">&#8592; View the AFTER state: project-edit.html</a>
+  <span style="font-size:12px;color:#94a3b8;">|</span>
+  <a href="index.html" class="back-link" style="color:#94a3b8;">Index</a>
+</div>
+
+<!-- Split body -->
+<div class="split-body">
+
+  <!-- ── LEFT: Existing Project Edit page ──────────────────── -->
+  <div class="panel">
+    <div class="panel-topbar">
+      <div class="panel-label before">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        Current production state
+      </div>
+      <div class="panel-route">/projects/:id/edit</div>
+      <div class="panel-header-title">Project Edit</div>
+      <div class="panel-header-sub">No Objective field. Description is the only freeform context agents could use — if the operator thought to write it there.</div>
+    </div>
+
+    <div class="proj-form">
+
+      <!-- Identity section -->
+      <div class="section-card">
+        <div class="section-card-header">Identity</div>
+        <div class="section-card-body">
+          <div class="field">
+            <label class="field-label">Name <span class="field-required">*</span></label>
+            <input class="form-input" type="text" value="Q1 Outreach Campaign" readonly>
+          </div>
+          <div class="field">
+            <label class="field-label">Description</label>
+            <textarea class="form-textarea" rows="4" readonly>Multi-channel outbound for Q1. LinkedIn, email, referrals. Target mid-market SaaS in EU.</textarea>
+          </div>
+          <div class="annotation">
+            <div class="annotation-dot"></div>
+            <div>Description is free-form. No signposting that this is injected into agent prompts. Operators do not know they should write a focused objective here — many write general notes instead.</div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label">Status</label>
+              <select class="form-select" disabled><option>Active</option></select>
+            </div>
+            <div class="field">
+              <label class="field-label">Color</label>
+              <input class="form-input" type="text" value="#6366f1" readonly>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Project management section -->
+      <div class="section-card">
+        <div class="section-card-header">Project management</div>
+        <div class="section-card-body">
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label">Target date</label>
+              <input class="form-input" type="text" value="Mar 31 2026" readonly>
+            </div>
+            <div class="field">
+              <label class="field-label">Budget (cents)</label>
+              <input class="form-input" type="text" value="500000" readonly>
+              <span style="font-size:11px;color:#94a3b8;margin-top:2px;">Budget stored in cents. No $ formatting. Operators must convert mentally.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Goal link section -->
+      <div class="section-card">
+        <div class="section-card-header">Linked goal</div>
+        <div class="section-card-body">
+          <div class="field">
+            <label class="field-label">Goal</label>
+            <select class="form-select" disabled>
+              <option>Q1 Outreach Goal (Objective tier)</option>
+            </select>
+          </div>
+          <div class="annotation">
+            <div class="annotation-dot"></div>
+            <div>
+              Setting <code>projects.goalId</code> links a project to a goal in the Goals tree.
+              This does NOT push goal text into agent prompts. The link is metadata only.
+              Agents have no awareness of the goal's mission or objective text.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Linked resources -->
+      <div class="section-card">
+        <div class="section-card-header">Linked resources</div>
+        <div class="section-card-body">
+          <div class="field">
+            <label class="field-label">Repository URL</label>
+            <input class="form-input" type="text" value="https://github.com/acme-corp/q1-outreach" readonly>
+          </div>
+          <div class="field">
+            <label class="field-label">Linked agents</label>
+            <input class="form-input" type="text" value="Outreach Agent, Lead Qualifier, Demo Scheduler" readonly>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="proj-form-footer">
+      <button class="btn btn-primary">Save changes</button>
+      <button class="btn btn-outline">Discard</button>
+      <button class="btn btn-red-outline">Delete project</button>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: GoalsPage (soon to be retired) ─────────────── -->
+  <div class="panel">
+    <div class="panel-topbar">
+      <div class="panel-label goals-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        Retiring — GoalsPage
+      </div>
+      <div class="panel-route">/admin/subaccounts/:id/goals</div>
+      <div class="panel-header-title">Goals (OKR tree)</div>
+      <div class="panel-header-sub">Subaccount-level Mission / Objective / Key Result hierarchy. Maintained separately from projects.</div>
+    </div>
+
+    <div class="goals-panel">
+
+      <div class="goals-not-read-badge">
+        Zero hits in server/services/agent*/ — agents never receive goal text as context
+      </div>
+
+      <div class="goals-search-row">
+        <input class="goals-search" type="text" placeholder="Search goals..." readonly>
+        <button class="goals-add-btn">+ Add goal</button>
+      </div>
+
+      <!-- Goal tree mock -->
+      <div class="goal-tree">
+
+        <!-- MISSION 1 -->
+        <div class="goal-node">
+          <div class="goal-mission">
+            <div class="goal-mission-icon">M</div>
+            <div class="goal-mission-body">
+              <div class="goal-mission-label">Mission</div>
+              <div class="goal-mission-title">Become the leading agent-OS for mid-market companies in Europe</div>
+            </div>
+            <div class="goal-chevron">&#9660;</div>
+          </div>
+
+          <div class="goal-obj-group">
+
+            <!-- OBJECTIVE 1.1 (linked to project) -->
+            <div class="goal-obj">
+              <div class="goal-obj-icon">O</div>
+              <div class="goal-obj-body">
+                <div class="goal-obj-label">Objective</div>
+                <div class="goal-obj-title">Q1 Outreach Campaign — 30 qualified meetings</div>
+              </div>
+              <div class="goal-obj-link-badge">Linked to project</div>
+            </div>
+
+            <div class="goal-kr-group">
+              <div class="goal-kr">
+                <div class="goal-kr-icon">KR</div>
+                <div>
+                  <div class="goal-kr-label">Key Result</div>
+                  <div class="goal-kr-title">30 qualified meetings booked with mid-market SaaS companies in EU</div>
+                </div>
+                <span class="goal-kr-progress">8 / 30</span>
+              </div>
+              <div class="goal-kr">
+                <div class="goal-kr-icon">KR</div>
+                <div>
+                  <div class="goal-kr-label">Key Result</div>
+                  <div class="goal-kr-title">5 closed deals from the Q1 pipeline by Mar 31</div>
+                </div>
+                <span class="goal-kr-progress">1 / 5</span>
+              </div>
+            </div>
+
+            <!-- OBJECTIVE 1.2 -->
+            <div class="goal-obj">
+              <div class="goal-obj-icon">O</div>
+              <div class="goal-obj-body">
+                <div class="goal-obj-label">Objective</div>
+                <div class="goal-obj-title">Customer success scaling to support growth</div>
+              </div>
+            </div>
+
+            <div class="goal-kr-group">
+              <div class="goal-kr">
+                <div class="goal-kr-icon">KR</div>
+                <div>
+                  <div class="goal-kr-label">Key Result</div>
+                  <div class="goal-kr-title">Reduce customer churn by 25% through proactive health checks</div>
+                </div>
+                <span class="goal-kr-progress">—</span>
+              </div>
+              <div class="goal-kr">
+                <div class="goal-kr-icon">KR</div>
+                <div>
+                  <div class="goal-kr-label">Key Result</div>
+                  <div class="goal-kr-title">Launch automated health check program across all accounts</div>
+                </div>
+                <span class="goal-kr-progress">—</span>
+              </div>
+            </div>
+
+          </div><!-- /obj group -->
+        </div><!-- /mission node -->
+
+        <!-- MISSION 2 -->
+        <div class="goal-node" style="margin-top:8px;">
+          <div class="goal-mission">
+            <div class="goal-mission-icon">M</div>
+            <div class="goal-mission-body">
+              <div class="goal-mission-label">Mission</div>
+              <div class="goal-mission-title">Build a world-class partner and referral ecosystem</div>
+            </div>
+            <div class="goal-chevron">&#9658;</div>
+          </div>
+          <!-- collapsed -->
+          <div style="padding:8px 0 8px 32px;font-size:12px;color:#94a3b8;font-style:italic;">
+            2 objectives, 6 key results — collapsed
+          </div>
+        </div>
+
+      </div><!-- /goal-tree -->
+
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:7px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#94a3b8;margin-bottom:2px;">Annotations</div>
+        <div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#64748b;line-height:1.5;">
+          <span style="width:5px;height:5px;border-radius:50%;background:#f59e0b;flex-shrink:0;margin-top:5px;display:inline-block;"></span>
+          <span>Goals tree exists but is not read by any agent execution code. Zero hits in <code>server/services/agent*/</code>.</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#64748b;line-height:1.5;">
+          <span style="width:5px;height:5px;border-radius:50%;background:#f59e0b;flex-shrink:0;margin-top:5px;display:inline-block;"></span>
+          <span>Linking a project sets <code>projects.goalId</code> but the goal text is never pushed into agent context or prompts.</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#64748b;line-height:1.5;">
+          <span style="width:5px;height:5px;border-radius:50%;background:#f59e0b;flex-shrink:0;margin-top:5px;display:inline-block;"></span>
+          <span>Operators must manually copy goal intent into the project description if they want agents to honour it — and most do not know this is needed.</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#64748b;line-height:1.5;">
+          <span style="width:5px;height:5px;border-radius:50%;background:#f59e0b;flex-shrink:0;margin-top:5px;display:inline-block;"></span>
+          <span>The OKR hierarchy (Mission / Objective / Key Result) adds 3-level navigation complexity for a feature with zero agent integration and low operator usage.</span>
+        </div>
+      </div>
+
+    </div><!-- /goals-panel -->
+
+  </div><!-- /right panel -->
+
+</div><!-- /split-body -->
+
+<!-- Problems with current state -->
+<div class="problems-footer">
+  <div class="problems-footer-title">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    Problems with the current state
+  </div>
+  <ul class="problems-list">
+    <li>Goals tree is maintained by operators but never consumed by agents. The subsystem has zero runtime integration.</li>
+    <li>Project description is free-form and not signposted as the agent-focusing field. Most operators use it for general notes, not focused objectives.</li>
+    <li>Setting <code>projects.goalId</code> gives operators the impression agents know about the goal. They do not. The link is metadata only.</li>
+    <li>OKR hierarchy (Mission / Objective / Key Result) adds navigational complexity for a feature that provides no agent benefit.</li>
+    <li>No clear separation between "what this project is trying to achieve" (per-project objective) vs "how the company strategises overall" (org Memory blocks, already implemented).</li>
+    <li>Agent context for tasks under a project is diluted: description may contain mix of objective, notes, and instructions. No structured field that agents reliably receive.</li>
+  </ul>
+
+  <a href="project-edit.html" class="after-link">View the AFTER state: per-project Objective field &#8594;</a>
+</div>
+
+</body>
+</html>
