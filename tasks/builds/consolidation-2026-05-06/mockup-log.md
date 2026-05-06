@@ -1045,4 +1045,33 @@ index.html: masthead eyebrow Round 7c -> 7d. Description updated. 4 new decision
 - `prototypes/consolidation-2026-05-06/before-knowledge.html` (banner update)
 - `prototypes/consolidation-2026-05-06/before-org-knowledge.html` (banner update)
 - `prototypes/consolidation-2026-05-06/index.html` (metadata, decisions, card descriptions)
+
+## Round 7e-1a — 2026-05-06 (agent-edit Skills + Data sources split)
+
+**Operator feedback:** Replace the single "Capabilities" tab with two top-level tabs: Skills and Data sources. Tab strip becomes: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs.
+
+**Changes made:**
+- Tab strip updated: removed "Capabilities" button, added "Skills" (count 7) and "Data sources" (count 6) buttons
+- Removed `tab-capabilities` panel entirely
+- Added `tab-skills` panel with two sections:
+  - Section 1 "Enabled skills (7)": compact flat rows with tier chip (System/Org/This client) leading each row, toggle, 3-dot overflow, row click opens existing skill detail drawer; 7 mock skills: Send email, Read email inbox, HubSpot: read contacts, LinkedIn: post message, Sentiment analysis, Acme: Outreach scoring rubric, Acme: Lead qualification
+  - Section 2 "Add skills": search input + filter chips (All 247 / System 180 / Organisation 15 / This client 3 / Custom only 18) + live search via filterSkillLibrary(); results grouped in collapsible sections: System (15 visible + "Show all 180" link), Organisation (5 skills), This client (2 not-yet-enabled skills); each row has tier chip + icon + name + desc + "Add" button that animates row into enabled section; "+ Add custom skill" primary button in section header opens existing creator drawer
+- Added `tab-datasources` panel with two sections:
+  - Section 1 "Enabled data sources (6)": rows with type-coloured icon (blue=doc, violet=memory, purple=bundle, green=live), name, tier chip, inline description with sync status, toggle; 6 mock sources: Acme Inc Brand Guide, Voice and Tone Standards, Demo collateral Q1 2026, Acme HubSpot CRM, Acme: Outreach scoring rubric, Acme: ICP profile
+  - Section 2 "Add data sources": search + filter chips (All/Memory/Documents/Bundles/Live integrations) + "+ Add source" dropdown button (New memory block / Upload document / Connect data source); 14 available source rows across all types
+- Added `ds-drawer` element: type-specific drawer with 4 content variants (doc/memory/bundle/live); memory shows content preview + "Edit in Knowledge" link; doc shows file metadata + "View full document" link; bundle shows member document list; live shows connection details + "Configure connection in Integrations" link
+- Updated JS: added filterSkillLibrary(), setSkillLibFilter(), addSkillToEnabled(), openDsDrawer(), filterDsSources(), setDsFilter(), addDsToEnabled(), toggleDsAddMenu(), closeDsAddMenu(); updated Escape key handler to include ds-drawer; updated addNewSkillRow() to insert into new enabled skills list (grp-custom no longer exists)
+- Updated HTML comment block at top of file to reflect 7e-1a IA change
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — Skills tab opens on the enabled skills list (the active kit), not the library. Operator sees what this agent can do, then can search the library to add more.
+- Default to hidden: yes — 247-skill library is search-driven; results are collapsed by tier group; "Show all 180 system skills" link defers the long tail. Data sources section uses search + filter; no dashboards or utilization charts visible by default.
+- One primary action: yes — Skills tab primary action is managing enabled skills (toggle on/off); library search is secondary. Data sources tab primary action is enabling/disabling attached sources.
+- Inline state: yes — Each skill row shows tier, toggle state, and description inline. Each data source row shows type icon, sync status, and attachment mode inline.
+- Re-check passed: yes — A non-technical operator can quickly see which skills are on, toggle them, and search the library. Data sources are visually distinct from skills (dedicated tab). No overwhelming dashboards.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (tab strip + two new tab panels + DS drawer + JS updates)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
