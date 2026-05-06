@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Current — Integrations &amp; Credentials page</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #64748b; }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+  .page-content { flex: 1; padding: 24px 28px; max-width: 900px; }
+
+  .page-title { font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 24px; }
+
+  /* Tab bar */
+  .tabs-row { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px; }
+  .tab-btn {
+    padding: 8px 16px; font-size: 14px; font-weight: 500; border: none; background: transparent;
+    cursor: pointer; border-bottom: 2px solid transparent; color: #64748b;
+    font-family: inherit; margin-bottom: -1px;
+  }
+  .tab-btn.active { border-bottom-color: #1e293b; color: #1e293b; font-weight: 600; }
+  .tab-btn:hover:not(.active) { color: #334155; }
+
+  /* Section heading */
+  .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .section-title { font-size: 13px; font-weight: 600; color: #475569; }
+  .btn-add { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 7px; background: #4f46e5; color: #fff; font-size: 12px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; font-weight: 500; border-radius: 5px; cursor: pointer; font-family: inherit; border: 1px solid; }
+  .btn-sm-primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+
+  /* Connection list */
+  .conn-list { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; overflow: hidden; margin-bottom: 28px; }
+  .conn-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #f1f5f9; }
+  .conn-item:last-child { border-bottom: none; }
+  .conn-name { font-size: 14px; font-weight: 500; color: #1e293b; }
+  .conn-label { font-size: 12px; color: #94a3b8; margin-left: 8px; }
+  .conn-actions { display: flex; align-items: center; gap: 10px; }
+
+  .status-badge { font-size: 11.5px; font-weight: 500; padding: 2px 8px; border-radius: 99px; }
+  .status-active { background: #d1fae5; color: #065f46; }
+  .status-expired { background: #fef3c7; color: #92400e; }
+
+  .action-btn { font-size: 12px; color: #64748b; background: none; border: none; cursor: pointer; text-decoration: underline; font-family: inherit; }
+  .action-btn:hover { color: #1e293b; }
+  .action-btn.red { color: #ef4444; }
+  .action-btn.red:hover { color: #dc2626; }
+
+  /* Web login section */
+  .web-section-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  .web-section-title { font-size: 13px; font-weight: 600; color: #475569; }
+  .web-section-subtitle { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+
+  /* MCP tab: card grid */
+  .integration-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .integration-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px; }
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  .card-name-row { display: flex; align-items: center; gap: 8px; }
+  .card-dot { width: 8px; height: 8px; border-radius: 99px; flex-shrink: 0; }
+  .dot-green { background: #22c55e; }
+  .dot-red { background: #ef4444; }
+  .dot-slate { background: #94a3b8; }
+  .card-name { font-size: 16px; font-weight: 700; color: #1e293b; }
+  .card-type-pill { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+  .pill-tools { background: #ede9fe; color: #5b21b6; }
+  .pill-data { background: #dbeafe; color: #1e40af; }
+  .status-pill { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 99px; }
+  .pill-active { background: #d1fae5; color: #065f46; }
+  .pill-error { background: #fee2e2; color: #991b1b; }
+  .card-body { font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 12px; }
+  .card-body div { margin-bottom: 2px; }
+  .card-footer { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+  .card-btn { font-size: 11.5px; font-weight: 500; padding: 5px 10px; border-radius: 6px; cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #475569; font-family: inherit; }
+  .card-btn:hover { background: #f1f5f9; }
+  .card-btn.danger { color: #ef4444; }
+  .card-btn.danger:hover { background: #fee2e2; border-color: #fca5a5; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .empty-text { font-size: 13px; color: #94a3b8; }
+
+  .proto-footer { margin-top: 24px; font-size: 11.5px; color: #94a3b8; line-height: 1.7; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Integrations &amp; Credentials
+      </a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-current">Integrations &amp; Credentials</span>
+    </div>
+    <div class="page-content">
+
+      <div class="page-title">Integrations &amp; Credentials</div>
+
+      <div class="tabs-row">
+        <button class="tab-btn active" onclick="switchTab('credentials',this)">Credentials</button>
+        <button class="tab-btn" onclick="switchTab('integrations',this)">Integrations</button>
+      </div>
+
+      <!-- CREDENTIALS TAB -->
+      <div id="tab-credentials" class="tab-panel active">
+
+        <div class="section-heading">
+          <div class="section-title">OAuth Connections</div>
+          <button class="btn-add">+ Add Connection</button>
+        </div>
+
+        <div class="conn-list">
+          <div class="conn-item">
+            <div>
+              <span class="conn-name">Slack</span>
+              <span class="conn-label">→ #general</span>
+            </div>
+            <div class="conn-actions">
+              <span class="status-badge status-active">active</span>
+              <button class="action-btn">Configure</button>
+              <button class="action-btn red">Revoke</button>
+            </div>
+          </div>
+          <div class="conn-item">
+            <div>
+              <span class="conn-name">GoHighLevel</span>
+            </div>
+            <div class="conn-actions">
+              <span class="status-badge status-active">active</span>
+              <button class="action-btn red">Revoke</button>
+            </div>
+          </div>
+          <div class="conn-item">
+            <div>
+              <span class="conn-name">HubSpot</span>
+            </div>
+            <div class="conn-actions">
+              <span class="status-badge status-expired">expired</span>
+              <button class="action-btn red">Revoke</button>
+            </div>
+          </div>
+          <div class="conn-item">
+            <div>
+              <span class="conn-name">Google Drive</span>
+            </div>
+            <div class="conn-actions">
+              <span class="status-badge status-active">active</span>
+              <button class="action-btn red">Revoke</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="web-section-header">
+          <div>
+            <div class="web-section-title">Web Login Credentials</div>
+            <div class="web-section-subtitle">Stored logins agents use to access paywalled content (e.g. 42macro.com)</div>
+          </div>
+          <button class="btn-add">+ Add Login</button>
+        </div>
+
+        <div class="conn-list">
+          <div class="conn-item">
+            <div>
+              <span class="conn-name">42macro.com</span>
+              <span class="conn-label">research@agencyco.com · https://42macro.com/login</span>
+            </div>
+            <div class="conn-actions">
+              <button class="action-btn">Test</button>
+              <button class="action-btn">Edit</button>
+              <button class="action-btn red">Remove</button>
+            </div>
+          </div>
+          <div class="conn-item">
+            <div>
+              <span class="conn-name">Bloomberg Terminal</span>
+              <span class="conn-label">analyst@agencyco.com · https://terminal.bloomberg.com</span>
+            </div>
+            <div class="conn-actions">
+              <button class="action-btn">Test</button>
+              <button class="action-btn">Edit</button>
+              <button class="action-btn red">Remove</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- INTEGRATIONS TAB (MCP / Active) -->
+      <div id="tab-integrations" class="tab-panel">
+
+        <div style="display:flex;gap:6px;padding:4px;background:#f1f5f9;border-radius:10px;width:fit-content;margin-bottom:20px;">
+          <button style="padding:6px 16px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(15,23,42,0.1);border:none;font-family:inherit;">Active (3)</button>
+          <button style="padding:6px 16px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;background:transparent;color:#64748b;border:none;font-family:inherit;">Catalogue</button>
+        </div>
+
+        <div class="integration-grid">
+          <!-- MCP card 1 -->
+          <div class="integration-card">
+            <div class="card-top">
+              <div class="card-name-row">
+                <span class="card-dot dot-green"></span>
+                <div class="card-name">internal-knowledge-server</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <span class="card-type-pill pill-tools">Tools</span>
+                <span class="status-pill pill-active">active</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <div>http · 12 tools</div>
+              <div>Gate: Auto</div>
+              <div>Connected: 2h ago</div>
+            </div>
+            <div class="card-footer">
+              <button class="card-btn">Test</button>
+              <button class="card-btn">Tools</button>
+              <button class="card-btn">Edit</button>
+              <button class="card-btn danger">Delete</button>
+            </div>
+          </div>
+          <!-- MCP card 2 -->
+          <div class="integration-card">
+            <div class="card-top">
+              <div class="card-name-row">
+                <span class="card-dot dot-red"></span>
+                <div class="card-name">legacy-data-bridge</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <span class="card-type-pill pill-tools">Tools</span>
+                <span class="status-pill pill-error">error</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <div>http · 0 tools</div>
+              <div>Gate: Review</div>
+              <div>Connected: Never</div>
+              <div style="color:#ef4444;font-size:12px;">Connection refused: ECONNREFUSED</div>
+            </div>
+            <div class="card-footer">
+              <button class="card-btn">Test</button>
+              <button class="card-btn">Edit</button>
+              <button class="card-btn danger">Delete</button>
+            </div>
+          </div>
+          <!-- Native connector card -->
+          <div class="integration-card">
+            <div class="card-top">
+              <div class="card-name-row">
+                <span class="card-dot dot-green"></span>
+                <div class="card-name">GoHighLevel</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <span class="card-type-pill pill-data">Data Sync</span>
+                <span class="status-pill pill-active">active</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <div>Polls every 60 minutes</div>
+              <div>Last sync: 48m ago</div>
+              <div style="color:#059669;">Sync: success</div>
+            </div>
+            <div class="card-footer">
+              <button class="card-btn">Sync Now</button>
+              <button class="card-btn danger">Delete</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="proto-footer">
+        Current state · 2026-05-06 · IntegrationsAndCredentialsPage.tsx · CredentialsTab.tsx · McpServersPage.tsx · Two separate tabs with different patterns: Credentials = flat list, Integrations = 140px+ cards. Each card takes significant vertical space even for simple state. Credentials tab has two sub-sections (OAuth + Web Login) each with their own CTA button. "Integrations" label hides that it is MCP servers behind a friendlier label.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+}
+</script>
+</body>
+</html>

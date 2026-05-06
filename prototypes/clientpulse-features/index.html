@@ -341,9 +341,9 @@
   <div class="page-header">
     <div class="page-title">ClientPulse features — Comprehensive review set</div>
     <div class="page-desc">
-      Round 3 review set. Adds Section E: empty states, failure states, edge states, the knowledge-management surface (current + proposed), and downstream Pulse inbox landings. Sections A–D are unchanged from round 2. Use the "Today" and "Proposed" buttons to diff any modified surface. Section E files carry amber badges and footer scenario labels.
+      Round 5 review set. Adds Section F: Skills surfaces (sub-account skills, org skills, skill edit modal, agent capabilities current + proposed) and Connections redesign (current + proposed unified table, connection edit modal). Rounds 1–4 screens preserved unchanged.
     </div>
-    <div class="page-meta">5 features · 6 modified surfaces · 7 net-new surfaces · 14 state-variant screens · Round 3 · 2026-05-06</div>
+    <div class="page-meta">5 features · 9 modified surfaces · 14 net-new surfaces · 14 state-variant screens · Round 5 · 2026-05-06</div>
   </div>
 
   <!-- Suggested walkthrough -->
@@ -369,7 +369,7 @@
     <div class="section-header">
       <div class="section-letter">A</div>
       <div class="section-title-text">Net-new surfaces — no current equivalent</div>
-      <div class="section-desc-text">5 screens</div>
+      <div class="section-desc-text">12 screens (7 from rounds 1–3 + 5 new in round 4)</div>
     </div>
 
     <div class="feature-divider"><span class="fc fc-o-intake">O-Intake</span> Automation wishes conversation</div>
@@ -440,6 +440,56 @@
       <div class="screen-link">Open</div>
     </a>
 
+    <div class="feature-divider">Knowledge IA — Round 4 (Memory / Notes / Documents)</div>
+
+    <a href="org-library.html" class="new-card">
+      <div class="card-icon" style="background:#ccfbf1;color:#0f766e;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Organisation Library</div>
+        <div class="card-desc">Agency-wide material (templates, brand kit, documents, other). Single list with type-filter chips. Lightweight edit pattern. No per-client scope — this is the agency's own assets.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="memory-edit-modal.html" class="new-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Memory edit modal</div>
+        <div class="card-desc">Small focused modal shown over dimmed Memory tab. Two fields only: "What is this memory about?" and "What should every agent know?" Plus Delete link. Preserves spatial context via blurred background.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="note-edit-modal.html" class="new-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Note edit modal (with rich-text editor)</div>
+        <div class="card-desc">Medium modal shown over dimmed Notes tab. Title field + minimal rich-text toolbar (bold, italic, underline, link, list, heading) + tag chips. Matches Tiptap-style pattern used in the codebase.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="document-edit-interface.html" class="new-card">
+      <div class="card-icon" style="background:#fee2e2;color:#dc2626;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Document edit interface (full-screen, two-column)</div>
+        <div class="card-desc">Full-screen editor: 70% PDF preview pane showing realistic page chrome + chapter headings, 30% metadata sidebar with name, type, scope, added-by, pin-to-agents chip selector, and notes field. Topbar: Save / Cancel / Delete.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
   </div>
   <!-- END Section A -->
 
@@ -451,7 +501,7 @@
     <div class="section-header">
       <div class="section-letter">B</div>
       <div class="section-title-text">Modifies existing surfaces — current vs proposed</div>
-      <div class="section-desc-text">7 surfaces</div>
+      <div class="section-desc-text">9 surfaces (7 from rounds 1–3 + 2 new in round 4)</div>
     </div>
 
     <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> OnboardingWizard step 4</div>
@@ -589,18 +639,18 @@
       </div>
     </div>
 
-    <div class="feature-divider"><span class="fc fc-b-artefacts">B-Artefacts</span> SubaccountKnowledgePage (all-artefacts overview)</div>
+    <div class="feature-divider">Knowledge IA — Round 4 (replaces round-3 single proposed screen)</div>
 
     <div class="modifies-card">
       <div class="modifies-header">
         <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
         </div>
         <div class="modifies-card-meta">
-          <div class="modifies-card-name">SubaccountKnowledgePage — artefacts overview</div>
+          <div class="modifies-card-name">SubaccountKnowledgePage — Memory tab (proposed)</div>
           <div class="modifies-card-desc">
             <span class="modifies-badge">MODIFIES</span>
-            &nbsp;Today: flat artefact list with status dots, Edit button only on completed rows, no last-updated or captured-by info. Proposed: 3-column artefact card grid with last-updated, captured-by, and inline Edit/Capture. Page title anchors to primary task ("everything we know about…"). Badge in header triggers edit drawer.
+            &nbsp;Today (3-tab production page): References / Insights / Memory Blocks tabs with flat table. Proposed: Memory tab — 12 populated cards in a 3-column grid. Short stable facts. Each card has pencil edit affordance. Auto-curation silent: no source labels, no "Promote" button.
           </div>
         </div>
       </div>
@@ -609,9 +659,59 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           Today
         </a>
-        <a href="subaccount-knowledge-page-proposed.html" class="diff-btn diff-btn-proposed">
+        <a href="subaccount-knowledge-memory.html" class="diff-btn diff-btn-proposed">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-          Proposed
+          Proposed (Memory)
+        </a>
+      </div>
+    </div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">SubaccountKnowledgePage — Notes tab (proposed)</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: References tab with flat table + Insights tab (auto) + Memory Blocks tab. Proposed: Notes tab — 17 note cards (operator-authored and auto-captured silently merged). Search bar. Tag chips. Each card has pencil edit affordance. No "Promote" button anywhere.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-subaccount-knowledge-tab.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="subaccount-knowledge-notes.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed (Notes)
+        </a>
+      </div>
+    </div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#fee2e2;color:#dc2626;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">SubaccountKnowledgePage — Documents tab (proposed)</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: no Documents tab. Proposed: Documents tab — 8 files/bundles in a clean list. PDF, spreadsheet, and bundle types with colour-coded icons. Pencil icon opens full-screen document editor. "Add documents" upload flow.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-subaccount-knowledge-tab.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="subaccount-knowledge-documents.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed (Documents)
         </a>
       </div>
     </div>
@@ -708,7 +808,8 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.8" fill="currentColor"/></svg>
       </div>
       <div>
-        <strong>B-Metrics — admin baseline reset action.</strong> The system-admin-only "Reset baseline" button with confirmation modal was deferred in round 1 and remains deferred. It is low-traffic (admin-only), does not affect the primary operator flow, and can be designed in isolation. Flag for round 3 if the operator wants to see it.
+        <strong>B-Metrics — admin baseline reset action.</strong> The system-admin-only "Reset baseline" button with confirmation modal was deferred in round 1 and remains deferred. It is low-traffic (admin-only), does not affect the primary operator flow, and can be designed in isolation.<br><br>
+        <strong><span style="text-decoration:line-through;">subaccount-knowledge-page-proposed.html</span> [superseded by round 4].</strong> The round-3 single-screen proposed Knowledge page (artefact card grid + References/Insights/Memory Blocks tabs) is superseded by the round-4 three-tab set (Memory / Notes / Documents). The file is preserved for diff history — do not delete.
       </div>
     </div>
 
@@ -796,8 +897,8 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>
       </div>
       <div class="card-meta">
-        <div class="card-name">Subaccount Knowledge page — zero artefacts (fresh client)</div>
-        <div class="card-desc">All 6 artefact rows show "Not started" with a "Capture" CTA. Tabs show 0 counts. No KPI tiles, no skeleton stub cards. Faithful to current code structure.</div>
+        <div class="card-name">Subaccount Knowledge page — empty state (fresh client) <span style="background:#ccfbf1;color:#0f766e;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;margin-left:6px;">UPDATED R4</span></div>
+        <div class="card-desc">Updated in round 4 to reflect new IA. Three tabs (Memory / Notes / Documents) with distinct empty states per tab. Old baseline artefacts section and References/Insights/Memory Blocks removed. Click tabs on the page to toggle between empty states.</div>
       </div>
       <div class="state-badge empty">Empty</div>
       <div class="screen-link">Open</div>
@@ -927,8 +1028,140 @@
   </div>
   <!-- END Section E -->
 
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SECTION F — Skills + Connections (Round 5)          -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div class="section" style="margin-top:8px;">
+    <div class="section-header" style="border-bottom-color:#fde68a;">
+      <div class="section-letter" style="background:#fef3c7;color:#92400e;">F</div>
+      <div class="section-title-text">Skills surfaces + Connections redesign — round 5</div>
+      <div class="section-desc-text">9 screens (3 current-state + 6 proposed)</div>
+    </div>
+
+    <div class="feature-divider"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:4px;background:#fef3c7;color:#92400e;">Skills</span> Sub-account Skills page</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Sub-account Skills page</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: dense data table with 7 columns, sort/filter dropdowns per column, no scope grouping visible at a glance. Proposed: three-scope grouping (Custom / Org / System) with filter chips, clear per-row affordances (Edit+Delete only on Custom), plain-English scope labels.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-subaccount-skills.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="subaccount-skills-proposed.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:4px;background:#fef3c7;color:#92400e;">Skills</span> Org Skills page (new)</div>
+
+    <a href="org-skills-proposed.html" class="new-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Org Skills page (proposed)</div>
+        <div class="card-desc">Agency-scoped skills management. Each org skill has a "Client visibility" cascade control (Hidden / Name only / Full) — the existing schema field made operator-facing. System skills shown as read-only. Filter chips: All / Org / System.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <a href="skill-edit-modal.html" class="new-card">
+      <div class="card-icon" style="background:#eef2ff;color:#4f46e5;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Skill edit modal</div>
+        <div class="card-desc">Small focused modal on top of dimmed Skills page. Fields: name, slug (auto-derived), description, instructions (monospace, the text injected into agent prompts). Advanced accordion hides the JSON tool schema. Delete link bottom-left for custom-scope only.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+    <div class="feature-divider"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:4px;background:#fef3c7;color:#92400e;">Skills</span> Agent Capabilities surface</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#eef2ff;color:#4f46e5;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Agent edit page — Capabilities tab</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: "Skills" section inside the agent edit form. "Link Skills" opens a picker dialog; remove via X button. No scope badges. No path to create a new skill from here. Proposed: renamed "Capabilities" tab, per-row toggle (enable/disable for this agent only, no global delete), scope badge per row, "+ Add capability" picker drawer, "+ Create new skill" CTA linking to the Skills page at the correct scope.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-agent-capabilities.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="agent-capabilities-proposed.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <div class="feature-divider"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;font-family:ui-monospace,monospace;padding:2px 7px;border-radius:4px;background:#d1fae5;color:#065f46;">Connections</span> Connections page redesign</div>
+
+    <div class="modifies-card">
+      <div class="modifies-header">
+        <div class="modifies-card-icon" style="background:#ccfbf1;color:#0f766e;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <div class="modifies-card-meta">
+          <div class="modifies-card-name">Connections page (was "Integrations &amp; Credentials")</div>
+          <div class="modifies-card-desc">
+            <span class="modifies-badge">MODIFIES</span>
+            &nbsp;Today: two tabs (Credentials / Integrations), card-heavy layout with ~140px per card, "Integrations" tab hides MCP servers behind a friendlier label. Proposed: unified single page "Connections", compact table rows (~44px), category filter chips (All / CRMs / Communications / Analytics / Other), custom servers blend into "Other" filter, Connected sorted first, inline scope badge per row.
+          </div>
+        </div>
+      </div>
+      <div class="diff-buttons">
+        <a href="current-connections.html" class="diff-btn diff-btn-today">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Today
+        </a>
+        <a href="connections-proposed.html" class="diff-btn diff-btn-proposed">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Proposed
+        </a>
+      </div>
+    </div>
+
+    <a href="connection-edit-modal.html" class="new-card">
+      <div class="card-icon" style="background:#ccfbf1;color:#0f766e;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-name">Connection edit modal</div>
+        <div class="card-desc">Small modal shown when operator clicks a connected row's overflow menu. Read-only: provider, connected date, last used. Editable: scope toggle (This client / Agency). Action buttons: Test connection, Reconnect. Remove link bottom-left. Matches memory-edit-modal visual chrome.</div>
+      </div>
+      <div class="new-badge">NEW</div>
+      <div class="screen-link">Open</div>
+    </a>
+
+  </div>
+  <!-- END Section F -->
+
   <div class="footer">
-    Prototype · round 3 · 2026-05-06 · ClientPulse features · mock data throughout · current-state mockups represent production code as read on 2026-05-06
+    Prototype · round 5 · 2026-05-06 · ClientPulse features · mock data throughout · current-state mockups represent production code as read on 2026-05-06 · Knowledge IA locked: Memory / Notes / Documents · Round 5 adds Skills surfaces + Connections redesign
   </div>
 
 </div>

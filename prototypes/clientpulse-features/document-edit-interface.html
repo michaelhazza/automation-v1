@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Document editor — Brand guidelines.pdf</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #f0f2f5; min-height: 100vh; font-family: 'Inter', ui-sans-serif, sans-serif; display: flex; flex-direction: column; }
+
+  /* === TOP BAR === */
+  .doc-topbar {
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 0 24px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .doc-topbar-left { display: flex; align-items: center; gap: 12px; }
+  .btn-close {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 7px;
+    border: 1px solid #e2e8f0; background: #fff;
+    color: #64748b; cursor: pointer; flex-shrink: 0;
+    transition: background 0.1s;
+  }
+  .btn-close:hover { background: #f8fafc; }
+  .doc-filename { font-size: 14px; font-weight: 600; color: #1e293b; }
+  .doc-scope-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; font-weight: 500; }
+
+  .doc-topbar-right { display: flex; align-items: center; gap: 8px; }
+  .btn-topbar-secondary { padding: 7px 14px; border-radius: 7px; background: #fff; color: #475569; font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0; cursor: pointer; font-family: inherit; }
+  .btn-topbar-secondary:hover { background: #f8fafc; }
+  .btn-topbar-danger { padding: 7px 14px; border-radius: 7px; background: #fff; color: #ef4444; font-size: 13px; font-weight: 500; border: 1px solid #fecaca; cursor: pointer; font-family: inherit; }
+  .btn-topbar-danger:hover { background: #fff1f1; }
+  .btn-topbar-primary { padding: 7px 16px; border-radius: 7px; background: #4f46e5; color: #fff; font-size: 13px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; }
+  .btn-topbar-primary:hover { background: #4338ca; }
+
+  /* === MAIN CONTENT AREA === */
+  .doc-body { display: flex; flex: 1; min-height: 0; height: calc(100vh - 52px); }
+
+  /* === LEFT: PDF PREVIEW (70%) === */
+  .doc-preview { flex: 7; background: #e5e7eb; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+
+  .pdf-page {
+    background: #fff;
+    width: 100%;
+    max-width: 680px;
+    min-height: 880px;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06);
+    padding: 56px 60px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Fake PDF content — Brand guidelines */
+  .pdf-doc-title { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .pdf-doc-sub { font-size: 13px; color: #94a3b8; margin-bottom: 36px; }
+  .pdf-section-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #4f46e5; margin-bottom: 10px; margin-top: 28px; padding-bottom: 6px; border-bottom: 2px solid #eef2ff; }
+  .pdf-body-text { font-size: 12.5px; color: #334155; line-height: 1.7; margin-bottom: 10px; }
+  .pdf-colour-row { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .pdf-swatch { width: 52px; height: 52px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.07); }
+  .pdf-swatch-label { font-size: 10px; color: #64748b; margin-top: 4px; text-align: center; }
+  .pdf-swatch-wrap { display: flex; flex-direction: column; align-items: center; }
+  .pdf-logo-area { background: #f8fafc; border-radius: 10px; height: 80px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; border: 1px solid #e2e8f0; }
+  .pdf-logo-placeholder { display: flex; align-items: center; gap: 10px; }
+  .pdf-logo-mark { width: 40px; height: 40px; border-radius: 10px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; }
+  .pdf-logo-wordmark { font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; }
+  .pdf-type-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .pdf-type-card { background: #f8fafc; border-radius: 7px; padding: 12px 14px; border: 1px solid #f1f5f9; }
+  .pdf-type-name { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .pdf-type-sample-h { font-size: 16px; font-weight: 700; color: #0f172a; }
+  .pdf-type-sample-b { font-size: 12px; color: #475569; line-height: 1.5; margin-top: 3px; }
+  .pdf-page-num { position: absolute; bottom: 20px; right: 24px; font-size: 11px; color: #94a3b8; }
+  .pdf-footer-line { position: absolute; bottom: 36px; left: 60px; right: 60px; height: 1px; background: #f1f5f9; }
+
+  .pdf-page-2 { min-height: 600px; }
+
+  /* === RIGHT: METADATA SIDEBAR (30%) === */
+  .doc-sidebar {
+    flex: 3;
+    background: #fff;
+    border-left: 1px solid #e2e8f0;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .sidebar-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #94a3b8; margin-bottom: 10px; }
+  .meta-row { margin-bottom: 12px; }
+  .meta-label { font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .meta-value { font-size: 13px; color: #1e293b; }
+  .meta-value-muted { font-size: 12px; color: #64748b; }
+
+  .field-input-sm { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; color: #1e293b; outline: none; font-family: inherit; transition: border-color 0.15s; }
+  .field-input-sm:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
+  .field-textarea-sm { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; color: #1e293b; outline: none; font-family: inherit; resize: vertical; line-height: 1.55; min-height: 72px; transition: border-color 0.15s; }
+  .field-textarea-sm:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
+
+  /* Pin to agents */
+  .agent-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .agent-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: background 0.1s; }
+  .agent-chip.active { background: #eef2ff; color: #4f46e5; }
+  .agent-chip.inactive { background: #f1f5f9; color: #94a3b8; }
+  .agent-chip.active:hover { background: #e0e7ff; }
+  .agent-chip.inactive:hover { background: #e2e8f0; color: #475569; }
+  .agent-chip-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot-active { background: #4f46e5; }
+  .dot-inactive { background: #cbd5e1; }
+
+  .divider { height: 1px; background: #f1f5f9; }
+
+  .proto-note { font-size: 11px; color: #94a3b8; line-height: 1.6; border-top: 1px solid #f1f5f9; padding-top: 14px; margin-top: auto; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="doc-topbar">
+  <div class="doc-topbar-left">
+    <a href="subaccount-knowledge-documents.html" class="btn-close" title="Close editor">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </a>
+    <span class="doc-filename">Brand guidelines.pdf</span>
+    <span class="doc-scope-badge">Apex Window Cleaning</span>
+  </div>
+  <div class="doc-topbar-right">
+    <button class="btn-topbar-danger" onclick="window.location.href='subaccount-knowledge-documents.html'">Delete</button>
+    <button class="btn-topbar-secondary" onclick="window.location.href='subaccount-knowledge-documents.html'">Cancel</button>
+    <button class="btn-topbar-primary" onclick="window.location.href='subaccount-knowledge-documents.html'">Save</button>
+  </div>
+</div>
+
+<!-- Two-column body -->
+<div class="doc-body">
+
+  <!-- LEFT: Fake PDF preview -->
+  <div class="doc-preview">
+
+    <!-- Page 1 -->
+    <div class="pdf-page">
+      <div class="pdf-doc-title">Apex Window Cleaning</div>
+      <div class="pdf-doc-sub">Brand Guidelines · Version 2.1 · May 2026</div>
+
+      <div class="pdf-section-h">1. Logo</div>
+      <div class="pdf-logo-area">
+        <div class="pdf-logo-placeholder">
+          <div class="pdf-logo-mark">A</div>
+          <div class="pdf-logo-wordmark">Apex Window Cleaning</div>
+        </div>
+      </div>
+      <div class="pdf-body-text">The Apex wordmark should always be presented in the primary indigo or white on dark backgrounds. The mark and wordmark must maintain a minimum clear space of 1× the mark height on all sides. Never stretch, rotate, or add effects to the logo.</div>
+
+      <div class="pdf-section-h">2. Colour Palette</div>
+      <div class="pdf-colour-row">
+        <div class="pdf-swatch-wrap"><div class="pdf-swatch" style="background:#1e3a5f;"></div><div class="pdf-swatch-label">#1e3a5f<br>Navy</div></div>
+        <div class="pdf-swatch-wrap"><div class="pdf-swatch" style="background:#4f88c6;"></div><div class="pdf-swatch-label">#4f88c6<br>Sky blue</div></div>
+        <div class="pdf-swatch-wrap"><div class="pdf-swatch" style="background:#f0f7ff;"></div><div class="pdf-swatch-label">#f0f7ff<br>Pale blue</div></div>
+        <div class="pdf-swatch-wrap"><div class="pdf-swatch" style="background:#0f172a;"></div><div class="pdf-swatch-label">#0f172a<br>Slate</div></div>
+        <div class="pdf-swatch-wrap"><div class="pdf-swatch" style="background:#ffffff;border:1px solid #e2e8f0;"></div><div class="pdf-swatch-label">#ffffff<br>White</div></div>
+      </div>
+      <div class="pdf-body-text">Primary: Navy is used for headlines, CTAs, and dominant brand moments. Sky blue for secondary elements and hover states. Pale blue for backgrounds and section fills. Slate for body copy. White for reversed layouts.</div>
+
+      <div class="pdf-section-h">3. Typography</div>
+      <div class="pdf-type-row">
+        <div class="pdf-type-card">
+          <div class="pdf-type-name">Heading</div>
+          <div class="pdf-type-sample-h">Inter Bold</div>
+          <div class="pdf-type-sample-b">Headlines, section titles, CTAs. Weight 700. Tracking -0.3px.</div>
+        </div>
+        <div class="pdf-type-card">
+          <div class="pdf-type-name">Body</div>
+          <div class="pdf-type-sample-h" style="font-size:13px;font-weight:400;">Inter Regular</div>
+          <div class="pdf-type-sample-b">Body copy, UI labels, descriptions. Weight 400. Line height 1.6.</div>
+        </div>
+      </div>
+      <div class="pdf-footer-line"></div>
+      <div class="pdf-page-num">1 / 18</div>
+    </div>
+
+    <!-- Page 2 (partial) -->
+    <div class="pdf-page pdf-page-2">
+      <div class="pdf-section-h">4. Photography Style</div>
+      <div class="pdf-body-text">Photography should convey professionalism, cleanliness, and a sense of pride in craft. Preferred shots: crew at work in natural daylight, before-and-after window comparisons, satisfied homeowners (with consent). Avoid stock photos featuring generic cleaning scenarios unrelated to window cleaning.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;">
+        <div style="background:#e0e7ff;border-radius:8px;height:120px;display:flex;align-items:center;justify-content:center;color:#4f46e5;font-size:11px;font-weight:600;">Approved: natural light, real crew</div>
+        <div style="background:#fee2e2;border-radius:8px;height:120px;display:flex;align-items:center;justify-content:center;color:#dc2626;font-size:11px;font-weight:600;">Avoid: staged stock photos</div>
+      </div>
+      <div class="pdf-section-h">5. Voice and Tone</div>
+      <div class="pdf-body-text">Apex's brand voice is warm, reliable, and quietly confident. We never oversell. Copy should feel like a conversation with a trusted neighbour, not a sales pitch. Use active verbs. Keep sentences short. Avoid jargon.</div>
+      <div class="pdf-body-text"><strong>Do:</strong> "We'll take care of it" · "Book in under 2 minutes" · "Streak-free, guaranteed"</div>
+      <div class="pdf-body-text"><strong>Don't:</strong> "Utilise our premium end-to-end window-cleaning solutions" · All-caps for emphasis</div>
+      <div class="pdf-footer-line"></div>
+      <div class="pdf-page-num">2 / 18</div>
+    </div>
+
+  </div><!-- /doc-preview -->
+
+  <!-- RIGHT: Metadata sidebar -->
+  <div class="doc-sidebar">
+
+    <div>
+      <div class="sidebar-section-title">Document details</div>
+      <div class="meta-row">
+        <div class="meta-label">Name</div>
+        <input class="field-input-sm" type="text" value="Brand guidelines.pdf" />
+      </div>
+      <div class="meta-row">
+        <div class="meta-label">Type</div>
+        <div class="meta-value">PDF · 18 pages</div>
+      </div>
+      <div class="meta-row">
+        <div class="meta-label">Scope</div>
+        <div class="meta-value">Apex Window Cleaning</div>
+      </div>
+      <div class="meta-row">
+        <div class="meta-label">Added by</div>
+        <div class="meta-value-muted">Sam Okafor, 12 days ago</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <div class="sidebar-section-title">Pin to agents</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:10px;line-height:1.5;">Choose which agents load this document as context when running tasks for Apex.</div>
+      <div class="agent-chip-row">
+        <div class="agent-chip active" onclick="this.classList.toggle('active');this.classList.toggle('inactive');this.querySelector('.agent-chip-dot').className='agent-chip-dot '+(this.classList.contains('active')?'dot-active':'dot-inactive')">
+          <div class="agent-chip-dot dot-active"></div>
+          Research agent
+        </div>
+        <div class="agent-chip active" onclick="this.classList.toggle('active');this.classList.toggle('inactive');this.querySelector('.agent-chip-dot').className='agent-chip-dot '+(this.classList.contains('active')?'dot-active':'dot-inactive')">
+          <div class="agent-chip-dot dot-active"></div>
+          Outreach agent
+        </div>
+        <div class="agent-chip inactive" onclick="this.classList.toggle('active');this.classList.toggle('inactive');this.querySelector('.agent-chip-dot').className='agent-chip-dot '+(this.classList.contains('active')?'dot-active':'dot-inactive')">
+          <div class="agent-chip-dot dot-inactive"></div>
+          Reporting agent
+        </div>
+        <div class="agent-chip inactive" onclick="this.classList.toggle('active');this.classList.toggle('inactive');this.querySelector('.agent-chip-dot').className='agent-chip-dot '+(this.classList.contains('active')?'dot-active':'dot-inactive')">
+          <div class="agent-chip-dot dot-inactive"></div>
+          Scheduling agent
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <div class="sidebar-section-title">Notes</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Any context about this document.</div>
+      <textarea class="field-textarea-sm" placeholder="Add a note about this document…">Full brand guidelines including logo usage, colour palette, and photography standards. Approved by owner May 2026. Use for any outreach or proposal copy review.</textarea>
+    </div>
+
+    <div class="proto-note">
+      Round 4 · document-edit-interface.html · two-column layout: 70% PDF preview + 30% metadata sidebar. "Pin to agents" chips toggle on click. Save/Cancel/Delete in top bar navigate back to documents tab.
+    </div>
+
+  </div><!-- /doc-sidebar -->
+
+</div><!-- /doc-body -->
+
+</body>
+</html>

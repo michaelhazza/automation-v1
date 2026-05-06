@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Edit memory — modal (Apex Window Cleaning)</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; font-family: 'Inter', sans-serif; }
+
+  /* === BACKGROUND: dimmed Memory tab === */
+  .bg-shell { display: flex; min-height: 100vh; filter: blur(1px) brightness(0.7); user-select: none; pointer-events: none; }
+  .bg-sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; padding: 16px 12px; }
+  .bg-sidebar .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .bg-main { flex: 1; }
+  .bg-topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px; font-size: 13px; color: #64748b; }
+  .bg-content { padding: 28px 32px; }
+  .bg-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 24px; }
+  .bg-tabs { display: flex; border-bottom: 1px solid #e2e8f0; margin-bottom: 20px; }
+  .bg-tab { padding: 10px 18px; font-size: 13px; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; }
+  .bg-tab.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+  .bg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .bg-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; }
+  .bg-card-title { font-size: 13px; font-weight: 600; color: #1e293b; margin-bottom: 6px; }
+  .bg-card-text { font-size: 12.5px; color: #475569; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .bg-card.editing { border-color: #4f46e5; border-width: 2px; }
+
+  /* === MODAL OVERLAY === */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(2px);
+  }
+  .modal {
+    position: relative; z-index: 1;
+    background: #fff; border-radius: 12px;
+    padding: 28px 28px 24px;
+    width: 420px;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.08);
+  }
+  .modal-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 20px; }
+
+  .field-label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; }
+  .field-input {
+    width: 100%; padding: 9px 12px;
+    border: 1px solid #e2e8f0; border-radius: 7px;
+    font-size: 13px; color: #1e293b;
+    outline: none; font-family: inherit; box-sizing: border-box;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+  .field-textarea {
+    width: 100%; padding: 9px 12px;
+    border: 1px solid #e2e8f0; border-radius: 7px;
+    font-size: 13px; color: #1e293b; line-height: 1.6;
+    outline: none; font-family: inherit; box-sizing: border-box;
+    resize: vertical;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field-textarea:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+
+  .modal-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 22px; }
+  .btn-delete { background: none; border: none; font-size: 12px; color: #ef4444; cursor: pointer; padding: 0; font-family: inherit; }
+  .btn-delete:hover { text-decoration: underline; }
+  .btn-cancel { padding: 8px 16px; border-radius: 7px; background: #fff; color: #475569; font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0; cursor: pointer; font-family: inherit; }
+  .btn-cancel:hover { background: #f8fafc; }
+  .btn-save { padding: 8px 16px; border-radius: 7px; background: #4f46e5; color: #fff; font-size: 13px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; }
+  .btn-save:hover { background: #4338ca; }
+
+  .proto-note {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #1e293b; color: #94a3b8; font-size: 11px; padding: 6px 14px;
+    border-radius: 6px; white-space: nowrap; z-index: 200;
+  }
+</style>
+</head>
+<body>
+
+<!-- Dimmed background — the Memory tab page -->
+<div class="bg-shell">
+  <div class="bg-sidebar">
+    <div style="display:flex;align-items:center;gap:8px;padding:0 8px 14px;margin-bottom:8px;border-bottom:1px solid #f1f5f9;">
+      <div class="mark">S</div>
+      <div style="font-size:13px;font-weight:600;color:#1e293b;">Synthetos</div>
+    </div>
+  </div>
+  <div class="bg-main">
+    <div class="bg-topbar">Clients / Apex Window Cleaning / <strong style="color:#1e293b;">Knowledge</strong></div>
+    <div class="bg-content">
+      <div class="bg-title">Knowledge</div>
+      <div class="bg-tabs">
+        <div class="bg-tab active">Memory (12)</div>
+        <div class="bg-tab">Notes (17)</div>
+        <div class="bg-tab">Documents (8)</div>
+      </div>
+      <div style="font-size:13px;color:#64748b;margin-bottom:16px;">These are the short, stable facts every agent loading data about Apex always knows.</div>
+      <div class="bg-grid">
+        <div class="bg-card editing">
+          <div class="bg-card-title">Brand identity</div>
+          <div class="bg-card-text">Family-owned residential window cleaning, established 1998, premium positioning.</div>
+        </div>
+        <div class="bg-card"><div class="bg-card-title">Voice and tone</div><div class="bg-card-text">Friendly but professional. Avoid sales-y language.</div></div>
+        <div class="bg-card"><div class="bg-card-title">Audience ICP</div><div class="bg-card-text">Homeowners 45–65, household income $150k+, suburban.</div></div>
+        <div class="bg-card"><div class="bg-card-title">Offer and positioning</div><div class="bg-card-text">Bi-monthly subscription window cleaning. Premium tier includes screens.</div></div>
+        <div class="bg-card"><div class="bg-card-title">Operating constraints</div><div class="bg-card-text">No service Sundays. No service in heavy rain.</div></div>
+        <div class="bg-card"><div class="bg-card-title">Proof library</div><div class="bg-card-text">98% subscription retention. 1,200+ five-star reviews.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal overlay -->
+<div class="modal-overlay">
+  <div class="modal-backdrop"></div>
+  <div class="modal">
+    <div class="modal-title">Edit memory</div>
+
+    <div style="margin-bottom:14px;">
+      <label class="field-label">What is this memory about?</label>
+      <input class="field-input" type="text" value="Brand identity" />
+    </div>
+
+    <div>
+      <label class="field-label">What should every agent know?</label>
+      <textarea class="field-textarea" rows="6">Family-owned residential window cleaning, established 1998, premium positioning. Operated by the Chen family in suburban Seattle.</textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-delete">Delete this memory</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-cancel" onclick="window.location.href='subaccount-knowledge-memory.html'">Cancel</button>
+        <button class="btn-save" onclick="window.location.href='subaccount-knowledge-memory.html'">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="proto-note">Round 4 · memory-edit-modal.html · modal shown over dimmed Memory tab · Cancel or Save returns to memory tab</div>
+
+</body>
+</html>

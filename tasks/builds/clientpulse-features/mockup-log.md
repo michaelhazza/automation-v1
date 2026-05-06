@@ -1,3 +1,100 @@
+## Round 5 — 2026-05-06 17:30
+
+**Operator feedback:** Initial draft — Skills surfaces and Connections page redesign. Two related IA cleanups. Skills pages need to be reachable from main nav. Sub-account skills page needs three-scope grouping. Org skills page needs cascade visibility toggle per skill. Agent Capabilities page should use link/unlink toggles (no inline CRUD). Connections page redesign: unified "Connections" page, single compact table (~44px rows), category filter chips, custom MCP servers blend into "Other" filter.
+
+**Changes made:**
+
+Skills surfaces (6 screens):
+- `current-subaccount-skills.html` — Already existed from prior work. Faithful render of SubaccountSkillsPage.tsx: 7-column sortable/filterable table, per-column dropdown headers, no scope grouping visible at a glance, "Delete" only shown for Subaccount-tier rows.
+- `subaccount-skills-proposed.html` — Proposed sub-account skills view for Apex Window Cleaning. Filter chips: All / Custom / Org / System (interactive JS filter). Table grouped with inline section header rows showing scope descriptions. Custom rows: Edit + Delete actions. Org rows: "View only" text. System rows: "Platform managed". Three scope badge types in green/indigo/purple.
+- `org-skills-proposed.html` — Proposed agency-level skills page. Same table shape but with a "Client visibility" column replacing per-row delete affordances for custom skills. Segmented three-option control (Hidden / Name only / Full) maps to the cascade_visibility schema field. System skills section below is read-only. Filter chips: All / Org / System. Interactive JS segment controls and filter.
+- `skill-edit-modal.html` — Focused edit modal over dimmed sub-account skills background. Fields: name, slug (mono, auto-derived with hint), description (one-liner), instructions (larger monospace textarea with hint explaining prompt injection). "Show advanced" accordion hides the JSON tool schema. Delete link bottom-left. Cancel/Save buttons. Matches memory-edit-modal chrome exactly.
+- `current-agent-capabilities.html` — Current state of SubaccountAgentEditPage.tsx "Skills" tab. SkillPickerSection component renders linked skills as rows with name, type badge (Built-in / Custom), and X remove button. "Link Skills" button opens a picker dialog. No scope badges today. No way to create a skill from this surface.
+- `agent-capabilities-proposed.html` — Proposed "Capabilities" tab. Info banner explains toggle-vs-delete semantics. Table with columns: skill, scope badge (Custom/Org/System), toggle switch (on/off per agent). Toggle affects only this agent, does not delete globally. Two CTAs below: "+ Add capability" (opens a drawer — functional picker implemented) and "+ Create new skill" (links to Skills page). Picker drawer shows available skills with scope badges and checkboxes.
+
+Connections redesign (3 screens):
+- `current-connections.html` — Faithful render of IntegrationsAndCredentialsPage.tsx + CredentialsTab.tsx + McpServersPage.tsx. Two tabs: Credentials (OAuth connections flat list + Web Login Credentials section, each with own CTA button) and Integrations (card grid ~140px per card, Active/Catalogue sub-tabs). Clear visual evidence of the wasted vertical space that motivates the redesign.
+- `connections-proposed.html` — Unified "Connections" page. Single compact table with ~44px rows. Filter chips: All / CRMs / Communications / Analytics / Other (interactive JS filter). Connected rows sorted first with a section header divider, Available rows below with "+ Connect" button. Scope badge (This client / Agency) per connected row. Status dot (green/amber/grey). Overflow menu per connected row: Test / Reconnect / Remove. Interactive overflow menus implemented in JS. Custom server row ("internal-knowledge-server") blends in under "Other" filter — no technical label.
+- `connection-edit-modal.html` — Edit modal over dimmed Connections page background. Shows Slack connection. Read-only details: provider, connected date, last used. Editable: scope toggle (This client / Agency). Actions section with Test connection and Reconnect buttons. "Remove connection" link bottom-left. Cancel/Save buttons. Matches memory-edit-modal chrome.
+
+Index update:
+- `index.html` — Added Section F "Skills + Connections redesign — round 5" with feature dividers per group. Sub-account skills: current/proposed diff buttons. Org skills: new card. Skill edit modal: new card. Agent Capabilities: current/proposed diff buttons. Connections: current/proposed diff buttons. Connection edit modal: new card. Page meta updated to Round 5.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — Sub-account skills: "manage skills available to this client's agents." Org skills: "manage what your agency's skill library offers and how visible it is to clients." Agent capabilities: "decide which skills this specific agent can use." Connections: "see what's connected and add what's missing." Each screen answers its primary task in the first 3 seconds.
+- Default to hidden: yes — Instructions field in skill modal behind the form (not collapsed, but appropriate prominence). Advanced JSON schema behind "Show advanced" accordion. System skills are visible but clearly read-only (no affordances). Connection details modal shows only what's needed: provider name, dates, scope, actions.
+- One primary action: yes — Sub-account skills: "+ Create skill" header button. Org skills: "+ Create skill" header button. Connections: "+ Add connection" header button. Skill modal: "Save skill". Connection modal: "Save". Agent capabilities: primary action is toggling (per-row), with "+ Add capability" as the main CTA below the list.
+- Inline state: yes — Toggle switches show enabled/disabled state inline on agent capabilities rows. Status dots (green/amber/grey) communicate connection health inline in the connections table. Cascade visibility control is inline per row in org skills, no separate detail page needed.
+- Re-check passed: yes — A non-technical operator on the sub-account skills page sees clearly labelled groups (Custom/Org/System), can create a skill with one click, can edit/delete only what they own. The connections page shows a scannable list in 44px rows; "Connected" and "Available" are clearly divided; category filter narrows the list. The agent capabilities page has an explanatory banner that clarifies toggle semantics.
+
+**Rule violations flagged:** none
+
+**Agent Capabilities surface finding:** No dedicated Capabilities page exists in the codebase today. The skills surface lives inside `SubaccountAgentEditPage.tsx` as a "Skills" tab, powered by the `SkillPickerSection` component. The tab also exists in `AdminAgentEditPage.tsx` and `SystemAgentEditPage.tsx`. The current surface has "Link Skills" button (opens a modal picker) and per-row X remove buttons. There is no scope badge per row, no toggle-style interface, and no path to create a new skill from this surface. The proposed design renames the tab from "Skills" to "Capabilities" and changes from a picker dialog to a persistent list of all available skills with individual toggles — a significantly different interaction model that will require more front-end work than a simple column add.
+
+**Files modified:**
+- `prototypes/clientpulse-features/subaccount-skills-proposed.html` (new)
+- `prototypes/clientpulse-features/org-skills-proposed.html` (new)
+- `prototypes/clientpulse-features/skill-edit-modal.html` (new)
+- `prototypes/clientpulse-features/current-agent-capabilities.html` (new)
+- `prototypes/clientpulse-features/agent-capabilities-proposed.html` (new)
+- `prototypes/clientpulse-features/current-connections.html` (new)
+- `prototypes/clientpulse-features/connections-proposed.html` (new)
+- `prototypes/clientpulse-features/connection-edit-modal.html` (new)
+- `prototypes/clientpulse-features/index.html` (updated — Section F added, page meta updated to Round 5)
+- `tasks/builds/clientpulse-features/mockup-log.md` (this entry)
+
+---
+
+## Round 4 — 2026-05-06
+
+**Operator feedback:** Lock the Knowledge IA decision (Memory / Notes / Documents tabs). Build three populated tab pages with edit interfaces. Build Organisation Library page. Update empty-state page to new IA. Mark round-3 proposed page superseded in index.
+
+**Changes made:**
+
+Three populated Knowledge tab pages (new):
+- `subaccount-knowledge-memory.html` — Memory tab, 12 items in a 3-column card grid. Mix of onboarding-captured, operator-added, and auto-synthesised items. Source labels suppressed (auto-curation is silent). Each card has pencil-icon edit affordance opening inline modal. "Add memory" primary action. Inline modal demonstrates the memory-edit-modal.html pattern.
+- `subaccount-knowledge-notes.html` — Notes tab, 17 note cards in a full-width list. Operator-authored and auto-captured silently merged. Search bar. Tag chips on relevant cards. Relative timestamps. Pencil-icon edit affordance. Inline modal demonstrates note-edit-modal.html pattern. No "Promote" button anywhere.
+- `subaccount-knowledge-documents.html` — Documents tab, 8 files/bundles with colour-coded type icons (PDF red, spreadsheet green, bundle purple). Type label + description + added date. Pencil icon routes to document-edit-interface.html. "Add documents" opens upload modal.
+
+Three edit interface pages (new):
+- `memory-edit-modal.html` — Standalone page showing modal over dimmed Memory tab background. Two fields only: title ("What is this memory about?") and content ("What should every agent know?"). Delete link bottom-left. Cancel/Save buttons. No tags, no categories, no author info.
+- `note-edit-modal.html` — Standalone page showing modal over dimmed Notes tab background. Title field + rich-text editor with minimal toolbar (bold, italic, underline, link, bullet list, heading) + tag chips with add-tag input. Delete link bottom-left. Cancel/Save buttons.
+- `document-edit-interface.html` — Full-screen two-column layout. Left 70%: realistic fake PDF preview (Brand guidelines.pdf with colour swatches, typography samples, photography guidance across 2 pages). Right 30%: metadata sidebar with name input, type/scope/added-by meta, "Pin to agents" clickable chip selector (4 agents), notes textarea. Topbar: filename + scope badge + Delete/Cancel/Save.
+
+Organisation Library page (new):
+- `org-library.html` — Agency-wide library. Title "Library" (not "Knowledge Library"). 10 items grouped with section dividers across 4 types: Templates (2), Brand kit (2), Documents (3), Other (3). Type filter chips are interactive (click to filter via JS). Search bar. "Add to library" primary action. Document items link to document-edit-interface.html.
+
+Updated existing files:
+- `empty-subaccount-knowledge.html` — Rebuilt to reflect new IA. Three interactive tabs (Memory / Notes / Documents), each with its own empty-state well, explainer, and distinct primary action. Old baseline artefacts section, References/Insights/Memory Blocks tabs removed. Comment in HTML noting Round 4 update.
+- `prototypes/clientpulse-features/index.html` — Page meta updated to Round 4. Section A: count updated (5 → 12), 5 new round-4 cards added (org-library, memory-edit-modal, note-edit-modal, document-edit-interface, plus org-library grouped under knowledge IA divider). Section B: count updated (7 → 9), old single SubaccountKnowledgePage proposed entry replaced with three per-tab entries each paired against the same "Today" file. Section D: superseded notice for subaccount-knowledge-page-proposed.html added. Section E: empty-subaccount-knowledge entry updated with "UPDATED R4" badge and new description.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — Memory tab primary task is "see what agents know / correct it"; Notes tab primary task is "search for and add longer context"; Documents tab primary task is "attach source files." Each screen starts from operator intent, not from a data model.
+- Default to hidden: yes — No source attribution on memory items (auto-curation silent). No "Promote" button. No "Insights" tab. Document metadata in sidebar, not in the list. Agent pinning in the document editor sidebar, not on the Documents tab list.
+- One primary action: yes — Memory: "Add memory". Notes: "Add note". Documents: "Add documents". Library: "Add to library". Memory modal: "Save". Note modal: "Save". Document editor: "Save" in topbar.
+- Inline state: yes — Edit affordances are pencil icon buttons inline on each card. Modal overlays preserve spatial context via blurred/dimmed background. Document editor uses full-screen overlay but topbar clearly shows the doc name and scope so operator knows where they are.
+- Re-check passed: yes — Non-technical operator can scan 12 memory cards, understand what agents know, and click a pencil to correct one item. Notes search bar is immediately visible. Document list is scannable at a glance with file-type colours.
+
+**Rule violations flagged:** none
+
+**Hidden complexity surfaced:**
+- Memory tab items come from multiple sources (operator-authored, onboarding-captured, auto-synthesised) but no source labels are shown. This is correct per the locked IA decision. However, if an operator ever wants to know "who put this here?" or "can I delete auto-synthesised items?", there is no affordance for that. This is a design choice to keep the UI clean — operators are expected to trust the pool and edit/delete as needed. If provenance ever becomes important, it belongs in a progressive disclosure "Details" tooltip or hover state, not a visible column.
+- The Documents tab has no concept of "which agents have this pinned" visible at list level — that detail is inside the document editor. An operator browsing the list cannot see at a glance which docs are already pinned to agents. This is acceptable for v1 (low information-density list is the goal) but worth noting if agent pinning becomes a common task.
+
+**Files modified:**
+- `prototypes/clientpulse-features/subaccount-knowledge-memory.html` (new)
+- `prototypes/clientpulse-features/subaccount-knowledge-notes.html` (new)
+- `prototypes/clientpulse-features/subaccount-knowledge-documents.html` (new)
+- `prototypes/clientpulse-features/memory-edit-modal.html` (new)
+- `prototypes/clientpulse-features/note-edit-modal.html` (new)
+- `prototypes/clientpulse-features/document-edit-interface.html` (new)
+- `prototypes/clientpulse-features/org-library.html` (new)
+- `prototypes/clientpulse-features/empty-subaccount-knowledge.html` (updated — new IA)
+- `prototypes/clientpulse-features/index.html` (updated — round 4 metadata, Section A new cards, Section B three-tab entries, Section D superseded notice, Section E updated entry)
+- `tasks/builds/clientpulse-features/mockup-log.md` (this entry)
+
+---
+
 ## Round 2 — 2026-05-06
 
 **Operator feedback:** Exhaustive review pass requested. Every modified surface needs a current-state mockup alongside the proposed state so the diff is obvious. Index restructured into four sections: A (net-new), B (modifies, with Today/Proposed button pairs), C (reused unchanged), D (deferred).

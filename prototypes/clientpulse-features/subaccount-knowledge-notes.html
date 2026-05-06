@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Apex Window Cleaning — Knowledge: Notes</title>
+<link rel="stylesheet" href="_shared.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; min-height: 100vh; }
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 216px; flex-shrink: 0; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 12px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 0 8px 14px; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-logo .mark { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+  .sidebar-logo .name { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #475569; text-decoration: none; }
+  .sidebar-nav a:hover { background: #f8fafc; }
+  .sidebar-nav a.active { background: #eef2ff; color: #4f46e5; font-weight: 500; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 10px 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #64748b; }
+  .topbar-slash { color: #cbd5e1; margin: 0 2px; }
+  .topbar-current { color: #1e293b; font-weight: 500; }
+  .page-content { flex: 1; padding: 28px 32px; max-width: 980px; }
+
+  .page-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 6px; letter-spacing: -0.3px; }
+
+  .tabs-row { display: flex; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px; }
+  .tab-btn { padding: 10px 18px; font-size: 13px; font-weight: 500; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; color: #64748b; text-decoration: none; display: inline-block; }
+  .tab-btn:hover { color: #1e293b; }
+  .tab-btn.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+
+  .tab-intro { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; gap: 24px; }
+  .tab-intro-text { font-size: 13px; color: #64748b; line-height: 1.6; max-width: 520px; }
+  .btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 13px; font-weight: 500; border: none; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .btn-primary:hover { background: #4338ca; }
+
+  .search-row { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .search-input { padding: 8px 12px 8px 34px; border: 1px solid #e2e8f0; border-radius: 7px; font-size: 13px; color: #1e293b; background: #fff; outline: none; width: 260px; font-family: inherit; }
+  .search-wrap { position: relative; }
+  .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+
+  .notes-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .note-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 14px 16px; display: flex; gap: 14px; align-items: flex-start;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .note-card:hover { border-color: #c7d2fe; box-shadow: 0 2px 8px rgba(79,70,229,0.06); }
+
+  .note-body { flex: 1; min-width: 0; }
+  .note-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .note-title { font-size: 13.5px; font-weight: 600; color: #1e293b; line-height: 1.3; }
+  .note-when { font-size: 11px; color: #94a3b8; white-space: nowrap; flex-shrink: 0; padding-top: 2px; }
+  .note-preview { font-size: 12.5px; color: #475569; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 8px; }
+  .note-footer { display: flex; align-items: center; gap: 6px; }
+  .note-tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 500; }
+
+  .btn-edit-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 5px; background: transparent;
+    border: 1px solid transparent; cursor: pointer; color: #94a3b8; flex-shrink: 0;
+    margin-top: 1px; transition: background 0.1s, border-color 0.1s, color 0.1s;
+  }
+  .btn-edit-icon:hover { background: #eef2ff; border-color: #c7d2fe; color: #4f46e5; }
+
+  .proto-footer { margin-top: 28px; font-size: 11.5px; color: #94a3b8; line-height: 1.7; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="mark">S</div><div class="name">Synthetos</div></div>
+    <div class="sidebar-nav">
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Pulse
+      </a>
+      <a href="#" class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Clients
+      </a>
+      <a href="#">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h7"/></svg>
+        Automations
+      </a>
+      <a href="org-library.html">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        Library
+      </a>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;padding:12px 8px 0;border-top:1px solid #f1f5f9;">Prototype · mock data</div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <a href="#" style="color:#64748b;text-decoration:none;">Clients</a>
+      <span class="topbar-slash">/</span>
+      <a href="#" style="color:#64748b;text-decoration:none;">Apex Window Cleaning</a>
+      <span class="topbar-slash">/</span>
+      <span class="topbar-current">Knowledge</span>
+    </div>
+
+    <div class="page-content">
+      <div class="page-title">Knowledge</div>
+
+      <div class="tabs-row">
+        <a href="subaccount-knowledge-memory.html" class="tab-btn">Memory (12)</a>
+        <a href="subaccount-knowledge-notes.html" class="tab-btn active">Notes (17)</a>
+        <a href="subaccount-knowledge-documents.html" class="tab-btn">Documents (8)</a>
+      </div>
+
+      <div class="tab-intro">
+        <div class="tab-intro-text">Searchable knowledge agents reference when a task touches relevant territory. Add anything that might be useful later.</div>
+        <button class="btn-primary" onclick="document.getElementById('note-modal').style.display='flex'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Add note
+        </button>
+      </div>
+
+      <div class="search-row">
+        <div class="search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-input" type="search" placeholder="Search notes…" />
+        </div>
+      </div>
+
+      <div class="notes-list">
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Kickoff call notes — 12 March</div>
+              <div class="note-when">3 weeks ago</div>
+            </div>
+            <div class="note-preview">Owner David Chen attended. Main priorities: increasing subscription renewals before summer, getting more Nextdoor referrals. Frustrated with current manual follow-up process. Wants automation to "feel personal, not robotic." Google review response workflow discussed as first automation.</div>
+            <div class="note-footer">
+              <span class="note-tag">kickoff</span>
+              <span class="note-tag">Q2</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Q2 priorities discussion</div>
+              <div class="note-when">2 weeks ago</div>
+            </div>
+            <div class="note-preview">Focus areas: (1) Premium tier upsell to existing subscribers, (2) Nextdoor neighbourhood referral campaign, (3) Reducing no-show rate. Owner wants weekly Slack summary instead of daily emails going forward.</div>
+            <div class="note-footer">
+              <span class="note-tag">Q2</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Conversation with lead Sarah Chen — premium interested</div>
+              <div class="note-when">6 days ago</div>
+            </div>
+            <div class="note-preview">Lead came through Nextdoor referral. Interested in bi-monthly schedule but asked about quarterly as well. Mentioned she has 4,200 sq ft home with 3 stories. Likely Premium tier candidate. Requested a quote via email.</div>
+            <div class="note-footer">
+              <span class="note-tag">lead</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Pipeline value increased 18% week-over-week</div>
+              <div class="note-when">5 days ago</div>
+            </div>
+            <div class="note-preview">Three new Nextdoor referral leads entered the pipeline this week. Average deal size: $420/year. Two are from same neighbourhood — possible cluster opportunity for crew scheduling efficiency.</div>
+            <div class="note-footer">
+              <span class="note-tag">pipeline</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Review of Q1 results</div>
+              <div class="note-when">Last week</div>
+            </div>
+            <div class="note-preview">Q1 subscription renewals: 94% (down from 98% target). Two cancellations attributed to relocation. Pipeline grew 22% vs Q4. Premium tier now 31% of total revenue, up from 24% in Q4. Owner happy with trajectory.</div>
+            <div class="note-footer">
+              <span class="note-tag">Q1</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Response time issue — discussed with team</div>
+              <div class="note-when">Last week</div>
+            </div>
+            <div class="note-preview">Owner flagged that quote responses were taking 24–36h. Agreed to target same-day response for all new inquiries. Automation workflow for quote acknowledgement now in progress.</div>
+            <div class="note-footer">
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Owner mentioned competitor pricing concerns</div>
+              <div class="note-when">8 days ago</div>
+            </div>
+            <div class="note-preview">A local competitor dropped prices by ~15%. Owner wants to hold pricing ("our retention proves value"). Asked that agents not engage on price comparisons if raised by customers — redirect to quality and track record.</div>
+            <div class="note-footer">
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Customer feedback summary — week of 8 April</div>
+              <div class="note-when">4 weeks ago</div>
+            </div>
+            <div class="note-preview">14 Google reviews processed. 12 positive, 2 neutral. Recurring positive: punctuality, polite crew, spotless results. Recurring neutral: wished booking confirmation was more automated. No negative reviews this week.</div>
+            <div class="note-footer">
+              <span class="note-tag">feedback</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">New lead source identified: Nextdoor referrals</div>
+              <div class="note-when">2 weeks ago</div>
+            </div>
+            <div class="note-preview">Nextdoor referrals now account for 28% of new leads this quarter, up from 8% in Q4. Posts by existing customers organically mentioning Apex. Not a paid channel. Owner wants to nurture this — considering a referral bonus programme.</div>
+            <div class="note-footer">
+              <span class="note-tag">lead source</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Subscription renewal patterns — Premium tier sticky</div>
+              <div class="note-when">3 weeks ago</div>
+            </div>
+            <div class="note-preview">Premium tier renewal rate: 99.1%. Entry tier renewal rate: 91.3%. Churn is almost entirely entry-tier customers who move or downsize. Upsell to Premium significantly improves lifetime value and retention.</div>
+            <div class="note-footer">
+              <span class="note-tag">retention</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Crew scheduling conflict resolution discussed</div>
+              <div class="note-when">10 days ago</div>
+            </div>
+            <div class="note-preview">Two-crew model means scheduling conflicts when neighbours book same day. Owner asked agents to flag same-neighbourhood same-day bookings for crew review before confirming. Not blocking — just needs a human check.</div>
+            <div class="note-footer">
+              <span class="note-tag">operations</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Reporting cadence change — now weekly Slack digest</div>
+              <div class="note-when">9 days ago</div>
+            </div>
+            <div class="note-preview">Owner requested shift from daily email reports to a single weekly Slack digest (Fridays by noon). Digest should include: new leads, renewals due, open quotes, any flags. Automation updated accordingly.</div>
+            <div class="note-footer">
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Pricing question from operator — flagged</div>
+              <div class="note-when">Yesterday</div>
+            </div>
+            <div class="note-preview">Owner asked whether the Q3 pricing review should include a Premium tier price increase. Flagged for next strategy call. No decision made. Agents should not reference any potential price changes until confirmed.</div>
+            <div class="note-footer">
+              <span class="note-tag">billing</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Workflow: Google review auto-response failed 3 times</div>
+              <div class="note-when">3 days ago</div>
+            </div>
+            <div class="note-preview">The Google review response automation failed on three consecutive reviews due to an API rate-limit issue. Now resolved. Owner aware — no customer-facing impact as manual responses went out same day.</div>
+            <div class="note-footer">
+              <span class="note-tag">operations</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Compliance check — no issues</div>
+              <div class="note-when">2 weeks ago</div>
+            </div>
+            <div class="note-preview">Reviewed all automated outreach messaging against WA state marketing guidelines. No issues found. Review log saved to documents. Next scheduled compliance review: July 2026.</div>
+            <div class="note-footer">
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">No-show follow-up script — approved</div>
+              <div class="note-when">4 days ago</div>
+            </div>
+            <div class="note-preview">Owner approved the draft no-show follow-up message for customers who aren't home. Tone: warm, not accusatory. Offers easy rescheduling with a direct link. Ready for automation.</div>
+            <div class="note-footer">
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+        <div class="note-card">
+          <div class="note-body">
+            <div class="note-header">
+              <div class="note-title">Summer demand surge — crew capacity note</div>
+              <div class="note-when">1 week ago</div>
+            </div>
+            <div class="note-preview">Owner expects 40–50% demand increase in June–August from existing subscribers adding extra cleans. Current 2-crew capacity may need a temp hire. Agents should flag any week with 30+ scheduled jobs for owner review.</div>
+            <div class="note-footer">
+              <span class="note-tag">operations</span>
+            </div>
+          </div>
+          <button class="btn-edit-icon" onclick="document.getElementById('note-modal').style.display='flex'" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+
+      </div><!-- /notes-list -->
+
+      <div class="proto-footer">
+        Round 4 · Notes tab · Apex Window Cleaning · 17 notes shown (operator-authored and auto-captured silently merged — no source labels; no "Promote" button). Click any pencil icon or "Add note" to open the edit modal.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Note edit modal -->
+<div id="note-modal" style="display:none;position:fixed;inset:0;z-index:100;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="position:absolute;inset:0;background:rgba(15,23,42,0.45);backdrop-filter:blur(2px);"></div>
+  <div style="position:relative;z-index:1;background:#fff;border-radius:12px;padding:28px;width:560px;box-shadow:0 20px 60px rgba(15,23,42,0.2);">
+    <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:20px;">Edit note</div>
+
+    <div style="margin-bottom:14px;">
+      <label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px;">Title</label>
+      <input type="text" value="Kickoff call notes — 12 March" style="width:100%;padding:9px 12px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;color:#1e293b;outline:none;font-family:inherit;box-sizing:border-box;" />
+    </div>
+
+    <!-- Minimal rich-text toolbar -->
+    <div style="margin-bottom:4px;">
+      <label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:6px;">Note</label>
+      <div style="border:1px solid #e2e8f0;border-radius:7px;overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:2px;padding:6px 8px;border-bottom:1px solid #f1f5f9;background:#fafbfc;">
+          <button style="width:26px;height:26px;border-radius:4px;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:700;color:#475569;display:flex;align-items:center;justify-content:center;" title="Bold">B</button>
+          <button style="width:26px;height:26px;border-radius:4px;border:none;background:transparent;cursor:pointer;font-size:12px;font-style:italic;color:#475569;display:flex;align-items:center;justify-content:center;" title="Italic">I</button>
+          <button style="width:26px;height:26px;border-radius:4px;border:none;background:transparent;cursor:pointer;font-size:12px;text-decoration:underline;color:#475569;display:flex;align-items:center;justify-content:center;" title="Underline">U</button>
+          <div style="width:1px;height:16px;background:#e2e8f0;margin:0 4px;"></div>
+          <button style="width:26px;height:26px;border-radius:4px;border:none;background:transparent;cursor:pointer;color:#475569;display:flex;align-items:center;justify-content:center;" title="Link">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+          <button style="width:26px;height:26px;border-radius:4px;border:none;background:transparent;cursor:pointer;color:#475569;display:flex;align-items:center;justify-content:center;" title="Bullet list">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+          <button style="width:26px;height:26px;border-radius:4px;border:none;background:transparent;cursor:pointer;color:#475569;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;" title="Heading">H</button>
+        </div>
+        <textarea rows="10" style="width:100%;padding:12px;border:none;font-size:13px;color:#1e293b;outline:none;font-family:inherit;resize:vertical;line-height:1.6;box-sizing:border-box;">Owner David Chen attended. Main priorities: increasing subscription renewals before summer, getting more Nextdoor referrals. Frustrated with current manual follow-up process. Wants automation to "feel personal, not robotic." Google review response workflow discussed as first automation.</textarea>
+      </div>
+    </div>
+
+    <div style="margin-bottom:20px;padding-top:12px;">
+      <label style="display:block;font-size:12px;font-weight:600;color:#475569;margin-bottom:8px;">Tags</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#eef2ff;color:#4f46e5;border-radius:4px;font-size:12px;font-weight:500;">kickoff <span style="cursor:pointer;opacity:0.6;">×</span></span>
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#eef2ff;color:#4f46e5;border-radius:4px;font-size:12px;font-weight:500;">Q2 <span style="cursor:pointer;opacity:0.6;">×</span></span>
+        <input type="text" placeholder="Add tag…" style="padding:3px 8px;border:1px dashed #c7d2fe;border-radius:4px;font-size:12px;color:#475569;outline:none;width:80px;font-family:inherit;background:transparent;" />
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <button style="background:none;border:none;font-size:12px;color:#ef4444;cursor:pointer;padding:0;">Delete this note</button>
+      <div style="display:flex;gap:8px;">
+        <button onclick="document.getElementById('note-modal').style.display='none'" style="padding:8px 16px;border-radius:7px;background:#fff;color:#475569;font-size:13px;font-weight:500;border:1px solid #e2e8f0;cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="document.getElementById('note-modal').style.display='none'" style="padding:8px 16px;border-radius:7px;background:#4f46e5;color:#fff;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
