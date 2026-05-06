@@ -1,128 +1,62 @@
 /**
  * Pure tests for D.5 — ghlAutoEnrolLocationsPageJob decision functions.
- * No IO; no DB; no runtime imports that trigger env validation.
- * Logic is duplicated inline to keep the test hermetic.
  */
 
-import { strict as assert } from 'assert';
+import { expect, test } from 'vitest';
+import { classifyError, classifyPageOutcome } from '../ghlAutoEnrolLocationsPageJobPure.js';
 
-// ── classifyPageOutcome (mirrors the implementation in ghlAutoEnrolLocationsPageJob) ──
+// ── classifyPageOutcome ───────────────────────────────────────────────────────
 
-type PageOutcome = 'completed_empty' | 'completed_cursor_null' | 'partial_page_cap' | 'continue';
+test('empty locations + cursor → completed_empty', () => {
+  expect(classifyPageOutcome({ locations: [], pageIndex: 0, maxPages: 200, nextCursor: 'abc' })).toBe('completed_empty');
+});
 
-function classifyPageOutcome(opts: {
-  locations: unknown[];
-  pageIndex: number;
-  maxPages: number;
-  nextCursor: string | null;
-}): PageOutcome {
-  const { locations, pageIndex, maxPages, nextCursor } = opts;
-  if (locations.length === 0) return 'completed_empty';
-  if (pageIndex >= maxPages) return 'partial_page_cap';
-  if (nextCursor === null) return 'completed_cursor_null';
-  return 'continue';
-}
+test('empty locations + null cursor → completed_empty', () => {
+  expect(classifyPageOutcome({ locations: [], pageIndex: 0, maxPages: 200, nextCursor: null })).toBe('completed_empty');
+});
 
-// ── classifyError (mirrors the implementation in ghlAutoEnrolLocationsPageJob) ──
+test('pageIndex at maxPages → partial_page_cap', () => {
+  expect(classifyPageOutcome({ locations: [{ id: '1' }], pageIndex: 200, maxPages: 200, nextCursor: 'abc' })).toBe('partial_page_cap');
+});
 
-type ErrorClass = 'fatal' | 'retry';
+test('pageIndex past maxPages → partial_page_cap', () => {
+  expect(classifyPageOutcome({ locations: [{ id: '1' }], pageIndex: 201, maxPages: 200, nextCursor: null })).toBe('partial_page_cap');
+});
 
-function classifyError(e: unknown): ErrorClass {
-  const err = e as { statusCode?: number; code?: string; message?: string };
-  if (
-    err.code === 'AGENCY_TOKEN_INVALID' ||
-    err.message?.includes('auth_revoked') ||
-    err.message?.includes('token_revoked') ||
-    (typeof err.statusCode === 'number' && err.statusCode === 401)
-  ) {
-    return 'fatal';
-  }
-  if (typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500 && err.statusCode !== 429) {
-    return 'fatal';
-  }
-  return 'retry';
-}
+test('locations present + null cursor → completed_cursor_null', () => {
+  expect(classifyPageOutcome({ locations: [{ id: '1' }, { id: '2' }], pageIndex: 5, maxPages: 200, nextCursor: null })).toBe('completed_cursor_null');
+});
 
-// ── classifyPageOutcome tests ─────────────────────────────────────────────────
+test('locations present + cursor → continue', () => {
+  expect(classifyPageOutcome({ locations: [{ id: '1' }], pageIndex: 5, maxPages: 200, nextCursor: 'next_cursor_token' })).toBe('continue');
+});
 
-// Empty locations → completed_empty regardless of cursor
-{
-  const r = classifyPageOutcome({ locations: [], pageIndex: 0, maxPages: 200, nextCursor: 'abc' });
-  assert.equal(r, 'completed_empty', 'empty locations + cursor → completed_empty');
-}
-{
-  const r = classifyPageOutcome({ locations: [], pageIndex: 0, maxPages: 200, nextCursor: null });
-  assert.equal(r, 'completed_empty', 'empty locations + null cursor → completed_empty');
-}
+// ── classifyError ─────────────────────────────────────────────────────────────
 
-// pageIndex >= maxPages → partial_page_cap
-{
-  const locs = [{ id: '1' }];
-  const r = classifyPageOutcome({ locations: locs, pageIndex: 200, maxPages: 200, nextCursor: 'abc' });
-  assert.equal(r, 'partial_page_cap', 'pageIndex at maxPages → partial_page_cap');
-}
-{
-  const locs = [{ id: '1' }];
-  const r = classifyPageOutcome({ locations: locs, pageIndex: 201, maxPages: 200, nextCursor: null });
-  assert.equal(r, 'partial_page_cap', 'pageIndex past maxPages → partial_page_cap');
-}
+test('AGENCY_TOKEN_INVALID → fatal', () => {
+  expect(classifyError({ code: 'AGENCY_TOKEN_INVALID' })).toBe('fatal');
+});
 
-// nextCursor === null AND locations > 0 → completed_cursor_null
-{
-  const locs = [{ id: '1' }, { id: '2' }];
-  const r = classifyPageOutcome({ locations: locs, pageIndex: 5, maxPages: 200, nextCursor: null });
-  assert.equal(r, 'completed_cursor_null', 'locations present + null cursor → completed_cursor_null');
-}
+test('401 → fatal', () => {
+  expect(classifyError({ statusCode: 401 })).toBe('fatal');
+});
 
-// else → continue
-{
-  const locs = [{ id: '1' }];
-  const r = classifyPageOutcome({ locations: locs, pageIndex: 5, maxPages: 200, nextCursor: 'next_cursor_token' });
-  assert.equal(r, 'continue', 'locations present + cursor → continue');
-}
+test('404 → fatal', () => {
+  expect(classifyError({ statusCode: 404 })).toBe('fatal');
+});
 
-// ── classifyError tests ───────────────────────────────────────────────────────
+test('429 → retry', () => {
+  expect(classifyError({ statusCode: 429 })).toBe('retry');
+});
 
-// Auth-revoked → fatal
-{
-  const r = classifyError({ code: 'AGENCY_TOKEN_INVALID' });
-  assert.equal(r, 'fatal', 'AGENCY_TOKEN_INVALID → fatal');
-}
+test('500 → retry', () => {
+  expect(classifyError({ statusCode: 500 })).toBe('retry');
+});
 
-// 401 → fatal
-{
-  const r = classifyError({ statusCode: 401 });
-  assert.equal(r, 'fatal', '401 → fatal');
-}
+test('unknown network error → retry', () => {
+  expect(classifyError(new Error('ECONNRESET'))).toBe('retry');
+});
 
-// 404 → fatal
-{
-  const r = classifyError({ statusCode: 404 });
-  assert.equal(r, 'fatal', '404 → fatal');
-}
-
-// 429 → retry (not fatal)
-{
-  const r = classifyError({ statusCode: 429 });
-  assert.equal(r, 'retry', '429 → retry');
-}
-
-// 500 → retry
-{
-  const r = classifyError({ statusCode: 500 });
-  assert.equal(r, 'retry', '500 → retry');
-}
-
-// Unknown error → retry
-{
-  const r = classifyError(new Error('ECONNRESET'));
-  assert.equal(r, 'retry', 'unknown network error → retry');
-}
-
-// auth_revoked in message → fatal
-{
-  const r = classifyError({ message: 'token_revoked by provider' });
-  assert.equal(r, 'fatal', 'token_revoked message → fatal');
-}
-
-console.log('ghlAutoEnrolLocationsPagePure: all assertions passed');
+test('token_revoked message → fatal', () => {
+  expect(classifyError({ message: 'token_revoked by provider' })).toBe('fatal');
+});

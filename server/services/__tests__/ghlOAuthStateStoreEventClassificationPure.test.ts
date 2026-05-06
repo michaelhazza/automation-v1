@@ -1,11 +1,8 @@
 /**
- * ghlOAuthStateStoreEventClassificationPure.test.ts
- *
  * Pure-function tests for classifyOAuthStateConsumeResult.
  */
 
-import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 import { classifyOAuthStateConsumeResult } from '../ghlOAuthStateStore.js';
 
 const now = new Date();
@@ -16,7 +13,7 @@ test('rowFromDelete present → consumed', () => {
     rowFromDelete: { issuedAt: past },
     expiredRow:    null,
   });
-  assert.equal(result, 'consumed');
+  expect(result).toBe('consumed');
 });
 
 test('rowFromDelete null + expiredRow present → expired', () => {
@@ -24,7 +21,7 @@ test('rowFromDelete null + expiredRow present → expired', () => {
     rowFromDelete: null,
     expiredRow:    { issuedAt: past, expiresAt: new Date(past.getTime() + 5 * 60 * 1000) },
   });
-  assert.equal(result, 'expired');
+  expect(result).toBe('expired');
 });
 
 test('both null → not_found', () => {
@@ -32,5 +29,5 @@ test('both null → not_found', () => {
     rowFromDelete: null,
     expiredRow:    null,
   });
-  assert.equal(result, 'not_found');
+  expect(result).toBe('not_found');
 });

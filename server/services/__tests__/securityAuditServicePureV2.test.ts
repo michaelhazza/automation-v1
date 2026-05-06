@@ -1,9 +1,8 @@
 /**
- * securityAuditServicePureV2.test.ts — Pure-function tests for normaliseSecurityEventV2.
+ * Pure-function tests for normaliseSecurityEventV2.
  */
 
-import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 import { normaliseSecurityEventV2 } from '../securityAuditServicePure.js';
 import { auditEvent } from '../../../shared/types/securityAuditEvents.js';
 
@@ -12,8 +11,8 @@ test('severity from factory entry injected into meta', () => {
     event: auditEvent.security.crossTenantAttempt,
     organisationId: 'org-1',
   });
-  assert.equal(result.meta.severity, 'security_boundary');
-  assert.equal(result.eventType, 'security.cross_tenant_attempt');
+  expect(result.meta.severity).toBe('security_boundary');
+  expect(result.eventType).toBe('security.cross_tenant_attempt');
 });
 
 test('no severity key when factory entry has no severity', () => {
@@ -21,10 +20,7 @@ test('no severity key when factory entry has no severity', () => {
     event: auditEvent.auth.loginFailed,
     organisationId: 'org-1',
   });
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(result.meta, 'severity'),
-    false,
-  );
+  expect(Object.prototype.hasOwnProperty.call(result.meta, 'severity')).toBe(false);
 });
 
 test('factory severity wins over caller-supplied meta severity', () => {
@@ -33,5 +29,5 @@ test('factory severity wins over caller-supplied meta severity', () => {
     organisationId: 'org-1',
     meta: { severity: 'rate_limit' },
   });
-  assert.equal(result.meta.severity, 'security_boundary');
+  expect(result.meta.severity).toBe('security_boundary');
 });

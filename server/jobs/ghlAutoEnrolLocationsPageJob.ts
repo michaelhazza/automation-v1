@@ -23,6 +23,7 @@ import { withBackoff } from '../lib/withBackoff.js';
 import { MAX_GHL_PAGES_PER_RUN } from '../config/limits.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { classifyError, classifyPageOutcome } from './ghlAutoEnrolLocationsPageJobPure.js';
 
 export const GHL_AUTO_ENROL_PAGE_JOB = 'ghl:auto-enrol-locations-page' as const;
 
@@ -44,40 +45,8 @@ function ghlHeaders(accessToken: string) {
   };
 }
 
-function classifyError(e: unknown): 'fatal' | 'retry' {
-  const err = e as { statusCode?: number; code?: string; message?: string };
-  // Auth revoked — no point retrying
-  if (
-    err.code === 'AGENCY_TOKEN_INVALID' ||
-    err.message?.includes('auth_revoked') ||
-    err.message?.includes('token_revoked') ||
-    (typeof err.statusCode === 'number' && err.statusCode === 401)
-  ) {
-    return 'fatal';
-  }
-  // 4xx client errors (except 429) — fatal
-  if (typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500 && err.statusCode !== 429) {
-    return 'fatal';
-  }
-  return 'retry';
-}
-
-/**
- * Pure decision helper — determines the outcome of a page based on its state.
- * Exported for pure testing (D.5 pure test).
- */
-export function classifyPageOutcome(opts: {
-  locations: unknown[];
-  pageIndex: number;
-  maxPages: number;
-  nextCursor: string | null;
-}): 'completed_empty' | 'completed_cursor_null' | 'partial_page_cap' | 'continue' {
-  const { locations, pageIndex, maxPages, nextCursor } = opts;
-  if (locations.length === 0) return 'completed_empty';
-  if (pageIndex >= maxPages) return 'partial_page_cap';
-  if (nextCursor === null) return 'completed_cursor_null';
-  return 'continue';
-}
+// classifyError + classifyPageOutcome live in ghlAutoEnrolLocationsPageJobPure.ts
+// (extracted per the *Pure.ts sibling convention enforced by verify-pure-helper-convention.sh).
 
 export async function ghlAutoEnrolLocationsPageWorker(payload: GhlAutoEnrolPagePayload): Promise<void> {
   const { connectionId, runId, pageCursor, pageIndex } = payload;
