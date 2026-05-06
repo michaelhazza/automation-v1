@@ -1,3 +1,16 @@
+## Library revert — 2026-05-06
+
+**Operator feedback:** Remove org-library.html from this branch. Knowledge / memory / documents / library work is being handled on a separate branch. Skills surfaces, B-Metrics, O-Intake, D-Compiler, and R-Polish remain in this branch.
+
+**Files removed (deleted from branch):**
+- `prototypes/clientpulse-features/org-library.html`
+
+**Files updated:**
+- `index.html` — Organisation Library card removed from Section A.
+- `mockup-log.md` — this revert entry appended.
+
+---
+
 ## Round 5 revert — 2026-05-06
 
 **Operator feedback:** Revert connections-related work from this branch. Connections redesign is being handled on a separate branch. Skills surfaces work stays.
