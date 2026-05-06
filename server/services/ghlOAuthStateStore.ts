@@ -106,12 +106,16 @@ export async function consumeGhlOAuthState(
     void recordSecurityEvent({
       event:          auditEvent.oauth.stateExpired,
       organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+      userAgent:      context?.userAgent ?? null,
+      ip:             context?.ip ?? null,
       meta:           { provider: 'ghl', issuedAt: issuedAt.toISOString(), latencyMs },
     });
   } else {
     void recordSecurityEvent({
       event:          auditEvent.oauth.stateNotFound,
       organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+      userAgent:      context?.userAgent ?? null,
+      ip:             context?.ip ?? null,
       meta:           { provider: 'ghl' },
     });
   }
