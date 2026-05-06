@@ -85,10 +85,32 @@
 
   .item-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; margin-top: 2px; }
 
-  .inline-approve { background: var(--emerald-50); border: 1px solid #a7f3d0; color: var(--emerald-700); }
-  .inline-approve:hover { background: #d1fae5; }
-  .inline-reject { background: var(--red-50); border: 1px solid #fecaca; color: var(--red-700); }
-  .inline-reject:hover { background: #fee2e2; }
+  /* Decision 6a: stronger approve/reject visual hierarchy */
+  .inline-approve {
+    background: var(--indigo-600); color: white; border: none;
+    min-height: 32px; padding: 5px 14px; font-size: 12px; font-weight: 600;
+  }
+  .inline-approve:hover { background: var(--indigo-700); }
+  .inline-reject {
+    background: white; color: var(--slate-500); border: 1px solid var(--slate-300);
+    min-height: 32px; padding: 5px 14px; font-size: 12px;
+  }
+  .inline-reject:hover { background: var(--slate-50); border-color: var(--slate-400); }
+  .kb-hint { font-size: 10.5px; color: var(--slate-400); white-space: nowrap; margin-top: 4px; }
+
+  /* Decision 6b: collapsible earlier/read section */
+  .collapsible-header {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    user-select: none;
+  }
+  .collapsible-header .caret {
+    font-size: 10px; color: var(--slate-400);
+    transition: transform 0.15s;
+  }
+  .collapsible-header.open .caret { transform: rotate(90deg); }
+
+  /* Suppressed memory item type */
+  .icon-suppressed { background: var(--slate-50); border-color: var(--slate-200); color: var(--slate-500); }
 
   .item-time { font-size: 12px; color: var(--slate-400); white-space: nowrap; margin-top: 2px; }
 
@@ -282,12 +304,15 @@
               <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
             </div>
           </div>
-          <div class="item-actions">
-            <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Accept new</button>
-            <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Keep existing</button>
-            <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();">Archive</button>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Accept new</button>
+              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Keep existing</button>
+              <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();">Archive</button>
+            </div>
+            <div class="kb-hint">A to approve · R to reject</div>
+            <div class="item-time">May 5, 2:14pm</div>
           </div>
-          <div class="item-time">May 5, 2:14pm</div>
         </div>
 
         <!-- Item 2: Block proposal -->
@@ -308,12 +333,15 @@
               <span style="font-size:11px;color:var(--slate-400);">Confidence 0.77</span>
             </div>
           </div>
-          <div class="item-actions">
-            <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Approve</button>
-            <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Reject</button>
-            <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();">Details</button>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Approve</button>
+              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Reject</button>
+              <button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();">Details</button>
+            </div>
+            <div class="kb-hint">A to approve · R to reject</div>
+            <div class="item-time">May 4, 10:02am</div>
           </div>
-          <div class="item-time">May 4, 10:02am</div>
         </div>
 
         <!-- Item 3: Approval pending (email) -->
@@ -333,12 +361,15 @@
               <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
             </div>
           </div>
-          <div class="item-actions">
-            <button class="btn btn-xs inline-approve">Approve</button>
-            <button class="btn btn-xs inline-reject">Reject</button>
-            <button class="btn btn-xs btn-ghost">View draft</button>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve">Approve</button>
+              <button class="btn btn-xs inline-reject">Reject</button>
+              <button class="btn btn-xs btn-ghost">View draft</button>
+            </div>
+            <div class="kb-hint">A to approve · R to reject</div>
+            <div class="item-time">May 5, 11:30am</div>
           </div>
-          <div class="item-time">May 5, 11:30am</div>
         </div>
 
         <!-- Item 4: Clarification pending -->
@@ -406,12 +437,15 @@
               <span style="font-size:11px;color:var(--slate-400);">Content Agent</span>
             </div>
           </div>
-          <div class="item-actions">
-            <button class="btn btn-xs inline-approve">Approve</button>
-            <button class="btn btn-xs inline-reject">Reject</button>
-            <button class="btn btn-xs btn-ghost">View draft</button>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve">Approve</button>
+              <button class="btn btn-xs inline-reject">Reject</button>
+              <button class="btn btn-xs btn-ghost">View draft</button>
+            </div>
+            <div class="kb-hint">A to approve · R to reject</div>
+            <div class="item-time">May 5, 9:15am</div>
           </div>
-          <div class="item-time">May 5, 9:15am</div>
         </div>
 
         <!-- Item 7: Failed run -->
@@ -440,8 +474,90 @@
           <div class="item-time">May 5, 7:45am</div>
         </div>
 
-        <!-- Section: Recent (read) -->
-        <div class="section-divider" style="margin-top:20px;">Earlier, read (8)</div>
+        <!-- Decision 2: Suppressed memory / contradicting evidence items (3 examples) -->
+        <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--slate-400);"></div>
+          <div class="item-type-icon icon-suppressed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Suppressed memory: contradicting evidence observed</div>
+            <div class="item-subtitle">Entry you suppressed on Apr 10 ("Prospect is not a technical buyer") may no longer be accurate. CRM Agent observed James Watt referencing container orchestration architecture in a new conversation. Confidence 0.88.</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Suppressed memory</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+              <span style="font-size:11px;color:var(--slate-400);">CRM Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.88</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Re-add</button>
+              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Re-suppress</button>
+            </div>
+            <div class="kb-hint">A to re-add · R to re-suppress</div>
+            <div class="item-time">May 6, 8:14am</div>
+          </div>
+        </div>
+
+        <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--slate-400);"></div>
+          <div class="item-type-icon icon-suppressed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Suppressed memory: contradicting evidence observed</div>
+            <div class="item-subtitle">Entry you suppressed on Apr 28 ("Budget is under review for H2 2026") may be relevant again. Outreach Agent found a LinkedIn post from Sarah Chen referencing a "phase 2 budget review" for Q3. Confidence 0.71.</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Suppressed memory</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.71</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Re-add</button>
+              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Re-suppress</button>
+            </div>
+            <div class="kb-hint">A to re-add · R to re-suppress</div>
+            <div class="item-time">May 5, 3:30pm</div>
+          </div>
+        </div>
+
+        <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--slate-400);"></div>
+          <div class="item-type-icon icon-suppressed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Suppressed memory: contradicting evidence observed</div>
+            <div class="item-subtitle">Entry you suppressed on Apr 15 ("Primary contact is Jennifer Park (EA)") conflicts with new evidence. Jennifer introduced herself as "the onboarding coordinator" on a call, not just a scheduling contact. Confidence 0.82.</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Suppressed memory</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.82</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="btn btn-xs inline-approve" onclick="event.stopPropagation();">Re-add</button>
+              <button class="btn btn-xs inline-reject" onclick="event.stopPropagation();">Re-suppress</button>
+            </div>
+            <div class="kb-hint">A to re-add · R to re-suppress</div>
+            <div class="item-time">May 5, 11:45am</div>
+          </div>
+        </div>
+
+        <!-- Decision 6b: Earlier / Read -- collapsed by default -->
+        <div class="section-divider" style="margin-top:20px;">
+          <div class="collapsible-header" id="earlier-toggle" onclick="toggleEarlier()">
+            <span class="caret">&#9656;</span>
+            <span>Earlier, read (47)</span>
+          </div>
+        </div>
+        <div id="earlier-section" style="display:none;">
 
         <!-- Item 8: Approval approved (past) -->
         <div class="inbox-item" style="opacity:0.75;">
@@ -578,9 +694,102 @@
           <div class="item-time">Apr 25</div>
         </div>
 
+        </div><!-- /earlier-section -->
+
+        <!-- Decision 6c: View earlier pagination -->
+        <div id="view-earlier-link" style="display:none;text-align:center;padding:14px 0;">
+          <button onclick="showViewEarlier()" style="font-size:13px;color:var(--indigo-600);background:none;border:1px solid var(--indigo-200);border-radius:8px;padding:7px 18px;cursor:pointer;">View earlier (30 more days)</button>
+        </div>
+        <div id="earlier-30-90" style="display:none;">
+          <!-- Items from days 31-90 -->
+          <div class="section-divider" style="margin-top:12px;">Days 31-90 ago</div>
+          <div class="inbox-item" style="opacity:0.7;">
+            <div style="width:7px;flex-shrink:0;"></div>
+            <div class="item-type-icon icon-task"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+            <div class="item-main">
+              <div class="item-title" style="font-weight:500;">Completed: Initial CRM data audit for Acme</div>
+              <div class="item-subtitle">147 contacts imported, 23 duplicates merged, 8 records enriched from LinkedIn.</div>
+              <div class="item-meta"><span class="badge badge-green" style="font-size:10px;">Completed</span><span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span></div>
+            </div>
+            <div class="item-time">Mar 10</div>
+          </div>
+          <div class="inbox-item" style="opacity:0.7;">
+            <div style="width:7px;flex-shrink:0;"></div>
+            <div class="item-type-icon icon-review"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+            <div class="item-main">
+              <div class="item-title" style="font-weight:500;">Approved: Discovery call debrief email to Sarah Chen</div>
+              <div class="item-subtitle">Email sent Mar 8. Confirmed follow-up date of April 22 in response.</div>
+              <div class="item-meta"><span class="badge badge-green" style="font-size:10px;">Approved</span><span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span></div>
+            </div>
+            <div class="item-time">Mar 8</div>
+          </div>
+          <div style="text-align:center;padding:14px 0;border-top:1px solid var(--slate-100);margin-top:8px;">
+            <a href="#" style="font-size:12.5px;color:var(--slate-500);text-decoration:none;">Archive (items older than 90 days are archived)</a>
+          </div>
+        </div>
+
       </div><!-- /inbox-all -->
 
     </div><!-- /page-body -->
+  </div>
+</div>
+
+<!-- ── SUPPRESSED MEMORY DRAWER (Decision 2 + 7) ───────────────────── -->
+<div id="suppressed-memory-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:560px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Suppressed memory: contradicting evidence</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Entry suppressed Apr 10 · new evidence found May 6</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <!-- What was suppressed -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">Suppressed entry</div>
+        <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;">
+            <span class="badge badge-amber" style="font-size:10px;">observation</span>
+            <span style="font-size:11px;color:var(--slate-400);">Outreach Agent · Apr 10 · Suppressed Apr 10</span>
+          </div>
+          <div style="font-size:13px;color:var(--slate-700);line-height:1.55;">Prospect is not a technical buyer. James Watt defers all technical evaluations to the engineering team and focuses only on business outcomes.</div>
+        </div>
+      </div>
+
+      <!-- New evidence -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">New evidence observed</div>
+        <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;">
+            <span style="font-size:11px;color:var(--indigo-500);">CRM Agent · May 6 · Run 8d4f2a</span>
+            <span style="margin-left:auto;font-size:11px;font-weight:600;color:var(--emerald-600);">Confidence 0.88</span>
+          </div>
+          <div style="font-size:13px;color:var(--indigo-800);line-height:1.55;">James Watt referenced container orchestration patterns and Kubernetes cluster sizing unprompted in a LinkedIn reply. The language used indicates hands-on technical familiarity, not just business-level understanding.</div>
+          <div style="margin-top:8px;">
+            <a href="#" style="font-size:12px;color:var(--indigo-600);">Open source run</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confidence bar -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <span style="font-size:12px;color:var(--slate-500);">Evidence confidence</span>
+        <div style="height:6px;border-radius:3px;background:var(--slate-200);flex:1;overflow:hidden;">
+          <div style="width:88%;height:100%;background:var(--emerald-500);border-radius:3px;"></div>
+        </div>
+        <span style="font-size:12px;font-weight:600;color:var(--slate-700);">0.88</span>
+      </div>
+
+      <div style="font-size:12.5px;color:var(--slate-500);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:10px 14px;">
+        Approving will re-add the original entry (or a revised version) to auto-memory. Re-suppressing will maintain the suppression and lower the triggering threshold for future contradictions.
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Close</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Re-suppress</button>
+      <button class="btn btn-primary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Approve (re-add)</button>
+    </div>
   </div>
 </div>
 
@@ -667,6 +876,31 @@
 function setInboxTab(id, btn) {
   document.querySelectorAll('.inbox-tab-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+}
+
+// Decision 6b: collapsible earlier/read section
+function toggleEarlier() {
+  var section = document.getElementById('earlier-section');
+  var toggle = document.getElementById('earlier-toggle');
+  var viewLink = document.getElementById('view-earlier-link');
+  var isOpen = section.style.display !== 'none';
+  if (isOpen) {
+    section.style.display = 'none';
+    toggle.classList.remove('open');
+    if (viewLink) viewLink.style.display = 'none';
+  } else {
+    section.style.display = 'block';
+    toggle.classList.add('open');
+    if (viewLink) viewLink.style.display = 'block';
+  }
+}
+
+// Decision 6c: show earlier pagination chunk
+function showViewEarlier() {
+  var earlier = document.getElementById('earlier-30-90');
+  var viewLink = document.getElementById('view-earlier-link');
+  if (earlier) earlier.style.display = 'block';
+  if (viewLink) viewLink.style.display = 'none';
 }
 </script>
 </body>

@@ -244,3 +244,68 @@ Bug 3 — Em-dash removal:
 - `prototypes/consolidation-2026-05-06/page-disposition.html` (Bug 3: em-dash placeholders and title)
 - `prototypes/consolidation-2026-05-06/permissions.html` (Bug 3: table cell em-dash, title)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (updated)
+
+## Round 5 — 2026-05-06 12:00
+**Operator feedback:** Seven locked-spec product decisions across four pages plus comprehensive dialog set. Crash-resilience priority order: knowledge.html rebuild+dialogs, inbox.html updates, integrations.html table redesign, agent-edit.html toggle rows+skill visibility, index.html metadata last.
+
+**Changes made:**
+
+Decision 1 (integrations.html) — completed in prior session:
+- Single dense table (~44px rows): Icon+name, Status, Scope, Last used, Overflow menu columns
+- Filter chips: All / CRMs / Communications / Analytics / Other (single-select pill-style)
+- Sort: Connected first, Reauth needed second, Available third
+- Available rows show "+ Connect" instead of overflow menu
+- MCP servers in Other, no MCP jargon visible; row click opens connection drawer
+
+Decision 2 (inbox.html) — completed in prior session:
+- 3 new "Suppressed memory: contradicting evidence observed" items (amber, unread)
+- Suppressed memory drawer with suppressed item panel, new evidence panel (indigo bg), confidence bar, Approve (Re-add) / Re-suppress actions
+- (Decision 6 also applied: solid-fill Approve button at 32px, outlined muted Reject, keyboard hint "A to approve, R to reject", Earlier/Read collapsed by default, 30-day default view with "View earlier" link)
+
+Decision 3 (agent-edit.html) — completed this session:
+- Replaced two-pane kit+library Skills section with single scrolling toggle-row list
+- 14 skills grouped into 4 collapsible categories: Communication (4), Data (4), Analysis (3), Custom (2)
+- Each row: skill icon (28px), skill name, one-line description, toggle switch (right-aligned), overflow dot menu
+- Filter chips: All / Enabled / Available / Custom above the list
+- Search input top-right of toolbar
+- Collapsible group headers with caret and "N of M enabled" count
+- Overflow dot menu per row opens skill edit drawer via openSkillDrawer()
+- Rate-limited skill shown at 60% opacity with disabled toggle
+- Data Sources section preserved as secondary block below skill list (4 rows)
+- Removed all old kit+library CSS
+
+Decision 4 (agent-edit.html) — completed this session:
+- Skill edit drawer Details tab: added "Client visibility" control below "Max calls per run"
+- Two radio option cards: Hidden (default, indigo-bordered) / Visible (white bordered)
+- Per-card: name + one-line description of what the setting does
+- selectVisCard() JS function swaps card border and background on selection
+- Drawer tabs (Details/Parameters/Test/Analyzer) now wired to switchSkillTab() with real panel switching
+
+Decisions 5, 6, 7 (knowledge.html, inbox.html) — completed in prior session per session summary
+
+Index metadata update:
+- Round counter updated from 3 to 5
+- Description updated to reference Round 5 decisions
+- Decisions box updated with 11 confirmed items
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — toggle rows surface enable/disable state as primary task on Capabilities tab; filter chips allow scoping without changing page
+- Default to hidden: yes — Client visibility defaults to Hidden; no new dashboards or KPI tiles introduced
+- One primary action: yes — Capabilities tab primary action is toggling a skill on/off; skill edit drawer primary action is Save
+- Inline state: yes — enabled/disabled shown inline via toggle per row; "N of M enabled" count in group header; rate-limited shown as chip on the row
+- Re-check passed: yes — non-technical operator can enable/disable any skill by flipping a toggle; category grouping provides context without domain knowledge
+
+**Rule violations flagged:** none
+
+**New CSS patterns added (agent-edit.html inline):**
+- .skill-toggle-list container
+- .skill-group-header with collapsible caret
+- .skill-toggle-row at 52px min-height
+- .toggle-wrap / .toggle-input / .toggle-track CSS-only toggle switch
+- .overflow-dot-btn three-dot menu trigger
+- .conn-chip filter pill (local copy; candidate for _shared.css promotion)
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (Decisions 3 and 4: capabilities toggle rows, skill visibility control, drawer tabs wired)
+- `prototypes/consolidation-2026-05-06/index.html` (metadata: Round 5, updated description and decisions box)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

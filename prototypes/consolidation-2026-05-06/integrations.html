@@ -49,28 +49,70 @@
 }
 .tab-panel { display: none; padding: 20px 24px; }
 .tab-panel.active { display: block; }
-.conn-filters {
-  display: flex; gap: 10px; align-items: center; margin-bottom: 16px;
+/* Decision 1: Dense connection table -- ~44px row height */
+.conn-table {
+  width: 100%; border-collapse: collapse;
+  background: white; border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden;
 }
-.conn-filters .search-wrap { flex: 1; max-width: 320px; }
-.conn-list { display: flex; flex-direction: column; gap: 8px; }
-.conn-row {
-  background: white; border: 1px solid var(--border); border-radius: 8px;
-  padding: 14px 16px; display: flex; align-items: center; gap: 14px;
-  cursor: pointer; transition: box-shadow 0.15s;
+.conn-table thead tr {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
 }
-.conn-row:hover { box-shadow: var(--shadow-md); border-color: var(--indigo-300); }
-.conn-row.has-issue { border-left: 3px solid var(--red-400); }
-.conn-row.has-warning { border-left: 3px solid var(--amber-400); }
-.conn-icon {
-  width: 40px; height: 40px; border-radius: 8px; background: var(--slate-100);
-  display: flex; align-items: center; justify-content: center; font-weight: 700;
-  font-size: 13px; color: var(--slate-500); flex-shrink: 0;
+.conn-table th {
+  padding: 9px 14px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--slate-500); text-align: left;
 }
-.conn-main { flex: 1; min-width: 0; }
-.conn-name { font-size: 14px; font-weight: 600; color: var(--slate-800); }
-.conn-meta { font-size: 12px; color: var(--slate-500); margin-top: 2px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.conn-cred-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.conn-table td {
+  padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+  vertical-align: middle; font-size: 13px;
+}
+.conn-table tbody tr:last-child td { border-bottom: none; }
+.conn-table tbody tr {
+  transition: background 0.1s; cursor: pointer;
+}
+.conn-table tbody tr:hover { background: var(--slate-50); }
+.conn-table tbody tr.row-issue { border-left: 3px solid var(--red-400); }
+.conn-table tbody tr.row-warning { border-left: 3px solid var(--amber-400); }
+
+.conn-icon-sm {
+  width: 28px; height: 28px; border-radius: 6px; background: var(--slate-100);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 10px; color: var(--slate-500); flex-shrink: 0;
+  vertical-align: middle; margin-right: 8px;
+}
+.conn-name-cell { display: flex; align-items: center; gap: 0; }
+.conn-service-name { font-size: 13px; font-weight: 600; color: var(--slate-800); }
+.conn-service-desc { font-size: 11px; color: var(--slate-400); }
+
+/* Filter chips (pill-style, single-select) */
+.conn-filter-chips { display: flex; gap: 6px; }
+.conn-chip {
+  padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--slate-200); color: var(--slate-600);
+  background: white; cursor: pointer; transition: all 0.12s;
+}
+.conn-chip:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+.conn-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+/* Overflow menu button */
+.overflow-btn {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--slate-400); font-size: 16px; padding: 2px 6px;
+  border-radius: 4px; transition: all 0.12s; line-height: 1;
+}
+.overflow-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+
+/* Available row connect button */
+.connect-row-btn {
+  font-size: 12px; font-weight: 500; color: var(--indigo-600);
+  background: var(--indigo-50); border: 1px solid var(--indigo-200);
+  border-radius: 6px; padding: 4px 12px; cursor: pointer;
+  transition: all 0.12s;
+}
+.connect-row-btn:hover { background: var(--indigo-100); }
+
+/* Compat with old chips still in drawers */
 .cred-chip {
   display: inline-flex; align-items: center; gap: 3px;
   border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px;
@@ -81,8 +123,6 @@
 .cred-chip .dot.amber { background: var(--amber-500); }
 .cred-chip .dot.red { background: var(--red-500); }
 .cred-chip .dot.slate { background: var(--slate-400); }
-.conn-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
-.conn-right .agents { font-size: 11px; color: var(--slate-500); }
 /* Issues tab */
 .issues-header {
   display: flex; gap: 12px; margin-bottom: 20px;
@@ -222,182 +262,229 @@
 
     <!-- Connections tab -->
     <div class="tab-panel active" id="tab-connections">
-      <div class="conn-filters">
-        <div class="search-wrap">
+      <!-- Filter chips + search (Decision 1) -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+        <div class="conn-filter-chips" id="conn-filter-chips">
+          <button class="conn-chip active" onclick="setConnFilter('all',this)">All</button>
+          <button class="conn-chip" onclick="setConnFilter('crm',this)">CRMs</button>
+          <button class="conn-chip" onclick="setConnFilter('comms',this)">Communications</button>
+          <button class="conn-chip" onclick="setConnFilter('analytics',this)">Analytics</button>
+          <button class="conn-chip" onclick="setConnFilter('other',this)">Other</button>
+        </div>
+        <div class="search-wrap" style="width:240px;">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" class="search-box" placeholder="Search connections...">
         </div>
-        <select class="form-select" style="font-size:13px;padding:7px 10px;">
-          <option>All statuses</option>
-          <option>Valid</option>
-          <option>Issues</option>
-          <option>Expiring</option>
-        </select>
-        <select class="form-select" style="font-size:13px;padding:7px 10px;">
-          <option>All types</option>
-          <option>API key</option>
-          <option>OAuth</option>
-          <option>Web login</option>
-          <option>Certificate</option>
-        </select>
       </div>
 
-      <div class="conn-list">
+      <!-- Dense table (sort: Connected first, then Reauth needed, then Available) -->
+      <table class="conn-table" id="conn-table">
+        <thead>
+          <tr>
+            <th style="width:220px;">Service</th>
+            <th style="width:160px;">Status</th>
+            <th style="width:130px;">Scope</th>
+            <th style="width:120px;">Last used</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Connected rows first -->
+          <tr data-category="comms" onclick="openDrawer('gmail')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#fce8e6;color:#c5221f;">GM</span>
+                <div>
+                  <div class="conn-service-name">Gmail</div>
+                  <div class="conn-service-desc">Email sending and reading</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">2m ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn" title="More actions">&#8942;</button>
+            </td>
+          </tr>
+          <tr data-category="crm" onclick="openDrawer('salesforce')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#e8f4fd;color:#0176d3;">SF</span>
+                <div>
+                  <div class="conn-service-name">Salesforce</div>
+                  <div class="conn-service-desc">CRM data read and write</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">14m ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
+          <tr data-category="other" onclick="openDrawer('hubspot')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#fff3ec;color:#ff7a59;">HS</span>
+                <div>
+                  <div class="conn-service-name">HubSpot</div>
+                  <div class="conn-service-desc">Marketing and CRM sync</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">1h ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
+          <tr data-category="other" onclick="openDrawer('portal')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#f0fdf4;color:#16a34a;">CP</span>
+                <div>
+                  <div class="conn-service-name">Client portal</div>
+                  <div class="conn-service-desc">Acme Corp internal reporting</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">This client</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">3h ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
+          <tr data-category="analytics" onclick="openDrawer('internal-api')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#eff6ff;color:#1d4ed8;">IA</span>
+                <div>
+                  <div class="conn-service-name">Internal data API</div>
+                  <div class="conn-service-desc">Company analytics and reporting</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-green"><span class="status-dot dot-green" style="margin-right:4px;"></span>Connected</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">Yesterday</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
 
-        <!-- Gmail -->
-        <div class="conn-row" onclick="openDrawer('gmail')">
-          <div class="conn-icon" style="background:#fce8e6;color:#c5221f;">GM</div>
-          <div class="conn-main">
-            <div class="conn-name">Gmail</div>
-            <div class="conn-meta">
-              <span>Email sending and reading</span>
-              <span class="badge badge-green">2 credentials</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot green"></span>OAuth 2.0 (workspace)</span>
-              <span class="cred-chip"><span class="dot green"></span>SMTP app password</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-green">Healthy</span>
-            <span class="agents">Used by 3 agents</span>
-          </div>
-        </div>
+          <!-- Reauth needed rows second -->
+          <tr class="row-issue" data-category="other" onclick="openDrawer('s3')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#fdf2e9;color:#e67e22;">S3</span>
+                <div>
+                  <div class="conn-service-name">AWS S3</div>
+                  <div class="conn-service-desc">File storage and retrieval</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-red"><span class="status-dot dot-red" style="margin-right:4px;"></span>Reauth needed</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">3 days ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
+          <tr class="row-warning" data-category="other" onclick="openDrawer('zapier')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#fff5f0;color:#ff4a00;">ZP</span>
+                <div>
+                  <div class="conn-service-name">Zapier</div>
+                  <div class="conn-service-desc">Automation workflow trigger</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-amber"><span class="status-dot dot-amber" style="margin-right:4px;"></span>Reauth needed</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">6h ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
+          <tr class="row-warning" data-category="other" onclick="openDrawer('legal')">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#f5f3ff;color:#7c3aed;">LD</span>
+                <div>
+                  <div class="conn-service-name">LegalDocs Pro</div>
+                  <div class="conn-service-desc">Contract retrieval and status</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-amber"><span class="status-dot dot-amber" style="margin-right:4px;"></span>Reauth needed</span></td>
+            <td><span style="font-size:12px;color:var(--slate-600);">Agency</span></td>
+            <td><span style="font-size:12px;color:var(--slate-500);">2 days ago</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="overflow-btn">&#8942;</button>
+            </td>
+          </tr>
 
-        <!-- Salesforce -->
-        <div class="conn-row" onclick="openDrawer('salesforce')">
-          <div class="conn-icon" style="background:#e8f4fd;color:#0176d3;">SF</div>
-          <div class="conn-main">
-            <div class="conn-name">Salesforce</div>
-            <div class="conn-meta">
-              <span>CRM data read and write</span>
-              <span class="badge badge-green">1 credential</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot green"></span>OAuth 2.0 (connected app)</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-green">Healthy</span>
-            <span class="agents">Used by 2 agents</span>
-          </div>
-        </div>
-
-        <!-- AWS S3 -->
-        <div class="conn-row has-issue" onclick="openDrawer('s3')">
-          <div class="conn-icon" style="background:#fdf2e9;color:#e67e22;">S3</div>
-          <div class="conn-main">
-            <div class="conn-name">AWS S3</div>
-            <div class="conn-meta">
-              <span>File storage and retrieval</span>
-              <span class="badge badge-red">1 issue</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot amber"></span>API key (expiring in 3 days)</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-red">Expiring</span>
-            <span class="agents">Used by 4 agents</span>
-          </div>
-        </div>
-
-        <!-- Zapier -->
-        <div class="conn-row has-warning" onclick="openDrawer('zapier')">
-          <div class="conn-icon" style="background:#fff5f0;color:#ff4a00;">ZP</div>
-          <div class="conn-main">
-            <div class="conn-name">Zapier</div>
-            <div class="conn-meta">
-              <span>Automation workflow trigger</span>
-              <span class="badge badge-amber">1 warning</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot amber"></span>API key (high latency)</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-amber">Degraded</span>
-            <span class="agents">Used by 1 agent</span>
-          </div>
-        </div>
-
-        <!-- HubSpot -->
-        <div class="conn-row" onclick="openDrawer('hubspot')">
-          <div class="conn-icon" style="background:#fff3ec;color:#ff7a59;">HS</div>
-          <div class="conn-main">
-            <div class="conn-name">HubSpot</div>
-            <div class="conn-meta">
-              <span>Marketing and CRM sync</span>
-              <span class="badge badge-green">1 credential</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot green"></span>API key</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-green">Healthy</span>
-            <span class="agents">Used by 2 agents</span>
-          </div>
-        </div>
-
-        <!-- Client portal (web login) -->
-        <div class="conn-row" onclick="openDrawer('portal')">
-          <div class="conn-icon" style="background:#f0fdf4;color:#16a34a;">CP</div>
-          <div class="conn-main">
-            <div class="conn-name">Client portal</div>
-            <div class="conn-meta">
-              <span>Acme Corp internal reporting tool</span>
-              <span class="badge badge-green">1 credential</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot green"></span>Web login (URL + TOTP)</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-green">Healthy</span>
-            <span class="agents">Used by 1 agent</span>
-          </div>
-        </div>
-
-        <!-- Legal doc platform (cookie session) -->
-        <div class="conn-row" onclick="openDrawer('legal')">
-          <div class="conn-icon" style="background:#f5f3ff;color:#7c3aed;">LD</div>
-          <div class="conn-main">
-            <div class="conn-name">LegalDocs Pro</div>
-            <div class="conn-meta">
-              <span>Contract retrieval and status</span>
-              <span class="badge badge-slate">1 credential</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot amber"></span>Cookie session (expires soon)</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-amber">Refresh needed</span>
-            <span class="agents">Used by 1 agent</span>
-          </div>
-        </div>
-
-        <!-- Internal API (certificate) -->
-        <div class="conn-row" onclick="openDrawer('internal-api')">
-          <div class="conn-icon" style="background:#eff6ff;color:#1d4ed8;">IA</div>
-          <div class="conn-main">
-            <div class="conn-name">Internal data API</div>
-            <div class="conn-meta">
-              <span>Company analytics and reporting</span>
-              <span class="badge badge-green">1 credential</span>
-            </div>
-            <div class="conn-cred-chips">
-              <span class="cred-chip"><span class="dot green"></span>Client certificate (mTLS)</span>
-            </div>
-          </div>
-          <div class="conn-right">
-            <span class="badge badge-green">Healthy</span>
-            <span class="agents">Used by 2 agents</span>
-          </div>
-        </div>
-
-      </div>
+          <!-- Available rows last (MCP servers surface here under "Other") -->
+          <tr data-category="comms" onclick="void(0)" style="opacity:0.75;">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#f0f9ff;color:#0369a1;">SL</span>
+                <div>
+                  <div class="conn-service-name">Slack</div>
+                  <div class="conn-service-desc">Team messaging and notifications</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-slate">Available</span></td>
+            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
+            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="connect-row-btn" onclick="openDrawer('new-conn')">+ Connect</button>
+            </td>
+          </tr>
+          <tr data-category="analytics" onclick="void(0)" style="opacity:0.75;">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#f5f5f5;color:#4285f4;">GA</span>
+                <div>
+                  <div class="conn-service-name">Google Analytics</div>
+                  <div class="conn-service-desc">Website and campaign analytics</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-slate">Available</span></td>
+            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
+            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="connect-row-btn" onclick="openDrawer('new-conn')">+ Connect</button>
+            </td>
+          </tr>
+          <tr data-category="other" onclick="void(0)" style="opacity:0.75;">
+            <td>
+              <div class="conn-name-cell">
+                <span class="conn-icon-sm" style="background:#f0fdf4;color:#059669;">MC</span>
+                <div>
+                  <div class="conn-service-name">Filesystem server</div>
+                  <div class="conn-service-desc">Local file read/write via tool server</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="badge badge-slate">Available</span></td>
+            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
+            <td><span style="font-size:12px;color:var(--slate-400);">-</span></td>
+            <td onclick="event.stopPropagation()" style="text-align:right;">
+              <button class="connect-row-btn" onclick="openDrawer('new-conn')">+ Connect</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
+
 
     <!-- Issues tab -->
     <div class="tab-panel" id="tab-issues">
@@ -841,6 +928,21 @@ function switchDTab(drawer, tab, btn) {
   });
   document.querySelectorAll('#drawer-tabs-' + drawer + ' .drawer-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+}
+
+// Decision 1: Category filter chips for connection table
+function setConnFilter(cat, el) {
+  document.querySelectorAll('#conn-filter-chips .conn-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const rows = document.querySelectorAll('#conn-table tbody tr');
+  rows.forEach(row => {
+    if (cat === 'all') {
+      row.style.display = '';
+    } else {
+      const rowCat = row.getAttribute('data-category');
+      row.style.display = (rowCat === cat) ? '' : 'none';
+    }
+  });
 }
 </script>
 </body>
