@@ -87,13 +87,13 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">
-    Prototype Round 7c
+    Prototype Round 7d
   </div>
   <h1>Automation OS UI Consolidation</h1>
-  <p>Round 7c: permission demos added to two surfaces. (1) Sidebar mode switcher: a "Demo: viewing as" dropdown above the pill row simulates System admin (all three pills), Org admin (Workspace + Org), and Workspace operator (pill row hidden). Profile persists via localStorage. If the active mode is unavailable for the selected profile, sidebar falls back to Workspace. (2) Skill creator drawer in agent-edit.html: collapsible "Demo controls" section above the footer with two radio states (Org admin vs Workspace user). Workspace user disables the Organisation scope radio, adds a lock icon, and swaps the radio row for a static "Saved to: This client" label. Round 7b-11 (7b chain) remains complete.</p>
+  <p>Round 7d: Knowledge UX complete terminology rebuild. Dropped all schema-verb language ("blocks", "promote", "suppress", "re-add", "re-suppress") from knowledge.html, org-knowledge.html, and inbox.html. New plain-language model: Authored memory / Auto-memory / Documents tabs; Pending review status; Suggested groupings; Track again / Keep ignoring actions; Ignored memories (replacing Suppressed). Inheritance visibility now profile-aware: workspace operators see subaccount items only; org and system admins see inherited items tagged "Admin view" with lock icon linking to org-knowledge.html. Round 7c (permission demos) remains complete.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
-    <div class="meta-item"><strong>Round:</strong> 7c</div>
+    <div class="meta-item"><strong>Round:</strong> 7d</div>
     <div class="meta-item"><strong>Status:</strong> Awaiting operator review</div>
     <div class="meta-item"><strong>Files:</strong> 54+ screens (consolidated pages, before pages, pattern galleries, reference pages)</div>
   </div>
@@ -121,6 +121,10 @@
     <li>System mode: left-nav only. No new page content. Links to system stubs only, except Activity which links to activity.html?scope=system.</li>
     <li>Activity page: three scopes (Subaccount / Org / System). Full filter bar. 28 rows across all 24 activity types. Slide-in drawer with type-specific fields. Links to run-trace.html and inbox.html from drawer.</li>
     <li>Tasks consolidated to Inbox (HITL). Scheduled to Calendar. Action Log kept as stub. Skills folded into Capabilities tab. Reports under ClientPulse stub.</li>
+    <li>Round 7d: Knowledge terminology rebuild: tabs renamed to Authored memory / Auto-memory / Documents. Schema verbs removed from all UI copy. "Suppress" becomes "Ignore" / "Ignored memories". "Re-add" becomes "Track again". "Re-suppress" becomes "Keep ignoring". "Promote" becomes "Approve as authored" or "Edit and approve". "Review queue" becomes "Pending review" filter chip within each tab.</li>
+    <li>Round 7d: Suggested groupings (was "block proposals"): surfaced as special card type in Auto-memory tab. Shows extracted observations, proposes a tier entry, allows Approve grouping / Edit and approve / Reject.</li>
+    <li>Round 7d: Inheritance visibility: workspace operators see subaccount items only (no inherited items shown). Org and system admins see inherited items tagged "Admin view" with eye icon, tooltip, and lock-icon Edit linking to org-knowledge.html.</li>
+    <li>Round 7d: inbox.html: "Suppressed memory" item type renamed "Memory update". Plain-English body text replaces schema-verb descriptions. Buttons: "Track again" (primary) and "Keep ignoring" (outlined). Keyboard hints: T to track, K to keep ignoring.</li>
     <li>Round 7b-1: Workspace nav grouped into Work / Build / Tasks / External / Setup sections. Workflows, Goals, Org Chart, Triggers removed as standalone items (folded into Automations tabs / Team tab / retired). Sites renamed to Pages.</li>
     <li>Round 7b-1: Org mode grouped into Clients / Build / Operate / Setup. Health removed (into Activity with filter). Spending Budgets and Spend Ledger merged into one Spending item. Team+Teams merged into one Team item. Workflows folded into Automations.</li>
     <li>Round 7b-1: System mode grouped into Inventory / Operate / Setup. Diagnostics+Job Queues merged into one Queues item. LLM P&L renamed to Financials.</li>
@@ -153,7 +157,7 @@
         <div class="proto-card-title">Knowledge</div>
         <div class="proto-card-file">knowledge.html</div>
       </div>
-      <div class="proto-card-desc">Unified Knowledge page. Auto-memory tab (Summary, Entries, Memory Blocks, Baseline, Board summary) with 40-50 realistic examples. Authored knowledge tab with 9 items. Review Queue moved to Inbox. Amber link shows pending count.</div>
+      <div class="proto-card-desc">Round 7d: full terminology rebuild. Tabs: Authored memory / Auto-memory / Documents. Authored memory: 8 active entries + 2 pending review + 3 org-inherited (admin view only). Auto-memory: 2 suggested groupings + 8 pending entries + 2 approved. Documents sub-tabs: Documents (8 subaccount + 4 inherited) / Bundles (4 cards with drawer). Ignored memories replaces Suppressed. All schema verbs removed from UI copy.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Replaces 4 pages</div>
         <div class="proto-card-replaces-list">
@@ -952,7 +956,7 @@
         <div class="proto-card-title">Org Knowledge</div>
         <div class="proto-card-file">org-knowledge.html</div>
       </div>
-      <div class="proto-card-desc">Org-level Knowledge: Memory + Documents tabs. Memory tab: 7 blocks grouped by Tier (1, 2, 3) plus 5 authored entries, each showing "Inherited by N of 4 workspaces" indicator. 640px drawer with rich-text editor (execCommand toolbar), tier dropdown, and inheritance panel (per-subaccount toggles, override link). Documents tab: 7-card 2-column grid with PDF / MD / DOC icons, "Used by" indicator, overflow menu (Replace, View inheritance, Archive). Upload modal with "Push to all workspaces" toggle.</div>
+      <div class="proto-card-desc">Round 7d: same three-tab structure as workspace Knowledge (Authored memory / Auto-memory / Documents). No inheritance chips here: this IS the source. "Used by N of 4 workspaces" on every item replaces the old Inheritance panel. 6 authored entries, 4 auto-memory entries (2 pending, 2 approved), 8 documents, 3 bundles. New entry drawer adds "Share with workspaces" selector.</div>
       <div class="proto-card-replaces">
         <div class="proto-card-replaces-label">Replaces</div>
         <div class="proto-card-replaces-list">

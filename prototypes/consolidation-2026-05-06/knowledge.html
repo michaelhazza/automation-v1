@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!--
-  Knowledge page — Round 7b-7 restructure
-  Tabs: Memory (default) / Notes / Documents
-  Memory: authored entries + memory blocks, rich-text drawer, org-inheritance chips
-  Notes: formerly Auto-memory — confidence, source, promote-to-memory action
-  Documents: 2-col grid, org-inheritance chips, upload modal, version drawer
+  Knowledge page — Round 7d rebuild
+  Tabs: Authored memory (default) / Auto-memory / Documents
+  Documents sub-tabs: Documents / Bundles
+  Terminology: no "blocks", no "promote", no "suppress", no "re-add", no "re-suppress"
+  New terms: Authored memory, Auto-memory, Pending review, Suggested grouping, Track again, Keep ignoring, Ignored memories
+  Inheritance model: workspace operator sees subaccount only; org/system admin sees inherited items tagged "Admin view"
 -->
 <html lang="en">
 <head>
@@ -15,8 +16,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="_shared.css">
 <style>
-  /* ── Filter chips ── */
-  .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* ---- Filter chips ---- */
+  .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .filter-chip {
     padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
     border: 1px solid var(--slate-200); color: var(--slate-600);
@@ -24,1714 +25,1419 @@
   }
   .filter-chip:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
   .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+  .filter-chip.amber-active { background: #b45309; color: white; border-color: #b45309; }
 
-  /* ── Inheritance chip colours ── */
-  .chip-inherited {
+  /* ---- Status chips ---- */
+  .chip-base {
     display: inline-flex; align-items: center; gap: 4px;
+    border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600;
+  }
+  .chip-pending { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+  .chip-in-use { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .chip-admin-view {
     background: #fdf4ff; border: 1px solid #e9d5ff;
-    color: #7c3aed; border-radius: 20px;
-    padding: 2px 8px; font-size: 10.5px; font-weight: 600;
+    color: #7c3aed;
   }
-  .chip-this-client {
-    display: inline-flex; align-items: center; gap: 4px;
-    background: var(--indigo-50); border: 1px solid var(--indigo-200);
-    color: var(--indigo-700); border-radius: 20px;
-    padding: 2px 8px; font-size: 10.5px; font-weight: 600;
-  }
-  .chip-type {
-    display: inline-flex; align-items: center;
-    background: var(--slate-100); color: var(--slate-600);
-    border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600;
-    border: 1px solid var(--slate-200);
-  }
-  .chip-tier {
-    display: inline-flex; align-items: center;
-    background: #f0fdf4; color: #15803d;
-    border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600;
-    border: 1px solid #bbf7d0;
-  }
-  .chip-tier-2 {
-    background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;
-  }
-  .chip-tier-3 {
-    background: #fff7ed; color: #c2410c; border-color: #fed7aa;
-  }
+  .chip-tier { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .chip-type { background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200); }
 
-  /* ── Memory list items ── */
-  .memory-item {
+  /* ---- Entry cards ---- */
+  .entry-list { display: flex; flex-direction: column; gap: 0; }
+  .entry-card {
+    padding: 14px 16px; border-bottom: 1px solid var(--slate-100);
     display: flex; align-items: flex-start; gap: 12px;
-    padding: 13px 16px; border-bottom: 1px solid var(--slate-100);
     cursor: pointer; transition: background 0.1s;
   }
-  .memory-item:last-child { border-bottom: none; }
-  .memory-item:hover { background: var(--slate-50); }
-  .memory-item-icon {
-    width: 34px; height: 34px; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0; margin-top: 1px;
+  .entry-card:hover { background: var(--slate-50); }
+  .entry-card:first-child { border-top: 1px solid var(--slate-100); }
+  .entry-body { flex: 1; min-width: 0; }
+  .entry-title {
+    font-size: 13.5px; font-weight: 600; color: var(--slate-800);
+    margin-bottom: 3px; line-height: 1.4;
   }
-  .memory-item-icon.entry { background: var(--indigo-50); color: var(--indigo-500); }
-  .memory-item-icon.block { background: #f0fdf4; color: #16a34a; }
-  .memory-item-icon.inherited { background: #fdf4ff; color: #7c3aed; }
-  .memory-item-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 3px; }
-  .memory-item-preview { font-size: 12px; color: var(--slate-500); line-height: 1.45; margin-bottom: 5px; }
-  .memory-item-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .memory-item-timestamp { font-size: 11px; color: var(--slate-400); }
-
-  /* ── Notes (auto-memory) rows ── */
-  .note-row {
-    display: flex; align-items: flex-start; gap: 10px;
-    padding: 11px 16px; border-bottom: 1px solid var(--slate-100);
-    cursor: pointer; transition: background 0.1s;
+  .entry-preview {
+    font-size: 12.5px; color: var(--slate-500); line-height: 1.5;
+    margin-bottom: 6px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .note-row:last-child { border-bottom: none; }
-  .note-row:hover { background: var(--slate-50); }
-  .note-type { min-width: 86px; flex-shrink: 0; }
-  .note-text { flex: 1; font-size: 12.5px; color: var(--slate-700); line-height: 1.45; }
-  .note-source { font-size: 11px; color: var(--slate-400); white-space: nowrap; min-width: 100px; }
-  .note-quality { font-size: 11px; font-family: monospace; color: var(--slate-400); white-space: nowrap; min-width: 36px; text-align: right; }
-  .note-date { font-size: 11px; color: var(--slate-400); white-space: nowrap; min-width: 46px; text-align: right; }
-  .note-actions { display: flex; gap: 4px; align-items: flex-start; flex-shrink: 0; }
-
-  /* ── Document cards (2-col grid) ── */
-  .doc-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
+  .entry-meta {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 11.5px; color: var(--slate-400);
   }
-  .doc-card {
-    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
-    padding: 14px 16px; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
-    display: flex; flex-direction: column; gap: 8px;
+  .entry-actions {
+    display: flex; gap: 6px; align-items: center; flex-shrink: 0;
   }
-  .doc-card:hover { box-shadow: var(--shadow-md); border-color: var(--slate-300); }
-  .doc-card-header { display: flex; align-items: flex-start; gap: 10px; }
-  .doc-icon {
-    width: 36px; height: 36px; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0; font-size: 11px; font-weight: 700;
+  .entry-action-btn {
+    padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--slate-200); background: white; color: var(--slate-600);
+    cursor: pointer; transition: all 0.12s; white-space: nowrap;
   }
-  .doc-icon-pdf { background: #fef2f2; color: #dc2626; }
-  .doc-icon-md  { background: #f0fdf4; color: #16a34a; }
-  .doc-icon-doc { background: #eff6ff; color: #2563eb; }
-  .doc-icon-txt { background: var(--slate-100); color: var(--slate-500); }
-  .doc-icon-img { background: #fff7ed; color: #ea580c; }
-  .doc-name { font-size: 13px; font-weight: 600; color: var(--slate-800); line-height: 1.35; }
-  .doc-meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
-  .doc-source { font-size: 11px; color: var(--slate-400); }
-  .doc-size { font-size: 11px; color: var(--slate-400); }
-  .doc-actions { display: flex; gap: 5px; margin-top: 4px; }
-
-  /* ── Rich-text editor ── */
-  .rte-toolbar {
-    display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
-    padding: 6px 10px; background: var(--slate-50);
-    border-bottom: 1px solid var(--slate-200);
+  .entry-action-btn:hover { border-color: var(--indigo-300); color: var(--indigo-600); background: var(--indigo-50); }
+  .entry-action-btn.primary { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+  .entry-action-btn.primary:hover { background: var(--indigo-700); }
+  .entry-action-btn.danger:hover { border-color: #fca5a5; color: #dc2626; background: #fef2f2; }
+  .overflow-menu-wrap { position: relative; }
+  .overflow-dot-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--slate-400);
   }
-  .rte-btn {
-    padding: 4px 7px; border-radius: 5px; border: 1px solid transparent;
-    background: none; cursor: pointer; font-size: 12px; color: var(--slate-600);
-    transition: background 0.1s, border-color 0.1s; line-height: 1.4;
-    font-family: inherit;
-  }
-  .rte-btn:hover { background: var(--slate-200); }
-  .rte-btn.active { background: var(--indigo-100); border-color: var(--indigo-300); color: var(--indigo-700); }
-  .rte-sep { width: 1px; height: 18px; background: var(--slate-200); margin: 0 4px; flex-shrink: 0; }
-  .rte-body {
-    min-height: 220px; padding: 14px 16px;
-    font-size: 13.5px; line-height: 1.7; color: var(--slate-700);
-    outline: none;
-  }
-  .rte-body:empty:before {
-    content: attr(data-placeholder);
-    color: var(--slate-400);
-    pointer-events: none;
-  }
-  .rte-body h2 { font-size: 16px; font-weight: 700; margin: 12px 0 6px; color: var(--slate-800); }
-  .rte-body h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; color: var(--slate-800); }
-  .rte-body ul { padding-left: 18px; margin: 6px 0; }
-  .rte-body ol { padding-left: 18px; margin: 6px 0; }
-  .rte-body li { margin-bottom: 3px; }
-  .rte-body blockquote {
-    border-left: 3px solid var(--indigo-300); padding-left: 12px;
-    color: var(--slate-500); margin: 8px 0; font-style: italic;
-  }
-  .rte-body code {
-    background: var(--slate-100); border-radius: 4px;
-    padding: 1px 5px; font-family: 'JetBrains Mono', monospace; font-size: 12px;
-  }
-  .rte-body pre {
-    background: var(--slate-900); color: #e2e8f0; padding: 12px 14px;
-    border-radius: 7px; font-family: 'JetBrains Mono', monospace;
-    font-size: 12px; line-height: 1.6; overflow-x: auto; margin: 8px 0;
-  }
-
-  /* ── Drawer state switching ── */
-  .drawer-view-mode, .drawer-edit-mode { transition: opacity 0.15s; }
-  .drawer-view-mode.hidden { display: none; }
-  .drawer-edit-mode.hidden { display: none; }
-
-  /* ── Lock notice ── */
-  .lock-notice {
-    display: flex; align-items: center; gap: 8px;
-    background: #fdf4ff; border: 1px solid #e9d5ff;
-    border-radius: 8px; padding: 10px 14px;
-    font-size: 12.5px; color: #6d28d9; margin-bottom: 14px;
-  }
-
-  /* ── Suppressed items ── */
-  .suppressed-row {
-    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
-    font-size: 12.5px; color: var(--slate-700);
-  }
-  .suppressed-row:last-child { border-bottom: none; }
-
-  /* ── Modal overlay ── */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.45); z-index: 300;
-    align-items: center; justify-content: center;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal-box {
-    background: white; border-radius: 12px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.18);
-    width: 480px; max-width: 96vw; padding: 28px 28px 22px;
-  }
-  .modal-title { font-size: 16px; font-weight: 700; color: var(--slate-900); margin-bottom: 8px; }
-  .modal-body { font-size: 13.5px; color: var(--slate-600); line-height: 1.6; margin-bottom: 20px; }
-  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
-
-  /* ── Upload drop zone ── */
-  .drop-zone {
-    border: 2px dashed var(--slate-300); border-radius: 10px;
-    padding: 32px 20px; text-align: center; cursor: pointer;
-    transition: border-color 0.15s, background 0.15s; margin-bottom: 16px;
-  }
-  .drop-zone:hover { border-color: var(--indigo-400); background: var(--indigo-50); }
-
-  /* ── Section separator ── */
-  .section-sep {
-    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.07em; color: var(--slate-400);
-    padding: 8px 16px 4px;
-    background: var(--slate-50); border-bottom: 1px solid var(--slate-100);
-    display: flex; align-items: center; justify-content: space-between;
-  }
-
-  /* ── Toast notification ── */
-  #toast {
-    position: fixed; bottom: 24px; right: 24px; z-index: 500;
-    background: var(--slate-900); color: white;
-    padding: 10px 18px; border-radius: 8px; font-size: 13px;
-    box-shadow: var(--shadow-lg); opacity: 0; pointer-events: none;
-    transition: opacity 0.2s;
-  }
-  #toast.show { opacity: 1; pointer-events: auto; }
-
-  /* ── Version history collapsible ── */
-  .version-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 7px 10px; border: 1px solid var(--slate-200);
-    border-radius: 7px; font-size: 12px; margin-bottom: 5px;
-  }
-  .version-row.current { border-color: var(--indigo-200); background: var(--indigo-50); }
-
-  /* ── Overflow menu ── */
-  .overflow-menu {
-    position: relative; display: inline-block;
-  }
-  .overflow-dropdown {
-    display: none; position: absolute; right: 0; top: 100%;
+  .overflow-dot-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+  .overflow-panel {
+    position: absolute; right: 0; top: 34px; z-index: 20;
     background: white; border: 1px solid var(--slate-200); border-radius: 8px;
-    box-shadow: var(--shadow-md); z-index: 50; min-width: 140px; padding: 4px 0;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1); min-width: 160px;
+    display: none;
   }
-  .overflow-dropdown.open { display: block; }
+  .overflow-panel.open { display: block; }
   .overflow-item {
-    display: block; width: 100%; text-align: left;
-    padding: 7px 14px; background: none; border: none;
-    font-size: 12.5px; color: var(--slate-700); cursor: pointer;
-    transition: background 0.1s;
+    padding: 8px 14px; font-size: 13px; color: var(--slate-700); cursor: pointer;
+    display: block; transition: background 0.1s; white-space: nowrap;
   }
   .overflow-item:hover { background: var(--slate-50); }
-  .overflow-item.danger { color: var(--red-500); }
+  .overflow-item.danger { color: #dc2626; }
+  .overflow-item.danger:hover { background: #fef2f2; }
+
+  /* ---- Confidence bar ---- */
+  .conf-bar-wrap { display: flex; align-items: center; gap: 6px; }
+  .conf-bar-bg { width: 60px; height: 5px; background: var(--slate-200); border-radius: 3px; flex-shrink: 0; }
+  .conf-bar-fill { height: 100%; border-radius: 3px; }
+  .conf-label { font-size: 11px; color: var(--slate-500); }
+
+  /* ---- Sub-tab strip for Documents ---- */
+  .sub-tab-strip {
+    display: flex; gap: 0; border-bottom: 1px solid var(--slate-200);
+    margin-bottom: 16px;
+  }
+  .sub-tab {
+    padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--slate-500);
+    cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: all 0.12s;
+  }
+  .sub-tab:hover { color: var(--indigo-600); }
+  .sub-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+
+  /* ---- Bundle cards ---- */
+  .bundle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .bundle-card {
+    border: 1px solid var(--slate-200); border-radius: 10px; padding: 16px;
+    background: white; cursor: pointer; transition: all 0.12s;
+  }
+  .bundle-card:hover { border-color: var(--indigo-300); box-shadow: 0 2px 8px rgba(79,70,229,0.08); }
+  .bundle-name { font-size: 14px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; }
+  .bundle-desc { font-size: 12.5px; color: var(--slate-500); margin-bottom: 10px; line-height: 1.4; }
+  .bundle-meta { font-size: 12px; color: var(--slate-400); }
+  .bundle-util { font-size: 11.5px; color: var(--slate-500); margin-top: 6px; }
+
+  /* ---- Document rows ---- */
+  .doc-list { display: flex; flex-direction: column; gap: 0; }
+  .doc-row {
+    display: flex; align-items: center; gap: 12px; padding: 11px 16px;
+    border-bottom: 1px solid var(--slate-100); cursor: pointer; transition: background 0.1s;
+  }
+  .doc-row:hover { background: var(--slate-50); }
+  .doc-row:first-child { border-top: 1px solid var(--slate-100); }
+  .doc-icon { font-size: 18px; flex-shrink: 0; }
+  .doc-name { flex: 1; font-size: 13px; font-weight: 500; color: var(--slate-700); }
+  .doc-meta { font-size: 11.5px; color: var(--slate-400); }
+
+  /* ---- Ignored memories link ---- */
+  .ignored-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 13px; color: var(--slate-500); cursor: pointer;
+    border: none; background: none; padding: 0; text-decoration: underline;
+    text-decoration-color: var(--slate-300);
+  }
+  .ignored-link:hover { color: var(--slate-700); }
+
+  /* ---- Tab panel ---- */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ---- Tab toolbar ---- */
+  .tab-toolbar {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .tab-toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .search-input {
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--slate-200);
+    font-size: 13px; color: var(--slate-700); outline: none; width: 200px;
+  }
+  .search-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
+
+  /* ---- Suggested grouping card ---- */
+  .suggestion-card {
+    border: 1px solid var(--indigo-200); border-radius: 10px; padding: 14px 16px;
+    background: var(--indigo-50); margin-bottom: 8px;
+  }
+  .suggestion-label {
+    font-size: 11px; font-weight: 600; color: var(--indigo-600); text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 6px;
+  }
+  .suggestion-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; }
+  .suggestion-body { font-size: 12.5px; color: var(--slate-600); margin-bottom: 10px; line-height: 1.5; }
+  .suggestion-bullets { font-size: 12px; color: var(--slate-600); margin-bottom: 10px; padding-left: 16px; }
+  .suggestion-bullets li { margin-bottom: 2px; }
+  .suggestion-actions { display: flex; gap: 8px; }
+
+  /* ---- Admin view tooltip ---- */
+  .admin-view-wrap { position: relative; display: inline-flex; align-items: center; }
+  .admin-tooltip {
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    background: var(--slate-800); color: white; font-size: 11.5px; padding: 5px 9px;
+    border-radius: 6px; white-space: nowrap; pointer-events: none;
+    opacity: 0; transition: opacity 0.15s; z-index: 30; margin-bottom: 4px;
+  }
+  .admin-view-wrap:hover .admin-tooltip { opacity: 1; }
+
+  /* ---- Drawer ---- */
+  .drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+    z-index: 40; display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .drawer-overlay.open { display: flex; }
+  .drawer-panel {
+    width: 520px; background: white; height: 100vh; overflow-y: auto;
+    display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.12);
+  }
+  .drawer-head {
+    padding: 18px 20px; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .drawer-title { font-size: 16px; font-weight: 700; color: var(--slate-800); }
+  .drawer-close {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; font-size: 16px; color: var(--slate-400);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .drawer-close:hover { background: var(--slate-100); color: var(--slate-700); }
+  .drawer-body { padding: 20px; flex: 1; }
+  .drawer-footer {
+    padding: 16px 20px; border-top: 1px solid var(--slate-200); flex-shrink: 0;
+    display: flex; gap: 10px;
+  }
+
+  /* ---- Form elements ---- */
+  .form-label { font-size: 12px; font-weight: 600; color: var(--slate-600); margin-bottom: 5px; display: block; text-transform: uppercase; letter-spacing: 0.04em; }
+  .form-group { margin-bottom: 16px; }
+  .form-input {
+    width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--slate-200);
+    font-size: 13.5px; color: var(--slate-700); outline: none;
+  }
+  .form-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
+  .form-select {
+    width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--slate-200);
+    font-size: 13.5px; color: var(--slate-700); outline: none; background: white; cursor: pointer;
+  }
+  .rte-toolbar {
+    display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--slate-200);
+    border-left: 1px solid var(--slate-200); border-right: 1px solid var(--slate-200);
+    border-radius: 8px 8px 0 0; background: var(--slate-50);
+  }
+  .rte-btn {
+    width: 28px; height: 28px; border-radius: 5px; border: none; background: none;
+    cursor: pointer; font-size: 13px; font-weight: 600; color: var(--slate-600);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rte-btn:hover { background: var(--slate-200); }
+  .rte-area {
+    min-height: 120px; padding: 10px 12px;
+    border: 1px solid var(--slate-200); border-top: none;
+    border-radius: 0 0 8px 8px; font-size: 13.5px; color: var(--slate-700);
+    outline: none; line-height: 1.6;
+  }
+
+  /* ---- Ignored drawer list ---- */
+  .ignored-item {
+    padding: 12px 0; border-bottom: 1px solid var(--slate-100);
+  }
+  .ignored-item:last-child { border-bottom: none; }
+  .ignored-title { font-size: 13px; font-weight: 600; color: var(--slate-700); margin-bottom: 2px; }
+  .ignored-reason { font-size: 12px; color: var(--slate-400); margin-bottom: 8px; }
+  .ignored-actions { display: flex; gap: 8px; }
+
+  /* ---- Replaces banner ---- */
+  .replaces-banner {
+    background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: var(--indigo-700);
+  }
+  .replaces-banner strong { font-weight: 700; }
 </style>
 </head>
 <body>
+
 <div class="app-shell">
+  <!-- Sidebar injected by _sidebar.js -->
+  <div class="sidebar" id="sidebar-mount"></div>
 
-  <div id="sidebar-mount"></div>
-  <script src="_sidebar.js"></script>
-  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'knowledge.html');</script>
-
-  <div class="main">
-    <div class="topbar">
-      <div class="topbar-breadcrumb">
-        <span>Acme Corp</span>
-        <span style="color:#cbd5e1">/</span>
-        <span class="topbar-breadcrumb-current">Knowledge</span>
+  <!-- Main content -->
+  <div class="main-content">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Knowledge</div>
+        <div class="page-sub">What agents know about your workspace, clients, and business.</div>
       </div>
-      <div class="topbar-spacer"></div>
-      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button class="ignored-link" onclick="openIgnoredDrawer()">
+          <span>&#128683;</span> Ignored memories (12)
+        </button>
+      </div>
     </div>
 
-    <div class="page-body">
+    <!-- Replaces banner -->
+    <div class="replaces-banner">
+      <strong>Prototype note:</strong> Replaces SubaccountKnowledgePage, WorkspaceMemoryPage, MemoryBlockDetailPage, MemoryReviewQueuePage, and OrgMemoryPage (workspace-scoped view). Round 7d: full terminology rebuild. Tabs: Authored memory / Auto-memory / Documents. <a href="before-knowledge.html" style="color:var(--indigo-600);font-weight:600;">View before state</a>
+    </div>
 
-      <!-- Replaces callout -->
-      <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:8px 14px;margin-bottom:18px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        Replaces 4 pages: SubaccountKnowledgePage, WorkspaceMemoryPage, MemoryBlockDetailPage, MemoryReviewQueuePage. Round 7b-7: Memory / Notes / Documents tabs, rich-text authoring, org-inheritance chips, document management.
-        <a href="before-knowledge.html" style="color:var(--indigo-700);font-weight:600;margin-left:2px;">View before state</a>
-      </div>
+    <!-- Top-level tab strip -->
+    <div class="tab-strip">
+      <button class="tab-btn active" onclick="switchTab('tab-authored', this)">Authored memory</button>
+      <button class="tab-btn" onclick="switchTab('tab-auto-memory', this)">Auto-memory</button>
+      <button class="tab-btn" onclick="switchTab('tab-documents', this)">Documents</button>
+    </div>
 
-      <!-- Page header -->
-      <div class="page-header" style="margin-bottom:8px;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;">
-          <div>
-            <h1>Knowledge</h1>
-            <div style="font-size:12px;color:var(--slate-400);margin-top:3px;">Acme Corp · Updated 2h ago · v14</div>
-          </div>
-          <div id="page-primary-action">
-            <div id="memory-actions" style="display:flex;gap:8px;">
-              <div class="overflow-menu" id="new-memory-menu">
-                <button class="btn btn-sm btn-primary" onclick="toggleMenu('new-memory-menu')">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-                  New
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:2px;"><polyline points="6 9 12 15 18 9"/></svg>
-                </button>
-                <div class="overflow-dropdown" id="dropdown-new-memory-menu">
-                  <button class="overflow-item" onclick="closeMenu('new-memory-menu');openMemoryDrawer('new-entry')">New entry</button>
-                  <button class="overflow-item" onclick="closeMenu('new-memory-menu');openMemoryDrawer('new-block')">New block</button>
-                </div>
-              </div>
-            </div>
-            <div id="notes-actions" style="display:none;"></div>
-            <div id="docs-actions" style="display:none;gap:8px;">
-              <button class="btn btn-sm btn-secondary" onclick="openModal('connect-drive-modal')">Connect Drive</button>
-              <button class="btn btn-sm btn-primary" onclick="openModal('upload-modal')">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-                Upload document
-              </button>
-            </div>
-          </div>
+    <!-- ============================================================
+         TAB: Authored memory
+         ============================================================ -->
+    <div id="tab-authored" class="tab-panel active" style="padding-top:16px;">
+      <!-- Toolbar -->
+      <div class="tab-toolbar">
+        <div class="filter-chips" id="authored-filter-chips">
+          <button class="filter-chip active" onclick="filterAuthored('all',this)">All (10)</button>
+          <button class="filter-chip" onclick="filterAuthored('pending',this)">Pending review (2)</button>
+          <button class="filter-chip" onclick="filterAuthored('tier1',this)">Tier 1</button>
+          <button class="filter-chip" onclick="filterAuthored('tier2',this)">Tier 2</button>
+          <button class="filter-chip" onclick="filterAuthored('tier3',this)">Tier 3</button>
+          <button class="filter-chip" id="chip-inherited-authored" style="display:none;" onclick="filterAuthored('inherited',this)">Inherited (3)</button>
+        </div>
+        <div class="tab-toolbar-right">
+          <input class="search-input" type="text" placeholder="Search memory...">
+          <button class="btn btn-primary" onclick="openNewEntryDrawer()">+ New entry</button>
         </div>
       </div>
 
-      <!-- Top-level 3 tabs -->
-      <div class="tabs" id="k-tabs" style="margin-bottom:20px;">
-        <button class="tab-btn active" onclick="switchKTab('memory',this)" id="tab-btn-memory">Memory <span class="tab-count">14</span></button>
-        <button class="tab-btn" onclick="switchKTab('notes',this)" id="tab-btn-notes">Notes <span class="tab-count">38</span></button>
-        <button class="tab-btn" onclick="switchKTab('documents',this)" id="tab-btn-documents">Documents <span class="tab-count">10</span></button>
+      <!-- Entry list -->
+      <div class="entry-list" id="authored-list">
+
+        <!-- Entry 1 — Tier 1, active -->
+        <div class="entry-card" data-filter="active tier1">
+          <div class="entry-body">
+            <div class="entry-title">Brand voice: confident but not cocky</div>
+            <div class="entry-preview">Our communications lead with capability and results. Avoid superlatives. Never trash competitors. Tone is direct and warm, not corporate.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 1</span>
+              <span>You</span><span>·</span><span>3 days ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om1')">&#8942;</button>
+              <div class="overflow-panel" id="om1">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om1')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 2 — Tier 2, active -->
+        <div class="entry-card" data-filter="active tier2">
+          <div class="entry-body">
+            <div class="entry-title">ICP: mid-market SaaS, 50-500 employees, US/EU</div>
+            <div class="entry-preview">Primary buyer persona is VP of Operations or Head of RevOps. Secondary buyer: IT director where compliance is a gating factor. Avoid SMB deals under 50 seats.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 2</span>
+              <span>Mike Liu</span><span>·</span><span>Yesterday</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om2')">&#8942;</button>
+              <div class="overflow-panel" id="om2">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om2')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 3 — Tier 2, active -->
+        <div class="entry-card" data-filter="active tier2">
+          <div class="entry-body">
+            <div class="entry-title">Standard demo flow: 30 min, technical buyer focus</div>
+            <div class="entry-preview">Open with the agent creation demo, not the dashboard. Show a live run within 5 minutes. Reserve 10 minutes for Q+A. Skip billing UI unless asked.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 2</span>
+              <span>You</span><span>·</span><span>2 weeks ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om3')">&#8942;</button>
+              <div class="overflow-panel" id="om3">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om3')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 4 — Tier 3, active -->
+        <div class="entry-card" data-filter="active tier3">
+          <div class="entry-body">
+            <div class="entry-title">Approval threshold: over $10k requires Sarah's signoff</div>
+            <div class="entry-preview">Any purchase, commitment, or contract renewal above $10,000 must include Sarah Chen (COO) on the final approval. Do not commit verbally without her confirmation.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 3</span>
+              <span>You</span><span>·</span><span>Last week</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om4')">&#8942;</button>
+              <div class="overflow-panel" id="om4">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om4')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 5 — no tier, active -->
+        <div class="entry-card" data-filter="active">
+          <div class="entry-body">
+            <div class="entry-title">Acme account: Jen Park is the new primary contact</div>
+            <div class="entry-preview">As of this week, Jennifer Park is the primary point of contact at Acme Corp. She replaced Marcus Webb. CC Jen on all correspondence going forward.</div>
+            <div class="entry-meta">
+              <span>You</span><span>·</span><span>4 hours ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om5')">&#8942;</button>
+              <div class="overflow-panel" id="om5">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om5')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 6 — Tier 1, active -->
+        <div class="entry-card" data-filter="active tier1">
+          <div class="entry-body">
+            <div class="entry-title">Do not mention competitor X by name</div>
+            <div class="entry-preview">Never reference the competitor by name in any outreach, demo, or proposal. If a prospect asks about them, acknowledge the landscape and redirect to our differentiation.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 1</span>
+              <span>Sarah Chen</span><span>·</span><span>Last month</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om6')">&#8942;</button>
+              <div class="overflow-panel" id="om6">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om6')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 7 — Tier 2, active -->
+        <div class="entry-card" data-filter="active tier2">
+          <div class="entry-body">
+            <div class="entry-title">Q1 messaging emphasis: efficiency over scale</div>
+            <div class="entry-preview">This quarter we lead with time-savings and automation ROI, not the number of agents or breadth of integrations. "Do more with what you have" is the frame.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 2</span>
+              <span>You</span><span>·</span><span>Last week</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om7')">&#8942;</button>
+              <div class="overflow-panel" id="om7">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om7')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 8 — Tier 3, active -->
+        <div class="entry-card" data-filter="active tier3">
+          <div class="entry-body">
+            <div class="entry-title">Internal escalation: page Sarah for at-risk accounts</div>
+            <div class="entry-preview">Any account flagged as "at risk" by the CRM agent should trigger a direct Slack notification to Sarah Chen. Do not wait for the weekly review.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-tier">Tier 3</span>
+              <span>You</span><span>·</span><span>1 month ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om8')">&#8942;</button>
+              <div class="overflow-panel" id="om8">
+                <span class="overflow-item" onclick="openEditEntry()">Edit</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om8')">Delete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 9 — PENDING REVIEW -->
+        <div class="entry-card" data-filter="pending" style="border-left:3px solid #f59e0b;">
+          <div class="entry-body">
+            <div class="entry-title">New brand tagline draft: "Automate what matters"</div>
+            <div class="entry-preview">Proposed by Mike Liu as the Q2 brand positioning tagline. Under review by Sarah Chen before we use it in any external materials.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+              <span>Submitted by Mike Liu</span><span>·</span><span>Awaiting Sarah Chen</span><span>·</span><span>1 hour ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Entry 10 — PENDING REVIEW -->
+        <div class="entry-card" data-filter="pending" style="border-left:3px solid #f59e0b;">
+          <div class="entry-body">
+            <div class="entry-title">Updated pricing language for Q2</div>
+            <div class="entry-preview">Carlos Diaz submitted revised language for quoting seat-based pricing. Replaces the old per-workflow pricing explanation in the sales playbook.</div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+              <span>Submitted by Carlos Diaz</span><span>·</span><span>3 hours ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- INHERITED ENTRIES (admin view only — hidden by default) -->
+        <!-- Entry 11 — INHERITED (admin view) -->
+        <div class="entry-card admin-view-entry" data-filter="inherited" style="display:none;">
+          <div class="entry-body">
+            <div class="entry-title">Acme Inc brand identity: primary tier</div>
+            <div class="entry-preview">Organisation-level brand guidelines for all Acme Corp work. Covers colour, typography, tone, and logo usage. Applies across all workspaces serving Acme accounts.</div>
+            <div class="entry-meta">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">This item is inherited from the organisation. Client users at this workspace do not see it.</span>
+              </div>
+              <span>Edited at org level</span><span>·</span><span>2 days ago</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn" onclick="window.location.href='org-knowledge.html'">
+              &#128274; Edit at org level
+            </button>
+          </div>
+        </div>
+
+        <!-- Entry 12 — INHERITED (admin view) -->
+        <div class="entry-card admin-view-entry" data-filter="inherited" style="display:none;">
+          <div class="entry-body">
+            <div class="entry-title">Communication style guide</div>
+            <div class="entry-preview">Organisation-wide communication norms: reply-time SLAs, meeting etiquette, email format guidelines, and escalation paths for external client queries.</div>
+            <div class="entry-meta">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">This item is inherited from the organisation. Client users at this workspace do not see it.</span>
+              </div>
+              <span>Org level</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn" onclick="window.location.href='org-knowledge.html'">
+              &#128274; Edit at org level
+            </button>
+          </div>
+        </div>
+
+        <!-- Entry 13 — INHERITED (admin view) -->
+        <div class="entry-card admin-view-entry" data-filter="inherited" style="display:none;">
+          <div class="entry-body">
+            <div class="entry-title">Approved vendor list</div>
+            <div class="entry-preview">List of pre-approved vendors for software, services, and contractors. Any new vendor not on this list requires COO sign-off before contracts are signed.</div>
+            <div class="entry-meta">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">This item is inherited from the organisation. Client users at this workspace do not see it.</span>
+              </div>
+              <span>Org level</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn" onclick="window.location.href='org-knowledge.html'">
+              &#128274; Edit at org level
+            </button>
+          </div>
+        </div>
+
+      </div><!-- /authored-list -->
+    </div><!-- /tab-authored -->
+
+    <!-- ============================================================
+         TAB: Auto-memory
+         ============================================================ -->
+    <div id="tab-auto-memory" class="tab-panel" style="padding-top:16px;">
+      <div class="tab-toolbar">
+        <div class="filter-chips" id="auto-filter-chips">
+          <button class="filter-chip active" onclick="filterAuto('all',this)">All (12)</button>
+          <button class="filter-chip" onclick="filterAuto('pending',this)">Pending review (8)</button>
+          <button class="filter-chip" onclick="filterAuto('suggested',this)">Suggested groupings (2)</button>
+          <button class="filter-chip" id="chip-inherited-auto" style="display:none;" onclick="filterAuto('inherited',this)">Inherited (0)</button>
+        </div>
+        <div class="tab-toolbar-right">
+          <input class="search-input" type="text" placeholder="Search auto-memory...">
+        </div>
+      </div>
+      <p style="font-size:12.5px;color:var(--slate-400);margin-bottom:14px;">Agents extract these automatically from runs. Review and approve to add them to your authored memory, or reject to ignore them.</p>
+
+      <!-- SUGGESTED GROUPINGS (first, prominent) -->
+      <div id="auto-suggestions">
+
+        <!-- Suggestion 1 -->
+        <div class="suggestion-card" data-auto-filter="suggested">
+          <div class="suggestion-label">Suggested grouping</div>
+          <div class="suggestion-title">Acme Corp deal context (Tier 1 candidate)</div>
+          <div class="suggestion-body">CRM Agent has observed 5 related facts about Acme Corp across recent runs and suggests grouping them into a single Tier 1 entry:</div>
+          <ul class="suggestion-bullets">
+            <li>Primary contact changed to Jen Park (observed Apr 29)</li>
+            <li>Deal stage moved to "Negotiation" (observed Apr 27)</li>
+            <li>Champion is VP of Operations, not CTO (observed Apr 25)</li>
+            <li>Budget approved: $85k ARR (observed Apr 22)</li>
+            <li>Legal review expected to take 2-3 weeks (observed Apr 20)</li>
+          </ul>
+          <div class="suggestion-actions">
+            <button class="btn btn-primary" onclick="alert('Grouping approved and created as Tier 1 entry')">Approve grouping</button>
+            <button class="btn btn-outline" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="btn btn-outline" style="color:var(--slate-400);" onclick="this.closest('.suggestion-card').style.display='none'">Reject</button>
+          </div>
+        </div>
+
+        <!-- Suggestion 2 -->
+        <div class="suggestion-card" data-auto-filter="suggested">
+          <div class="suggestion-label">Suggested grouping</div>
+          <div class="suggestion-title">H2 2026 planning signals (Tier 2 candidate)</div>
+          <div class="suggestion-body">Outreach Agent observed multiple H2 budget and planning signals across 3 accounts. Suggested as a Tier 2 entry for context:</div>
+          <ul class="suggestion-bullets">
+            <li>Gamma Solutions: procurement freeze lifted for Q3 (observed May 1)</li>
+            <li>Nova Digital: expanding headcount by 40% in H2 (observed Apr 30)</li>
+            <li>Beta Inc: budget review expected mid-June (observed Apr 28)</li>
+          </ul>
+          <div class="suggestion-actions">
+            <button class="btn btn-primary" onclick="alert('Grouping approved and created as Tier 2 entry')">Approve grouping</button>
+            <button class="btn btn-outline" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="btn btn-outline" style="color:var(--slate-400);" onclick="this.closest('.suggestion-card').style.display='none'">Reject</button>
+          </div>
+        </div>
+
+      </div><!-- /auto-suggestions -->
+
+      <!-- INDIVIDUAL AUTO-MEMORY ENTRIES -->
+      <div class="entry-list" id="auto-list" style="margin-top:8px;">
+
+        <!-- Auto entry 1 — PENDING, preference -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Prospect prefers async communication over calls</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">preference</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:72%;background:#10b981;"></div></div>
+                <span class="conf-label">0.72</span>
+              </div>
+              <span>From Outreach Agent run, Apr 30</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 2 — PENDING, decision -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Deal moved to legal review stage</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">decision</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:88%;background:#10b981;"></div></div>
+                <span class="conf-label">0.88</span>
+              </div>
+              <span>From CRM Agent run, Apr 29</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 3 — PENDING, fact -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Beta Inc headcount grew from 120 to 180 this year</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">fact</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:91%;background:#10b981;"></div></div>
+                <span class="conf-label">0.91</span>
+              </div>
+              <span>From Research Agent run, Apr 28</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 4 — PENDING, belief -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Gamma Solutions is evaluating two competing vendors</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">belief</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:54%;background:#f59e0b;"></div></div>
+                <span class="conf-label">0.54</span>
+              </div>
+              <span>From Outreach Agent run, Apr 27</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 5 — PENDING, observation -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Prospect mentioned a previous bad experience with automation tools</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">observation</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:79%;background:#10b981;"></div></div>
+                <span class="conf-label">0.79</span>
+              </div>
+              <span>From Call Summarizer Agent run, Apr 26</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 6 — PENDING, issue -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Nova Digital has a 90-day procurement cycle minimum</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">issue</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:82%;background:#10b981;"></div></div>
+                <span class="conf-label">0.82</span>
+              </div>
+              <span>From CRM Agent run, Apr 25</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 7 — PENDING, fact -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">CFO is involved in final sign-off at Acme Corp</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">fact</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:85%;background:#10b981;"></div></div>
+                <span class="conf-label">0.85</span>
+              </div>
+              <span>From CRM Agent run, Apr 23</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 8 — PENDING, preference -->
+        <div class="entry-card" data-auto-filter="pending">
+          <div class="entry-body">
+            <div class="entry-title">Beta Inc prefers monthly invoicing over annual</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">preference</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:67%;background:#10b981;"></div></div>
+                <span class="conf-label">0.67</span>
+              </div>
+              <span>From Outreach Agent run, Apr 21</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-pending">Pending review</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button class="entry-action-btn primary" onclick="alert('Approved')">Approve</button>
+            <button class="entry-action-btn" onclick="openEditEntry()">Edit &amp; approve</button>
+            <button class="entry-action-btn danger" onclick="alert('Rejected')">Reject</button>
+          </div>
+        </div>
+
+        <!-- Auto entry 9 — APPROVED (In use) -->
+        <div class="entry-card" data-auto-filter="approved">
+          <div class="entry-body">
+            <div class="entry-title">Champion at Acme Corp is VP of Operations, not CTO</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">fact</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:93%;background:#10b981;"></div></div>
+                <span class="conf-label">0.93</span>
+              </div>
+              <span>From CRM Agent run, Apr 18</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-in-use">In use</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-a9')">&#8942;</button>
+              <div class="overflow-panel" id="om-a9">
+                <span class="overflow-item" onclick="alert('Moved to Authored memory')">Edit and take ownership</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om-a9')">Reject</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto entry 10 — APPROVED (In use) -->
+        <div class="entry-card" data-auto-filter="approved">
+          <div class="entry-body">
+            <div class="entry-title">Gamma Solutions uses Salesforce CRM internally</div>
+            <div class="entry-meta" style="margin-bottom:6px;">
+              <span class="chip-base chip-type">fact</span>
+              <div class="conf-bar-wrap">
+                <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:96%;background:#10b981;"></div></div>
+                <span class="conf-label">0.96</span>
+              </div>
+              <span>From Research Agent run, Apr 14</span>
+              <a href="run-trace.html" style="font-size:11px;color:var(--indigo-600);">view run trace</a>
+            </div>
+            <div class="entry-meta">
+              <span class="chip-base chip-in-use">In use</span>
+            </div>
+          </div>
+          <div class="entry-actions">
+            <div class="overflow-menu-wrap">
+              <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-a10')">&#8942;</button>
+              <div class="overflow-panel" id="om-a10">
+                <span class="overflow-item" onclick="alert('Moved to Authored memory')">Edit and take ownership</span>
+                <span class="overflow-item danger" onclick="closeOverflow('om-a10')">Reject</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /auto-list -->
+    </div><!-- /tab-auto-memory -->
+
+    <!-- ============================================================
+         TAB: Documents
+         ============================================================ -->
+    <div id="tab-documents" class="tab-panel" style="padding-top:16px;">
+      <!-- Sub-tab strip -->
+      <div class="sub-tab-strip">
+        <button class="sub-tab active" onclick="switchSubTab('doc-sub-documents', this)">Documents</button>
+        <button class="sub-tab" onclick="switchSubTab('doc-sub-bundles', this)">Bundles</button>
       </div>
 
-      <!-- ════════════════════════════════════════════════════════════
-           TAB: MEMORY (default active)
-           Authored entries + memory blocks, with org-inheritance chips
-      ════════════════════════════════════════════════════════════ -->
-      <div class="tab-panel active" id="tab-memory">
-
-        <!-- Filter bar -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <div class="filter-chips" id="memory-filter-chips">
-              <button class="filter-chip active" onclick="setMemoryFilter('all',this)">All (14)</button>
-              <button class="filter-chip" onclick="setMemoryFilter('entries',this)">Authored entries (6)</button>
-              <button class="filter-chip" onclick="setMemoryFilter('blocks',this)">Memory blocks (5)</button>
-              <button class="filter-chip" onclick="setMemoryFilter('inherited',this)">Inherited (3)</button>
-            </div>
-            <div class="search-wrap" style="width:220px;">
-              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input class="search-box" type="search" placeholder="Search memory...">
-            </div>
+      <!-- ---- Documents sub-tab ---- -->
+      <div id="doc-sub-documents" class="tab-panel active">
+        <div class="tab-toolbar">
+          <div class="filter-chips">
+            <button class="filter-chip active">All (12)</button>
+            <button class="filter-chip">PDFs</button>
+            <button class="filter-chip">Spreadsheets</button>
+            <button class="filter-chip">Other</button>
+            <button class="filter-chip" id="chip-inherited-docs" style="display:none;">Inherited (4)</button>
+          </div>
+          <div class="tab-toolbar-right">
+            <input class="search-input" type="text" placeholder="Search documents...">
+            <button class="btn btn-primary">+ Upload</button>
           </div>
         </div>
 
-        <div class="card" id="memory-list">
-
-          <!-- ── Org-inherited blocks (3) ── -->
-          <div class="section-sep" id="sep-inherited">
-            Inherited from organisation
-            <span style="font-size:11px;color:var(--slate-400);font-weight:400;text-transform:none;letter-spacing:0;">Read-only at this level</span>
+        <div class="doc-list" id="doc-list">
+          <!-- Subaccount docs -->
+          <div class="doc-row">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Sales playbook Q1 2026.pdf</div>
+            <div class="doc-meta">PDF · 2.4 MB · Added by You, Apr 28</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Onboarding checklist v3.pdf</div>
+            <div class="doc-meta">PDF · 890 KB · Added by Sarah Chen, Apr 15</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Acme Corp discovery notes.docx</div>
+            <div class="doc-meta">Word · 145 KB · Added by You, May 2</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128202;</div>
+            <div class="doc-name">Q1 pipeline review.xlsx</div>
+            <div class="doc-meta">Spreadsheet · 1.1 MB · Added by Mike Liu, Apr 22</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Beta Inc proposal draft.pdf</div>
+            <div class="doc-meta">PDF · 3.2 MB · Added by You, Apr 30</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Technical integration spec.pdf</div>
+            <div class="doc-meta">PDF · 780 KB · Added by Carlos Diaz, Apr 10</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Demo script v2.docx</div>
+            <div class="doc-meta">Word · 220 KB · Added by You, Mar 18</div>
+          </div>
+          <div class="doc-row">
+            <div class="doc-icon">&#128202;</div>
+            <div class="doc-name">Account expansion targets H2.xlsx</div>
+            <div class="doc-meta">Spreadsheet · 680 KB · Added by Sarah Chen, May 1</div>
           </div>
 
-          <!-- Inherited 1 -->
-          <div class="memory-item inherited-item" onclick="openMemoryDrawer('view-inherited-1')">
-            <div class="memory-item-icon inherited">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Brand identity and positioning</div>
-              <div class="memory-item-preview">We help agencies scale client output without scaling headcount. Lead with efficiency ROI, not technical complexity. Avoid describing ourselves as "AI" in first contact.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-inherited">Org-inherited</span>
-                <span class="chip-tier">Tier 1 · brand_identity</span>
-                <span class="memory-item-timestamp">Updated May 1</span>
+          <!-- Inherited docs — admin view only, hidden by default -->
+          <div class="doc-row admin-view-entry" style="display:none;background:var(--violet-50);">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Organisation brand guidelines.pdf</div>
+            <div class="doc-meta" style="display:flex;align-items:center;gap:8px;">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">Inherited from organisation. Not visible to client users.</span>
               </div>
+              PDF · 4.5 MB · Org level
             </div>
           </div>
-
-          <!-- Inherited 2 -->
-          <div class="memory-item inherited-item" onclick="openMemoryDrawer('view-inherited-2')">
-            <div class="memory-item-icon inherited">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Voice and tone standards</div>
-              <div class="memory-item-preview">Professional but warm. Avoid jargon and sports metaphors. Use "we" when referring to the agency. Lead with outcomes before features. Max 3 paragraphs per outbound email.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-inherited">Org-inherited</span>
-                <span class="chip-tier">Tier 1 · voice_tone</span>
-                <span class="memory-item-timestamp">Updated Apr 28</span>
+          <div class="doc-row admin-view-entry" style="display:none;background:var(--violet-50);">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Approved vendor list 2026.pdf</div>
+            <div class="doc-meta" style="display:flex;align-items:center;gap:8px;">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">Inherited from organisation. Not visible to client users.</span>
               </div>
+              PDF · 350 KB · Org level
             </div>
           </div>
-
-          <!-- Inherited 3 -->
-          <div class="memory-item inherited-item" onclick="openMemoryDrawer('view-inherited-3')">
-            <div class="memory-item-icon inherited">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Operating constraints and SLAs</div>
-              <div class="memory-item-preview">No cold outreach before 8am or after 6pm local time. Response SLA for HITL approvals is 2 business hours. Do not commit to deliverables without manager sign-off above $10k.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-inherited">Org-inherited</span>
-                <span class="chip-tier">Tier 1 · operating_constraints</span>
-                <span class="memory-item-timestamp">Updated Apr 15</span>
+          <div class="doc-row admin-view-entry" style="display:none;background:var(--violet-50);">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">SOC 2 audit report 2025.pdf</div>
+            <div class="doc-meta" style="display:flex;align-items:center;gap:8px;">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">Inherited from organisation. Not visible to client users.</span>
               </div>
+              PDF · 8.2 MB · Org level
             </div>
           </div>
-
-          <!-- ── Subaccount memory blocks (5) ── -->
-          <div class="section-sep" id="sep-blocks">
-            Memory blocks
-            <span style="font-size:11px;color:var(--slate-400);font-weight:400;text-transform:none;letter-spacing:0;">Loaded into every agent run as stable context</span>
-          </div>
-
-          <!-- Block 1 -->
-          <div class="memory-item block-item" onclick="openMemoryDrawer('view-block-1')">
-            <div class="memory-item-icon block">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Acme stakeholder map</div>
-              <div class="memory-item-preview">Sarah Chen (VP Ops, champion), James Watt (CTO, technical approver), Marcus Hill (Finance, likely procurement lead, unconfirmed), Jennifer Park (EA, scheduling). Budget approved $48k ARR.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-this-client">This client</span>
-                <span class="chip-tier chip-tier-2">Tier 2 · audience_icp</span>
-                <span class="memory-item-timestamp">Updated May 2 · Jordan K.</span>
+          <div class="doc-row admin-view-entry" style="display:none;background:var(--violet-50);">
+            <div class="doc-icon">&#128196;</div>
+            <div class="doc-name">Data processing agreement template.pdf</div>
+            <div class="doc-meta" style="display:flex;align-items:center;gap:8px;">
+              <div class="admin-view-wrap">
+                <span class="chip-base chip-admin-view">&#128065; Admin view</span>
+                <span class="admin-tooltip">Inherited from organisation. Not visible to client users.</span>
               </div>
+              PDF · 210 KB · Org level
             </div>
           </div>
-
-          <!-- Block 2 -->
-          <div class="memory-item block-item" onclick="openMemoryDrawer('view-block-2')">
-            <div class="memory-item-icon block">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Competitive positioning vs FieldEdge</div>
-              <div class="memory-item-preview">Incumbent: FieldEdge (4 years). Pain points: 72h support SLAs, no REST API, no real-time compliance dashboard. Counter: real-time compliance, Zapier, 3-week onboarding. Present side-by-side on request.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-this-client">This client</span>
-                <span class="chip-tier chip-tier-2">Tier 2 · offer_positioning</span>
-                <span class="memory-item-timestamp">Updated Apr 22 · Marcus D.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Block 3 -->
-          <div class="memory-item block-item" onclick="openMemoryDrawer('view-block-3')">
-            <div class="memory-item-icon block">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Q2 2026 team priorities</div>
-              <div class="memory-item-preview">Close Acme Corp deal by end of May. Secondary: upsell TerraForm Partners analytics. No new outreach campaigns until June — bandwidth constrained by Revel Group onboarding.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-this-client">This client</span>
-                <span class="chip-tier chip-tier-3">Tier 3 · proof_library</span>
-                <span class="memory-item-timestamp">Updated May 3 · Jordan K.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Block 4 -->
-          <div class="memory-item block-item" onclick="openMemoryDrawer('view-block-4')">
-            <div class="memory-item-icon block">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Pricing and packaging context</div>
-              <div class="memory-item-preview">Current pricing: Starter $12k, Growth $28k, Enterprise $48k+ ARR. Always present as annual bundles. Acme strongly prefers bundle pricing — per-seat model was a blocker in prior vendor evaluation.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-this-client">This client</span>
-                <span class="chip-tier chip-tier-2">Tier 2 · offer_positioning</span>
-                <span class="memory-item-timestamp">Updated Apr 15 · Sarah L.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Block 5 -->
-          <div class="memory-item block-item" onclick="openMemoryDrawer('view-block-5')">
-            <div class="memory-item-icon block">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Communication timing preferences</div>
-              <div class="memory-item-preview">Email Tues/Thurs 9am-12pm AEST, 83% open rate across 6 interactions. LinkedIn DMs to Sarah Chen: 100% read rate within 4 hours. James Watt: detailed technical content, no executive summaries.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Block</span>
-                <span class="chip-this-client">This client</span>
-                <span class="chip-tier chip-tier-3">Tier 3 · proof_library</span>
-                <span class="memory-item-timestamp">Updated May 1 · Jordan K.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- ── Authored entries (6) ── -->
-          <div class="section-sep" id="sep-entries">
-            Authored entries
-            <span style="font-size:11px;color:var(--slate-400);font-weight:400;text-transform:none;letter-spacing:0;">Human-written knowledge</span>
-          </div>
-
-          <!-- Entry 1 -->
-          <div class="memory-item entry-item" onclick="openMemoryDrawer('view-entry-1')">
-            <div class="memory-item-icon entry">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Acme Corp deal history</div>
-              <div class="memory-item-preview">Chronological log of all significant interactions since first contact January 2026. Includes proposal versions, key objections raised, decisions made, and outstanding commitments.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Entry</span>
-                <span class="chip-this-client">This client</span>
-                <span class="badge badge-slate" style="font-size:10px;">note</span>
-                <span class="memory-item-timestamp">Apr 15 · Jordan K.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Entry 2 -->
-          <div class="memory-item entry-item" onclick="openMemoryDrawer('view-entry-2')">
-            <div class="memory-item-icon entry">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Objection handling playbook</div>
-              <div class="memory-item-preview">Responses to the 12 most common sales objections. Organised by category: price, trust, vendor lock-in, compliance, competitor comparison. Validated by Q4 2025 closed deals.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Entry</span>
-                <span class="chip-this-client">This client</span>
-                <span class="badge badge-indigo" style="font-size:10px;">playbook</span>
-                <span class="memory-item-timestamp">Feb 1 · Jordan K.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Entry 3 -->
-          <div class="memory-item entry-item" onclick="openMemoryDrawer('view-entry-3')">
-            <div class="memory-item-icon entry">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Competitor intelligence: FieldEdge 2026</div>
-              <div class="memory-item-preview">Research on FieldEdge positioning, pricing (estimated $55k-80k ARR for comparable tier), support model, known weaknesses, and recent customer reviews. Last updated April 2026.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Entry</span>
-                <span class="chip-this-client">This client</span>
-                <span class="badge badge-slate" style="font-size:10px;">note</span>
-                <span class="memory-item-timestamp">Apr 3 · Marcus D.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Entry 4 -->
-          <div class="memory-item entry-item" onclick="openMemoryDrawer('view-entry-4')">
-            <div class="memory-item-icon entry">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">How we onboard new SaaS clients</div>
-              <div class="memory-item-preview">Step-by-step process for onboarding any new SaaS client. Covers CRM sync, agent configuration, data source setup, first-run checklist, and 30-day review cadence.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Entry</span>
-                <span class="chip-this-client">This client</span>
-                <span class="badge badge-indigo" style="font-size:10px;">playbook</span>
-                <span class="memory-item-timestamp">Mar 15 · Jordan K.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Entry 5 -->
-          <div class="memory-item entry-item" onclick="openMemoryDrawer('view-entry-5')">
-            <div class="memory-item-icon entry">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Pricing rationale 2026</div>
-              <div class="memory-item-preview">Internal document explaining why we moved to bundle-only pricing in January 2026. Key reasoning: reduces negotiation friction, improves NRR, prevents add-on fatigue.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Entry</span>
-                <span class="chip-this-client">This client</span>
-                <span class="badge badge-amber" style="font-size:10px;">decision</span>
-                <span class="memory-item-timestamp">Jan 10 · Marcus D.</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Entry 6 -->
-          <div class="memory-item entry-item" onclick="openMemoryDrawer('view-entry-6')">
-            <div class="memory-item-icon entry">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            </div>
-            <div style="flex:1;min-width:0;">
-              <div class="memory-item-title">Data handling and compliance FAQ</div>
-              <div class="memory-item-preview">Answers to common prospect questions about data residency, SOC 2 status, GDPR, AI model data policies, and subprocessor disclosure. Updated March 2026.</div>
-              <div class="memory-item-meta">
-                <span class="chip-type">Entry</span>
-                <span class="chip-this-client">This client</span>
-                <span class="badge badge-slate" style="font-size:10px;">note</span>
-                <span class="memory-item-timestamp">Mar 12 · Sarah L.</span>
-              </div>
-            </div>
-          </div>
-
-        </div><!-- /memory-list -->
-      </div><!-- /tab-memory -->
-
-      <!-- ════════════════════════════════════════════════════════════
-           TAB: NOTES (formerly Auto-memory)
-           System-extracted entries, org-scoped only
-      ════════════════════════════════════════════════════════════ -->
-      <div class="tab-panel" id="tab-notes" style="display:none;">
-
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <div class="filter-chips" id="notes-filter-chips">
-              <button class="filter-chip active" onclick="setNotesFilter('all',this)">All (38)</button>
-              <button class="filter-chip" onclick="setNotesFilter('entries',this)">Entries (30)</button>
-              <button class="filter-chip" onclick="setNotesFilter('blocks',this)">Blocks (8)</button>
-            </div>
-            <div class="search-wrap" style="width:220px;">
-              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input class="search-box" type="search" placeholder="Search notes...">
-            </div>
-          </div>
-          <button onclick="openDrawer('suppressed')" style="font-size:12px;color:var(--slate-500);background:none;border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;white-space:nowrap;">Suppressed (12)</button>
         </div>
+      </div><!-- /doc-sub-documents -->
 
-        <div class="card">
-          <!-- Entries section -->
-          <div class="section-sep" id="sep-notes-entries">
-            Entries (30)
-            <span style="font-size:11px;color:var(--slate-400);font-weight:400;text-transform:none;letter-spacing:0;">Extracted from agent runs</span>
-          </div>
-
-          <!-- Note entry 1 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-amber" style="font-size:10px;">preference</span></div>
-            <div class="note-text">Sarah Chen responds best to ROI-first framing. Mentioned "12 hours per week saved" figure unprompted in April 22 call, use in all decks.</div>
-            <div class="note-source">Outreach Agent</div>
-            <div class="note-quality">0.91</div>
-            <div class="note-date">May 1</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" title="Promote to Memory" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 2 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-green" style="font-size:10px;">decision</span></div>
-            <div class="note-text">Agreed to deliver Kubernetes deployment architecture doc before procurement review. James Watt specifically requested container orchestration detail and multi-region failover design.</div>
-            <div class="note-source">Outreach Agent</div>
-            <div class="note-quality">0.88</div>
-            <div class="note-date">Apr 28</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 3 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-blue" style="font-size:10px;">fact</span></div>
-            <div class="note-text">Acme has approximately 180 employees across Sydney (HQ, ~110), Melbourne (~45), and Brisbane (~25). All offices use a shared Active Directory tenant.</div>
-            <div class="note-source">CRM Agent</div>
-            <div class="note-quality">0.97</div>
-            <div class="note-date">Apr 15</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 4 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-amber" style="font-size:10px;">preference</span></div>
-            <div class="note-text">Acme strongly prefers bundle pricing over line-item invoicing. Procurement team flagged per-seat models as a blocker in a previous vendor evaluation.</div>
-            <div class="note-source">CRM Agent</div>
-            <div class="note-quality">0.84</div>
-            <div class="note-date">Apr 22</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 5 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-violet" style="font-size:10px;">observation</span></div>
-            <div class="note-text">Email outreach on Tuesdays and Thursdays 9am-12pm AEST consistently produces fastest response. Pattern confirmed across 6 separate interactions since Jan 2026.</div>
-            <div class="note-source">Outreach Agent</div>
-            <div class="note-quality">0.93</div>
-            <div class="note-date">Apr 10</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 6 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-sky" style="font-size:10px;">belief</span></div>
-            <div class="note-text">Marcus Hill (Finance Manager) is likely the procurement sign-off authority based on his involvement in the April 28 budget approval conversation. Confidence 0.74, not yet confirmed.</div>
-            <div class="note-source">Outreach Agent</div>
-            <div class="note-quality">0.74</div>
-            <div class="note-date">May 5</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 7 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-red" style="font-size:10px;">issue</span></div>
-            <div class="note-text">Procurement cycle is longer than initial estimate (2-3 weeks vs 1 week). Flag for follow-up email if no procurement committee response by May 12.</div>
-            <div class="note-source">CRM Agent</div>
-            <div class="note-quality">0.96</div>
-            <div class="note-date">Apr 28</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 8 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-blue" style="font-size:10px;">fact</span></div>
-            <div class="note-text">Current vendor is FieldEdge. Acme has been a FieldEdge customer for approximately 4 years. Contract renewal is likely H2 2026, timing opportunity for competitive displacement.</div>
-            <div class="note-source">CRM Agent</div>
-            <div class="note-quality">0.81</div>
-            <div class="note-date">Mar 20</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 9 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-green" style="font-size:10px;">decision</span></div>
-            <div class="note-text">Content Agent approved to use a formal-professional tone for all Acme client-facing deliverables. Casual or conversational tone is not appropriate for this account.</div>
-            <div class="note-source">Content Agent</div>
-            <div class="note-quality">0.99</div>
-            <div class="note-date">Feb 18</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Note entry 10 -->
-          <div class="note-row note-entry-item" onclick="openDrawer('note-entry-detail')">
-            <div class="note-type"><span class="badge badge-violet" style="font-size:10px;">observation</span></div>
-            <div class="note-text">James Watt engages with LinkedIn posts on cloud infrastructure topics (Kubernetes, AWS, platform engineering). Consider using shared content as a warm touchpoint pre-proposal.</div>
-            <div class="note-source">Outreach Agent</div>
-            <div class="note-quality">0.67</div>
-            <div class="note-date">Mar 5</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <div style="padding:9px 16px;font-size:12px;color:var(--slate-400);text-align:center;">+ 20 more entries</div>
-
-          <!-- Blocks section within notes -->
-          <div class="section-sep" id="sep-notes-blocks">
-            Blocks (8)
-            <span style="font-size:11px;color:var(--slate-400);font-weight:400;text-transform:none;letter-spacing:0;">System-proposed stable context</span>
-          </div>
-
-          <!-- Notes block 1 -->
-          <div class="note-row note-block-item" onclick="openDrawer('note-block-detail')">
-            <div class="note-type"><span class="badge badge-slate" style="font-size:10px;">block</span></div>
-            <div class="note-text" style="font-family:'JetBrains Mono',monospace;font-size:11.5px;">client.acme.next_actions: (1) Kubernetes doc by May 9. (2) Procurement follow-up if no response May 12. (3) Competitor comparison refresh. (4) Resolve belief conflict on Marcus Hill.</div>
-            <div class="note-source">Agent-proposed</div>
-            <div class="note-quality">0.88</div>
-            <div class="note-date">May 5</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <!-- Notes block 2 -->
-          <div class="note-row note-block-item" onclick="openDrawer('note-block-detail')">
-            <div class="note-type"><span class="badge badge-slate" style="font-size:10px;">block</span></div>
-            <div class="note-text" style="font-family:'JetBrains Mono',monospace;font-size:11.5px;">client.acme.proposal_status: Q2 proposal at $48,000 ARR submitted Apr 28. Procurement in progress, 2-3 weeks. Budget confirmed by Sarah Chen.</div>
-            <div class="note-source">CRM Agent</div>
-            <div class="note-quality">0.95</div>
-            <div class="note-date">Apr 28</div>
-            <div class="note-actions" onclick="event.stopPropagation()">
-              <button class="btn btn-xs btn-ghost" onclick="showToast('Promoted to Memory')">Promote</button>
-              <button class="btn btn-xs btn-ghost" onclick="openModal('suppress-modal')" style="color:var(--slate-400);">Suppress</button>
-            </div>
-          </div>
-          <div style="padding:9px 16px;font-size:12px;color:var(--slate-400);text-align:center;">+ 6 more blocks</div>
-        </div>
-      </div><!-- /tab-notes -->
-
-      <!-- ════════════════════════════════════════════════════════════
-           TAB: DOCUMENTS
-           Org-inherited + subaccount documents, with 2-col card grid
-      ════════════════════════════════════════════════════════════ -->
-      <div class="tab-panel" id="tab-documents" style="display:none;">
-
-        <!-- Doc filter bar -->
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-          <div class="search-wrap" style="width:220px;">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input class="search-box" type="search" placeholder="Search documents...">
-          </div>
-          <select class="form-select" style="font-size:12px;padding:5px 10px;">
-            <option>Type: All</option><option>PDF</option><option>Markdown</option><option>Text</option><option>Image</option>
-          </select>
-          <select class="form-select" style="font-size:12px;padding:5px 10px;">
-            <option>Source: All</option><option>Manual upload</option><option>Google Drive</option><option>Notion</option>
-          </select>
-          <select class="form-select" style="font-size:12px;padding:5px 10px;">
-            <option>Scope: All</option><option>Org-inherited</option><option>This client</option>
-          </select>
-        </div>
-
-        <!-- Org-inherited section -->
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--slate-400);margin-bottom:10px;display:flex;align-items:center;gap:8px;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-          Organisation-level (4)
-        </div>
-        <div class="doc-grid" style="margin-bottom:20px;">
-
-          <!-- Org doc 1 -->
-          <div class="doc-card" onclick="openDocDrawer('org-doc-1')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-pdf">PDF</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Acme Inc Brand Guide</div>
-                <div class="doc-meta-row">
-                  <span class="chip-inherited">Org-inherited</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">2.4 MB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v3</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated Apr 10</div>
-          </div>
-
-          <!-- Org doc 2 -->
-          <div class="doc-card" onclick="openDocDrawer('org-doc-2')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-md">MD</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Voice and Tone Standards</div>
-                <div class="doc-meta-row">
-                  <span class="chip-inherited">Org-inherited</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">38 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v7</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated May 1</div>
-          </div>
-
-          <!-- Org doc 3 -->
-          <div class="doc-card" onclick="openDocDrawer('org-doc-3')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-pdf">PDF</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Operating Procedures Manual</div>
-                <div class="doc-meta-row">
-                  <span class="chip-inherited">Org-inherited</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">5.1 MB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v12</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated Mar 28</div>
-          </div>
-
-          <!-- Org doc 4 -->
-          <div class="doc-card" onclick="openDocDrawer('org-doc-4')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-txt">TXT</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Approved Vendor List</div>
-                <div class="doc-meta-row">
-                  <span class="chip-inherited">Org-inherited</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Notion sync</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">12 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v2</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Synced 2h ago</div>
+      <!-- ---- Bundles sub-tab ---- -->
+      <div id="doc-sub-bundles" class="tab-panel" style="display:none;">
+        <div class="tab-toolbar">
+          <div class="tab-toolbar-right" style="margin-left:0;">
+            <button class="btn btn-primary" onclick="openNewBundleModal()">+ New bundle</button>
           </div>
         </div>
 
-        <!-- Client-specific section -->
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--slate-400);margin-bottom:10px;">
-          This client (6)
-        </div>
-        <div class="doc-grid">
+        <div class="bundle-grid" id="bundle-grid">
 
-          <!-- Client doc 1 -->
-          <div class="doc-card" onclick="openDocDrawer('client-doc-1')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-pdf">PDF</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Q4 2025 Pricing Sheet</div>
-                <div class="doc-meta-row">
-                  <span class="chip-this-client">This client</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">840 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v2</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated Jan 5</div>
+          <!-- Bundle 1 -->
+          <div class="bundle-card" onclick="openBundleDrawer('b1')">
+            <div class="bundle-name">Onboarding pack</div>
+            <div class="bundle-desc">Core documents for onboarding new clients. Shared with CRM Agent and Onboarding Agent.</div>
+            <div class="bundle-meta">5 documents</div>
+            <div class="bundle-util">claude-sonnet-4-6: 87% · gpt-4o: 82%</div>
+            <div class="bundle-meta" style="margin-top:6px;">Updated 2 days ago</div>
           </div>
 
-          <!-- Client doc 2 -->
-          <div class="doc-card" onclick="openDocDrawer('client-doc-2')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-md">MD</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Client onboarding checklist</div>
-                <div class="doc-meta-row">
-                  <span class="chip-this-client">This client</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">24 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v4</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated May 2</div>
+          <!-- Bundle 2 -->
+          <div class="bundle-card" onclick="openBundleDrawer('b2')">
+            <div class="bundle-name">Demo collateral Q1 2026</div>
+            <div class="bundle-desc">Product demos, case studies, and one-pagers for Q1 sales motions.</div>
+            <div class="bundle-meta">3 documents</div>
+            <div class="bundle-util">claude-sonnet-4-6: 92% · gpt-4o: 89%</div>
+            <div class="bundle-meta" style="margin-top:6px;">Updated 1 week ago</div>
           </div>
 
-          <!-- Client doc 3 -->
-          <div class="doc-card" onclick="openDocDrawer('client-doc-3')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-doc">DOC</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Sample proposal template</div>
-                <div class="doc-meta-row">
-                  <span class="chip-this-client">This client</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Google Drive</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">1.2 MB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v6</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Synced 1h ago</div>
+          <!-- Bundle 3 -->
+          <div class="bundle-card" onclick="openBundleDrawer('b3')">
+            <div class="bundle-name">Compliance evidence: SOC 2</div>
+            <div class="bundle-desc">Audit reports and evidence documentation for SOC 2 Type II certification review.</div>
+            <div class="bundle-meta">12 documents</div>
+            <div class="bundle-util">claude-sonnet-4-6: 76% · gpt-4o: 71%</div>
+            <div class="bundle-meta" style="margin-top:6px;">Updated 3 weeks ago</div>
           </div>
 
-          <!-- Client doc 4 -->
-          <div class="doc-card" onclick="openDocDrawer('client-doc-4')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-txt">TXT</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Stripe API integration notes</div>
-                <div class="doc-meta-row">
-                  <span class="chip-this-client">This client</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">8 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v1</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated Apr 20</div>
+          <!-- Bundle 4 -->
+          <div class="bundle-card" onclick="openBundleDrawer('b4')">
+            <div class="bundle-name">Sales playbook supporting docs</div>
+            <div class="bundle-desc">Reference materials used by sales agents during outreach and negotiation phases.</div>
+            <div class="bundle-meta">7 documents</div>
+            <div class="bundle-util">claude-sonnet-4-6: 81% · gpt-4o: 78%</div>
+            <div class="bundle-meta" style="margin-top:6px;">Updated 5 days ago</div>
           </div>
 
-          <!-- Client doc 5 -->
-          <div class="doc-card" onclick="openDocDrawer('client-doc-5')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-pdf">PDF</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">January 2026 promo terms</div>
-                <div class="doc-meta-row">
-                  <span class="chip-this-client">This client</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Manual upload</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">310 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v1</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Updated Jan 28</div>
-          </div>
+        </div><!-- /bundle-grid -->
+      </div><!-- /doc-sub-bundles -->
 
-          <!-- Client doc 6 -->
-          <div class="doc-card" onclick="openDocDrawer('client-doc-6')">
-            <div class="doc-card-header">
-              <div class="doc-icon doc-icon-doc">DOC</div>
-              <div style="flex:1;min-width:0;">
-                <div class="doc-name">Sales playbook v3</div>
-                <div class="doc-meta-row">
-                  <span class="chip-this-client">This client</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="doc-source">Google Drive</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">890 KB</span>
-              <span style="color:var(--slate-300);">·</span>
-              <span class="doc-size">v3</span>
-            </div>
-            <div style="font-size:11px;color:var(--slate-400);">Synced 30m ago</div>
-          </div>
+    </div><!-- /tab-documents -->
 
-        </div>
-      </div><!-- /tab-documents -->
-
-    </div><!-- /page-body -->
-  </div><!-- /main -->
+  </div><!-- /main-content -->
 </div><!-- /app-shell -->
 
-<!-- ═══════════════════════════════════════════════════════════════════
-     MEMORY DRAWER — unified view/edit with rich-text authoring
-     Opens for both authored entries and memory blocks
-═══════════════════════════════════════════════════════════════════ -->
-<div id="drawer-memory-item" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)closeDrawer('memory-item')">
-  <div class="drawer" style="width:640px;">
-    <div class="drawer-header" style="display:flex;align-items:center;justify-content:space-between;">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <h2 id="memory-drawer-title">Acme Corp deal history</h2>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <button id="memory-edit-btn" class="btn btn-sm btn-secondary" onclick="enterEditMode()" style="">Edit</button>
-        <button class="drawer-close" onclick="closeDrawer('memory-item')">&times;</button>
-      </div>
+<!-- ============================================================
+     DRAWER: New entry
+     ============================================================ -->
+<div class="drawer-overlay" id="new-entry-drawer" onclick="closeDrawerIfOverlay(event,'new-entry-drawer')">
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">New authored memory</div>
+      <button class="drawer-close" onclick="closeDrawer('new-entry-drawer')">&#x2715;</button>
     </div>
     <div class="drawer-body">
-
-      <!-- VIEW MODE -->
-      <div id="memory-view-mode">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;" id="memory-drawer-meta-chips">
-          <span class="chip-type" id="mc-type">Entry</span>
-          <span class="chip-this-client" id="mc-scope">This client</span>
-          <span class="chip-tier" id="mc-tier" style="display:none;">Tier 2 · audience_icp</span>
-          <span id="mc-badge" class="badge badge-slate" style="font-size:10px;">note</span>
-        </div>
-        <div style="font-size:11.5px;color:var(--slate-400);margin-bottom:14px;" id="mc-updated">Updated Apr 15 by Jordan K.</div>
-
-        <div style="font-size:13.5px;line-height:1.75;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:10px;padding:16px 18px;" id="memory-drawer-content">
-          <p>Chronological log of all significant interactions with Acme Corp since first contact in January 2026.</p>
-          <h3>Key milestones</h3>
-          <ul>
-            <li>January 2026 — initial outreach via LinkedIn to Sarah Chen</li>
-            <li>February 2026 — discovery call, identified FieldEdge as incumbent</li>
-            <li>April 22 — technical call with James Watt, Kubernetes architecture discussed</li>
-            <li>April 28 — Q2 proposal submitted at $48,000 ARR</li>
-            <li>May 5 — procurement in progress, 2-3 weeks estimate</li>
-          </ul>
-          <h3>Outstanding commitments</h3>
-          <ul>
-            <li>Deliver Kubernetes architecture doc before May 9</li>
-            <li>Follow-up trigger if no procurement response by May 12</li>
-          </ul>
-        </div>
+      <div class="form-group">
+        <label class="form-label">Title</label>
+        <input class="form-input" type="text" placeholder="Short, clear label for this memory">
       </div>
-
-      <!-- EDIT MODE (hidden by default) -->
-      <div id="memory-edit-mode" style="display:none;">
-        <div class="form-field">
-          <label class="form-label">Title</label>
-          <input class="form-input" id="edit-title-input" value="Acme Corp deal history">
+      <div class="form-group">
+        <label class="form-label">Content</label>
+        <div class="rte-toolbar">
+          <button class="rte-btn" onclick="document.execCommand('bold')"><b>B</b></button>
+          <button class="rte-btn" onclick="document.execCommand('italic')"><i>I</i></button>
+          <button class="rte-btn" onclick="document.execCommand('insertUnorderedList')">&#8226;</button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-          <div class="form-field" style="margin-bottom:0;">
-            <label class="form-label">Type</label>
-            <select class="form-select" id="edit-type-select" style="width:100%;">
-              <option>Entry</option>
-              <option>Block</option>
-            </select>
-          </div>
-          <div class="form-field" style="margin-bottom:0;" id="edit-tier-field" style="display:none;">
-            <label class="form-label">Tier (blocks only)</label>
-            <select class="form-select" id="edit-tier-select" style="width:100%;">
-              <option value="">None</option>
-              <option value="brand_identity">Tier 1 · brand_identity</option>
-              <option value="voice_tone">Tier 1 · voice_tone</option>
-              <option value="offer_positioning">Tier 1 · offer_positioning</option>
-              <option value="audience_icp">Tier 2 · audience_icp</option>
-              <option value="operating_constraints">Tier 2 · operating_constraints</option>
-              <option value="proof_library">Tier 3 · proof_library</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Rich-text editor -->
-        <div class="form-field">
-          <label class="form-label">Content</label>
-          <div style="border:1px solid var(--slate-300);border-radius:8px;overflow:hidden;" id="rte-container">
-            <div class="rte-toolbar">
-              <button class="rte-btn" onclick="execFmt('bold')" title="Bold"><strong>B</strong></button>
-              <button class="rte-btn" onclick="execFmt('italic')" title="Italic"><em>I</em></button>
-              <button class="rte-btn" onclick="execFmt('underline')" title="Underline" style="text-decoration:underline;">U</button>
-              <button class="rte-btn" onclick="execFmt('strikeThrough')" title="Strikethrough"><s>S</s></button>
-              <div class="rte-sep"></div>
-              <button class="rte-btn" onclick="execBlock('h2')" title="Heading 2">H2</button>
-              <button class="rte-btn" onclick="execBlock('h3')" title="Heading 3">H3</button>
-              <div class="rte-sep"></div>
-              <button class="rte-btn" onclick="execFmt('insertUnorderedList')" title="Bullet list">&#8226; List</button>
-              <button class="rte-btn" onclick="execFmt('insertOrderedList')" title="Numbered list">1. List</button>
-              <div class="rte-sep"></div>
-              <button class="rte-btn" onclick="execBlock('blockquote')" title="Quote">&#8220;&#8221;</button>
-              <button class="rte-btn" onclick="execFmt('formatBlock','pre')" title="Code block">&lt;/&gt;</button>
-              <div class="rte-sep"></div>
-              <button class="rte-btn" onclick="insertLink()" title="Insert link">Link</button>
-            </div>
-            <div
-              class="rte-body"
-              id="rte-editor"
-              contenteditable="true"
-              data-placeholder="Write long-form notes, SOPs, brand docs, meeting summaries..."
-            >
-              <p>Chronological log of all significant interactions with Acme Corp since first contact in January 2026.</p>
-              <h3>Key milestones</h3>
-              <ul>
-                <li>January 2026 — initial outreach via LinkedIn to Sarah Chen</li>
-                <li>February 2026 — discovery call, identified FieldEdge as incumbent</li>
-                <li>April 22 — technical call with James Watt, Kubernetes architecture discussed</li>
-                <li>April 28 — Q2 proposal submitted at $48,000 ARR</li>
-                <li>May 5 — procurement in progress, 2-3 weeks estimate</li>
-              </ul>
-              <h3>Outstanding commitments</h3>
-              <ul>
-                <li>Deliver Kubernetes architecture doc before May 9</li>
-                <li>Follow-up trigger if no procurement response by May 12</li>
-              </ul>
-            </div>
-          </div>
-        </div>
+        <div class="rte-area" contenteditable="true"></div>
       </div>
-    </div>
-
-    <!-- FOOTER — changes between view/edit mode -->
-    <div class="drawer-footer" id="memory-footer-view">
-      <button class="btn btn-ghost" onclick="closeDrawer('memory-item')">Close</button>
-    </div>
-    <div class="drawer-footer" id="memory-footer-edit" style="display:none;">
-      <button class="btn btn-danger" style="margin-right:auto;" onclick="openModal('delete-entry-modal')">Delete</button>
-      <button class="btn btn-ghost" onclick="cancelEditMode()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveMemoryItem()">Save</button>
-    </div>
-  </div>
-</div>
-
-<!-- Memory drawer for org-inherited (read-only) -->
-<div id="drawer-memory-inherited" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)closeDrawer('memory-inherited')">
-  <div class="drawer" style="width:640px;">
-    <div class="drawer-header">
-      <h2>Brand identity and positioning</h2>
-      <button class="drawer-close" onclick="closeDrawer('memory-inherited')">&times;</button>
-    </div>
-    <div class="drawer-body">
-      <div class="lock-notice">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-        This block is managed at the organisation level. To edit, go to Organisation Settings.
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-        <span class="chip-type">Block</span>
-        <span class="chip-inherited">Org-inherited</span>
-        <span class="chip-tier">Tier 1 · brand_identity</span>
-      </div>
-      <div style="font-size:11.5px;color:var(--slate-400);margin-bottom:14px;">Updated May 1 by Admin</div>
-      <div style="font-size:13.5px;line-height:1.75;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:10px;padding:16px 18px;">
-        <p>We help agencies scale client output without scaling headcount. Lead with efficiency ROI, not technical complexity. Avoid describing ourselves as "AI" in first contact.</p>
-        <ul>
-          <li>Primary value prop: "your team's output, multiplied"</li>
-          <li>Never lead with model names or infrastructure details</li>
-          <li>Case studies preferred over feature lists in outbound</li>
-        </ul>
+      <div class="form-group">
+        <label class="form-label">Tier (optional)</label>
+        <select class="form-select">
+          <option value="">No tier</option>
+          <option value="1">Tier 1 - highest priority</option>
+          <option value="2">Tier 2 - standard priority</option>
+          <option value="3">Tier 3 - reference only</option>
+        </select>
       </div>
     </div>
     <div class="drawer-footer">
-      <button class="btn btn-ghost" onclick="closeDrawer('memory-inherited')">Close</button>
-      <a href="#" style="margin-left:auto;" class="btn btn-secondary" onclick="event.preventDefault();closeDrawer('memory-inherited');showToast('Navigating to Organisation Settings...')">Edit at organisation level</a>
+      <button class="btn btn-primary" onclick="closeDrawer('new-entry-drawer')">Save</button>
+      <button class="btn btn-outline" onclick="closeDrawer('new-entry-drawer')">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════
-     NOTE DETAIL DRAWER
-═══════════════════════════════════════════════════════════════════ -->
-<div id="drawer-note-entry-detail" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)closeDrawer('note-entry-detail')">
-  <div class="drawer" style="width:560px;">
-    <div class="drawer-header">
-      <h2>Note detail</h2>
-      <button class="drawer-close" onclick="closeDrawer('note-entry-detail')">&times;</button>
+<!-- ============================================================
+     DRAWER: Ignored memories (was "Suppressed")
+     ============================================================ -->
+<div class="drawer-overlay" id="ignored-drawer" onclick="closeDrawerIfOverlay(event,'ignored-drawer')">
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">Ignored memories (12)</div>
+      <button class="drawer-close" onclick="closeDrawer('ignored-drawer')">&#x2715;</button>
     </div>
     <div class="drawer-body">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
-        <span class="badge badge-amber">preference</span>
-        <span style="font-size:12px;color:var(--slate-400);">Outreach Agent · May 1</span>
-      </div>
-      <div style="font-size:14px;color:var(--slate-800);line-height:1.65;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
-        Sarah Chen responds best to ROI-first framing. Mentioned "12 hours per week saved" figure unprompted in April 22 call, use in all decks and proposals.
-      </div>
-      <div style="margin-bottom:14px;">
-        <div style="font-size:12px;font-weight:600;color:var(--slate-600);margin-bottom:6px;">Source run</div>
-        <a href="#" style="font-size:12.5px;color:var(--indigo-600);text-decoration:none;">Outreach run 7c3a4f <span style="color:var(--slate-400);">· Apr 22, 2026 · 23 steps</span></a>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div style="font-size:12px;font-weight:600;color:var(--slate-600);margin-bottom:6px;">Confidence</div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="height:6px;border-radius:3px;background:var(--slate-200);flex:1;max-width:180px;overflow:hidden;">
-            <div style="width:91%;height:100%;background:var(--emerald-500);border-radius:3px;"></div>
-          </div>
-          <span style="font-size:13px;font-weight:600;color:var(--slate-700);">0.91</span>
+      <p style="font-size:13px;color:var(--slate-500);margin-bottom:16px;">Memories you removed. Agents won't track these unless you add them back.</p>
+
+      <div class="ignored-item">
+        <div class="ignored-title">Prospect is not a technical buyer</div>
+        <div class="ignored-reason">You removed this on Apr 10 · Removed manually</div>
+        <div class="ignored-actions">
+          <button class="btn btn-primary" onclick="alert('Tracking again')">Track again</button>
+          <button class="btn btn-outline" onclick="alert('Keeping ignored')">Keep ignoring</button>
         </div>
+      </div>
+
+      <div class="ignored-item">
+        <div class="ignored-title">Budget is under review for H2 2026</div>
+        <div class="ignored-reason">You removed this on Apr 28 · Removed manually</div>
+        <div class="ignored-actions">
+          <button class="btn btn-primary" onclick="alert('Tracking again')">Track again</button>
+          <button class="btn btn-outline" onclick="alert('Keeping ignored')">Keep ignoring</button>
+        </div>
+      </div>
+
+      <div class="ignored-item">
+        <div class="ignored-title">Primary contact is Jennifer Park (EA)</div>
+        <div class="ignored-reason">You removed this on Apr 15 · Removed manually</div>
+        <div class="ignored-actions">
+          <button class="btn btn-primary" onclick="alert('Tracking again')">Track again</button>
+          <button class="btn btn-outline" onclick="alert('Keeping ignored')">Keep ignoring</button>
+        </div>
+      </div>
+
+      <div class="ignored-item">
+        <div class="ignored-title">Nova Digital deal paused for Q1</div>
+        <div class="ignored-reason">Removed automatically · Low confidence (0.31)</div>
+        <div class="ignored-actions">
+          <button class="btn btn-primary" onclick="alert('Tracking again')">Track again</button>
+          <button class="btn btn-outline" onclick="alert('Keeping ignored')">Keep ignoring</button>
+        </div>
+      </div>
+
+      <div class="ignored-item">
+        <div class="ignored-title">Competitor X integrates natively with Salesforce</div>
+        <div class="ignored-reason">You removed this on Mar 22 · Removed manually</div>
+        <div class="ignored-actions">
+          <button class="btn btn-primary" onclick="alert('Tracking again')">Track again</button>
+          <button class="btn btn-outline" onclick="alert('Keeping ignored')">Keep ignoring</button>
+        </div>
+      </div>
+
+      <div style="padding-top:10px;font-size:12px;color:var(--slate-400);">
+        + 7 more ignored memories
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     DRAWER: Bundle detail
+     ============================================================ -->
+<div class="drawer-overlay" id="bundle-drawer" onclick="closeDrawerIfOverlay(event,'bundle-drawer')">
+  <div class="drawer-panel" style="width:560px;">
+    <div class="drawer-head">
+      <div class="drawer-title" id="bundle-drawer-title">Bundle</div>
+      <button class="drawer-close" onclick="closeDrawer('bundle-drawer')">&#x2715;</button>
+    </div>
+    <div class="drawer-body" id="bundle-drawer-body">
+      <!-- Populated by JS -->
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-primary">Save</button>
+      <button class="btn btn-outline" onclick="closeDrawer('bundle-drawer')">Cancel</button>
+      <button class="btn btn-outline" style="margin-left:auto;color:var(--slate-400);">Archive</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     MODAL: New bundle
+     ============================================================ -->
+<div class="drawer-overlay" id="new-bundle-modal" onclick="closeDrawerIfOverlay(event,'new-bundle-modal')">
+  <div class="drawer-panel" style="width:480px;">
+    <div class="drawer-head">
+      <div class="drawer-title">New bundle</div>
+      <button class="drawer-close" onclick="closeDrawer('new-bundle-modal')">&#x2715;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-group">
+        <label class="form-label">Bundle name</label>
+        <input class="form-input" type="text" placeholder="e.g. Q2 Demo pack">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description (optional)</label>
+        <input class="form-input" type="text" placeholder="What is this bundle for?">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Initial documents</label>
+        <p style="font-size:12.5px;color:var(--slate-400);margin-bottom:8px;">You can add documents after creating the bundle.</p>
+        <button class="btn btn-outline" style="width:100%;">+ Pick from your documents</button>
       </div>
     </div>
     <div class="drawer-footer">
-      <button class="btn btn-ghost" onclick="closeDrawer('note-entry-detail')">Close</button>
-      <button class="btn btn-secondary" onclick="closeDrawer('note-entry-detail');openModal('suppress-modal')">Suppress</button>
-      <button class="btn btn-primary" onclick="closeDrawer('note-entry-detail');showToast('Promoted to Memory')">Promote to Memory</button>
+      <button class="btn btn-primary" onclick="closeDrawer('new-bundle-modal')">Create bundle</button>
+      <button class="btn btn-outline" onclick="closeDrawer('new-bundle-modal')">Cancel</button>
     </div>
   </div>
 </div>
 
-<div id="drawer-note-block-detail" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)closeDrawer('note-block-detail')">
-  <div class="drawer" style="width:560px;">
-    <div class="drawer-header">
-      <h2>Block proposal</h2>
-      <button class="drawer-close" onclick="closeDrawer('note-block-detail')">&times;</button>
-    </div>
-    <div class="drawer-body">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
-        <span class="badge badge-slate">block</span>
-        <span style="font-size:12px;color:var(--slate-400);">Agent-proposed · May 5</span>
-      </div>
-      <div style="font-size:13px;color:var(--slate-700);line-height:1.65;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-family:'JetBrains Mono',monospace;font-size:12px;">
-        client.acme.next_actions: (1) Kubernetes doc by May 9. (2) Procurement follow-up if no response May 12. (3) Competitor comparison refresh. (4) Resolve belief conflict on Marcus Hill.
-      </div>
-      <div style="font-size:12px;color:var(--slate-500);">This block was automatically proposed based on accumulated note entries. Promoting it will add it to Memory where it will be loaded into every agent run for this client.</div>
-    </div>
-    <div class="drawer-footer">
-      <button class="btn btn-ghost" onclick="closeDrawer('note-block-detail')">Close</button>
-      <button class="btn btn-secondary" onclick="closeDrawer('note-block-detail');openModal('suppress-modal')">Suppress</button>
-      <button class="btn btn-primary" onclick="closeDrawer('note-block-detail');showToast('Block promoted to Memory')">Promote to Memory</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════
-     DOCUMENT DETAIL DRAWER
-═══════════════════════════════════════════════════════════════════ -->
-<div id="drawer-doc-detail" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)closeDrawer('doc-detail')">
-  <div class="drawer" style="width:600px;">
-    <div class="drawer-header">
-      <h2 id="doc-drawer-title">Client onboarding checklist</h2>
-      <button class="drawer-close" onclick="closeDrawer('doc-detail')">&times;</button>
-    </div>
-    <div class="drawer-body">
-      <!-- Inherited notice (shown for org docs) -->
-      <div class="lock-notice" id="doc-lock-notice" style="display:none;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-        This document is managed at the organisation level. Archive or replace only available at org level.
-      </div>
-
-      <!-- Metadata -->
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-        <span class="chip-this-client" id="doc-scope-chip">This client</span>
-        <span class="doc-source" id="doc-source-label">Manual upload</span>
-        <span style="font-size:11px;color:var(--slate-400);" id="doc-size-label">24 KB</span>
-        <span style="font-size:11px;color:var(--slate-400);">v4</span>
-      </div>
-
-      <!-- Preview area -->
-      <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:20px;margin-bottom:16px;text-align:center;">
-        <div style="font-size:40px;margin-bottom:8px;">&#x1F4C4;</div>
-        <div style="font-size:13px;color:var(--slate-600);" id="doc-preview-name">client-onboarding-checklist.md</div>
-        <a href="#" style="font-size:12px;color:var(--indigo-600);" onclick="event.preventDefault();showToast('Opening raw content...')">View raw content</a>
-      </div>
-
-      <!-- Version history collapsible -->
-      <div style="margin-bottom:16px;">
-        <button onclick="toggleVersionHistory()" style="display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--slate-700);padding:0;margin-bottom:8px;">
-          <svg id="version-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-          Version history (4 versions)
-        </button>
-        <div id="version-history-list" style="display:none;">
-          <div class="version-row current">
-            <span style="font-weight:700;color:var(--indigo-700);">v4</span>
-            <span style="color:var(--indigo-500);">Current</span>
-            <span style="margin-left:auto;color:var(--slate-400);">May 2, 10:14am</span>
-          </div>
-          <div class="version-row">
-            <span style="font-weight:600;color:var(--slate-700);">v3</span>
-            <span style="color:var(--slate-500);">Jordan K.</span>
-            <span style="margin-left:auto;color:var(--slate-400);">Apr 15</span>
-            <button class="btn btn-xs btn-ghost" style="margin-left:8px;" onclick="showToast('Reverted to v3')">Revert</button>
-          </div>
-          <div class="version-row">
-            <span style="font-weight:600;color:var(--slate-700);">v2</span>
-            <span style="color:var(--slate-500);">Marcus D.</span>
-            <span style="margin-left:auto;color:var(--slate-400);">Mar 20</span>
-            <button class="btn btn-xs btn-ghost" style="margin-left:8px;" onclick="showToast('Reverted to v2')">Revert</button>
-          </div>
-          <div class="version-row">
-            <span style="font-weight:600;color:var(--slate-700);">v1</span>
-            <span style="color:var(--slate-500);">Jordan K.</span>
-            <span style="margin-left:auto;color:var(--slate-400);">Feb 10</span>
-            <button class="btn btn-xs btn-ghost" style="margin-left:8px;" onclick="showToast('Reverted to v1')">Revert</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Replace upload -->
-      <div id="doc-replace-section">
-        <div style="font-size:12px;font-weight:600;color:var(--slate-600);margin-bottom:8px;">Replace document</div>
-        <div class="drop-zone" style="padding:20px;" onclick="showToast('File picker opened')">
-          <div style="font-size:12.5px;color:var(--slate-500);">Drag file here or click to browse</div>
-          <div style="font-size:11px;color:var(--slate-400);margin-top:4px;">PDF, DOCX, MD, TXT up to 50 MB</div>
-        </div>
-      </div>
-    </div>
-    <div class="drawer-footer">
-      <button class="btn btn-danger" id="doc-archive-btn" onclick="openModal('archive-doc-modal')" style="margin-right:auto;">Archive</button>
-      <button class="btn btn-ghost" onclick="closeDrawer('doc-detail')">Close</button>
-      <button class="btn btn-secondary" onclick="showToast('Downloading...')">Download</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════
-     SUPPRESSED DRAWER
-═══════════════════════════════════════════════════════════════════ -->
-<div id="drawer-suppressed" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)closeDrawer('suppressed')">
-  <div class="drawer" style="width:560px;">
-    <div class="drawer-header">
-      <h2>Suppressed items (12)</h2>
-      <button class="drawer-close" onclick="closeDrawer('suppressed')">&times;</button>
-    </div>
-    <div class="drawer-body">
-      <div style="font-size:12.5px;color:var(--slate-500);background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-        Suppressed items will not re-appear in Notes unless the system observes contradicting evidence.
-      </div>
-      <div class="card">
-        <div class="suppressed-row">
-          <div style="font-weight:500;">Prospect is not a technical buyer</div>
-          <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">Suppressed May 3 · conflicted with later evidence</div>
-        </div>
-        <div class="suppressed-row">
-          <div style="font-weight:500;">Budget is under review for H2 2026</div>
-          <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">Suppressed Apr 28 · superseded by confirmed budget</div>
-        </div>
-        <div class="suppressed-row">
-          <div style="font-weight:500;">James Watt prefers shorter emails</div>
-          <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">Suppressed Apr 15 · contradicted by direct feedback</div>
-        </div>
-        <div class="suppressed-row">
-          <div style="font-weight:500;">Primary contact is Jennifer Park (EA)</div>
-          <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">Suppressed Apr 10 · Sarah Chen confirmed as primary</div>
-        </div>
-        <div class="suppressed-row">
-          <div style="font-weight:500;">Acme has no existing API integrations</div>
-          <div style="font-size:11px;color:var(--slate-400);margin-top:2px;">Suppressed Apr 2 · CRM agent found Active Directory API in use</div>
-        </div>
-        <div style="padding:10px 14px;font-size:12px;color:var(--slate-400);text-align:center;">+ 7 more suppressed items</div>
-      </div>
-    </div>
-    <div class="drawer-footer">
-      <button class="btn btn-secondary" onclick="closeDrawer('suppressed')">Close</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════
-     MODALS
-═══════════════════════════════════════════════════════════════════ -->
-
-<!-- Suppress modal -->
-<div id="modal-suppress-modal" class="modal-overlay" onclick="if(event.target===this)closeModal('suppress-modal')">
-  <div class="modal-box">
-    <div class="modal-title">Suppress this item?</div>
-    <div class="modal-body">This item will be removed from Notes. If the system later observes contradicting evidence, you will see a review item in your Inbox.</div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('suppress-modal')">Cancel</button>
-      <button class="btn btn-danger" onclick="closeModal('suppress-modal');showToast('Item suppressed')">Suppress</button>
-    </div>
-  </div>
-</div>
-
-<!-- Delete entry modal -->
-<div id="modal-delete-entry-modal" class="modal-overlay" onclick="if(event.target===this)closeModal('delete-entry-modal')">
-  <div class="modal-box">
-    <div class="modal-title">Delete this entry?</div>
-    <div class="modal-body">This memory entry will be permanently deleted. Agents that referenced it will lose access on the next run. This cannot be undone.</div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('delete-entry-modal')">Cancel</button>
-      <button class="btn btn-danger" onclick="closeModal('delete-entry-modal');closeDrawer('memory-item');showToast('Entry deleted')">Delete entry</button>
-    </div>
-  </div>
-</div>
-
-<!-- Archive document modal -->
-<div id="modal-archive-doc-modal" class="modal-overlay" onclick="if(event.target===this)closeModal('archive-doc-modal')">
-  <div class="modal-box">
-    <div class="modal-title">Archive this document?</div>
-    <div class="modal-body">Archived documents are no longer accessible by agents but are retained for audit purposes. You can restore archived documents from Organisation Settings.</div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('archive-doc-modal')">Cancel</button>
-      <button class="btn btn-danger" onclick="closeModal('archive-doc-modal');closeDrawer('doc-detail');showToast('Document archived')">Archive</button>
-    </div>
-  </div>
-</div>
-
-<!-- Upload document modal -->
-<div id="modal-upload-modal" class="modal-overlay" onclick="if(event.target===this)closeModal('upload-modal')">
-  <div class="modal-box" style="width:520px;">
-    <div class="modal-title">Upload document</div>
-    <div class="drop-zone" onclick="showToast('File picker opened')">
-      <div style="font-size:28px;margin-bottom:8px;">&#x1F4C2;</div>
-      <div style="font-size:13px;font-weight:600;color:var(--slate-700);">Drop files here</div>
-      <div style="font-size:12px;color:var(--slate-400);margin-top:4px;">or click to browse &middot; PDF, DOCX, MD, TXT, PNG up to 50 MB</div>
-    </div>
-    <div class="form-field">
-      <label class="form-label">File name</label>
-      <input class="form-input" placeholder="e.g. Q4 2025 Pricing Sheet.pdf">
-    </div>
-    <div class="form-field">
-      <label class="form-label">Description (optional)</label>
-      <input class="form-input" placeholder="Brief description of this document...">
-    </div>
-    <div class="form-field" style="margin-bottom:0;">
-      <label class="form-label">Tags</label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--slate-300);border-radius:8px;background:white;">
-        <input style="border:none;outline:none;font-size:12px;flex:1;min-width:80px;" placeholder="Add tag, press Enter...">
-      </div>
-    </div>
-    <div class="modal-footer" style="margin-top:20px;">
-      <button class="btn btn-ghost" onclick="closeModal('upload-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="closeModal('upload-modal');showToast('Document uploaded')">Upload</button>
-    </div>
-  </div>
-</div>
-
-<!-- Connect Drive modal -->
-<div id="modal-connect-drive-modal" class="modal-overlay" onclick="if(event.target===this)closeModal('connect-drive-modal')">
-  <div class="modal-box">
-    <div class="modal-title">Connect Google Drive</div>
-    <div class="modal-body">Select a Drive folder to sync. Documents in the folder will be available to agents and will auto-update when files change.</div>
-    <div class="form-field">
-      <label class="form-label">Drive folder URL or ID</label>
-      <input class="form-input" placeholder="https://drive.google.com/drive/folders/...">
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('connect-drive-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="closeModal('connect-drive-modal');showToast('Google Drive connected')">Connect</button>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div id="toast"></div>
-
+<script src="_sidebar.js"></script>
 <script>
-// ── Tab switching ──
-function switchKTab(id, btn) {
-  document.querySelectorAll('#k-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
-  document.getElementById('tab-' + id).style.display = 'block';
-
-  document.getElementById('memory-actions').style.display = id === 'memory' ? 'flex' : 'none';
-  document.getElementById('notes-actions').style.display = id === 'notes' ? 'flex' : 'none';
-  document.getElementById('docs-actions').style.display = id === 'documents' ? 'flex' : 'none';
-}
-
-// ── Memory filter chips ──
-function setMemoryFilter(type, el) {
-  document.querySelectorAll('#memory-filter-chips .filter-chip').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  var inherited = document.querySelectorAll('.inherited-item');
-  var blocks = document.querySelectorAll('.block-item');
-  var entries = document.querySelectorAll('.entry-item');
-  var sepInherited = document.getElementById('sep-inherited');
-  var sepBlocks = document.getElementById('sep-blocks');
-  var sepEntries = document.getElementById('sep-entries');
-  var show = function(items, sep, vis) {
-    items.forEach(function(r) { r.style.display = vis ? '' : 'none'; });
-    if (sep) sep.style.display = vis ? '' : 'none';
-  };
-  if (type === 'all') {
-    show(inherited, sepInherited, true); show(blocks, sepBlocks, true); show(entries, sepEntries, true);
-  } else if (type === 'entries') {
-    show(inherited, sepInherited, false); show(blocks, sepBlocks, false); show(entries, sepEntries, true);
-  } else if (type === 'blocks') {
-    show(inherited, sepInherited, false); show(blocks, sepBlocks, true); show(entries, sepEntries, false);
-  } else if (type === 'inherited') {
-    show(inherited, sepInherited, true); show(blocks, sepBlocks, false); show(entries, sepEntries, false);
+// ---- Sidebar ----
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof renderSidebar === 'function') {
+    renderSidebar('workspace', 'knowledge.html');
   }
-}
-
-// ── Notes filter chips ──
-function setNotesFilter(type, el) {
-  document.querySelectorAll('#notes-filter-chips .filter-chip').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  var noteEntries = document.querySelectorAll('.note-entry-item');
-  var noteBlocks = document.querySelectorAll('.note-block-item');
-  var sepNE = document.getElementById('sep-notes-entries');
-  var sepNB = document.getElementById('sep-notes-blocks');
-  if (type === 'all') {
-    noteEntries.forEach(r => r.style.display = '');
-    noteBlocks.forEach(r => r.style.display = '');
-    if (sepNE) sepNE.style.display = '';
-    if (sepNB) sepNB.style.display = '';
-  } else if (type === 'entries') {
-    noteEntries.forEach(r => r.style.display = '');
-    noteBlocks.forEach(r => r.style.display = 'none');
-    if (sepNE) sepNE.style.display = '';
-    if (sepNB) sepNB.style.display = 'none';
-  } else if (type === 'blocks') {
-    noteEntries.forEach(r => r.style.display = 'none');
-    noteBlocks.forEach(r => r.style.display = '');
-    if (sepNE) sepNE.style.display = 'none';
-    if (sepNB) sepNB.style.display = '';
-  }
-}
-
-// ── Drawers ──
-function openDrawer(id) {
-  var el = document.getElementById('drawer-' + id);
-  if (el) {
-    el.style.display = 'flex';
-    var drawer = el.querySelector('.drawer');
-    if (drawer) {
-      drawer.style.transform = 'translateX(100%)';
-      requestAnimationFrame(function() {
-        drawer.style.transition = 'transform 0.25s ease';
-        drawer.style.transform = 'translateX(0)';
-      });
-    }
-  }
-}
-function closeDrawer(id) {
-  var el = document.getElementById('drawer-' + id);
-  if (el) {
-    var drawer = el.querySelector('.drawer');
-    if (drawer) {
-      drawer.style.transform = 'translateX(100%)';
-      setTimeout(function() { el.style.display = 'none'; }, 250);
-    } else {
-      el.style.display = 'none';
-    }
-  }
-}
-
-// ── Memory drawer routing ──
-function openMemoryDrawer(context) {
-  if (context === 'new-entry' || context === 'new-block') {
-    // Open in edit mode with empty fields
-    document.getElementById('memory-drawer-title').textContent = context === 'new-entry' ? 'New entry' : 'New block';
-    document.getElementById('edit-title-input').value = '';
-    document.getElementById('rte-editor').innerHTML = '';
-    document.getElementById('memory-edit-btn').style.display = 'none';
-    document.getElementById('memory-view-mode').style.display = 'none';
-    document.getElementById('memory-edit-mode').style.display = 'block';
-    document.getElementById('memory-footer-view').style.display = 'none';
-    document.getElementById('memory-footer-edit').style.display = 'flex';
-    openDrawer('memory-item');
-  } else if (context && context.startsWith('view-inherited')) {
-    openDrawer('memory-inherited');
-  } else {
-    // Open in view mode (default)
-    document.getElementById('memory-edit-btn').style.display = '';
-    document.getElementById('memory-view-mode').style.display = 'block';
-    document.getElementById('memory-edit-mode').style.display = 'none';
-    document.getElementById('memory-footer-view').style.display = 'flex';
-    document.getElementById('memory-footer-edit').style.display = 'none';
-    openDrawer('memory-item');
-  }
-}
-
-// ── Edit mode toggle ──
-function enterEditMode() {
-  document.getElementById('memory-view-mode').style.display = 'none';
-  document.getElementById('memory-edit-mode').style.display = 'block';
-  document.getElementById('memory-edit-btn').style.display = 'none';
-  document.getElementById('memory-footer-view').style.display = 'none';
-  document.getElementById('memory-footer-edit').style.display = 'flex';
-  document.getElementById('rte-editor').focus();
-}
-function cancelEditMode() {
-  document.getElementById('memory-view-mode').style.display = 'block';
-  document.getElementById('memory-edit-mode').style.display = 'none';
-  document.getElementById('memory-edit-btn').style.display = '';
-  document.getElementById('memory-footer-view').style.display = 'flex';
-  document.getElementById('memory-footer-edit').style.display = 'none';
-}
-function saveMemoryItem() {
-  var title = document.getElementById('edit-title-input').value || 'Untitled';
-  var html = document.getElementById('rte-editor').innerHTML;
-  // Update view mode content
-  document.getElementById('memory-drawer-title').textContent = title;
-  document.getElementById('memory-drawer-content').innerHTML = html;
-  cancelEditMode();
-  showToast('Saved');
-}
-
-// ── Rich-text execCommand ──
-function execFmt(cmd, val) {
-  document.getElementById('rte-editor').focus();
-  document.execCommand(cmd, false, val || null);
-}
-function execBlock(tag) {
-  document.getElementById('rte-editor').focus();
-  document.execCommand('formatBlock', false, tag);
-}
-function insertLink() {
-  var url = prompt('Enter URL:');
-  if (url) {
-    document.getElementById('rte-editor').focus();
-    document.execCommand('createLink', false, url);
-  }
-}
-
-// ── Document drawer ──
-function openDocDrawer(docId) {
-  var isOrg = docId.startsWith('org-');
-  var lockNotice = document.getElementById('doc-lock-notice');
-  var archiveBtn = document.getElementById('doc-archive-btn');
-  var replaceSection = document.getElementById('doc-replace-section');
-  var docScopeChip = document.getElementById('doc-scope-chip');
-
-  if (isOrg) {
-    lockNotice.style.display = 'flex';
-    archiveBtn.style.display = 'none';
-    replaceSection.style.display = 'none';
-    docScopeChip.className = 'chip-inherited';
-    docScopeChip.textContent = 'Org-inherited';
-    var titles = {
-      'org-doc-1': 'Acme Inc Brand Guide',
-      'org-doc-2': 'Voice and Tone Standards',
-      'org-doc-3': 'Operating Procedures Manual',
-      'org-doc-4': 'Approved Vendor List'
-    };
-    document.getElementById('doc-drawer-title').textContent = titles[docId] || 'Document';
-  } else {
-    lockNotice.style.display = 'none';
-    archiveBtn.style.display = '';
-    replaceSection.style.display = '';
-    docScopeChip.className = 'chip-this-client';
-    docScopeChip.textContent = 'This client';
-    var titles = {
-      'client-doc-1': 'Q4 2025 Pricing Sheet',
-      'client-doc-2': 'Client onboarding checklist',
-      'client-doc-3': 'Sample proposal template',
-      'client-doc-4': 'Stripe API integration notes',
-      'client-doc-5': 'January 2026 promo terms',
-      'client-doc-6': 'Sales playbook v3'
-    };
-    document.getElementById('doc-drawer-title').textContent = titles[docId] || 'Document';
-  }
-  openDrawer('doc-detail');
-}
-
-// ── Version history collapsible ──
-function toggleVersionHistory() {
-  var list = document.getElementById('version-history-list');
-  var caret = document.getElementById('version-caret');
-  if (list.style.display === 'none') {
-    list.style.display = 'block';
-    caret.style.transform = 'rotate(90deg)';
-  } else {
-    list.style.display = 'none';
-    caret.style.transform = '';
-  }
-}
-
-// ── Overflow menu ──
-function toggleMenu(menuId) {
-  var dd = document.getElementById('dropdown-' + menuId);
-  dd.classList.toggle('open');
-  event.stopPropagation();
-}
-function closeMenu(menuId) {
-  var dd = document.getElementById('dropdown-' + menuId);
-  if (dd) dd.classList.remove('open');
-}
-document.addEventListener('click', function() {
-  document.querySelectorAll('.overflow-dropdown').forEach(function(d) { d.classList.remove('open'); });
+  applyProfileToKnowledge();
 });
 
-// ── Modals ──
-function openModal(id) {
-  var el = document.getElementById('modal-' + id);
-  if (el) el.classList.add('open');
-}
-function closeModal(id) {
-  var el = document.getElementById('modal-' + id);
-  if (el) el.classList.remove('open');
+// ---- Profile-aware visibility ----
+function getProfile() {
+  return localStorage.getItem('prototype.sidebar.demoProfile') || 'workspace-operator';
 }
 
-// ── Toast ──
-function showToast(msg) {
-  var t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(function() { t.classList.remove('show'); }, 2200);
+function applyProfileToKnowledge() {
+  const profile = getProfile();
+  const isAdmin = (profile === 'org-admin' || profile === 'system-admin');
+
+  // Show/hide Inherited filter chips
+  document.querySelectorAll('[id^="chip-inherited"]').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
+
+  // Show/hide admin-view entries
+  document.querySelectorAll('.admin-view-entry').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
 }
+
+// ---- Tab switching ----
+function switchTab(panelId, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    if (p.id.startsWith('tab-')) p.classList.remove('active');
+  });
+  document.getElementById(panelId).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ---- Sub-tab switching (inside Documents) ----
+function switchSubTab(panelId, btn) {
+  // Hide all doc sub-panels
+  document.getElementById('doc-sub-documents').style.display = 'none';
+  document.getElementById('doc-sub-documents').classList.remove('active');
+  document.getElementById('doc-sub-bundles').style.display = 'none';
+  document.getElementById('doc-sub-bundles').classList.remove('active');
+
+  document.getElementById(panelId).style.display = 'block';
+  document.getElementById(panelId).classList.add('active');
+
+  document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ---- Authored filter ----
+function filterAuthored(filter, btn) {
+  document.querySelectorAll('#authored-filter-chips .filter-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const profile = getProfile();
+  const isAdmin = (profile === 'org-admin' || profile === 'system-admin');
+
+  document.querySelectorAll('#authored-list .entry-card').forEach(card => {
+    const cardFilter = card.getAttribute('data-filter') || '';
+    if (filter === 'all') {
+      // Show all, but respect admin view
+      if (card.classList.contains('admin-view-entry')) {
+        card.style.display = isAdmin ? '' : 'none';
+      } else {
+        card.style.display = '';
+      }
+    } else if (filter === 'pending') {
+      card.style.display = cardFilter.includes('pending') ? '' : 'none';
+    } else if (filter === 'tier1') {
+      card.style.display = cardFilter.includes('tier1') ? '' : 'none';
+    } else if (filter === 'tier2') {
+      card.style.display = cardFilter.includes('tier2') ? '' : 'none';
+    } else if (filter === 'tier3') {
+      card.style.display = cardFilter.includes('tier3') ? '' : 'none';
+    } else if (filter === 'inherited') {
+      card.style.display = cardFilter.includes('inherited') ? '' : 'none';
+    }
+  });
+}
+
+// ---- Auto-memory filter ----
+function filterAuto(filter, btn) {
+  document.querySelectorAll('#auto-filter-chips .filter-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  document.querySelectorAll('#auto-list .entry-card').forEach(card => {
+    const f = card.getAttribute('data-auto-filter') || '';
+    if (filter === 'all') {
+      card.style.display = '';
+    } else if (filter === 'pending') {
+      card.style.display = f === 'pending' ? '' : 'none';
+    } else {
+      card.style.display = '';
+    }
+  });
+
+  document.querySelectorAll('#auto-suggestions .suggestion-card').forEach(card => {
+    if (filter === 'all' || filter === 'suggested') {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+// ---- Overflow menus ----
+function toggleOverflow(e, id) {
+  e.stopPropagation();
+  const panel = document.getElementById(id);
+  const isOpen = panel.classList.contains('open');
+  document.querySelectorAll('.overflow-panel.open').forEach(p => p.classList.remove('open'));
+  if (!isOpen) panel.classList.add('open');
+}
+function closeOverflow(id) {
+  document.getElementById(id).classList.remove('open');
+}
+document.addEventListener('click', function() {
+  document.querySelectorAll('.overflow-panel.open').forEach(p => p.classList.remove('open'));
+});
+
+// ---- Drawers ----
+function openDrawer(id) { document.getElementById(id).classList.add('open'); }
+function closeDrawer(id) { document.getElementById(id).classList.remove('open'); }
+function closeDrawerIfOverlay(e, id) {
+  if (e.target === document.getElementById(id)) closeDrawer(id);
+}
+
+function openNewEntryDrawer() { openDrawer('new-entry-drawer'); }
+function openEditEntry() { openDrawer('new-entry-drawer'); }
+function openIgnoredDrawer() { openDrawer('ignored-drawer'); }
+
+// ---- Bundle drawer ----
+const BUNDLES = {
+  b1: {
+    name: 'Onboarding pack',
+    desc: 'Core documents for onboarding new clients.',
+    docs: ['Onboarding checklist v3.pdf', 'Sales playbook Q1 2026.pdf', 'Technical integration spec.pdf', 'Demo script v2.docx', 'Acme Corp discovery notes.docx'],
+    util: 'claude-sonnet-4-6: 87% · gpt-4o: 82%',
+    agents: ['CRM Agent', 'Onboarding Agent'],
+    tokens: '~142k prefix tokens · 91% cache hit rate'
+  },
+  b2: {
+    name: 'Demo collateral Q1 2026',
+    desc: 'Product demos, case studies, and one-pagers for Q1 sales motions.',
+    docs: ['Demo script v2.docx', 'Beta Inc proposal draft.pdf', 'Q1 pipeline review.xlsx'],
+    util: 'claude-sonnet-4-6: 92% · gpt-4o: 89%',
+    agents: ['Outreach Agent'],
+    tokens: '~89k prefix tokens · 94% cache hit rate'
+  },
+  b3: {
+    name: 'Compliance evidence: SOC 2',
+    desc: 'Audit reports and evidence documentation for SOC 2 Type II certification review.',
+    docs: ['SOC 2 audit report 2025.pdf', 'Data processing agreement template.pdf', 'Technical integration spec.pdf', '+ 9 more'],
+    util: 'claude-sonnet-4-6: 76% · gpt-4o: 71%',
+    agents: ['Compliance Agent'],
+    tokens: '~310k prefix tokens · 88% cache hit rate'
+  },
+  b4: {
+    name: 'Sales playbook supporting docs',
+    desc: 'Reference materials used by sales agents during outreach and negotiation phases.',
+    docs: ['Sales playbook Q1 2026.pdf', 'Demo script v2.docx', 'Beta Inc proposal draft.pdf', 'Account expansion targets H2.xlsx', '+ 3 more'],
+    util: 'claude-sonnet-4-6: 81% · gpt-4o: 78%',
+    agents: ['Outreach Agent', 'CRM Agent'],
+    tokens: '~198k prefix tokens · 90% cache hit rate'
+  }
+};
+
+function openBundleDrawer(id) {
+  const b = BUNDLES[id];
+  document.getElementById('bundle-drawer-title').textContent = b.name;
+  document.getElementById('bundle-drawer-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Bundle name</label>
+      <input class="form-input" type="text" value="${b.name}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input class="form-input" type="text" value="${b.desc}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Documents (${b.docs.length})</label>
+      ${b.docs.map(d => `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--slate-100);font-size:13px;color:var(--slate-700);">&#128196; ${d} <button style="margin-left:auto;font-size:11px;color:var(--slate-400);border:none;background:none;cursor:pointer;">Remove</button></div>`).join('')}
+      <button class="btn btn-outline" style="width:100%;margin-top:10px;">+ Add documents</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Utilization</label>
+      <div style="font-size:13px;color:var(--slate-600);">${b.util}</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Attached agents</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${b.agents.map(a => `<span style="background:var(--indigo-50);border:1px solid var(--indigo-200);color:var(--indigo-700);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:500;">${a} <span style="cursor:pointer;color:var(--slate-400);">x</span></span>`).join('')}
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cached context impact</label>
+      <div style="font-size:13px;color:var(--slate-600);">${b.tokens}</div>
+    </div>
+  `;
+  openDrawer('bundle-drawer');
+}
+
+function openNewBundleModal() { openDrawer('new-bundle-modal'); }
+
+// Close drawers on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.drawer-overlay.open').forEach(d => d.classList.remove('open'));
+  }
+});
 </script>
 </body>
 </html>

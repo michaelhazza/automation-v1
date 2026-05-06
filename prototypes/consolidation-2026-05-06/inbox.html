@@ -456,17 +456,17 @@
           <div class="item-time">May 5, 7:45am</div>
         </div>
 
-        <!-- Decision 2: Suppressed memory / contradicting evidence items (3 examples) -->
+        <!-- Round 7d: Memory update items (was "Suppressed memory") -->
         <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
           <div class="unread-dot" style="background:var(--slate-400);"></div>
           <div class="item-type-icon icon-suppressed">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
           </div>
           <div class="item-main">
-            <div class="item-title">Suppressed memory: contradicting evidence observed</div>
-            <div class="item-subtitle">Entry you suppressed on Apr 10 ("Prospect is not a technical buyer") may no longer be accurate. CRM Agent observed James Watt referencing container orchestration architecture in a new conversation. Confidence 0.88.</div>
+            <div class="item-title">Memory update: Acme Corp prospect</div>
+            <div class="item-subtitle">CRM Agent flagged a possible memory update. On Apr 10 you removed the note "Prospect is not a technical buyer". James Watt was just heard discussing container orchestration architecture in a recent call, which suggests the opposite. Should I track this again?</div>
             <div class="item-meta">
-              <span class="badge badge-slate" style="font-size:10px;">Suppressed memory</span>
+              <span class="badge badge-slate" style="font-size:10px;">Memory update</span>
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
               <span style="font-size:11px;color:var(--slate-400);">CRM Agent</span>
               <span style="font-size:11px;color:var(--slate-400);">Confidence 0.88</span>
@@ -474,10 +474,10 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Re-add</button>
-              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Re-suppress</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Track again</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep ignoring</button>
             </div>
-            <div class="kb-hint">A to re-add · R to re-suppress</div>
+            <div class="kb-hint">T to track · K to keep ignoring</div>
             <div class="item-time">May 6, 8:14am</div>
           </div>
         </div>
@@ -488,10 +488,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
           </div>
           <div class="item-main">
-            <div class="item-title">Suppressed memory: contradicting evidence observed</div>
-            <div class="item-subtitle">Entry you suppressed on Apr 28 ("Budget is under review for H2 2026") may be relevant again. Outreach Agent found a LinkedIn post from Sarah Chen referencing a "phase 2 budget review" for Q3. Confidence 0.71.</div>
+            <div class="item-title">Memory update: H2 2026 budget review</div>
+            <div class="item-subtitle">Outreach Agent flagged a possible memory update. On Apr 28 you removed the note "Budget is under review for H2 2026". A LinkedIn post from Sarah Chen referenced a "phase 2 budget review" for Q3. Should I track this again?</div>
             <div class="item-meta">
-              <span class="badge badge-slate" style="font-size:10px;">Suppressed memory</span>
+              <span class="badge badge-slate" style="font-size:10px;">Memory update</span>
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
               <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
               <span style="font-size:11px;color:var(--slate-400);">Confidence 0.71</span>
@@ -499,10 +499,10 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Re-add</button>
-              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Re-suppress</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Track again</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep ignoring</button>
             </div>
-            <div class="kb-hint">A to re-add · R to re-suppress</div>
+            <div class="kb-hint">T to track · K to keep ignoring</div>
             <div class="item-time">May 5, 3:30pm</div>
           </div>
         </div>
@@ -513,10 +513,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
           </div>
           <div class="item-main">
-            <div class="item-title">Suppressed memory: contradicting evidence observed</div>
-            <div class="item-subtitle">Entry you suppressed on Apr 15 ("Primary contact is Jennifer Park (EA)") conflicts with new evidence. Jennifer introduced herself as "the onboarding coordinator" on a call, not just a scheduling contact. Confidence 0.82.</div>
+            <div class="item-title">Memory update: Acme Corp primary contact</div>
+            <div class="item-subtitle">Outreach Agent flagged a possible memory update. On Apr 15 you removed the note "Primary contact is Jennifer Park (EA)". Jennifer just introduced herself as "the onboarding coordinator" on a call, not just a scheduling contact. Should I track this again?</div>
             <div class="item-meta">
-              <span class="badge badge-slate" style="font-size:10px;">Suppressed memory</span>
+              <span class="badge badge-slate" style="font-size:10px;">Memory update</span>
               <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
               <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
               <span style="font-size:11px;color:var(--slate-400);">Confidence 0.82</span>
@@ -524,10 +524,10 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
             <div class="item-actions">
-              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Re-add</button>
-              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Re-suppress</button>
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Track again</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep ignoring</button>
             </div>
-            <div class="kb-hint">A to re-add · R to re-suppress</div>
+            <div class="kb-hint">T to track · K to keep ignoring</div>
             <div class="item-time">May 5, 11:45am</div>
           </div>
         </div>
@@ -716,24 +716,24 @@
   </div>
 </div>
 
-<!-- ── SUPPRESSED MEMORY DRAWER (Decision 2 + 7) ───────────────────── -->
+<!-- ── MEMORY UPDATE DRAWER (Round 7d: was "Suppressed memory") ───────────────────── -->
 <div id="suppressed-memory-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
   <div class="drawer" style="width:560px;">
     <div class="drawer-header">
       <div>
-        <h2>Suppressed memory: contradicting evidence</h2>
-        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Entry suppressed Apr 10 · new evidence found May 6</div>
+        <h2>Memory update: Acme Corp prospect</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Note removed Apr 10 · new evidence found May 6</div>
       </div>
       <button class="drawer-close" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">&times;</button>
     </div>
     <div class="drawer-body">
-      <!-- What was suppressed -->
+      <!-- What was ignored -->
       <div style="margin-bottom:16px;">
-        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">Suppressed entry</div>
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">Note you removed</div>
         <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px 14px;">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;">
             <span class="badge badge-amber" style="font-size:10px;">observation</span>
-            <span style="font-size:11px;color:var(--slate-400);">Outreach Agent · Apr 10 · Suppressed Apr 10</span>
+            <span style="font-size:11px;color:var(--slate-400);">Outreach Agent · removed Apr 10</span>
           </div>
           <div style="font-size:13px;color:var(--slate-700);line-height:1.55;">Prospect is not a technical buyer. James Watt defers all technical evaluations to the engineering team and focuses only on business outcomes.</div>
         </div>
@@ -741,15 +741,15 @@
 
       <!-- New evidence -->
       <div style="margin-bottom:16px;">
-        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">New evidence observed</div>
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">New evidence</div>
         <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:12px 14px;">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;">
             <span style="font-size:11px;color:var(--indigo-500);">CRM Agent · May 6 · Run 8d4f2a</span>
             <span style="margin-left:auto;font-size:11px;font-weight:600;color:var(--emerald-600);">Confidence 0.88</span>
           </div>
-          <div style="font-size:13px;color:var(--indigo-800);line-height:1.55;">James Watt referenced container orchestration patterns and Kubernetes cluster sizing unprompted in a LinkedIn reply. The language used indicates hands-on technical familiarity, not just business-level understanding.</div>
+          <div style="font-size:13px;color:var(--indigo-800);line-height:1.55;">James Watt was just heard discussing container orchestration architecture in a recent call, which suggests the opposite. He referenced Kubernetes cluster sizing unprompted, indicating hands-on technical familiarity.</div>
           <div style="margin-top:8px;">
-            <a href="#" style="font-size:12px;color:var(--indigo-600);">Open source run</a>
+            <a href="run-trace.html" style="font-size:12px;color:var(--indigo-600);">View run trace</a>
           </div>
         </div>
       </div>
@@ -764,13 +764,13 @@
       </div>
 
       <div style="font-size:12.5px;color:var(--slate-500);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:10px 14px;">
-        Approving will re-add the original entry (or a revised version) to auto-memory. Re-suppressing will maintain the suppression and lower the triggering threshold for future contradictions.
+        Tracking again adds this back to auto-memory for agents to use. Keeping it ignored means agents won't track this note unless you change your mind.
       </div>
     </div>
     <div class="drawer-footer">
       <button class="btn btn-ghost" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Close</button>
-      <button class="btn btn-secondary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Re-suppress</button>
-      <button class="btn btn-primary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Approve (re-add)</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Keep ignoring</button>
+      <button class="btn btn-primary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Track again</button>
     </div>
   </div>
 </div>

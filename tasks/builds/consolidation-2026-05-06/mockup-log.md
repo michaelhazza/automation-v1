@@ -982,3 +982,67 @@ index.html:
 - `prototypes/consolidation-2026-05-06/before-project-edit.html` (created)
 - `prototypes/consolidation-2026-05-06/index.html` (masthead, decisions bullet, 7b-11 section added, chain marked complete)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 7d — 2026-05-06
+
+**Operator feedback:** Knowledge structure leaks schema concepts (memory blocks, suppression, promotion) into the UI in ways operators cannot decode. Round 7d: drop all schema-verb language from knowledge.html, org-knowledge.html, inbox.html, and before-* pages. Apply locked mental model and inheritance visibility model.
+
+**Terminology decisions (Round 7d):**
+- "blocks" removed from UI (schema concept only)
+- "promote" replaced by "Approve as authored" or "Edit and approve"
+- "suppress" replaced by "Reject" or "Ignore"
+- "re-add" replaced by "Track again"
+- "re-suppress" replaced by "Keep ignoring"
+- "Notes" tab replaced by "Auto-memory" (Authored memory is its own tab now)
+- "Suppressed memory" inbox item type renamed "Memory update"
+- New terms introduced: "Pending review", "Suggested grouping", "Track again", "Keep ignoring", "Ignored memories"
+- "Review queue" becomes a filter chip within each tab (not a separate page)
+
+**Changes made:**
+
+knowledge.html (full rebuild):
+- Top-level tabs: Authored memory (default) / Auto-memory / Documents
+- Authored memory: filter chips (All / Pending review / Tier 1 / Tier 2 / Tier 3 / Inherited for admins). 8 active entries, 2 pending-review entries (amber left-border, Approve / Edit and approve / Reject actions). 3 org-inherited entries (hidden for workspace operators, shown with "Admin view" purple chip + tooltip + lock-icon "Edit at org level" for org/system admins). All wired to demo profile selector.
+- Auto-memory: filter chips (All / Pending review / Suggested groupings / Inherited). No "+ New" button (system-generated). 2 suggested grouping cards (indigo-bg, bullet list of observations, Approve grouping / Edit and approve / Reject). 8 pending individual entries with type chip + confidence bar. 2 approved entries with "In use" chip and "Edit and take ownership" overflow action.
+- Documents tab: sub-tab strip (Documents / Bundles). Documents sub-tab: 8 subaccount docs + 4 inherited (admin-only, violet-bg). Bundles sub-tab: 4 bundle cards with utilization per model family, drawer with member list, attached agents, cached context impact. "+ New bundle" primary button opens modal.
+- "Ignored memories (12)" link in page header opens drawer (was "Suppressed (12)"). Drawer renamed "Ignored memories". Body copy: "Memories you removed. Agents won't track these unless you add them back." 5 example rows each with "Track again" (primary) and "Keep ignoring" (outlined) buttons.
+- "New entry" drawer: execCommand rich-text editor + tier dropdown.
+- Profile-aware JS: applyProfileToKnowledge() shows/hides admin-view entries and Inherited filter chip based on localStorage profile.
+
+org-knowledge.html (full rebuild):
+- Same three-tab structure (Authored memory / Auto-memory / Documents).
+- No inheritance chips (this IS the source). "Used by N of 4 workspaces" indicator on every item (replaces old Inheritance panel from 7b-8).
+- 6 authored entries with Used-by chips. 4 auto-memory entries (2 pending with "Would propagate to N workspaces" chip, 2 approved). 8 documents + 3 bundles, all with Used-by chips.
+- New entry drawer adds "Share with workspaces" selector.
+- Org notice bar explains propagation behavior.
+
+inbox.html (3 item edits + drawer edit):
+- Item 1 title: "Memory update: Acme Corp prospect". Body: plain-English question format ("CRM Agent flagged...Should I track this again?"). Buttons: Track again / Keep ignoring. Keyboard hint: "T to track · K to keep ignoring".
+- Item 2 title: "Memory update: H2 2026 budget review". Same plain-English format.
+- Item 3 title: "Memory update: Acme Corp primary contact". Same format.
+- Item type chip: "Memory update" (was "Suppressed memory").
+- Drawer title: "Memory update: Acme Corp prospect". Section labels: "Note you removed" / "New evidence". Footer: "Keep ignoring" / "Track again".
+
+before-knowledge.html: banner updated to note Round 7d scope + 5-point problems list including schema-verb leak.
+
+before-org-knowledge.html: Round 7d note added: OrgMemoryPage used "block" terminology; all schema verbs replaced in Round 7d rebuild.
+
+index.html: masthead eyebrow Round 7c -> 7d. Description updated. 4 new decisions box entries covering terminology rebuild, suggested groupings, inheritance visibility model, and inbox Memory update items. Knowledge card description updated. org-knowledge card description updated.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- knowledge.html opens on Authored memory (the operator's primary task: manage what agents know). Auto-memory and Documents are secondary tabs. Pending review is a filter chip, not a leading state.
+- Default to hidden: yes -- inherited items hidden for workspace operators (not relevant to their context). Suggested groupings surfaced in Auto-memory but not as a default view. Confidence bars visible inline but small. No KPI tiles added.
+- One primary action: yes -- Authored memory: "+ New entry". Auto-memory: no primary action (system-generated). Documents: "+ Upload" or "+ New bundle" per sub-tab. Ignored memories: "Track again" per row.
+- Inline state: yes -- pending status shown as amber chip and left-border on card. Approved shown as "In use" chip. Admin-inherited shown as purple "Admin view" chip. No separate status dashboard.
+- Re-check passed: yes -- workspace operator sees only their workspace items, no confusing inherited noise. Admin sees inherited items clearly tagged and separated. "Track again / Keep ignoring" replaces the schema-verb pair. A non-technical operator can read "Memory update: Acme Corp prospect" and understand what to do without a glossary.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/knowledge.html` (full rebuild)
+- `prototypes/consolidation-2026-05-06/org-knowledge.html` (full rebuild)
+- `prototypes/consolidation-2026-05-06/inbox.html` (3 item edits + drawer edit)
+- `prototypes/consolidation-2026-05-06/before-knowledge.html` (banner update)
+- `prototypes/consolidation-2026-05-06/before-org-knowledge.html` (banner update)
+- `prototypes/consolidation-2026-05-06/index.html` (metadata, decisions, card descriptions)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
