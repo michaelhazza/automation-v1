@@ -32,31 +32,44 @@
     color: #94a3b8; margin-bottom: 14px; padding-bottom: 10px;
     border-bottom: 1px solid #e2e8f0;
   }
-  .section-heading-count { color: #cbd5e1; font-weight: 500; }
   .section-heading-desc { font-size: 12.5px; font-weight: 400; color: #94a3b8; text-transform: none; letter-spacing: 0; margin-left: auto; }
 
   .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
 
   .proto-card {
     background: white; border: 1px solid #e8ecf0; border-radius: 12px;
-    padding: 16px 18px; color: inherit;
+    padding: 16px 18px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    transition: all 0.15s; display: block;
+    transition: all 0.15s;
     position: relative;
   }
   .proto-card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
-  .proto-card-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }
-  .before-link { position: relative; z-index: 2; }
+
+  /* Title link is the primary clickable surface — it stretches via ::before to cover the whole card */
+  .proto-card-title-link {
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .proto-card-title-link::before {
+    content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px;
+  }
+  /* Anything that should be independently clickable inside the card sits above the overlay */
+  .before-link, .preview-link, .preview-links {
+    position: relative; z-index: 2;
+  }
 
   .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-  .proto-card-title { font-size: 14px; font-weight: 700; color: #0f172a; }
   .proto-card-file { font-size: 11px; font-family: monospace; color: #94a3b8; background: #f1f5f9; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
   .proto-card-desc { font-size: 12.5px; color: #64748b; line-height: 1.5; margin-bottom: 8px; }
   .proto-card-footer { display: flex; align-items: center; justify-content: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f1f5f9; gap: 8px; }
-  .before-link { font-size: 11px; color: #b45309; font-weight: 600; background: #fef9c3; border: 1px solid #fde68a; border-radius: 4px; padding: 2px 7px; }
+  .before-link {
+    font-size: 11px; color: #b45309; font-weight: 600;
+    background: #fef9c3; border: 1px solid #fde68a; border-radius: 4px; padding: 2px 7px;
+  }
   .before-link:hover { background: #fef08a; }
 
-  .preview-links { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+  .preview-links { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
   .preview-link {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 12px; color: #4f46e5; font-weight: 600;
@@ -80,7 +93,7 @@
   .decisions-box li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #f59e0b; margin-top: 6px; flex-shrink: 0; }
 
   .reference-section .proto-card { background: #fafbfc; border-style: dashed; }
-  .reference-section .proto-card-title { color: #475569; }
+  .reference-section .proto-card-title-link { color: #475569; }
   a { text-decoration: none; }
 </style>
 </head>
@@ -88,7 +101,7 @@
 
 <div class="masthead">
   <div class="masthead-eyebrow">UI Consolidation Prototype</div>
-  <h1>Automation OS — UI Consolidation</h1>
+  <h1>Automation OS, UI Consolidation</h1>
   <p>Clickable HTML prototypes for the consolidated UI. Each card links to a redesigned surface; if a "View before" link is present, it opens the depiction of the current production state for comparison. Use the demo profile selector at the top of the sidebar (Workspace operator / Org admin / System admin) to see permission-gated views.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-06</div>
@@ -118,7 +131,7 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- WORKSPACE — day-to-day operator surfaces                     -->
+<!-- WORKSPACE                                                    -->
 <!-- ============================================================ -->
 <div class="section">
   <div class="section-heading">
@@ -127,69 +140,69 @@
   </div>
   <div class="card-grid">
 
-    <a href="home.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Home</div>
+        <a href="home.html" class="proto-card-title-link">Home</a>
         <div class="proto-card-file">home.html</div>
       </div>
       <div class="proto-card-desc">4-widget grid (Today's runs sparkline, Active agents, Today's schedule, Spend &amp; cap) plus Inbox preview, Recent runs list and Recent activity list.</div>
       <div class="proto-card-footer">
         <a href="before-home.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="inbox.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Inbox</div>
+        <a href="inbox.html" class="proto-card-title-link">Inbox</a>
         <div class="proto-card-file">inbox.html</div>
       </div>
       <div class="proto-card-desc">Unified human-in-the-loop queue. Approvals, clarifications, tasks, failed runs, and memory updates in one stream. Action buttons consistent across item types.</div>
       <div class="proto-card-footer">
         <a href="before-inbox.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="calendar.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Calendar</div>
+        <a href="calendar.html" class="proto-card-title-link">Calendar</a>
         <div class="proto-card-file">calendar.html</div>
       </div>
       <div class="proto-card-desc">Schedule visualisation with Week / Fortnight / Month views. Today + previous / next inline navigation. Shows scheduled fires across all recurring tasks and agent runs.</div>
       <div class="proto-card-footer">
         <a href="before-calendar.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="activity.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Activity</div>
+        <a href="activity.html" class="proto-card-title-link">Activity</a>
         <div class="proto-card-file">activity.html</div>
       </div>
       <div class="proto-card-desc">Cross-cutting activity feed. Subaccount / Org / System scope toggle. 24+ event types with type, status, severity filters. Slide-in drawer for event detail.</div>
       <div class="proto-card-footer"></div>
-    </a>
+    </div>
 
-    <a href="recurring-tasks.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Recurring tasks</div>
+        <a href="recurring-tasks.html" class="proto-card-title-link">Recurring tasks</a>
         <div class="proto-card-file">recurring-tasks.html</div>
       </div>
       <div class="proto-card-desc">Unified surface for rule-fires-agent. Each task has a fire condition (Schedule / Event / Manual) and an action (invoke agent + optional pinned workflow). Replaces ScheduledTasks and Triggers.</div>
       <div class="proto-card-footer">
         <a href="before-recurring-tasks.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="run-trace.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Run trace</div>
+        <a href="run-trace.html" class="proto-card-title-link">Run trace</a>
         <div class="proto-card-file">run-trace.html</div>
       </div>
       <div class="proto-card-desc">Per-run forensic timeline. All 6 event types (RUN_START, LLM_CALL, TOOL_CALL, TOOL_RESULT, HITL_GATE, DELEGATION) clickable with type-specific detail panel and absolute timestamps.</div>
       <div class="proto-card-footer">
         <a href="before-run-trace.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -206,7 +219,7 @@
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Agents</div>
+        <span class="proto-card-title-link" style="cursor: default;">Agents</span>
         <div class="proto-card-file">agents.html</div>
       </div>
       <div class="proto-card-desc">Single mode-aware page that morphs based on context. Open all three side-by-side to see the differences.</div>
@@ -221,38 +234,38 @@
       </div>
     </div>
 
-    <a href="agent-edit.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Agent edit</div>
+        <a href="agent-edit.html" class="proto-card-title-link">Agent edit</a>
         <div class="proto-card-file">agent-edit.html</div>
       </div>
       <div class="proto-card-desc">Subaccount-level agent edit. Tabs: Configure, Behaviour, Skills, Data sources, Schedule, Budget, Runs. Skills tab uses search-driven Enabled / Add structure with tier chips (System / Org / This client).</div>
       <div class="proto-card-footer">
         <a href="before-agent-edit.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="org-agent-edit.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Org agent edit</div>
+        <a href="org-agent-edit.html" class="proto-card-title-link">Org agent edit</a>
         <div class="proto-card-file">org-agent-edit.html</div>
       </div>
       <div class="proto-card-desc">Org-level agent definition (the template that subaccounts inherit). Same tab structure as workspace agent edit, plus a Deployments tab. Two-tier skills (System + Organisation).</div>
       <div class="proto-card-footer">
         <a href="before-org-agent-edit.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="project-edit.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Project edit</div>
+        <a href="project-edit.html" class="proto-card-title-link">Project edit</a>
         <div class="proto-card-file">project-edit.html</div>
       </div>
       <div class="proto-card-desc">Project configuration with the new Objective field that is injected into agent context at run time. Replaces the retired Goals OKR tree.</div>
       <div class="proto-card-footer">
         <a href="before-project-edit.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -267,38 +280,38 @@
   </div>
   <div class="card-grid">
 
-    <a href="knowledge.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Knowledge (workspace)</div>
+        <a href="knowledge.html" class="proto-card-title-link">Knowledge (workspace)</a>
         <div class="proto-card-file">knowledge.html</div>
       </div>
       <div class="proto-card-desc">Authored memory, Auto-memory, Documents (with Documents / Bundles sub-tabs). Rich-text authoring on Authored. Pending review status with Approve / Edit and approve / Reject. Org admin profile sees inherited items as Admin view.</div>
       <div class="proto-card-footer">
         <a href="before-knowledge.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="org-knowledge.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Knowledge (org)</div>
+        <a href="org-knowledge.html" class="proto-card-title-link">Knowledge (org)</a>
         <div class="proto-card-file">org-knowledge.html</div>
       </div>
       <div class="proto-card-desc">Org-level Knowledge editing surface. Same Authored / Auto-memory / Documents structure, with "Used by N of 4 workspaces" indicators on every item. No inheritance chips (this is the source).</div>
       <div class="proto-card-footer">
         <a href="before-org-knowledge.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="integrations.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Connections</div>
+        <a href="integrations.html" class="proto-card-title-link">Connections</a>
         <div class="proto-card-file">integrations.html</div>
       </div>
       <div class="proto-card-desc">App connections and Logins. Universal search at the top. Plain-language method labels (Sign in / Key / Web login) replace OAuth / API key / cookie session.</div>
       <div class="proto-card-footer">
         <a href="before-integrations.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -313,38 +326,38 @@
   </div>
   <div class="card-grid">
 
-    <a href="automations.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Automations</div>
+        <a href="automations.html" class="proto-card-title-link">Automations</a>
         <div class="proto-card-file">automations.html</div>
       </div>
       <div class="proto-card-desc">Two tabs: Workflows (internal multi-step flows) and External (webhook-based recipes). Triggers retired and folded into Recurring tasks.</div>
       <div class="proto-card-footer">
         <a href="before-automations.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="automation-detail.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Automation detail</div>
+        <a href="automation-detail.html" class="proto-card-title-link">Automation detail</a>
         <div class="proto-card-file">automation-detail.html</div>
       </div>
       <div class="proto-card-desc">Sub-screen reachable when clicking an automation row. Execution detail, run history, configuration. Not a top-level nav item.</div>
       <div class="proto-card-footer">
         <a href="before-automation-detail.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="queues.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Queues (system)</div>
+        <a href="queues.html" class="proto-card-title-link">Queues (system)</a>
         <div class="proto-card-file">queues.html</div>
       </div>
       <div class="proto-card-desc">System-admin operations surface. Two tabs: Queue health (live BullMQ aggregates per tier) and Execution log (per-execution forensic). Drawer with sparkline, errors, DLQ, pause / resume.</div>
       <div class="proto-card-footer">
         <a href="before-queues.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -359,49 +372,49 @@
   </div>
   <div class="card-grid">
 
-    <a href="team.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Team</div>
+        <a href="team.html" class="proto-card-title-link">Team</a>
         <div class="proto-card-file">team.html</div>
       </div>
       <div class="proto-card-desc">Members and Org Chart tabs sharing one detail drawer. Replaces SubaccountTeamPage and standalone OrgChartPage.</div>
       <div class="proto-card-footer">
         <a href="before-team.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="spending.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Spending</div>
+        <a href="spending.html" class="proto-card-title-link">Spending</a>
         <div class="proto-card-file">spending.html</div>
       </div>
       <div class="proto-card-desc">Caps and budgets + Ledger tabs. Org-level cap with month-to-date vs cap progress and pace projection. Per-workspace caps with inline-editable amounts. Group-by views in the ledger.</div>
       <div class="proto-card-footer">
         <a href="before-spending.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="manage-org.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Manage org</div>
+        <a href="manage-org.html" class="proto-card-title-link">Manage org</a>
         <div class="proto-card-file">manage-org.html</div>
       </div>
       <div class="proto-card-desc">Organisation settings. Removed Memory and Integrations tabs (those have dedicated nav items now). General, Categories, Engines, MCP servers, Permission sets.</div>
       <div class="proto-card-footer">
         <a href="before-manage-org.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
-    <a href="pages.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Pages</div>
+        <a href="pages.html" class="proto-card-title-link">Pages</a>
         <div class="proto-card-file">pages.html</div>
       </div>
       <div class="proto-card-desc">Branded landing pages on a custom subdomain. Renamed from Sites. Card grid with theme thumbnails, status filtering, drawer with Settings / Content / SEO / Analytics tabs.</div>
       <div class="proto-card-footer">
         <a href="before-pages.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
@@ -416,86 +429,86 @@
   </div>
   <div class="card-grid">
 
-    <a href="onboarding.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Onboarding wizard</div>
+        <a href="onboarding.html" class="proto-card-title-link">Onboarding wizard</a>
         <div class="proto-card-file">onboarding.html</div>
       </div>
       <div class="proto-card-desc">Multi-step setup: Welcome, Integration, First agent, First automation, Done. Multi-select pattern across all steps; background data pull begins on each connection.</div>
       <div class="proto-card-footer"></div>
-    </a>
+    </div>
 
   </div>
 </div>
 
 <!-- ============================================================ -->
-<!-- REFERENCE & PATTERNS — descriptive, not in-app               -->
+<!-- REFERENCE & PATTERNS                                         -->
 <!-- ============================================================ -->
 <div class="section reference-section">
   <div class="section-heading">
     <span>Reference &amp; patterns</span>
-    <span class="section-heading-desc">Design references and pattern galleries — not in-app screens</span>
+    <span class="section-heading-desc">Design references and pattern galleries, not in-app screens</span>
   </div>
   <div class="card-grid">
 
-    <a href="shell-nav.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Shell &amp; navigation reference</div>
+        <a href="shell-nav.html" class="proto-card-title-link">Shell &amp; navigation reference</a>
         <div class="proto-card-file">shell-nav.html</div>
       </div>
       <div class="proto-card-desc">Documents the three-mode sidebar pattern and full page mapping (every production page accounted for). Reference document.</div>
-    </a>
+    </div>
 
-    <a href="page-disposition.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Page disposition</div>
+        <a href="page-disposition.html" class="proto-card-title-link">Page disposition</a>
         <div class="proto-card-file">page-disposition.html</div>
       </div>
-      <div class="proto-card-desc">Disposition matrix — which production pages were kept, merged, renamed, or retired. Reference document.</div>
-    </a>
+      <div class="proto-card-desc">Disposition matrix: which production pages were kept, merged, renamed, or retired. Reference document.</div>
+    </div>
 
-    <a href="permissions.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Permission patterns</div>
+        <a href="permissions.html" class="proto-card-title-link">Permission patterns</a>
         <div class="proto-card-file">permissions.html</div>
       </div>
       <div class="proto-card-desc">Pattern reference for permission-gated views (mode switcher, skill scope, admin views). Reference document.</div>
-    </a>
+    </div>
 
-    <a href="empty-states.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Empty states</div>
+        <a href="empty-states.html" class="proto-card-title-link">Empty states</a>
         <div class="proto-card-file">empty-states.html</div>
       </div>
       <div class="proto-card-desc">Empty-state pattern library. Reference document.</div>
-    </a>
+    </div>
 
-    <a href="lifecycle-errors.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Lifecycle errors</div>
+        <a href="lifecycle-errors.html" class="proto-card-title-link">Lifecycle errors</a>
         <div class="proto-card-file">lifecycle-errors.html</div>
       </div>
       <div class="proto-card-desc">Lifecycle and error patterns. Reference document.</div>
-    </a>
+    </div>
 
-    <a href="glossary.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">System model</div>
+        <a href="glossary.html" class="proto-card-title-link">System model</a>
         <div class="proto-card-file">glossary.html</div>
       </div>
       <div class="proto-card-desc">Domain glossary and system model. Reference document.</div>
-    </a>
+    </div>
 
-    <a href="workflows.html" class="proto-card proto-card-link">
+    <div class="proto-card">
       <div class="proto-card-header">
-        <div class="proto-card-title">Workflows (legacy)</div>
+        <a href="workflows.html" class="proto-card-title-link">Workflows (legacy)</a>
         <div class="proto-card-file">workflows.html</div>
       </div>
       <div class="proto-card-desc">Standalone Workflows page from earlier rounds. Workflows now live as a tab inside Automations; this file is kept for historical reference only.</div>
       <div class="proto-card-footer">
         <a href="before-workflows.html" class="before-link">View before</a>
       </div>
-    </a>
+    </div>
 
   </div>
 </div>
