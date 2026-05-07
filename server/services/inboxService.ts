@@ -1,7 +1,8 @@
 import { db } from '../db/index.js';
-import { tasks, reviewItems, agentRuns, inboxReadStates, subaccounts } from '../db/schema/index.js';
+import { tasks, reviewItems, agentRuns, actions, inboxReadStates, subaccounts } from '../db/schema/index.js';
 import { eq, and, or, isNull, desc, asc, gte, ilike, inArray, sql } from 'drizzle-orm';
 import { auditService } from './auditService.js';
+import { deriveBand, filterByQ, type InboxBand, type InboxKind } from './inboxServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -12,6 +13,26 @@ type EntityType = 'task' | 'review_item' | 'agent_run';
 interface InboxItemRef {
   entityType: EntityType;
   entityId: string;
+}
+
+interface BandedInboxItemRef {
+  /**
+   * Logical kind used for band-derivation and action routing.
+   * 'approval' maps to actions rows (status='pending_approval').
+   */
+  kind: InboxKind;
+  entityId: string;
+}
+
+interface ListInboxByBandFilters {
+  band?: InboxBand;
+  q?: string;
+  subaccountId?: string;
+}
+
+interface InboxActionResult {
+  ok: boolean;
+  alreadyApplied: boolean;
 }
 
 type SortField = 'updatedAt' | 'priority' | 'type' | 'subaccount';
@@ -36,6 +57,8 @@ const MAX_TOTAL_ITEMS = 100;
 
 interface UnifiedInboxItem {
   entityType: EntityType;
+  /** Logical kind for band derivation and action routing. */
+  kind: InboxKind;
   entityId: string;
   title: string;
   status: string;
@@ -43,6 +66,10 @@ interface UnifiedInboxItem {
   isArchived: boolean;
   readAt: Date | null;
   updatedAt: Date;
+  /** Due date for high-band proximity check. */
+  dueAt?: Date | null;
+  /** Severity string (critical/urgent → high band when unread). */
+  severity?: string | null;
   meta: Record<string, unknown>;
 }
 
@@ -155,6 +182,7 @@ export const inboxService = {
         if (row.isArchived) continue;
         items.push({
           entityType: 'task',
+          kind: 'task',
           entityId: row.id,
           title: row.title,
           status: row.status,
@@ -209,6 +237,7 @@ export const inboxService = {
         if (search && !row.reviewStatus.includes(search.toLowerCase())) continue;
         items.push({
           entityType: 'review_item',
+          kind: 'review_item',
           entityId: row.id,
           title: `Review: ${row.reviewStatus}`,
           status: row.reviewStatus,
@@ -271,6 +300,7 @@ export const inboxService = {
         if (row.isArchived) continue;
         items.push({
           entityType: 'agent_run',
+          kind: 'agent_run',
           entityId: row.id,
           title: row.errorMessage ?? `Agent run ${row.status}`,
           status: row.status,
@@ -444,6 +474,239 @@ export const inboxService = {
       entityType: 'inbox',
       metadata: { items, count: items.length },
     });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Band-filtered listing (spec §4.2)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * List inbox items for a specific priority band.
+   * Calls the existing union-fetchers and applies deriveBand() in JS.
+   */
+  async listInboxByBand(
+    userId: string,
+    orgId: string,
+    filters: ListInboxByBandFilters
+  ): Promise<Array<UnifiedInboxItem & { band: InboxBand }>> {
+    // Reuse getUnifiedInbox to fetch all items across all tabs (no tab filter)
+    const all = await inboxService.getUnifiedInbox(userId, orgId, {
+      tab: 'all',
+      subaccountId: filters.subaccountId,
+      // Pass orgWide when no subaccount filter
+      orgWide: !filters.subaccountId,
+    });
+
+    const now = new Date();
+    const result: Array<UnifiedInboxItem & { band: InboxBand }> = [];
+
+    for (const item of all) {
+      // Apply q filter on the title
+      if (!filterByQ(item.title, filters.q)) continue;
+
+      const band = deriveBand({
+        isRead: item.isRead,
+        isArchived: item.isArchived,
+        dueAt: item.dueAt,
+        severity: item.severity,
+        kind: item.kind,
+      }, now);
+
+      if (filters.band && band !== filters.band) continue;
+
+      result.push({ ...item, band });
+    }
+
+    // Also include archived items in 'previous' band when band=previous is requested
+    // (getUnifiedInbox skips archived items; re-fetch with isArchived flag)
+    // The existing getUnifiedInbox already includes read items in `all`; archived items
+    // are filtered out in getUnifiedInbox. For the `previous` band we surface them by
+    // re-querying inboxReadStates for archived entity IDs and returning stub items.
+    // To keep complexity low in Phase 1: archived items are visible as "previous"
+    // if they were returned by getUnifiedInbox with isRead=true. The `isArchived`
+    // flag is already checked by deriveBand (archived → previous).
+    // Note: getUnifiedInbox SKIPS archived items (row.isArchived → continue).
+    // Phase 1: only read (non-archived) items surface in previous. Archived items
+    // that are NOT in the active union (task/review/agent_run) are not listed here.
+    // This is acceptable per spec §4.2 Phase 1 scope.
+
+    return result;
+  },
+
+  // ---------------------------------------------------------------------------
+  // Per-kind action methods (spec §4.2 + §6 idempotency)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Approve a review_item or approval-kind inbox item.
+   * Idempotent: if the predicate doesn't match (already applied), returns alreadyApplied=true.
+   * Returns 400-equivalent data when the kind doesn't support approve (agent_run, task).
+   */
+  async approveItem(
+    orgId: string,
+    userId: string,
+    ref: BandedInboxItemRef
+  ): Promise<InboxActionResult & { notApplicable?: boolean }> {
+    if (ref.kind === 'review_item') {
+      // UPDATE review_items SET reviewStatus='approved' WHERE id=? AND reviewStatus IN ('pending','edited_pending')
+      const updated = await db
+        .update(reviewItems)
+        .set({ reviewStatus: 'approved', reviewedBy: userId, reviewedAt: new Date() })
+        .where(and(
+          eq(reviewItems.id, ref.entityId),
+          eq(reviewItems.organisationId, orgId),
+          or(
+            eq(reviewItems.reviewStatus, 'pending'),
+            eq(reviewItems.reviewStatus, 'edited_pending')
+          )
+        ))
+        .returning({ id: reviewItems.id });
+
+      const alreadyApplied = updated.length === 0;
+
+      await auditService.log({
+        actorId: userId,
+        actorType: 'user',
+        action: 'inbox.item.approved',
+        organisationId: orgId,
+        entityType: 'review_item',
+        entityId: ref.entityId,
+        metadata: { alreadyApplied },
+      });
+
+      return { ok: true, alreadyApplied };
+    }
+
+    if (ref.kind === 'approval') {
+      // approval kind maps to actions rows with status='pending_approval'
+      const updated = await db
+        .update(actions)
+        .set({ status: 'approved', approvedBy: userId, approvedAt: new Date() })
+        .where(and(
+          eq(actions.id, ref.entityId),
+          eq(actions.organisationId, orgId),
+          eq(actions.status, 'pending_approval')
+        ))
+        .returning({ id: actions.id });
+
+      const alreadyApplied = updated.length === 0;
+
+      await auditService.log({
+        actorId: userId,
+        actorType: 'user',
+        action: 'inbox.item.approved',
+        organisationId: orgId,
+        entityType: 'action',
+        entityId: ref.entityId,
+        metadata: { alreadyApplied },
+      });
+
+      return { ok: true, alreadyApplied };
+    }
+
+    // agent_run and task kinds do not support approve
+    return { ok: false, alreadyApplied: false, notApplicable: true };
+  },
+
+  /**
+   * Reject a review_item or approval-kind inbox item.
+   * Reason is persisted for approval kind (actions.rejectionComment).
+   * For review_item: review_items has no reviewerComment column — reason is
+   * captured in the audit log only (silent drop from DB).
+   * Idempotent: 0 rows updated → alreadyApplied=true.
+   */
+  async rejectItem(
+    orgId: string,
+    userId: string,
+    ref: BandedInboxItemRef,
+    reason?: string
+  ): Promise<InboxActionResult & { notApplicable?: boolean }> {
+    if (ref.kind === 'review_item') {
+      // review_items has no reviewerComment column — reason dropped silently from DB
+      const updated = await db
+        .update(reviewItems)
+        .set({ reviewStatus: 'rejected', reviewedBy: userId, reviewedAt: new Date() })
+        .where(and(
+          eq(reviewItems.id, ref.entityId),
+          eq(reviewItems.organisationId, orgId),
+          or(
+            eq(reviewItems.reviewStatus, 'pending'),
+            eq(reviewItems.reviewStatus, 'edited_pending')
+          )
+        ))
+        .returning({ id: reviewItems.id });
+
+      const alreadyApplied = updated.length === 0;
+
+      await auditService.log({
+        actorId: userId,
+        actorType: 'user',
+        action: 'inbox.item.rejected',
+        organisationId: orgId,
+        entityType: 'review_item',
+        entityId: ref.entityId,
+        metadata: { alreadyApplied, reason: reason ?? null },
+      });
+
+      return { ok: true, alreadyApplied };
+    }
+
+    if (ref.kind === 'approval') {
+      const updated = await db
+        .update(actions)
+        .set({
+          status: 'rejected',
+          rejectionComment: reason ?? null,
+        })
+        .where(and(
+          eq(actions.id, ref.entityId),
+          eq(actions.organisationId, orgId),
+          eq(actions.status, 'pending_approval')
+        ))
+        .returning({ id: actions.id });
+
+      const alreadyApplied = updated.length === 0;
+
+      await auditService.log({
+        actorId: userId,
+        actorType: 'user',
+        action: 'inbox.item.rejected',
+        organisationId: orgId,
+        entityType: 'action',
+        entityId: ref.entityId,
+        metadata: { alreadyApplied, reason: reason ?? null },
+      });
+
+      return { ok: true, alreadyApplied };
+    }
+
+    // agent_run and task kinds do not support reject
+    return { ok: false, alreadyApplied: false, notApplicable: true };
+  },
+
+  /**
+   * Archive a single inbox item by entityId.
+   * Delegates to the existing bulk archiveItems with a single-item array.
+   * Always succeeds (archive is available for all kinds).
+   */
+  async archiveItem(
+    userId: string,
+    orgId: string,
+    ref: BandedInboxItemRef
+  ): Promise<InboxActionResult> {
+    // Map kind → entityType for inboxReadStates
+    const kindToEntityType: Record<InboxKind, EntityType> = {
+      task: 'task',
+      review_item: 'review_item',
+      agent_run: 'agent_run',
+      // approval items are backed by actions rows but their read-state is tracked
+      // under entityType='review_item' linked via review_items.actionId.
+      // For inbox read-state purposes we use 'review_item' as the entityType.
+      approval: 'review_item',
+    };
+    const entityType = kindToEntityType[ref.kind];
+    await inboxService.archiveItems(userId, orgId, [{ entityType, entityId: ref.entityId }]);
+    return { ok: true, alreadyApplied: false };
   },
 
   /**

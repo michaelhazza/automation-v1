@@ -140,4 +140,142 @@ router.get(
   })
 );
 
+/**
+ * GET /api/inbox
+ * Band-filtered inbox list (spec §4.2 InboxListResponse).
+ * Query params:
+ *   band        — 'high' | 'needs_action' | 'previous' (omit for all)
+ *   q           — full-text search on item title
+ *   subaccountId — scope to a single subaccount
+ */
+router.get(
+  '/api/inbox',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const orgId = req.orgId!;
+
+    const band = (req.query.band as string) || undefined;
+    const q = (req.query.q as string) || undefined;
+    const subaccountId = (req.query.subaccountId as string) || undefined;
+
+    const VALID_BANDS = ['high', 'needs_action', 'previous'];
+    if (band && !VALID_BANDS.includes(band)) {
+      throw { statusCode: 400, message: `Invalid band. Must be one of: ${VALID_BANDS.join(', ')}` };
+    }
+
+    const items = await inboxService.listInboxByBand(userId, orgId, {
+      band: band as 'high' | 'needs_action' | 'previous' | undefined,
+      q,
+      subaccountId,
+    });
+
+    res.json({ items });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Action endpoints (spec §4.2 + §6 idempotency)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/inbox/:id/approve
+ * Approve a review_item or approval-kind inbox item.
+ * Body: { kind: 'review_item' | 'approval' }
+ * Returns 200 { ok: true, alreadyApplied: boolean }
+ * Returns 400 { errorCode: 'inbox_action_not_applicable' } for agent_run/task kinds.
+ */
+router.post(
+  '/api/inbox/:id/approve',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const orgId = req.orgId!;
+    const entityId = req.params.id;
+    // guard-ignore-next-line: input-validation reason="kind validated against allowlist below"
+    const { kind } = req.body as { kind?: string };
+
+    const VALID_KINDS = ['review_item', 'approval', 'task', 'agent_run'];
+    if (!kind || !VALID_KINDS.includes(kind)) {
+      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_KINDS.join(', ')}` };
+    }
+
+    const result = await inboxService.approveItem(orgId, userId, {
+      kind: kind as 'review_item' | 'approval' | 'task' | 'agent_run',
+      entityId,
+    });
+
+    if (result.notApplicable) {
+      throw { statusCode: 400, errorCode: 'inbox_action_not_applicable', message: 'Approve is not applicable to this item kind' };
+    }
+
+    res.json({ ok: result.ok, alreadyApplied: result.alreadyApplied });
+  })
+);
+
+/**
+ * POST /api/inbox/:id/reject
+ * Reject a review_item or approval-kind inbox item.
+ * Body: { kind: 'review_item' | 'approval', reason?: string }
+ * Returns 200 { ok: true, alreadyApplied: boolean }
+ * Returns 400 { errorCode: 'inbox_action_not_applicable' } for agent_run/task kinds.
+ */
+router.post(
+  '/api/inbox/:id/reject',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const orgId = req.orgId!;
+    const entityId = req.params.id;
+    // guard-ignore-next-line: input-validation reason="kind validated against allowlist; reason is a free-text string persisted to DB (audit log)"
+    const { kind, reason } = req.body as { kind?: string; reason?: string };
+
+    const VALID_KINDS = ['review_item', 'approval', 'task', 'agent_run'];
+    if (!kind || !VALID_KINDS.includes(kind)) {
+      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_KINDS.join(', ')}` };
+    }
+
+    const result = await inboxService.rejectItem(orgId, userId, {
+      kind: kind as 'review_item' | 'approval' | 'task' | 'agent_run',
+      entityId,
+    }, reason);
+
+    if (result.notApplicable) {
+      throw { statusCode: 400, errorCode: 'inbox_action_not_applicable', message: 'Reject is not applicable to this item kind' };
+    }
+
+    res.json({ ok: result.ok, alreadyApplied: result.alreadyApplied });
+  })
+);
+
+/**
+ * POST /api/inbox/:id/archive
+ * Archive a single inbox item (all kinds supported).
+ * Body: { kind: 'review_item' | 'approval' | 'task' | 'agent_run' }
+ * Returns 200 { ok: true, alreadyApplied: false }
+ */
+router.post(
+  '/api/inbox/:id/archive',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const orgId = req.orgId!;
+    const entityId = req.params.id;
+    // guard-ignore-next-line: input-validation reason="kind validated against allowlist below"
+    const { kind } = req.body as { kind?: string };
+
+    const VALID_KINDS = ['review_item', 'approval', 'task', 'agent_run'];
+    if (!kind || !VALID_KINDS.includes(kind)) {
+      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_KINDS.join(', ')}` };
+    }
+
+    const result = await inboxService.archiveItem(userId, orgId, {
+      kind: kind as 'review_item' | 'approval' | 'task' | 'agent_run',
+      entityId,
+    });
+
+    res.json({ ok: result.ok, alreadyApplied: result.alreadyApplied });
+  })
+);
+
 export default router;
