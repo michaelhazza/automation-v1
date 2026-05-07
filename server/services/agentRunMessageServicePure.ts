@@ -84,6 +84,134 @@ export function validateMessageShape(input: MessageShapeInput): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// §4.8 Run-trace role-aware masking projection
+// ---------------------------------------------------------------------------
+
+/**
+ * Roles recognised by the masking projection.
+ *
+ * - 'system_admin' — sees everything, even when scoped into an org.
+ * - 'org_admin'    — sees tool names + output summaries; inputs visible.
+ * - 'user'         — workspace user; tool inputs redacted, outputs truncated.
+ *
+ * Any unrecognised role string falls back to the most restrictive tier
+ * ('user') so future roles are safe-by-default.
+ */
+export type RunTraceRole = 'system_admin' | 'org_admin' | 'user';
+
+/** Result shape for a single masked tool-call pair. */
+export interface RunTraceToolCallProjection {
+  toolName: string;
+  /** Tool call arguments — '<redacted>' for workspace_user; full object otherwise. */
+  input: Record<string, unknown> | '<redacted>';
+  /** Tool result body — truncated to TOOL_RESULT_TRUNCATE_CHARS for workspace_user; full string otherwise. */
+  output: string | '<redacted>';
+  /** Present and true only when the field is visible but was truncated (not when redacted). */
+  outputTruncated?: true;
+  durationMs: number;
+  iteration: number;
+}
+
+/** Maximum characters for truncated tool result output (workspace_user tier). */
+export const TOOL_RESULT_TRUNCATE_CHARS = 200;
+
+/** The redaction sentinel token, per spec §4.8. */
+export const REDACTION_TOKEN = '<redacted>' as const;
+
+/**
+ * Normalise a caller-supplied role string to the three recognised tiers.
+ * Unknown strings fall back to 'user' (most restrictive — safe by default).
+ */
+export function normaliseRunTraceRole(role: string): RunTraceRole {
+  if (role === 'system_admin' || role === 'org_admin' || role === 'user') {
+    return role;
+  }
+  return 'user';
+}
+
+/**
+ * Project a single tool-call log entry into its role-masked form.
+ *
+ * Masking rules per spec §4.8:
+ *   - workspace_user ('user'):  input → '<redacted>'; output → first 200 chars + truncated flag
+ *   - org_admin:                input visible; output visible
+ *   - system_admin:             everything visible
+ *
+ * Mask-over-truncate precedence: if a field is masked, it emits '<redacted>'
+ * with NO truncated flag (truncated is only present when the field is visible
+ * but partial).
+ */
+export function projectMessageForRole(
+  entry: {
+    tool?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+    output?: unknown;
+    durationMs?: number;
+    iteration?: number;
+  },
+  role: string,
+): RunTraceToolCallProjection {
+  const tier = normaliseRunTraceRole(role);
+  const toolName = entry.tool ?? entry.name ?? '(unknown)';
+  const rawInput = entry.input ?? {};
+  const rawOutput =
+    typeof entry.output === 'string'
+      ? entry.output
+      : entry.output == null
+        ? ''
+        : JSON.stringify(entry.output);
+  const durationMs = typeof entry.durationMs === 'number' ? entry.durationMs : 0;
+  const iteration = typeof entry.iteration === 'number' ? entry.iteration : 0;
+
+  if (tier === 'user') {
+    // Input: masked (takes precedence over any truncation).
+    // Output: truncated to first TOOL_RESULT_TRUNCATE_CHARS chars.
+    const outputVisible = rawOutput.slice(0, TOOL_RESULT_TRUNCATE_CHARS);
+    const outputTruncated = rawOutput.length > TOOL_RESULT_TRUNCATE_CHARS;
+    return {
+      toolName,
+      input: REDACTION_TOKEN,
+      output: outputVisible,
+      ...(outputTruncated ? { outputTruncated: true as const } : {}),
+      durationMs,
+      iteration,
+    };
+  }
+
+  // org_admin and system_admin: all fields visible.
+  return {
+    toolName,
+    input: rawInput,
+    output: rawOutput,
+    durationMs,
+    iteration,
+  };
+}
+
+/**
+ * Project an ordered array of tool-call log entries for a given user role.
+ * Returns a new array; does not mutate the input.
+ */
+export function projectForRole(
+  entries: ReadonlyArray<{
+    tool?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+    output?: unknown;
+    durationMs?: number;
+    iteration?: number;
+  }>,
+  role: string,
+): RunTraceToolCallProjection[] {
+  return entries.map((entry) => projectMessageForRole(entry, role));
+}
+
+// ---------------------------------------------------------------------------
+// Sequence number arithmetic
+// ---------------------------------------------------------------------------
+
 /**
  * Given the current maximum sequence number for a run, return the
  * next value to use. `null` means the run has no messages yet →

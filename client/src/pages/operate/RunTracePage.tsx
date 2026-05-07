@@ -30,6 +30,7 @@ import { parseEmbeddedFlag } from '../../lib/runTraceEmbeddedPure';
 import { WorkspaceBadge } from '../../components/WorkspaceBadge';
 import { PageShell } from '../../components/PageShell';
 import type { RunDetail } from '../../components/runs/RunTraceView';
+import { RunTraceEventRenderer } from './components/RunTraceEventRenderer';
 
 // ── IEE progress polling (ported from RunTraceViewerPage) ─────────────────────
 
@@ -45,15 +46,6 @@ interface IeeProgress {
 const POLL_BACKOFF_SCHEDULE_MS = [3_000, 5_000, 10_000] as const;
 const POLL_MAX_DURATION_MS = 15 * 60 * 1_000; // 15 minutes
 
-// ── Placeholder renderer (replaced by <RunTraceEventRenderer> in C5b) ─────────
-
-// Placeholder — replaced by <RunTraceEventRenderer> in C5b
-// `embedded` is accepted now and will be used in C5b to suppress "open in modal" affordances.
-const PlaceholderRenderer = ({ events, embedded: _embedded }: { events: unknown[]; embedded?: boolean }) => (
-  <pre style={{ fontSize: 12, overflow: 'auto', padding: '12px' }}>
-    {JSON.stringify(events, null, 2)}
-  </pre>
-);
 
 // ── RunTracePage ──────────────────────────────────────────────────────────────
 
@@ -316,8 +308,8 @@ export default function RunTracePage({ user: _user }: { user: User }) {
         style={{ height: '100vh', overflow: 'auto', padding: '16px' }}
       >
         {ieePanel}
-        {/* Placeholder — replaced by <RunTraceEventRenderer> in C5b */}
-        <PlaceholderRenderer events={[run as unknown as object]} embedded={true} />
+        {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
+        <RunTraceEventRenderer runId={run.id} embedded={true} />
       </div>
     );
   }
@@ -329,8 +321,8 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       <div className="animate-[fadeIn_0.2s_ease-out_both]">
         {chainInfo}
         {ieePanel}
-        {/* Placeholder — replaced by <RunTraceEventRenderer> in C5b */}
-        <PlaceholderRenderer events={[run as unknown as object]} embedded={false} />
+        {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
+        <RunTraceEventRenderer runId={run.id} embedded={false} />
       </div>
     </PageShell>
   );
