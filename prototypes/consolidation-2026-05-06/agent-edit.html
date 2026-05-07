@@ -28,45 +28,58 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="_shared.css">
 <style>
-  /* ── Three-column layout ──────────────────────────────────────────── */
-  /* Left sidebar (from _shared.css) | Center form | Right rail          */
-  /* Grid layout (more predictable than flex+wrap at narrow widths)      */
-  .agent-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px;
-    gap: 0;
-    min-height: calc(100vh - 88px);
-    align-items: start;
-  }
+  /* ── Single-column layout ────────────────────────────────────────── */
+  /* Agent edit is a tabbed form column with a persistent Test runner   */
+  /* card at the bottom (always visible, regardless of which tab is on).*/
   .agent-content {
-    padding: 24px 28px 100px 28px; /* bottom pad = footer height + breathing room */
+    padding: 24px 28px 110px 28px; /* bottom pad keeps last card clear of fixed footer */
     display: flex;
     flex-direction: column;
     min-width: 0;
   }
-  /* Right rail — sticky to the viewport, 360px */
-  .agent-right-rail {
-    border-left: 1px solid var(--border);
-    background: white;
-    position: sticky;
-    top: 0;
-    height: calc(100vh - 88px);
-    overflow-y: auto;
+
+  /* ── Test runner card (replaces the earlier right-rail Test panel) ── */
+  /* Lives inline at the bottom of agent-content. Always visible, all   */
+  /* viewport widths. Reuses the .section-card chrome for consistency.  */
+  .test-runner {
+    margin-top: 8px;
+  }
+  .test-runner-grid {
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .test-runner-grid { grid-template-columns: 1fr; }
+  }
+  .test-runner-actions {
     display: flex;
-    flex-direction: column;
-    align-self: start;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
   }
-  .test-panel {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
+  .test-runner-actions .meta {
+    font-size: 12px; color: var(--slate-500);
   }
-  .test-panel-header {
-    padding: 13px 16px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-    flex-shrink: 0;
+  .test-runner-actions .view-trace {
+    margin-left: auto; font-size: 12px; font-weight: 600; color: var(--indigo-600);
+    text-decoration: none;
   }
-  .test-panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+  .test-runner-actions .view-trace:hover { text-decoration: underline; }
+  .test-runner-result {
+    margin-top: 14px;
+    background: var(--emerald-50);
+    border: 1px solid #a7f3d0;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .test-runner-result-head {
+    font-size: 12.5px; font-weight: 600; color: var(--emerald-700);
+    margin-bottom: 6px;
+  }
+  .test-runner-result-body {
+    font-size: 12.5px; color: var(--slate-700); line-height: 1.55;
+  }
 
   /* ── Full-width fixed footer (same look as project-edit.html) ─────── */
   /* Inner band has 28px horizontal padding so Discard left + Delete     */
@@ -95,17 +108,9 @@
     margin-left: auto;
   }
 
-  /* ── Collapse right rail on narrow viewports ──────────────────────── */
-  /* Below 1180px the right rail moves to a regular section below the form. */
-  @media (max-width: 1180px) {
-    .agent-layout { grid-template-columns: minmax(0, 1fr); }
-    .agent-right-rail {
-      position: static;
-      height: auto;
-      border-left: none;
-      border-top: 1px solid var(--border);
-    }
-  }
+  /* (Right-rail Test panel deprecated in round 15 — Test runner is now an
+     inline section card at the bottom of agent-content. Single column at
+     all viewport widths.) */
 
   .section-card {
     background: white; border: 1px solid var(--border);
@@ -478,8 +483,7 @@
       <a href="before-agent-edit.html" style="color:var(--indigo-700);font-weight:600;">View before state</a>
     </div>
 
-    <div class="agent-layout">
-      <div class="agent-content">
+    <div class="agent-content">
 
         <!-- Tab bar -->
         <div class="tabs" id="agent-tabs" style="margin-bottom:18px;">
@@ -1634,35 +1638,40 @@ The Q1 pipeline shows 23 active leads at various stages. No blockers to report.<
           </div>
         </div><!-- /tab-runs -->
 
+        <!-- ── Test runner card (always visible, all tabs) ──────────── -->
+        <section class="section-card test-runner" id="test-runner-card">
+          <header class="section-card-header">
+            <h3>Test agent</h3>
+            <button type="button" class="btn btn-xs btn-ghost" onclick="document.getElementById('test-input').focus()">Try a sample input</button>
+          </header>
+          <div class="section-card-body">
+            <div class="test-runner-grid">
+              <div class="form-field" style="margin:0;">
+                <label class="form-label" for="test-input">Test input</label>
+                <textarea id="test-input" class="form-textarea" style="min-height:84px;">Draft a follow-up email for Sarah Chen about the pending proposal.</textarea>
+              </div>
+              <div class="form-field" style="margin:0;">
+                <label class="form-label" for="test-context">Workspace context</label>
+                <select id="test-context" class="form-select" style="width:100%;">
+                  <option selected>Acme Corp</option>
+                  <option>TerraForm Partners</option>
+                  <option>Revel Group</option>
+                </select>
+              </div>
+            </div>
+            <div class="test-runner-actions">
+              <button type="button" class="btn btn-primary" style="padding:8px 18px;">Run test</button>
+              <span class="meta">Last run completed in 1.4s</span>
+              <a href="run-trace.html" class="view-trace">View run trace</a>
+            </div>
+            <div class="test-runner-result">
+              <div class="test-runner-result-head">Last test passed</div>
+              <div class="test-runner-result-body">Draft email created. Subject: "Following up on your Q2 proposal review." Identified May 12 follow-up deadline and referenced it in the email body.</div>
+            </div>
+          </div>
+        </section>
+
       </div><!-- /agent-content -->
-
-      <!-- Right rail: Test run panel (sticky) -->
-      <div class="agent-right-rail">
-        <div class="test-panel">
-          <div class="test-panel-header">
-            <span style="font-size:13px;font-weight:600;color:var(--slate-700);">Test run</span>
-            <button class="btn btn-xs btn-ghost" style="color:var(--slate-400);">Expand</button>
-          </div>
-          <div class="test-panel-body">
-            <div class="form-field">
-              <label class="form-label">Test input</label>
-              <textarea class="form-textarea" style="min-height:80px;">Draft a follow-up email for Sarah Chen about the pending proposal.</textarea>
-            </div>
-            <div class="form-field">
-              <label class="form-label">Client context</label>
-              <select class="form-select" style="width:100%;"><option selected>Acme Corp</option><option>TerraForm Partners</option><option>Revel Group</option></select>
-            </div>
-            <button class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:12px;">Run test</button>
-            <div style="font-size:12px;padding:12px;background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;line-height:1.5;">
-              <div style="font-weight:600;color:var(--emerald-700);margin-bottom:4px;">Completed in 1.4s</div>
-              <div style="color:var(--slate-600);">Draft email created. Subject: "Following up on your Q2 proposal review." Identified May 12 follow-up deadline and referenced it in the email body.</div>
-              <a href="run-trace.html" style="font-size:11.5px;color:var(--indigo-600);font-weight:500;display:inline-block;margin-top:6px;">View run trace</a>
-            </div>
-          </div>
-        </div>
-      </div><!-- /agent-right-rail -->
-
-    </div><!-- /agent-layout -->
 
     <!-- Full-width sticky footer (fixed to bottom of viewport) -->
     <div class="form-footer">

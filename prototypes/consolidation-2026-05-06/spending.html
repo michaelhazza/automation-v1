@@ -695,10 +695,10 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
             </div>
           </div>
 
-          <!-- Right: Top 5 spend this month — bar chart by workspace -->
+          <!-- Right: Top workspaces this month — bar chart -->
           <div class="chart-card" id="org-spend-chart-card">
-            <div class="chart-card-title">Top 5 workspaces this month</div>
-            <div class="chart-card-sub">MTD spend by workspace, top 5 only ($4,267 total)</div>
+            <div class="chart-card-title">Top workspaces this month</div>
+            <div class="chart-card-sub">MTD spend, top 5 workspaces ($4,267 total)</div>
             <!-- Inline SVG bar chart -->
             <svg width="100%" height="140" viewBox="0 0 340 140" class="chart-svg-wrap">
               <!-- Bars: Acme $312 (24.3%), TerraForm $1247 wait — use correct MTD values -->
@@ -756,10 +756,10 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
         <!-- SECOND ROW: Trend charts — org only -->
         <div class="caps-row org-only" data-view-org-only id="trend-charts-row">
 
-          <!-- Left: Top 5 spend trend (last 6 months) -->
+          <!-- Left: Spend trend by workspace (top 5, last 6 months) -->
           <div class="chart-card">
-            <div class="chart-card-title">Top 5 spend trend (last 6 months)</div>
-            <div class="chart-card-sub">Apr 2026 to current month, top 5 workspaces by MTD spend</div>
+            <div class="chart-card-title">Spend trend by workspace</div>
+            <div class="chart-card-sub">Apr 2026 to current month, top 5 by MTD spend</div>
             <!-- Inline SVG line chart — 340x140 viewBox, 6 x-points -->
             <!-- X positions: 35, 95, 155, 215, 275, 335 (6 months) -->
             <!-- Y scale: 0–1500, chart area 10–120px from top (110px range) -->
@@ -815,10 +815,10 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
             </div>
           </div>
 
-          <!-- Right: Top 5 cap utilisation trend (last 6 months) -->
+          <!-- Right: Cap utilisation trend (top 5, last 6 months) -->
           <div class="chart-card">
-            <div class="chart-card-title">Top 5 cap utilisation trend</div>
-            <div class="chart-card-sub">% of monthly cap used per workspace, last 6 months, top 5 only</div>
+            <div class="chart-card-title">Cap utilisation trend</div>
+            <div class="chart-card-sub">% of monthly cap used, last 6 months, top 5 by spend</div>
             <!-- Y scale: 0–120%, chart area 10–118px (108px range). y = 118 - (pct/120)*108 -->
             <!-- Acme: 36,41,45,47,51,59 -->
             <!-- Terra: 59,70,79,87,96,83 -->

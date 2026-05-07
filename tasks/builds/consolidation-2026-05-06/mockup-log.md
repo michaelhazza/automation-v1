@@ -1750,3 +1750,34 @@ Filter funnel icon (replaces down-arrow caret on filter buttons):
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
 
 Note: tasks/builds/consolidation-foundation/ deliberately untouched in this round per operator instruction (Phase 0 build plan in flight; will fold these UI changes back into the plan once the current chunk completes).
+
+## Round 15 — 2026-05-07 (agent-edit Test panel full rewrite + spending chart titles)
+
+Two fixes flagged in final review.
+
+agent-edit.html: full rewrite of the Test runner section. The previous right-rail design (sticky panel on the right at wide viewports, fallback below the form at narrow viewports) was unreliable across common laptop widths and the user reported it kept rendering "weirdly in the bottom-left."
+
+Layout simplified to single-column at all viewport widths:
+- Removed `.agent-layout` grid wrapper, `.agent-right-rail` sticky column, `.test-panel*` styles, and the 1180px breakpoint media query.
+- `<div class="agent-layout">` and `<div class="agent-right-rail">...</div>` removed from markup; `<div class="agent-content">` is now the sole content column.
+
+Test runner rebuilt as a proper inline `.section-card` named "Test agent" living at the bottom of `.agent-content` (always visible, regardless of which form tab is active):
+- Header: "Test agent" with a small ghost button "Try a sample input" that focuses the textarea.
+- Body uses a 2-column grid (`grid-template-columns: 1fr 240px`, collapsing to single column at <720px). Left: Test input textarea. Right: Workspace context dropdown (renamed from "Client context" for consistency with the rest of the app).
+- Below the grid: a horizontal action row with normal-width "Run test" primary button (no longer full-width and visually heavy), an inline "Last run completed in 1.4s" meta line, and a right-aligned "View run trace" link.
+- Result block: cleaner card with "Last test passed" header and the body text. No checkmark glyph, no jarring colour blocks.
+
+New CSS classes added: `.test-runner`, `.test-runner-grid`, `.test-runner-actions`, `.test-runner-actions .meta`, `.test-runner-actions .view-trace`, `.test-runner-result`, `.test-runner-result-head`, `.test-runner-result-body`.
+
+spending.html: chart titles renamed to drop the literal "5" from the title (per user preference; subtitles still mention the top-5 cap):
+- "Top 5 workspaces this month" -> "Top workspaces this month" (subtitle: "MTD spend, top 5 workspaces ($4,267 total)").
+- "Top 5 spend trend (last 6 months)" -> "Spend trend by workspace" (subtitle: "Apr 2026 to current month, top 5 by MTD spend").
+- "Top 5 cap utilisation trend" -> "Cap utilisation trend" (subtitle: "% of monthly cap used, last 6 months, top 5 by spend").
+- Stale code comments updated to match new titles. Chart visuals already capped at 5 workspaces (4 named + Other rollup).
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/agent-edit.html`
+- `prototypes/consolidation-2026-05-06/spending.html`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+Note: tasks/builds/consolidation-foundation/ still untouched (Phase 0 plan + build in flight).
