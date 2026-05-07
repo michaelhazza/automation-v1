@@ -142,10 +142,31 @@ Top themes: documentation_clarity, observability.
   - [auto] F2-R2 (R2) — `dbCompatCheckOk: boolean` field — wait until instrumentation becomes production-critical (i.e. wired into alerting).
 - Architectural items surfaced to screen (user decisions): none
 - KNOWLEDGE.md updated: no — checked `iee-worker-timing`, `iee.worker.boot_timing`, `worker boot timing` against the file; zero stale references and zero new pattern worth a fresh entry. Per-PR observability runbooks live in `references/`, not KNOWLEDGE.md (architectural decisions and gotchas only).
-- architecture.md updated: no — checked `iee-worker-timing`, `iee.worker.boot_timing`, `boot.timing`, `worker.boot.timing`; zero hits. PR introduces a runbook + a single log line in an existing service file; no service boundaries, route conventions, agent-fleet entries, or architecture rules touched.
+- architecture.md updated: yes (Worker service Key files per domain row for `worker/src/bootstrap.ts`) — finalisation-coordinator canonical doc-sync sweep grepped for `bootstrap.ts` / `worker/src/bootstrap` and found the existing Key files per domain row described only the Playwright + Chromium pre-flight check responsibility. The PR adds a second responsibility (boot-timing instrumentation + `iee.worker.boot_timing` log) to that same file. Row updated in same finalisation pass to mention the timing log and link to the runbook.
 - capabilities.md updated: n/a — no add / remove / rename of any product capability, agency capability, skill, or integration in this PR.
 - integration-reference.md updated: n/a — no integration behaviour change; PR is internal observability instrumentation.
 - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked `iee-worker-timing`, `iee.worker.boot_timing`, `worker boot timing`, `bootstrap.ts` against both files; zero hits. No build-discipline, agent-fleet, review-pipeline, or locked-rule change.
+- CONTRIBUTING.md updated: no — checked all timing-related grep terms; zero hits. No lint-suppression policy or contributor convention change.
 - frontend-design-principles.md updated: n/a — backend-only change; no UI pattern, hard rule, or worked example introduced.
-- main merged into branch: deferred to step 10 (executed below)
+- spec-context.md updated: n/a — not a spec-review session.
+- decisions/ updated: n/a — no durable architectural choice locked. Boot-timing instrumentation is observability, not architecture; the runbook itself is the artefact.
+- context-packs/ updated: n/a — no architecture.md anchor renames; the bullet edit on the existing Worker service row does not break any pack reference.
+- test-gate-policy.md updated: n/a — no test-gate posture change.
+- spec-review-directional-signals.md updated: n/a — not a spec-review session.
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: n/a — repo-specific observability change, not a framework-level change to the agent-fleet or conventions layer.
+- main merged into branch: n/a — branch is 0 commits behind origin/main (verified by finalisation-coordinator S2 sync).
 - PR: #269 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/269
+
+---
+
+## Phase 3 Finalisation (finalisation-coordinator) — 2026-05-07
+
+Phase 3 finalisation pass run on top of the in-session chatgpt-pr-review work above. Operator confirmed the upstream review was already complete and the `ready-to-merge` label already applied.
+
+- S2 branch sync: clean — branch 0 commits behind `origin/main`, no merge needed.
+- G4 regression guard: `npm run lint` 0 errors / 871 pre-existing warnings; `npm run typecheck` clean.
+- Doc-sync canonical sweep: 13 registered docs grepped against the candidate-stale-reference set. One stale row found in `architecture.md § Worker service` (Key files per domain entry for `worker/src/bootstrap.ts`); fixed in this same pass. All other docs verdicts above.
+- KNOWLEDGE.md pattern extraction: decision = no entry. The boot-timing template (structured single-line log + companion runbook + memory-backed trigger phrase) is genuinely reusable, but it is one PR's worth of evidence. Per `KNOWLEDGE.md § Append rules`, patterns should be born of repeated need, not first-occurrence speculation. If the same shape recurs in a second observability instrumentation, append then.
+- tasks/todo.md deferred items verified: PR #269 section present with two `[auto]` entries (F5 longitudinal-monitoring fields, F2-R2 `dbCompatCheckOk: boolean` field). Well-formed.
+- tasks/current-focus.md: NOT transitioned. Pointer is `baseline-capture` (REVIEWING). PR #269 is a parallel one-off instrumentation branch outside the in-flight feature; transitioning current-focus would corrupt the active build pointer.
+- ready-to-merge label: already applied (verified via `gh pr view 269` — present, PR `MERGEABLE` / `OPEN`, CI in progress).
