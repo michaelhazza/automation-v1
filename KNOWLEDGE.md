@@ -2766,3 +2766,33 @@ Skipping NFC produces long-tail duplicate revision bugs that are nearly impossib
 **Source:** Same finalisation pass — design pattern from `SortableTable.tsx` + `sortableTablePure.ts` (and `useViewMode.ts` + `useViewModePure.ts`).
 **Pattern:** When a UI primitive contains non-trivial logic (sorting, filtering, mode-derivation, transition rules), split into two files: `Foo.tsx` (the React wrapper — hooks, state, event handlers, render) and `fooPure.ts` (the deterministic helpers — sort comparators, filter predicates, derivation rules, transition guards). The pure module exports plain functions with explicit input/output types and zero React dependency. Tests live next to the pure module under `__tests__/fooPure.test.ts` using the existing convention: `npx tsx <test-path>` runs them in isolation, no test runner setup, fast feedback. The React wrapper's behaviour is verified by integration of the pure module's contract — the wrapper itself does not need its own unit suite if the pure module is fully covered.
 **Why it matters:** UI logic is normally locked behind component-render machinery and is hard to test deterministically. The split moves the testable surface out from under React, eliminates jsdom setup, runs in milliseconds, and produces a stable contract surface that downstream specs (Specs A/B/C consuming the same primitives) can rely on without rebuilding test infrastructure. Locks in the existing repo convention (`*Pure.ts` + `*Pure.test.ts` as the unit-test surface).
+
+### [2026-05-07] Gotcha — `agentTriggers` has no `agentId` FK; triggers are scoped through `subaccountAgents`
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`GET /api/agents/:id/full` (in `server/routes/agents/agentTabs.ts`) joins through `subaccountAgents` to get agent-scoped triggers — NOT through a direct `agentId` on `agentTriggers`. The `agentTriggers` table does not have an `agentId` foreign key; trigger rows are linked to a sub-account agent via the `subaccountAgents.agentId` join. Any query that tries to filter `agentTriggers` directly by `agentId` will return nothing silently.
+
+### [2026-05-07] Gotcha — `AgentFull.budget` fields are Phase 1 placeholders; writes accepted but not persisted
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentFull.budget` (`dailyCapUsd`, `monthlyCapUsd`, `warnThresholdPct`) are always null/zero. The `spendingBudgets` table is for agentic commerce spend (external transactions), NOT for LLM cost caps. Budget cap fields on agents have no backing schema yet — writes to the budget tab in `AgentEditPage` are accepted by the server but not persisted. This is an explicit Phase 2 deferral. Do not build features that assume these fields are live without first checking whether the backing schema has landed.
+
+### [2026-05-07] Gotcha — `WRITE_ORDER` in `AgentEditPage` intentionally excludes `schedule` and `budget` tabs
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentEditPage.tsx` defines a `WRITE_ORDER` constant that controls which tabs participate in ETag-gated saves. The `schedule` and `budget` tabs are excluded from this list. Trigger editing is done via the existing per-workspace override page (not consolidated into `AgentEditPage`). Budget caps have no backing schema yet. A future developer who sees the missing tabs should consult the ADR `docs/decisions/0007-consolidation-build-page-retirement.md` before assuming the omission is a bug.
+
+### [2026-05-07] Gotcha — `startRunAsync` in `agentExecutionService.ts` uses bare fire-and-forget (non-durable)
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`startRunAsync` is a fire-and-forget invocation — if the process crashes after the call site returns but before the run completes, the run is not recovered. This is a known PLAN_GAP documented in `tasks/builds/consolidation-build/migration-gaps.md`. Do not rely on this path for durable task execution. The durable path is through the pg-boss job queue.
+
+### [2026-05-07] Gotcha — `formatFireCondition` in `recurringTasksServicePure.ts` handles a subset of the RRULE spec
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`formatFireCondition` parses FREQ, BYDAY, BYMONTHDAY, and INTERVAL from RRULE strings and returns a human-readable label. Any RRULE pattern using other components (BYSETPOS, BYHOUR, COUNT, UNTIL, WKST, etc.) falls back to returning the literal RRULE string unchanged. This is intentional for Phase 1 — do not add a full RRULE parser unless the product requirement explicitly calls for it.
