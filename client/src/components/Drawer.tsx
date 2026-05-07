@@ -76,6 +76,9 @@ export function Drawer({
     [onClose],
   );
 
+  // Effect 1: scroll lock + initial focus + focus restore on close.
+  // Depends only on [open] so that a new onClose reference from the parent
+  // never triggers scroll-lock churn or focus flicker.
   useEffect(() => {
     if (!open) return;
 
@@ -83,7 +86,6 @@ export function Drawer({
     previousFocusRef.current = document.activeElement;
 
     acquireScrollLock();
-    document.addEventListener('keydown', handleKeyDown);
 
     // Move initial focus into the panel
     const raf = requestAnimationFrame(() => {
@@ -99,13 +101,24 @@ export function Drawer({
 
     return () => {
       cancelAnimationFrame(raf);
-      document.removeEventListener('keydown', handleKeyDown);
       releaseScrollLock();
 
       // Restore focus to the element that was active before the drawer opened
       if (previousFocusRef.current instanceof HTMLElement) {
         previousFocusRef.current.focus();
       }
+    };
+  }, [open]);
+
+  // Effect 2: keyboard listener.
+  // Separated so that a new handleKeyDown identity (from a new onClose reference)
+  // only re-registers the listener — it does not disturb scroll lock or focus.
+  useEffect(() => {
+    if (!open) return;
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [open, handleKeyDown]);
 
