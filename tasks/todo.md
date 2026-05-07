@@ -3207,3 +3207,27 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 These items require operator action outside the file system (repo/GitHub settings).
 
 - [ ] **CHATGPT-R1-OP-1 — Make `grep_invariants` a required status check on `main`.** Source: chatgpt-pr-review round 1 finding #2. Current branch protection on `main` has zero required status checks (`gh api repos/<owner>/<repo>/branches/main/protection` confirms). PRs can merge red. Recommended action: Settings → Branches → main → Branch protection → Required status checks → add `Grep invariants (Phase 3 B.1-B.4)`, `lint-typecheck`, `Portable framework tests`. Without this, the grep gates protect the codebase only as long as merge discipline holds.
+
+---
+
+## Deferred from branch-level reviews — consolidation-foundation (2026-05-07)
+
+**Captured:** 2026-05-07T08:30:00Z
+**PR:** #270 — `claude/consolidation-foundation` → `main`
+**Source logs:**
+- pr-reviewer: `tasks/review-logs/pr-review-log-consolidation-foundation-2026-05-07T03-38-16Z.md` (and prior C* per-chunk logs)
+- adversarial-reviewer: `tasks/review-logs/adversarial-review-log-consolidation-foundation-2026-05-07T*.md`
+- dual-reviewer: `tasks/review-logs/dual-review-log-consolidation-foundation-2026-05-07T07-56-31Z.md`
+- chatgpt-pr-review: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T*.md`
+
+- [ ] **CONSOL-FND-DEF-1 — Cross-tab `storage` listener for `useViewMode`.** Source: adversarial-reviewer likely-hole 3.1. Two browser tabs sharing identity state in `localStorage` will diverge until the stale tab is reloaded. For a product with `system_admin` impersonation, an elevated tab can keep showing system-admin nav items after the privilege is revoked from another tab. Add `window.addEventListener('storage', ...)` in `useViewMode` so it re-derives mode on cross-tab mutation.
+
+- [ ] **CONSOL-FND-DEF-2 — Verify server-side `X-Organisation-Id` header trust model.** Source: adversarial-reviewer likely-hole 2.2. Client sends the header for any request when `localStorage.userRole === 'system_admin'`. If `localStorage` is tampered with (XSS elsewhere, malicious extension), a non-admin can inject a target org UUID. Confirm the backend `authenticate` middleware re-validates the JWT role claim before honouring the header. If not, add the JWT-role check server-side.
+
+- [ ] **CONSOL-FND-DEF-3 — `useMemo` on `applySortAndFilters` in SortableTable.** Source: pr-reviewer S3. Recomputed on every render of the parent. Acceptable for the spec's ≤1000-row target but wasteful for high-frequency parent rerenders. Defer until Specs A/B/C surface a consumer that demonstrates the cost. Three-line change.
+
+- [ ] **CONSOL-FND-DEF-4 — Test for `buildNavItems` with empty-string `activeClientId`.** Source: pr-reviewer S5. The function is guarded by `if (hasOrgContext && activeClientId)` checks, but the type allows `string` which permits `''`. Add a test that locks the invariant so a future contributor cannot regress it.
+
+- [ ] **CONSOL-FND-DEF-5 — Central overlay manager / stack ownership.** Source: chatgpt-pr-review round 1 F6. Modal/Drawer coordination is currently convention-driven (zIndex hierarchy + spec-documented carveout for modal-over-drawer). Two independent components opening overlays simultaneously can both acquire scroll locks, bind escape handlers, and compete for focus restoration. ChatGPT explicitly flagged this as "not a blocker for this PR, but likely needed as consolidation expands." Build during Specs A/B/C if a multi-overlay consumer surfaces.
+
+- [ ] **CONSOL-FND-DEF-6 — CSS injection vector on project `color` field.** Source: adversarial-reviewer worth-confirming 4.1. `<span style={{ background: color }}>` in nav-item rendering accepts whatever the server returns. Server-side validation is the right gate; confirm projects.color is constrained to a CSS color token at the schema or service layer. If not, add validation server-side and a defensive client-side hex/rgb sanitiser.

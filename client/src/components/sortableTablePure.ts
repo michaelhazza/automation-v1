@@ -5,6 +5,13 @@
  * The SortableTable component imports from here; test coverage lives in
  * __tests__/sortableTablePure.test.ts.
  *
+ * Runtime invariant — stable sort: applySortAndFilters relies on the host
+ * Array.sort being stable (i.e. equal-key rows retain their original input
+ * order). ECMAScript 2019+ requires this and every supported runtime in
+ * this project (modern Chromium / Firefox / Safari / Node 18+) honours it.
+ * If a future port targets an older engine, an explicit index-tiebreaker
+ * will be needed to preserve the stability tests in __tests__/.
+ *
  * Run tests via:
  *   npx tsx client/src/components/__tests__/sortableTablePure.test.ts
  */

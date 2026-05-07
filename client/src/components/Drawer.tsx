@@ -3,7 +3,7 @@
 // Portal-rendered side-drawer overlay.
 // zIndex=900 (one level below Modal's 1000).
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useId, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { acquireScrollLock, releaseScrollLock } from './overlayScrollLock';
 
@@ -26,6 +26,11 @@ const FOCUSABLE_SELECTORS = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
+/** Visibility check that tolerates fixed-position elements, which `offsetParent === null`
+ *  would otherwise exclude. Mirrors jQuery's `:visible` heuristic. */
+const isVisible = (el: HTMLElement): boolean =>
+  !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+
 export function Drawer({
   open,
   side = 'right',
@@ -37,6 +42,7 @@ export function Drawer({
 }: DrawerProps): React.ReactPortal | null {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<Element | null>(null);
+  const titleId = useId();
 
   // Keyboard handler: Esc closes
   const handleKeyDown = useCallback(
@@ -50,10 +56,19 @@ export function Drawer({
       if (e.key === 'Tab' && panelRef.current) {
         const focusable = Array.from(
           panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS),
-        ).filter((el) => el.offsetParent !== null); // exclude hidden elements
+        ).filter(isVisible);
 
         if (focusable.length === 0) {
           e.preventDefault();
+          return;
+        }
+
+        // If focus has escaped the panel entirely (devtools, programmatic focus,
+        // browser chrome interaction, nested portals), pull it back to the first
+        // focusable inside the drawer instead of relying on first/last comparisons.
+        if (!panelRef.current.contains(document.activeElement)) {
+          e.preventDefault();
+          focusable[0].focus();
           return;
         }
 
@@ -153,7 +168,7 @@ export function Drawer({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title ?? 'Drawer'}
+        {...(title ? { 'aria-labelledby': titleId } : { 'aria-label': 'Drawer' })}
         tabIndex={-1}
         style={{
           position: 'relative',
@@ -187,6 +202,7 @@ export function Drawer({
             }}
           >
             <h2
+              id={titleId}
               style={{
                 margin: 0,
                 fontSize: '16px',
@@ -245,22 +261,6 @@ export function Drawer({
           </div>
         )}
       </div>
-
-      {/* Keyframe animations injected once */}
-      <style>{`
-        @keyframes drawer-fade-in {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-        @keyframes drawer-slide-in-right {
-          from { transform: translateX(100%); }
-          to   { transform: translateX(0); }
-        }
-        @keyframes drawer-slide-in-left {
-          from { transform: translateX(-100%); }
-          to   { transform: translateX(0); }
-        }
-      `}</style>
     </div>
   );
 

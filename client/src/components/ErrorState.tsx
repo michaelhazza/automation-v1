@@ -36,7 +36,7 @@ export function ErrorState({
   error,
   retry,
 }: ErrorStateProps) {
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = import.meta.env.DEV;
   const displayBody = body ?? (isDev && error?.message ? error.message : undefined);
 
   return (
