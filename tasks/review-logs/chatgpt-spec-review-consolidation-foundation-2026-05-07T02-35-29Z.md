@@ -212,3 +212,68 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0). No forward r
 
 ### Top themes
 Final micro-tightenings on edge cases (NaN, sentinel collision), documentation invariants (side-effect table, failure-mode), and the last missing default (page-shell padding). Spec is now build-ready per ChatGPT's verdict.
+
+---
+
+## Round 3 — 2026-05-07T03:10:00Z
+
+### ChatGPT Feedback (raw)
+
+Anything else before we move on?
+
+At this point you're basically done. This is one of those cases where continuing to iterate risks overfitting rather than improving.
+
+That said, there are three final micro-tightenings that are genuinely worth locking before build. After that, stop.
+
+Final micro-tightenings (high signal)
+
+1. Persisted state versioning (future-proofing)
+   - Right now: table:${persistKey}
+   - Add: table:v1:${persistKey}
+   - Why: if you ever change filter shape, sort format, or column keys, you won't have to deal with corrupted localStorage.
+
+2. SortableTable: lock stable sort guarantee explicitly
+   - "Sorting MUST be stable. If two rows compare equal under the active comparator, their relative order from the input rows array MUST be preserved."
+   - Why: JS sort stability is implementation-dependent historically. Prevents someone "optimising" with a non-stable sort later.
+
+3. Modal/Drawer: scroll lock ownership clarification
+   - Each overlay manages scroll lock independently.
+   - When multiple overlays are stacked (modal over drawer), only the top-most overlay controls scroll lock.
+   - On unmount, scroll lock must restore correctly even if another overlay remains.
+   - Why: classic subtle bug zone. Lock it now, not during QA.
+
+Optional (nice-to-have, not required)
+- Dev primitives route (/dev/primitives) — Modal sizes, Drawer, Table (filters + edge cases), ViewModeSwitcher states.
+
+What you should NOT touch anymore: no more API tweaks, no more abstraction, no more "just one more improvement". You've already crossed the quality bar.
+
+Final verdict: DONE. APPROVED. BUILD.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F18 — SortableTable persistKey: bump prefix to `table:v1:${persistKey}` | technical | apply | auto (apply) | low | Future-proofs persisted-state migration; bumping `v1`→`v2` on shape change avoids corrupted localStorage. Zero cost now. |
+| F19 — SortableTable: lock stability as a contract (not just an implementation detail) | technical | apply | auto (apply) | low | Codifies the existing tiebreaker rule as an explicit invariant; prevents future "optimisations" with non-stable sort algorithms. |
+| F20 — Modal/Drawer: scroll-lock ownership for stacked overlays (mount-counter + deferred restore) | technical | apply | auto (apply) | low | Closes a classic subtle bug zone; replaces the "no body-scroll lock conflict" assumption with a locked contract. |
+| F21 — (re-raise) Formalize /dev/primitives playground route | technical | reject | auto (reject) | low | Duplicate of Round 1 F10 which the operator already deferred. ChatGPT acknowledges as "Optional (nice-to-have, not required)". Operator's prior decision stands; not re-escalated. |
+
+### Triage rationale
+
+F18-F20: technical, low severity, internal contract / default-value tightenings with no user-visible behaviour change. Auto-apply.
+
+F21: not a fresh finding. ChatGPT re-raised the same suggestion as Round 1 F10. The operator decided defer in Round 1; that decision stands. Logged as `auto (reject)` with the rationale "duplicate, prior user defer holds" rather than re-escalating.
+
+### Escalations to operator
+None this round.
+
+### Applied (auto-applied technical + user-approved user-facing)
+- [auto] F18 — Versioned persistKey prefix `table:v1:${persistKey}` in §4.3
+- [auto] F19 — Explicit stable-sort contract in §4.3
+- [auto] F20 — Scroll-lock ownership rules for stacked overlays in §4.2
+
+### Integrity check
+Integrity check: 0 issues found this round (auto: 0, escalated: 0). The persistKey reference in §4.3 was the only place the unversioned form appeared and was updated atomically with F18.
+
+### Top themes
+Three locked invariants close out the spec: persistence migration safety, sort stability as a contract, and scroll-lock ownership for stacked overlays. ChatGPT's final verdict: DONE. APPROVED. BUILD.

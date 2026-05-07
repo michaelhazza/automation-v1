@@ -126,6 +126,13 @@ interface DrawerProps {
 
 Behaviour: portal-rendered, fade-in backdrop, slide-in panel, Esc closes, backdrop click closes, focus trap (same pattern as `Modal`). No body-scroll lock conflict with Modal; both manage their own.
 
+**Scroll-lock ownership (cross-cuts §4.1 and §4.2, locked):**
+
+- Each overlay (Modal, Drawer) manages body-scroll lock independently. On mount, the overlay applies `overflow: hidden` to `document.body` (or equivalent); on unmount, it restores the prior value.
+- When overlays stack (the modal-over-drawer carveout below), only the **top-most** mounted overlay controls the lock. Each overlay snapshots the body's `overflow` value at mount time AND only restores it on unmount if no other overlay is still mounted (use a small mount-counter on a window-scoped symbol; if the count is greater than zero on unmount, skip restoration).
+- This guarantees scroll-lock state restores correctly after stacked-overlay close sequences, including the case where a Modal mounted over an active Drawer is closed first (lock stays applied because the Drawer is still mounted) and the case where the Drawer is closed first (lock release deferred until the Modal also closes).
+- Without this rule, naive `overflow: hidden` / restore pairs would leak: closing the Modal first restores `overflow: auto` while the Drawer is still open, and the body becomes scrollable behind a visible Drawer. Lock the contract, not the implementation.
+
 **Overlay exclusivity invariant (cross-cuts §4.1 and §4.2):**
 
 - Only one top-level overlay (Modal OR Drawer) is active at a time. Consumers MUST close the active overlay before opening another of the same kind.
@@ -174,6 +181,7 @@ Behaviour (locked here, do not redesign in A/B/C):
 - Empty-state row when no matches.
 - Caret highlights when column has an active filter (fewer items checked than total).
 - Sort tiebreaker: stable insertion order from `rows` prop (consistent with §8 development-discipline rule on sort tiebreakers in `DEVELOPMENT_GUIDELINES.md`).
+- **Stability is a contract, not an implementation detail.** Sorting MUST be stable: if two rows compare equal under the active comparator, their relative order from the input `rows` array MUST be preserved across renders. Implementations using `Array.prototype.sort` are acceptable on engines that guarantee stability (V8 since 7.0, all currently-shipping browsers); any future implementation MUST preserve this guarantee even if a non-stable algorithm is faster. Document the requirement in the component JSDoc.
 
 **Sort comparator semantics (locked):**
 
@@ -191,8 +199,9 @@ Behaviour (locked here, do not redesign in A/B/C):
 
 **Persist key namespacing (locked):**
 
-- The `persistKey` prop names the consumer logically (e.g. `'spending-ledger'`). The component prefixes it as `table:${persistKey}` when reading/writing localStorage so SortableTable storage cannot collide with non-table consumers.
-- Callers pass the unprefixed identifier; the component owns the namespace.
+- The `persistKey` prop names the consumer logically (e.g. `'spending-ledger'`). The component prefixes it as `table:v1:${persistKey}` when reading/writing localStorage so SortableTable storage cannot collide with non-table consumers.
+- The `v1` segment is the **persisted-state schema version**. If the persisted shape (sort tuple, filter selections, column-key set) ever changes incompatibly, bump to `v2`; the old `v1` keys are then ignored and treated as absent rather than producing corrupted state. Consumers do NOT include the version in `persistKey`.
+- Callers pass the unprefixed, unversioned identifier; the component owns both the namespace AND the version.
 
 **Out of scope for Phase 0:** server-side sort/filter, virtualised rendering, column resize, column drag-reorder, multi-sort. Hooks are exposed in props (`getValue`, `getFilterOptions`) so Specs A/B/C can wire client-side filters without modifying the component.
 
