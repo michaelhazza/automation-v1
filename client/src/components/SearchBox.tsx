@@ -21,7 +21,7 @@ interface SearchBoxProps {
   'aria-label'?: string;
 }
 
-export default function SearchBox({
+export function SearchBox({
   value,
   onChange,
   placeholder = 'Search...',
@@ -37,6 +37,13 @@ export default function SearchBox({
   useEffect(() => {
     setLocal(value);
   }, [value]);
+
+  // Clear any pending debounce timer on unmount to prevent stale onChange calls.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   function handleChange(next: string) {
     setLocal(next);
@@ -86,7 +93,7 @@ export default function SearchBox({
           type="button"
           onClick={handleClear}
           aria-label="Clear search"
-          className="absolute right-2 text-slate-400 hover:text-slate-700 transition-colors"
+          className="absolute right-2 text-slate-400 hover:text-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path

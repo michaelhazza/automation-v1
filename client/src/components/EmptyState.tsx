@@ -19,7 +19,7 @@ interface EmptyStateProps {
   secondaryAction?: { label: string; onClick: () => void };
 }
 
-export default function EmptyState({
+export function EmptyState({
   title,
   body,
   icon,

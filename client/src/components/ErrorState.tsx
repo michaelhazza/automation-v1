@@ -30,7 +30,7 @@ const ExclamationCircleIcon = () => (
   </svg>
 );
 
-export default function ErrorState({
+export function ErrorState({
   title = 'Something went wrong',
   body,
   error,
