@@ -1,192 +1,322 @@
 # Agent Cloud Compute — Development Brief
 
-> **Status:** Rev 1 — first pass. Pre-spec, pre-review.
+> **Status:** Rev 2 — stress-test shape. Pre-spec, pre-review.
 > **Date:** 2026-05-07
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii`
-> **Audience:** Internal engineering, plus LLM reviewers without prior context.
-> **Trigger:** Manus shipped "Cloud Computers" (one-click persistent VM per agent). OpenClaw has done similar via VPS deployment for months. Question: do we need to match this, or does our existing model already deliver the customer outcome more cheaply?
+> **Audience:** Internal engineering, plus LLM and external reviewers without prior context.
+> **Posture:** Neutral. Two paths laid out in parallel with pros and cons, recommendation last. Designed to be stress-tested, not defended.
 
 ---
 
 ## Contents
 
 1. What this brief is
-2. The Manus / OpenClaw model — what they're selling
-3. Where we are today
-4. The strategic decision — what we are NOT building, and why
-5. Recommendations
-   - 5.1 Positioning rewrite in `capabilities.md`
-   - 5.2 Session-scoped container reuse in IEE
-   - 5.3 Workspace persistence model — memory in app, scratch in object storage
-   - 5.4 "Always-on" framing via schedulers + persistent state
-6. Dependencies and suggested ordering
-7. Out of scope
-8. Success criteria for v1
-9. Decisions made
-10. Alternatives considered and rejected
+2. The market signal we're reacting to
+3. Competitor landscape
+4. The customer outcome being promised
+5. The two paths — overview
+6. Where we are today
+7. Path A — per-agent persistent VM
+8. Path B — workspace across primitives + session-scoped runtime
+9. Side-by-side comparison
+10. Recommendation
+11. If we choose Path B — what we'd actually build
+12. Open questions and where this analysis could be wrong
+13. Out of scope
+14. Success criteria for v1
 
 ---
 
 ## 1. What this brief is
 
-The agentic AI category is converging on a single pitch: *"your agent has its own computer, running 24/7."* Manus has now wrapped this into a one-click button. OpenClaw has shipped it via VPS deployment. The customer-perceived outcome is *"my agent works while I sleep, with persistent files, persistent env, and persistent state."*
+In May 2026, Manus shipped "Cloud Computers" — a one-click feature that gives every Manus agent its own persistent virtual machine. OpenClaw has been doing the same thing for months via VPS deployment, configured manually by power users. A widely-shared post on the day of Manus's launch framed this as the moment *"AI got its own desk"* and claimed *"every platform is racing to give AI agents persistent compute."*
 
-Synthetos already delivers most of that outcome through different primitives. This brief argues we should **not** ship a per-agent persistent VM, and instead close the perceived gap with (a) a positioning rewrite, (b) a small extension to IEE for multi-step task continuity, and (c) a clearer workspace persistence story that frames our existing primitives as the durable workspace.
+This brief asks one question: **does Synthetos need to ship a per-agent persistent VM to remain competitive, or can our existing primitives deliver the same customer outcome more cheaply and with better fit to our architecture?**
 
-This is a brief, not a spec. Each recommendation is sized as a small, independently-shippable change.
+The brief is structured for stress-testing. It does not start from the answer. Sections 7 and 8 lay out the two paths in parallel with their pros and cons. The recommendation is in §10. Section 12 is an honest list of where this analysis could be wrong, intended to invite challenge from reviewers.
 
-## 2. The Manus / OpenClaw model — what they're selling
+This is a brief, not a spec. If a path is chosen, the spec follows.
 
-Both products bundle the same set of properties under the headline "your agent gets its own computer":
+## 2. The market signal we're reacting to
 
-- A **dedicated VM** (Manus) or **dedicated VPS** (OpenClaw) per agent.
-- **Persistent filesystem** — files written during one run survive into the next.
-- **Persistent env** — installed packages, browser sessions, custom scripts persist.
-- **Always-on availability** — the agent can be triggered or scheduled at any time without cold-start setup.
-- **Independent of the user's machine** — the agent does not need the user's laptop open to work.
+The post that triggered this brief makes five claims worth taking seriously:
 
-Manus's pitch: *"An always-on workspace for your agent to work 24/7. One click. Create."* OpenClaw's pitch: *"Configure your own VPS, run agents across infrastructure you control."*
+1. **Convergence claim.** *"The agentic AI space is converging on the same conclusion. AI agents need their own computers."*
+2. **Pattern claim.** *"OpenClaw ships a capability for power users who can configure it themselves. Then closed platforms package it for everyone else."* (i.e. one-click VMs are now table stakes)
+3. **Persistence claim.** *"Your AI doesn't just respond when you talk to it anymore. It has its own workspace. Its own files. Its own environment."*
+4. **Independence claim.** *"It works while you sleep."*
+5. **Inflection claim.** *"This was when everything changed. Not when AI got smarter. When AI got its own desk."*
 
-The framing is sticky because it maps onto a familiar mental model: a VM is a computer, a computer is a desk, your agent has a desk. The framing is also expensive: an idle VM costs money 24 hours a day for an agent that runs 30 minutes a day.
+Some of these are real product trends. Some are LinkedIn-thinkfluencer compression. The brief takes #1 and #3 as genuine signals, treats #2 as plausible but not proven, treats #4 as a marketing reframe of capabilities we already have, and treats #5 as commentary, not data.
 
-## 3. Where we are today
+What matters strategically: the **language** of "your agent has its own computer" is becoming the default frame for how non-technical buyers reason about agent platforms. Even if we believe the per-agent VM is the wrong primitive, we have to engage the frame, because customers are going to ask us about it.
 
-Synthetos already ships, in production:
+## 3. Competitor landscape
 
-### 3.1 Sandboxed Runtime (IEE)
-`server/services/ieeExecutionService.ts`, `server/services/ieeUsageService.ts`, `server/jobs/ieeRunCompletedHandler.ts`. Fully sandboxed Docker containers for browser automation and org-level extensibility. Per-run cost tracking. Budget controls. Connection health validation against stored credentials.
+This section aims to be honest about what we know and what we're guessing. Where research is needed before final decisions, the brief flags it.
 
-### 3.2 Persistent agent memory
+### 3.1 Manus
+- **Pitch:** General-purpose AI agent. As of May 2026, every agent gets a one-click "Cloud Computer" — a dedicated VM that persists files, env, and state.
+- **Strengths:** Polished UX, strong consumer-grade marketing, the new VM feature now bundled into the default experience (no configuration required).
+- **Weaknesses we suspect but have not confirmed:** Likely high cost-per-customer (idle VMs), unclear multi-tenancy story, unclear how the VM model composes with team / agency use cases.
+- **Customer profile:** Mass-market individual users and small teams running general agent tasks.
+- **Research gap:** Pricing tiers, scale, real customer base size, retention. Worth a 30-minute research pass before final decisions.
+
+### 3.2 OpenClaw
+- **Pitch:** Open-source agent platform. Power users configure their own VPS deployments per-agent. The post's author, Clarence at VA Staffer, claims to manage *"dozens of VPS running OpenClaw agents for clients."*
+- **Strengths:** Customer-owned infrastructure, full control, persistent compute, scriptable.
+- **Weaknesses:** Configuration burden falls on the operator. Not turnkey. The post itself frames this as a deliberate trade-off ("for power users who can configure it themselves").
+- **Customer profile:** Technical power users and agencies running multi-agent fleets on customer-owned infrastructure.
+- **Research gap:** Whether OpenClaw is a real well-known project or a niche one. The post's framing suggests it's known in agency circles but not mass-market. Worth checking before we cite it externally.
+
+### 3.3 Adjacent players (not direct, but shape the frame)
+- **Devin (Cognition Labs):** Code-focused agent that runs in its own sandboxed dev environment. Established the "AI gets a workspace" frame for engineering-tasks specifically.
+- **Replit Agent:** Coding agent inside a Replit workspace. Similar framing, narrower domain.
+- **Claude Computer Use (Anthropic):** API-level capability for an agent to operate a computer interface. Does NOT bundle hosting; the customer brings their own compute. This is closer to our IEE model.
+- **AutoGPT / earlier OSS agent loops:** Run-on-your-laptop. Persistence comes from the user's local machine. Different tier; not a comparator.
+
+### 3.4 What the landscape is telling us
+- The **pitch** is converging on "your agent gets its own computer."
+- The **implementations** are not. Manus and OpenClaw bundle compute. Anthropic's Computer Use does not. Devin runs agents in an isolated dev environment, not a general-purpose VM.
+- This means the framing is up for grabs. There's room for *"your agent has a workspace, not a server"* if the message lands well — but there's also risk that customers don't bother distinguishing and we lose deals to the simpler pitch.
+
+## 4. The customer outcome being promised
+
+Stripping away the marketing, the per-agent-VM pitch is promising five concrete things to the customer:
+
+1. **Persistent files.** Files the agent created or downloaded in one run are still there in the next run.
+2. **Persistent env.** Packages, browser sessions, custom scripts, accumulated state survive between runs.
+3. **Always-on availability.** The agent can be triggered or scheduled at any time without cold-start setup.
+4. **Independence.** The agent does not need the user's laptop open. It works while the user sleeps.
+5. **Mental-model legibility.** "My agent has a computer" is intuitive. The user knows where their stuff is.
+
+These are five distinct customer needs. The Manus / OpenClaw answer maps all five onto one primitive (a VM). The Synthetos answer would have to address all five too — but not necessarily with the same primitive.
+
+Outcomes #1 through #4 are functional and measurable. Outcome #5 is **psychological and is the hardest one to compete on.** A platform can deliver superior #1-4 and still lose to a competitor with a sharper #5.
+
+## 5. The two paths — overview
+
+There are essentially two product strategies on the table:
+
+**Path A — Match the frame.** Ship a per-agent persistent VM as a first-class primitive. Compete on the same axes as Manus and OpenClaw. Buy into "your agent has its own computer" as the central pitch.
+
+**Path B — Reframe.** Position our existing primitives (sandboxed runtime, persistent memory in the app, credentials layer, schedulers) as a coherent "agent workspace" that delivers outcomes #1-4 without an idle VM. Compete on cost, auditability, and multi-tenant fit. Accept the harder marketing job in exchange for a structurally cheaper product.
+
+A third path — *"do nothing, wait and see"* — is implicitly available but not seriously evaluated here, because the positioning gap exists today and concedes the narrative if left unaddressed.
+
+The next two sections lay out Path A and Path B with pros and cons in parallel. Section 9 compares them side by side. Section 10 makes a recommendation.
+
+## 6. Where we are today
+
+Synthetos already ships, in production, the primitives that bear on this question:
+
+### 6.1 Sandboxed Runtime (IEE)
+`server/services/ieeExecutionService.ts`, `server/services/ieeUsageService.ts`, `server/jobs/ieeRunCompletedHandler.ts`. Fully sandboxed Docker containers for browser automation and org-level extensibility. Per-run cost tracking. Budget controls. Connection health validation against stored credentials. Containers are currently **per-run, not per-task** — each step of a multi-step task spins up a fresh container.
+
+### 6.2 Persistent agent memory
 Config Documents (`docs/capabilities.md` § Knowledge Sharing & Reusable Context). Workspace-level reference material that informs every agent run. Persisted in our database, audited, multi-tenant-isolated.
 
-### 3.3 Stable actor identity
+### 6.3 Stable actor identity
 `docs/capabilities.md` § Actor / identity model. Every agent is a stable actor with persistent identity across backend migrations. History, audit, and continuity survive even when the underlying compute changes.
 
-### 3.4 Thread context panel
+### 6.4 Thread context panel
 Per-conversation persistent context — task description, preferred approach, key decisions — that the agent reads at the start of every run.
 
-### 3.5 Always-on workloads
-Continuous enrichment, always-on health scoring, anomaly detection (`docs/capabilities.md` § Replaces / Consolidates). These are scheduler-driven, not VM-driven.
+### 6.5 Always-on workloads
+Continuous enrichment, always-on health scoring, anomaly detection (`docs/capabilities.md` § Replaces / Consolidates). These are scheduler-driven, not VM-driven. **Research gap:** confirm the scheduler infrastructure is real and load-tested, not aspirational.
 
-### 3.6 Credentials and sessions
+### 6.6 Credentials and sessions
 Connections + Connection Health Validation. Browser sessions and OAuth tokens are persisted in the credentials layer, not in a VM filesystem.
 
-### 3.7 Spending and compute budgets
+### 6.7 Spending and compute budgets
 Two distinct budget primitives. Compute Budget caps LLM and runtime cost per workspace. Spending Budget governs money the agent moves on the client's behalf. Both already integrate with IEE runtime cost.
 
-What we **don't** have:
+### 6.8 What we don't have
+- A way to keep the same IEE container alive across multiple steps of a single task.
+- A canonical place for scratch artifacts (downloaded files, intermediate CSVs) addressable across runs.
+- Public-facing positioning that frames the above as a coherent "agent workspace."
+- Customer demand signal: have any actual customers asked us for VMs? Worth checking before deciding. Absence of demand is data.
 
-- A way to keep the **same** IEE container alive across multiple steps of a single long task (each step currently spins up a fresh container).
-- Public-facing positioning that frames IEE + Config Documents + Actor identity as a coherent "your agent's workspace."
-- A canonical place where scratch artifacts from a run (downloaded files, intermediate CSVs) are stored and re-attached on the next run.
+## 7. Path A — per-agent persistent VM
 
-## 4. The strategic decision — what we are NOT building, and why
+Ship a dedicated VM per agent (or per workspace, scoped tightly), with a one-click "create your agent's computer" UX modelled on Manus. The VM holds files, env, browser state, and accumulated work between runs.
 
-**We are not shipping a per-agent persistent VM.**
+### 7.1 What we'd build
+- A VM provisioning service (likely on top of a hosting partner: Fly Machines, GCE, or similar) with per-agent or per-workspace isolation.
+- A lifecycle manager: provision on agent creation, suspend on idle, resume on activity, decommission on agent deletion.
+- A workspace browser UI: file explorer, env inspection, session history.
+- A pricing tier that covers the new infra cost.
+- Migration tooling: existing IEE container behaviour either deprecates or composes with the new VM model.
 
-The Manus pitch maps four customer needs onto one expensive primitive. We map them onto four cheaper, more auditable primitives:
+### 7.2 Pros
+- **Marketing parity.** The pitch *"your agent has its own computer"* is available to us in the same words competitors use. Easy to sell, easy to explain, no re-education required.
+- **Power-user appeal.** Agency operators running 20+ agents (the OpenClaw customer profile in the post) get an obvious upgrade path from self-managed VPS to managed-by-us VM.
+- **Genuine answer to long-running processes.** A watcher on a VM that polls every 30 seconds is straightforward; on schedulers + cold containers it's awkward.
+- **Customer lock-in via state accumulation.** Once a customer's agent has weeks of accumulated state on a VM, switching costs are high. This is an asset.
+- **Future-proofing for niche workloads.** Some workloads (real-time data pipelines, long-running model fine-tuning, heavy local tooling) genuinely need warm compute.
 
-| What the agent needs to persist | Manus / OpenClaw answer | Synthetos answer |
-|---------------------------------|-------------------------|------------------|
-| Memory (what it learned, decided) | VM filesystem | Database — Config Documents, Thread Context, Actor history |
-| Credentials and sessions | VM filesystem | Connections layer with Connection Health Validation |
-| Working files, intermediate state | VM disk | Object storage attached to the run (proposed) |
-| Long-running processes | Always-on VM | Scheduler with on-demand IEE container |
+### 7.3 Cons
+- **High idle cost.** A VM idling at $X/hour for an agent that runs 30 minutes a day is wasteful. At scale across many tenants, this materially changes our gross margin.
+- **Multi-tenancy strain.** Our model is *agency runs N subaccounts, each subaccount has M agents*. A VM-per-agent model multiplies. Aggregating to "VM per subaccount" or "VM per agency" weakens the marketing pitch.
+- **Operational surface area increase.** VM lifecycle, snapshotting, backup, security patching, OS upgrades become our problem. Container lifecycle is hard; VM lifecycle is harder.
+- **Auditability regression.** State on a VM filesystem is harder to inspect than state in a database. We lose a structural advantage we currently have.
+- **Security blast radius.** A persistent VM compromised by an agent action can persist that compromise across runs. A per-run container does not.
+- **Cost-of-goods passthrough.** We either eat the infra cost (worse margins) or pass it through (higher prices). Both options are bad for an agency-tier product where the buyer is cost-sensitive.
+- **Disagrees with our existing architecture story.** We've built a clean separation of memory (DB), credentials (Connections), runtime (IEE), and skills (Skill Studio). VMs collapse those back into one fuzzy primitive.
 
-The Synthetos column is **better** on every axis a non-technical operator cares about: lower cost (no idle VM), auditable (memory lives in business records the operator can inspect), multi-tenant-isolated (RLS, not file permissions), backend-portable (Actor identity survives migrations).
+### 7.4 Cost model (rough)
+- Idle VM (Fly Machines or similar small instance): ~$5-15/month per agent, depending on size. Scales linearly with agent count.
+- For an agency with 20 agents across 10 subaccounts: $1k-3k/month in idle infra alone.
+- Compare to current IEE: per-run cost only, ~$0 idle. Materially different unit economics.
 
-The Synthetos column is **worse** on one thing: marketing legibility. *"Your agent has its own computer"* is a sharper sentence than *"your agent has its own workspace, persisted across our managed primitives."* That is a positioning problem, not an architecture problem.
+### 7.5 Engineering effort
+- Provisioning + lifecycle: 4-8 weeks for a credible v1.
+- UX: 2-4 weeks.
+- Pricing/billing wiring: 1-2 weeks.
+- Total: roughly a quarter of focused work for a launchable product, plus ongoing operational load.
 
-The remainder of this brief proposes the smallest set of changes that close the legibility gap without taking on the cost and complexity of per-agent VMs.
+## 8. Path B — workspace across primitives + session-scoped runtime
 
-## 5. Recommendations
+Position our existing primitives (Config Documents, Connections, IEE, Schedulers, Skill Studio) as a coherent "agent workspace." Add the smallest extension needed to close the real functional gap: keep the same IEE container alive across multiple steps of a single multi-step task. Define a canonical home for scratch artifacts.
 
-### 5.1 Positioning rewrite in `capabilities.md`
+### 8.1 What we'd build
+- **No new compute primitive.** Re-use IEE.
+- **Session-scoped container reuse.** New `iee_sessions` table; a session lives for the duration of one logical task; idle timeout tears it down. Heartbeat extends. State is summarised back to the workspace at session end.
+- **Artifact store.** Object storage bucket per workspace, addressable by run id. Thin service wrapping put/get. Run records expose `artifact_url`.
+- **Capabilities rewrite.** New top-level *"Persistent Agent Workspace"* capability section in `docs/capabilities.md` framing the four existing primitives as a workspace. Replaces / Consolidates table updated to address Manus / OpenClaw directly.
+- **Non-goal documentation.** Explicit "we do not run a persistent VM per agent — here's why" entry. Forces sales conversations to engage on cost and audit, not on framing.
 
-Reframe the Sandboxed Runtime (IEE) section and the surrounding capabilities so that, read together, they describe a **persistent agent workspace**. No code changes — copy and structure only.
+### 8.2 Pros
+- **Cheap to ship.** Positioning rewrite is hours. Session reuse is a Standard task (2-4 files). Artifact store is a thin wrapper. Total: weeks, not quarters.
+- **Lower COGS at scale.** No idle compute. Only pay for compute when an agent is actually working. This compounds favourably as we add tenants.
+- **Better fit with multi-tenant agency model.** No per-agent infra explosion. Existing budget primitives already handle the cost surface.
+- **Auditability advantage.** State lives in our database (memory) and object storage (artifacts). Operators can inspect everything through the app. This is a **real** differentiator we can sell, not just spin.
+- **Smaller security surface.** Per-task containers torn down at task end. No long-lived attack persistence.
+- **Composes with our existing architecture.** Memory / credentials / runtime / skills stay separated. We get to keep the architectural cleanliness we've built.
+- **Reversible.** If we're wrong and customers genuinely want VMs, Path B does not foreclose Path A. We can ship VMs as a premium tier later. Path A does not enjoy the same reversibility — if we ship VMs first and want to retreat, the migration is painful.
 
-Concretely:
-- Add a new top-level capability section titled something like *Persistent Agent Workspace*, sitting above the IEE section, that names the four primitives (Config Documents, Actor identity, Connections, Sandboxed Runtime) as the components of "your agent's workspace."
-- Rewrite the IEE intro to lead with *"on-demand, sandboxed compute that picks up where the last run left off"* rather than *"Docker containers for browser automation."*
-- Update the Replaces / Consolidates table with a row covering hosted-VM-per-agent platforms (Manus, OpenClaw, similar) and our differentiator: workspace lives in the operator's business records, not on a server they cannot audit.
-- Add a Non-goals entry: *"We do not run a persistent VM per agent — see [link] for why."*
+### 8.3 Cons
+- **Worse marketing legibility.** *"Persistent workspace across our managed primitives"* is a longer sentence than *"your agent has its own computer."* In a noisy market, sharper sentences win.
+- **Customer education tax.** Every sales conversation has to address why we don't have VMs. That's a recurring cost in seller time and customer-confusion-handling.
+- **Genuine workload gaps.** Sub-minute pollers, long-running watchers, heavy local tooling — these workloads are harder on schedulers + cold containers than on warm VMs. We may turn down deals we could have won.
+- **Engineering risk on session reuse.** Docker container lifecycle (heartbeats, idle timeouts, leaked containers, cleanup races, orphaned resources) is operationally hairy. Non-trivial chance of post-launch incidents.
+- **Risk of being "right but lonely."** The market may converge on the VM frame to the point where "no VMs" reads as a missing feature regardless of underlying capability. Being architecturally right does not always win.
+- **Lock-in disadvantage.** Path A's accumulated VM state creates customer stickiness. Path B's state lives in our app, which is also sticky — but less viscerally so for the customer.
 
-This is the highest-leverage change in the brief. Cost: a few hours of writing.
+### 8.4 Cost model (rough)
+- Object storage: ~$0.02/GB/month. Negligible at expected scales.
+- IEE compute: per-run, no idle cost. Already in production.
+- Engineering: weeks. No new infra partnership required.
 
-### 5.2 Session-scoped container reuse in IEE
+### 8.5 Engineering effort
+- Positioning rewrite: 1 week.
+- Artifact store: 1 week.
+- Session-scoped container reuse: 2-3 weeks (most of the risk lives here).
+- Total: roughly a month of focused work.
 
-Today, each step of a multi-step task spins up a fresh IEE container. For a single logical task that runs across multiple steps (a 4-hour browser sequence, a multi-page scrape, a complex form submission with intermediate waits), this is wasteful and breaks any in-container state the agent built up.
+## 9. Side-by-side comparison
 
-Add a **session** primitive to IEE: a logical envelope that holds the same container alive across multiple step invocations within one task, then tears it down at task end and writes summarised state back to the workspace.
+| Axis | Path A — per-agent VM | Path B — workspace + session runtime |
+|------|----------------------|--------------------------------------|
+| Marketing legibility | Strong (matches the frame customers already hear) | Weaker (requires reframing the conversation) |
+| Engineering effort to ship | Quarter-scale | Month-scale |
+| Idle infra cost | High and scales with agent count | Near zero |
+| Multi-tenant fit | Strained (VM-per-agent multiplies poorly across agency / subaccount / agent tiers) | Natural (existing tenant model unchanged) |
+| Auditability | Worse (state behind SSH) | Better (state in DB + object storage) |
+| Security blast radius | Larger (long-lived attack persistence) | Smaller (per-task containers torn down) |
+| Long-running workload fit | Excellent | Awkward (cold-start latency on schedulers) |
+| Customer lock-in | Strong (accumulated VM state) | Moderate (state in our app) |
+| Operational load | High (VM lifecycle, patching, backups) | Moderate (container lifecycle only) |
+| Reversibility | Low (hard to retreat from VMs once shipped) | High (can add VMs later as premium tier) |
+| Differentiation 12 months out | Low (everyone has VMs) | High if the cost-and-audit story lands |
+| Differentiation 12 months out if cost-and-audit story does NOT land | Low | Negative (we look like we're missing a feature) |
 
-Sketch:
-- New `iee_sessions` row created when a task begins; references the run, the actor, the budget context.
-- IEE execution service checks for an active session before spawning a new container; if present, dispatches into the existing one.
-- Idle timeout (default: minutes, not hours) tears the container down to control cost. Heartbeat extends the lease.
-- At session end, a structured "what happened in this session" summary is written to the run record and any durable artifacts are uploaded to object storage (see 5.3).
-- Reuse the existing per-run cost tracking; bill the session under the parent task's compute budget.
+The last two rows are the live argument. Path B's upside is conditional on customers caring about cost and audit. Path A's upside is unconditional but has worse unit economics.
 
-This is the only meaningful build in the brief. Sized as a Standard task (2-4 files, no new patterns). It does not require a persistent VM, an idle workspace, or any 24/7 compute.
+## 10. Recommendation
 
-### 5.3 Workspace persistence model — memory in app, scratch in object storage
+**Recommendation: Path B, with a Path-A escape hatch on the roadmap.**
 
-Define the canonical answer to *"where do agent files go between runs?"*:
+The reasoning, briefly:
 
-- **Memory** (decisions, learnings, key facts) → Config Documents and Thread Context. Already in place; document the convention.
-- **Scratch artifacts** (downloaded CSVs, screenshots, intermediate JSON) → object storage bucket per workspace, addressable by run id. Add a thin service that wraps put/get and exposes an `artifact_url` field on run records.
-- **Credentials and sessions** → Connections layer. Already in place.
-- **Code/scripts** → Skill versions, not container filesystems. Skill Studio already covers this.
+1. **Unit economics decide this.** Path A's idle-VM cost is a structural margin drag that gets worse as we scale. We are not a venture-funded growth-at-any-cost play; gross margin matters.
+2. **Multi-tenant fit decides it again.** Our customer is an agency running clients running agents. Path A's per-agent VM does not compose cleanly with that hierarchy. Path B does.
+3. **Reversibility breaks the tie.** If the market proves us wrong on Path B, we can add a VM tier later. If we ship VMs first and the market proves us wrong, we cannot easily retreat. When in doubt between two paths, prefer the one that preserves optionality.
+4. **The cost-and-audit story is sellable.** *"Your agent's workspace lives in your business records, not on a server you can't audit, and you only pay for compute when work happens"* is a real pitch. It is not as sharp as *"your agent has its own computer,"* but it is durable and compounds with time as customers feel the cost difference on their own bills.
 
-The point of this section is that the operator can answer the question *"where is my agent's stuff?"* in plain English and inspect every layer through the app, not by SSHing to a VM.
+**The condition under which this recommendation flips:** if the research gaps in §3 reveal that Manus / OpenClaw are winning enterprise deals on the VM pitch specifically, and we have already lost named opportunities because of it, then Path A becomes a defensive necessity. Recommend running that check before committing.
 
-Sized as a Standard task once the object-storage convention is picked. The artifact-store wrapper is small; the harder work is the convention and the doc.
+**The condition under which both paths could be wrong:** if customer demand turns out to be for *"my agent runs my desktop, not a server in the cloud,"* the entire frame shifts to local execution (Anthropic Computer Use direction) and both paths become irrelevant. This is unlikely on a 12-month horizon but worth flagging.
 
-### 5.4 "Always-on" framing via schedulers + persistent state
+## 11. If we choose Path B — what we'd actually build
 
-Manus's "24/7" pitch is genuinely answered by scheduling, not by an idle VM. We already have schedulers and the always-on enrichment / health-scoring patterns. Make this explicit in the capabilities doc:
+In suggested order. Each step is independently shippable.
 
-- "Always-on" workloads are **schedule + workspace state**, not **idle VM**.
-- An agent triggered every 15 minutes on a workspace with persistent memory **is** an always-on agent, at a fraction of the cost of an idle VM.
-- The Replaces / Consolidates table should explicitly position this against the 24/7 VM pitch.
+### 11.1 Positioning rewrite (Week 1)
+- New top-level *"Persistent Agent Workspace"* section in `docs/capabilities.md` framing Config Documents + Actor identity + Connections + Sandboxed Runtime as a coherent workspace.
+- IEE intro rewritten: lead with *"on-demand sandboxed compute that picks up where the last run left off"* rather than *"Docker containers for browser automation."*
+- Replaces / Consolidates table updated with a row directly addressing hosted-VM-per-agent platforms.
+- Non-goals entry: *"We do not run a persistent VM per agent — see §X for why."*
+- "Always-on" reframed as schedulers + persistent state rather than idle compute.
 
-No build. Pure positioning. Bundle with 5.1.
+No code changes. Highest leverage per hour of effort in this brief.
 
-## 6. Dependencies and suggested ordering
+### 11.2 Workspace persistence model (Weeks 2-3)
+- Define the canonical answer to *"where do agent files go between runs?"*: memory in DB, scratch in object storage, credentials in Connections, code in Skill versions.
+- Build the artifact-store wrapper: per-workspace bucket, addressable by run id, exposed via `artifact_url` on run records.
+- Document the convention. Add an operator-facing surface (file browser per workspace) so customers can answer *"where is my agent's stuff?"* without us.
 
-1. **5.1 + 5.4 first** (positioning rewrite). Independent of any code change. Highest leverage, lowest cost. Ship this week.
-2. **5.3 next** (workspace persistence model). The doc convention plus the object-storage wrapper. Unblocks 5.2's "write artifacts back to workspace" step.
-3. **5.2 last** (session-scoped container reuse). Builds on 5.3 for end-of-session artifact upload.
+Sized as a Standard task once the storage convention is picked.
 
-Each step is independently shippable. 5.2 is the only one that needs a real spec.
+### 11.3 Session-scoped container reuse in IEE (Weeks 3-5)
+- New `iee_sessions` table referencing run, actor, budget context.
+- IEE execution service checks for active session before spawning a new container; dispatches into existing if present.
+- Idle timeout (minutes, not hours) tears the container down. Heartbeat extends.
+- Session end: structured summary written to run record; durable artifacts uploaded to artifact store.
+- Existing per-run cost tracking applied; bill the session under the parent task's compute budget.
 
-## 7. Out of scope
+Sized as a Standard-to-Significant task. Most of the engineering risk in the brief lives here. Needs a real spec.
 
-- **Per-agent persistent VMs.** Explicit non-goal. See §4 for rationale.
-- **User-managed VPS deployment** in OpenClaw style. Different product surface, different customer profile, not a fit for our agency-on-behalf-of-clients model.
+### 11.4 Optional follow-on: long-running session tier (TBD)
+- If customer demand surfaces for genuine sub-minute pollers or long-running watchers, evaluate a "warm session" tier that keeps a container alive for hours/days within tight cost caps.
+- This is the Path-A escape hatch. Not for v1.
+
+## 12. Open questions and where this analysis could be wrong
+
+This section exists to be challenged. Reviewers should push hardest on these.
+
+1. **Is the cost difference real at our scale?** §7.4 estimates idle-VM cost at $5-15/agent/month. If customer demand is small enough that 10x the cost is still rounding error, the cost argument weakens substantially.
+2. **Is the multi-tenant argument real?** Path A could be sold as *"per-subaccount workspace VM"* rather than per-agent. That softens the multiplication problem and may match customer mental model better than per-agent. Worth pressure-testing.
+3. **Have we lost deals on this already?** If yes, the urgency is higher than this brief assumes. If no, we have time to ship Path B and observe.
+4. **Is the auditability story actually a buying criterion?** Operators say they want audit trails. They often buy on other axes. If audit is *"nice to have"* and not *"will pay more for,"* the differentiation argument weakens.
+5. **Do we have real schedulers, or are they aspirational in `capabilities.md`?** The "always-on via schedulers" pitch only works if the scheduler infra is production-grade. Confirm before committing.
+6. **Is OpenClaw a real comparator?** The post asserts it confidently. Worth 30 minutes of independent research before citing it externally.
+7. **Will Manus's VM model prove sticky or expensive-and-abandoned?** If their unit economics blow up in 6 months and they retreat, Path B looks prescient. If they ride it to a much larger customer base before the unit economics matter, Path A looks like the right call we missed.
+8. **Could a hybrid be cheaper than either?** E.g. shared "workspace VM" per subaccount with per-agent containers inside it. Not seriously evaluated in this brief; might deserve its own section if reviewers push.
+9. **Is the security blast-radius argument overstated?** A compromised long-lived VM is bad, but a compromised set of accumulated database rows (memory) and object-storage artifacts is also bad. The asymmetry is real but not infinite.
+10. **What does the customer base actually want?** This brief is reasoning from competitive signal, not from customer interviews. A handful of *"yes I want this / no I don't"* conversations would beat all of this analysis.
+
+## 13. Out of scope
+
+- **Pricing / billing redesign.** Compute Budget and Spending Budget already cover the cost model. Path B does not require pricing changes. Path A would.
+- **A "click here to spin up a workspace" UI primitive** mirroring Manus's button. The workspace already exists under Path B; what's shipped is the language naming it. If we go Path A, this comes back into scope.
+- **User-managed VPS deployment** in OpenClaw style. Different product surface, different customer profile, not a fit for our agency-on-behalf-of-clients model regardless of which path we pick.
 - **Cross-task container reuse.** A session is bounded by one logical task. Sharing containers across unrelated tasks introduces tenancy and cleanup risks not worth taking on in v1.
-- **A "click here to spin up a workspace" UI primitive** mirroring Manus's button. The workspace already exists; what we're shipping is the language that names it, not a new UI flow.
-- **Pricing / billing redesign.** Compute Budget and Spending Budget already cover the cost model. No changes needed for v1.
+- **Local execution model** (agent runs on the user's desktop). Genuinely different product. Worth tracking as a market signal but not in scope for this brief.
 
-## 8. Success criteria for v1
+## 14. Success criteria for v1
+
+These criteria are stated for Path B, since that is the recommendation. If the recommendation flips, criteria for Path A are derivable from §7.
 
 A non-technical operator can:
 
-- Read the capabilities doc and answer the question *"where does my agent's memory and work persist?"* without saying "in a VM somewhere."
+- Read the capabilities doc and answer *"where does my agent's memory and work persist?"* without saying *"in a VM somewhere."*
 - See, in the app, the four workspace layers (memory, credentials, scratch artifacts, skills) and their contents per agent or per run.
 - Run a multi-step task that takes hours, confident that mid-task state is not lost between steps and that end-of-task artifacts are recoverable.
-- Compare us against Manus or OpenClaw and articulate the differentiator in one sentence: *"Synthetos persists my agent's workspace in my business records, not on a server I can't audit, and only spins up compute when the agent is actually working."*
+- Compare us against Manus or OpenClaw and articulate the differentiator in one sentence: *"Synthetos persists my agent's workspace in my business records, not on a server I can't audit, and I only pay for compute when the agent is actually working."*
 
-## 9. Decisions made
+A reasonable internal observer can:
 
-- **No per-agent persistent VM.** Closed; the cost/benefit does not justify it for our customer profile.
-- **Session as the unit of container continuity, not workspace.** A session lives for one logical task and is torn down at task end. Workspace continuity is achieved via the four persistent layers (memory, credentials, scratch, skills), not via a long-lived container.
-- **Memory lives in the app, not in the runtime.** Config Documents, Thread Context, and Actor history are the canonical persistence surface. The runtime is ephemeral by design.
-- **Scratch artifacts live in object storage, not in container disks.** Operator-visible, multi-tenant-isolated, cheap.
-- **"Always-on" is delivered by schedulers + persistent state, not by idle compute.** Same outcome, lower cost, more auditable.
-
-## 10. Alternatives considered and rejected
-
-- **Build per-agent persistent VMs to match Manus head-on.** Rejected. High cost (idle compute), poor multi-tenant fit (VM-per-agent does not compose with our agency-of-subaccounts model), worse auditability (state hidden behind SSH), and lower long-term differentiation (the marketing pitch wins six months, the cost structure loses for years).
-- **Ship a persistent VM as a premium tier on top of IEE.** Rejected for v1. Re-evaluate only if a real customer asks for it. Even then, prefer extending session lifetime before standing up a separate VM product.
-- **Replace IEE with always-on agent runtimes.** Rejected. IEE's per-run sandboxing is a security and isolation feature, not a limitation; trading it away to chase a marketing pitch is the wrong direction.
-- **Wait and see.** Rejected. The positioning gap exists today and is cheap to close. Doing nothing concedes the narrative.
+- Verify that no idle compute cost has been introduced by the v1 work.
+- Verify that the session-reuse mechanism does not leak containers under normal or adverse conditions.
+- Confirm that the brief's recommendation has aged well or recognise when it has not, using the open questions in §12 as the checklist.
