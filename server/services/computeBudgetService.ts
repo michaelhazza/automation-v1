@@ -6,14 +6,19 @@ import {
   computeReservations,
   costAggregates,
   subaccountAgents,
+  subaccounts,
 } from '../db/schema/index.js';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import {
   ComputeBudgetContext,
   ComputeBudgetExceededError,
   projectCostCents,
   compareToLimit,
+  projectPaceCents,
+  computePeriodResetAt,
+  daysRemainingInPeriod,
+  classifyPace,
 } from './computeBudgetServicePure.js';
 
 export { ComputeBudgetContext, ComputeBudgetExceededError, isComputeBudgetExceededError } from './computeBudgetServicePure.js';
@@ -402,6 +407,167 @@ export async function releaseReservation(reservationId: string | null): Promise<
     .update(computeReservations)
     .set({ status: 'released' })
     .where(eq(computeReservations.id, reservationId));
+}
+
+// ---------------------------------------------------------------------------
+// CapsResponse — read-only caps + pace (spec §4.3, §4.11)
+// ---------------------------------------------------------------------------
+
+export interface CapsResponse {
+  scope: 'workspace' | 'org';
+  orgCap: {
+    monthlyUsd: number;
+    usedMtdUsd: number;
+    daysRemaining: number;
+    pace: 'on_track' | 'warning' | 'over';
+  };
+  workspaces: Array<{
+    id: string;
+    name: string;
+    dailyCapUsd: number | null;
+    monthlyCapUsd: number | null;
+    usedMtdUsd: number;
+    pacePct: number;
+    status: 'on_track' | 'warning' | 'over';
+  }>;
+  periodResetAt: string;
+  paceWindow: '7d' | '14d' | '30d';
+  paceProjectedEndOfPeriodUsd: number;
+}
+
+export interface GetCapsOptions {
+  organisationId: string;
+  scope: 'workspace' | 'org';
+  subaccountId?: string;
+}
+
+export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsResponse> {
+  const now = new Date();
+  const billingMonth = now.toISOString().slice(0, 7); // 'YYYY-MM'
+  const resetAt = computePeriodResetAt(now);
+  const daysRemaining = daysRemainingInPeriod(now);
+
+  // Build the 7 daily period keys covering the window [now-6d, now]
+  const windowDays = 7;
+  const windowKeys: string[] = [];
+  for (let i = 0; i < windowDays; i++) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    windowKeys.push(d.toISOString().slice(0, 10));
+  }
+
+  // Days elapsed in window = min(7, day-of-month) to avoid projecting on
+  // partial first day of month when window spans a month boundary.
+  const dayOfMonth = now.getUTCDate(); // 1-indexed
+  const daysElapsedInWindow = Math.min(windowDays, dayOfMonth);
+
+  const [orgBudget, orgMtdRow, orgWindowRows, allSubaccounts] = await Promise.all([
+    getOrgComputeBudget(opts.organisationId),
+    db
+      .select({ totalCostCents: costAggregates.totalCostCents })
+      .from(costAggregates)
+      .where(
+        and(
+          eq(costAggregates.entityType, 'organisation'),
+          eq(costAggregates.entityId, opts.organisationId),
+          eq(costAggregates.periodType, 'monthly'),
+          eq(costAggregates.periodKey, billingMonth),
+        ),
+      )
+      .then((rows) => rows[0] ?? null),
+    db
+      .select({ totalCostCents: costAggregates.totalCostCents })
+      .from(costAggregates)
+      .where(
+        and(
+          eq(costAggregates.entityType, 'organisation'),
+          eq(costAggregates.entityId, opts.organisationId),
+          eq(costAggregates.periodType, 'daily'),
+          inArray(costAggregates.periodKey, windowKeys),
+        ),
+      ),
+    db
+      .select({ id: subaccounts.id, name: subaccounts.name })
+      .from(subaccounts)
+      .where(
+        and(
+          eq(subaccounts.organisationId, opts.organisationId),
+          sql`${subaccounts.deletedAt} IS NULL`,
+        ),
+      ),
+  ]);
+
+  const orgMtdCents = orgMtdRow?.totalCostCents ?? 0;
+  const orgWindowCents = orgWindowRows.reduce((s, r) => s + (r.totalCostCents ?? 0), 0);
+  const orgCapCents = orgBudget?.monthlyComputeLimitCents ?? 0;
+
+  const orgProjectedCents = projectPaceCents(orgMtdCents, orgWindowCents, daysElapsedInWindow, daysRemaining);
+  const orgPace = classifyPace(orgProjectedCents, orgCapCents);
+
+  // Per-workspace: fetch limits + MTD spend in parallel
+  const subaccountIds = allSubaccounts.map((s) => s.id);
+
+  const [wsLimitsRows, wsMtdRows] = subaccountIds.length > 0
+    ? await Promise.all([
+        db
+          .select({
+            subaccountId: workspaceLimits.subaccountId,
+            dailyCapCents: workspaceLimits.dailyCostLimitCents,
+            monthlyCapCents: workspaceLimits.monthlyCostLimitCents,
+          })
+          .from(workspaceLimits)
+          .where(inArray(workspaceLimits.subaccountId, subaccountIds)),
+        db
+          .select({
+            entityId: costAggregates.entityId,
+            totalCostCents: costAggregates.totalCostCents,
+          })
+          .from(costAggregates)
+          .where(
+            and(
+              eq(costAggregates.entityType, 'subaccount'),
+              inArray(costAggregates.entityId, subaccountIds),
+              eq(costAggregates.periodType, 'monthly'),
+              eq(costAggregates.periodKey, billingMonth),
+            ),
+          ),
+      ])
+    : [[], []];
+
+  const limitsMap = new Map(wsLimitsRows.map((r) => [r.subaccountId, r]));
+  const mtdMap = new Map(wsMtdRows.map((r) => [r.entityId, r.totalCostCents ?? 0]));
+
+  const workspaces: CapsResponse['workspaces'] = allSubaccounts.map((ws) => {
+    const limits = limitsMap.get(ws.id);
+    const usedMtdCents = mtdMap.get(ws.id) ?? 0;
+    const monthlyCapCents = limits?.monthlyCapCents ?? 0;
+    const pacePct = monthlyCapCents > 0
+      ? Math.min(200, Math.round((usedMtdCents / monthlyCapCents) * 100))
+      : 0;
+    const status = classifyPace(usedMtdCents, monthlyCapCents);
+    return {
+      id: ws.id,
+      name: ws.name,
+      dailyCapUsd: limits?.dailyCapCents != null ? limits.dailyCapCents / 100 : null,
+      monthlyCapUsd: limits?.monthlyCapCents != null ? limits.monthlyCapCents / 100 : null,
+      usedMtdUsd: usedMtdCents / 100,
+      pacePct,
+      status,
+    };
+  });
+
+  return {
+    scope: opts.scope,
+    orgCap: {
+      monthlyUsd: orgCapCents / 100,
+      usedMtdUsd: orgMtdCents / 100,
+      daysRemaining,
+      pace: orgPace,
+    },
+    workspaces,
+    periodResetAt: resetAt.toISOString(),
+    paceWindow: '7d',
+    paceProjectedEndOfPeriodUsd: orgProjectedCents / 100,
+  };
 }
 
 export const computeBudgetService = {
