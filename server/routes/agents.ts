@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
+import agentTabsRouter from './agents/agentTabs.js';
 import { conversationService } from '../services/conversationService.js';
 import { getConversationCost } from '../services/conversationCostService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
@@ -15,6 +16,11 @@ import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 
 const router = Router();
+
+// ── Consolidation Build C1 — tab-scoped endpoints (GET /:id/full + writers) ──
+// Registered first so the more-specific /full and /configure etc. paths take
+// precedence over the generic /:id catch-all below.
+router.use(agentTabsRouter);
 
 // ── Agent Hierarchy Tree ──────────────────────────────────────────────────
 

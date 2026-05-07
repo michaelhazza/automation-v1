@@ -17,6 +17,54 @@ import { v4 as uuidv4 } from 'uuid';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
 
 // ---------------------------------------------------------------------------
+// Consolidation Build C1 — local type declarations
+// (Will be replaced by shared/types/build.ts exports in chunk C5)
+// ---------------------------------------------------------------------------
+
+export interface AgentPersonality {
+  traits: string[];
+  tone: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface AgentRunPreview {
+  id: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  costUsd: number;
+}
+
+export interface AgentFull {
+  id: string;
+  etag: string;
+  /** Runtime guard used by service; not exposed in API response */
+  isSystemManaged: boolean;
+  configure: {
+    name: string;
+    description: string;
+    roleTitle: string;
+    parentAgentId: string | null;
+    model: string;
+    outputSize: 'compact' | 'standard' | 'extended';
+    allowSubaccountModelOverride: boolean;
+    responseMode: 'balanced' | 'expressive' | 'precise' | 'highly_creative';
+  };
+  behaviour: {
+    briefingTemplate: string;
+    constraints: string[];
+  };
+  personality: AgentPersonality;
+  skills: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }>;
+  dataSources: Array<{ id: string; kind: string; ref: string; status: 'connected' | 'disconnected' | 'error' }>;
+  triggers: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>;
+  budget: { dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number };
+  runs: { last5: AgentRunPreview[]; total30d: number; cost30d: number };
+}
+
+// ---------------------------------------------------------------------------
 // In-memory caches
 // ---------------------------------------------------------------------------
 
@@ -1700,4 +1748,512 @@ export const agentService = {
   // ScheduledTaskDetailPage edit form yet. When the agent reassignment UI
   // lands, restore this method (it was a pure read with no side effects)
   // and re-add the GET /reassignment-preview route in scheduledTasks.ts.
+
+  // ---------------------------------------------------------------------------
+  // Consolidation Build — C1: Full agent payload + tab-scoped writes
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Retrieve the full agent payload used by the Build tab-editor UI.
+   * All arrays are ordered per INVARIANT-Q1-A (createdAt ASC, id ASC) to
+   * ensure deterministic ETag computation.
+   */
+  async getFull(agentId: string, orgId: string): Promise<AgentFull> {
+    const { sql: drizzleSql, count: drizzleCount } = await import('drizzle-orm');
+    const { agentRuns, skills, agentTriggers: agentTriggersTable, agentDataSources: agentDataSourcesTable } = await import('../db/schema/index.js');
+    const { spendingBudgets } = await import('../db/schema/spendingBudgets.js');
+    const { computeAgentEtag } = await import('../lib/agentEtag.js');
+
+    const [rawAgent] = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId), isNull(agents.deletedAt)));
+
+    if (!rawAgent) throw { statusCode: 404, message: 'Agent not found', errorCode: 'AGENT_NOT_FOUND' };
+
+    // ── Skills (from defaultSkillSlugs joined to skills table) ──────────────
+    const slugs: string[] = (rawAgent.defaultSkillSlugs ?? []) as string[];
+    let skillRows: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }> = [];
+    if (slugs.length > 0) {
+      const { inArray } = await import('drizzle-orm');
+      const rows = await db
+        .select({ id: skills.id, slug: skills.slug, name: skills.name, isActive: skills.isActive, createdAt: skills.createdAt })
+        .from(skills)
+        .where(inArray(skills.slug, slugs))
+        .orderBy(asc(skills.createdAt), asc(skills.id));
+      skillRows = rows.map((s) => ({
+        id: s.id,
+        key: s.slug,
+        name: s.name,
+        configJson: {},
+        status: s.isActive ? 'enabled' as const : 'disabled' as const,
+      }));
+    }
+
+    // ── Data Sources (org-level only: subaccountAgentId IS NULL, scheduledTaskId IS NULL) ─
+    const dataSources = await db
+      .select()
+      .from(agentDataSourcesTable)
+      .where(
+        and(
+          eq(agentDataSourcesTable.agentId, agentId),
+          drizzleSql`${agentDataSourcesTable.subaccountAgentId} IS NULL`,
+          drizzleSql`${agentDataSourcesTable.scheduledTaskId} IS NULL`,
+        )
+      )
+      .orderBy(asc(agentDataSourcesTable.createdAt), asc(agentDataSourcesTable.id));
+
+    // ── Triggers ─────────────────────────────────────────────────────────────
+    const triggers = await db
+      .select()
+      .from(agentTriggersTable)
+      .where(
+        and(
+          eq(agentTriggersTable.organisationId, orgId),
+          drizzleSql`${agentTriggersTable.deletedAt} IS NULL`,
+          // Org-level triggers: no subaccount scope
+          drizzleSql`${agentTriggersTable.subaccountAgentId} IS NULL`,
+        )
+      )
+      .orderBy(asc(agentTriggersTable.createdAt), asc(agentTriggersTable.id));
+
+    // ── Last 5 runs + 30d stats ───────────────────────────────────────────────
+    const last5Runs = await db
+      .select({
+        id: agentRuns.id,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        durationMs: agentRuns.durationMs,
+        inputTokens: agentRuns.inputTokens,
+        outputTokens: agentRuns.outputTokens,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.agentId, agentId), eq(agentRuns.organisationId, orgId)))
+      .orderBy(desc(agentRuns.startedAt), desc(agentRuns.id))
+      .limit(5);
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [stats30d] = await db
+      .select({
+        total: drizzleSql<number>`CAST(COUNT(*) AS INT)`,
+        costUsd: drizzleSql<number>`COALESCE(SUM((${agentRuns.inputTokens} + ${agentRuns.outputTokens})::numeric / 1000000 * 3), 0)`,
+      })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.agentId, agentId),
+          eq(agentRuns.organisationId, orgId),
+          drizzleSql`${agentRuns.createdAt} >= ${thirtyDaysAgo.toISOString()}`,
+        )
+      );
+
+    // ── Budget ────────────────────────────────────────────────────────────────
+    const [budgetRow] = await db
+      .select()
+      .from(spendingBudgets)
+      .where(
+        and(
+          eq(spendingBudgets.agentId, agentId),
+          eq(spendingBudgets.organisationId, orgId),
+        )
+      )
+      .limit(1);
+
+    const budget = {
+      dailyCapUsd: null as number | null,
+      monthlyCapUsd: budgetRow ? (budgetRow.monthlySpendAlertThresholdMinor ?? null) !== null ? (budgetRow.monthlySpendAlertThresholdMinor! / 100) : null : null,
+      warnThresholdPct: 80,
+    };
+
+    // ── Personality ───────────────────────────────────────────────────────────
+    const rawPersonality = (rawAgent as unknown as { personality?: unknown }).personality;
+    const personality: AgentPersonality = rawPersonality && typeof rawPersonality === 'object'
+      ? rawPersonality as AgentPersonality
+      : { traits: [], tone: '', description: '', enabled: false };
+
+    const configure = {
+      name: rawAgent.name,
+      description: rawAgent.description ?? '',
+      roleTitle: rawAgent.agentTitle ?? '',
+      parentAgentId: rawAgent.parentAgentId ?? null,
+      model: rawAgent.modelId,
+      outputSize: (['compact', 'standard', 'extended'].includes(rawAgent.outputSize) ? rawAgent.outputSize : 'standard') as 'compact' | 'standard' | 'extended',
+      allowSubaccountModelOverride: rawAgent.allowModelOverride,
+      responseMode: rawAgent.responseMode as 'balanced' | 'expressive' | 'precise' | 'highly_creative',
+    };
+
+    const behaviour = {
+      briefingTemplate: rawAgent.additionalPrompt ?? '',
+      constraints: [] as string[],
+    };
+
+    const etagPayload = {
+      configure,
+      behaviour,
+      personality,
+      skills: skillRows.map((s) => ({ id: s.id, key: s.key, configJson: s.configJson, status: s.status })),
+      dataSources: dataSources.map((d) => ({ id: d.id, kind: d.sourceType, ref: d.sourcePath, status: d.lastFetchStatus === 'ok' ? 'connected' as const : d.lastFetchStatus === 'error' ? 'error' as const : 'disconnected' as const })),
+      triggers: triggers.map((t) => ({ id: t.id, kind: 'event' as const, spec: t.eventFilter ?? {}, status: t.isActive ? 'active' as const : 'paused' as const })),
+      budget,
+    };
+
+    const etag = computeAgentEtag(etagPayload);
+
+    return {
+      id: rawAgent.id,
+      etag,
+      isSystemManaged: rawAgent.isSystemManaged,
+      configure,
+      behaviour,
+      personality,
+      skills: skillRows,
+      dataSources: dataSources.map((d) => ({
+        id: d.id,
+        kind: d.sourceType,
+        ref: d.sourcePath,
+        status: d.lastFetchStatus === 'ok' ? 'connected' as const : d.lastFetchStatus === 'error' ? 'error' as const : 'disconnected' as const,
+      })),
+      triggers: triggers.map((t) => ({
+        id: t.id,
+        kind: 'event' as const,
+        spec: t.eventFilter ?? {},
+        status: t.isActive ? 'active' as const : 'paused' as const,
+      })),
+      budget,
+      runs: {
+        last5: last5Runs.map((r) => ({
+          id: r.id,
+          status: r.status,
+          startedAt: r.startedAt?.toISOString() ?? '',
+          completedAt: r.completedAt?.toISOString() ?? null,
+          durationMs: r.durationMs ?? null,
+          costUsd: ((r.inputTokens + r.outputTokens) / 1_000_000) * 3,
+        })),
+        total30d: Number(stats30d?.total ?? 0),
+        cost30d: Number(stats30d?.costUsd ?? 0),
+      },
+    };
+  },
+
+  /** Guard: throws 403 if agent is system-managed and actor is not system_admin. */
+  _assertNotSystemManaged(agent: AgentFull, actorRole: string | undefined): void {
+    if (agent.isSystemManaged && actorRole !== 'system_admin') {
+      throw { statusCode: 403, message: 'System agent is read-only', errorCode: 'SYSTEM_AGENT_READ_ONLY' };
+    }
+  },
+
+  /** Guard: throws 409 if ETag doesn't match. */
+  _assertEtag(current: AgentFull, expectedEtag: string): void {
+    if (current.etag !== expectedEtag) {
+      throw { statusCode: 409, message: 'Agent has been modified since you last fetched it. Reload and retry.', errorCode: 'ETAG_MISMATCH', currentEtag: current.etag };
+    }
+  },
+
+  async patchConfigure(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<AgentFull['configure']>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.name !== undefined) {
+      update.name = patch.name;
+      // Slug update: derive new slug from name (idempotent within org)
+      const newSlug = patch.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      // Check for slug conflict (excluding current agent)
+      const { ne } = await import('drizzle-orm');
+      const [conflict] = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.organisationId, orgId),
+            eq(agents.slug, newSlug),
+            ne(agents.id, agentId),
+            isNull(agents.deletedAt),
+          )
+        );
+      if (conflict) {
+        throw { statusCode: 409, message: `An agent with slug "${newSlug}" already exists`, errorCode: 'SLUG_CONFLICT' };
+      }
+      update.slug = newSlug;
+    }
+    if (patch.description !== undefined) update.description = patch.description;
+    if (patch.roleTitle !== undefined) update.agentTitle = patch.roleTitle;
+    if (patch.parentAgentId !== undefined) update.parentAgentId = patch.parentAgentId;
+    if (patch.model !== undefined) update.modelId = patch.model;
+    if (patch.outputSize !== undefined) update.outputSize = patch.outputSize;
+    if (patch.allowSubaccountModelOverride !== undefined) update.allowModelOverride = patch.allowSubaccountModelOverride;
+    if (patch.responseMode !== undefined) update.responseMode = patch.responseMode;
+
+    await db.transaction(async (tx) => {
+      await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async patchBehaviour(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<AgentFull['behaviour']>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.briefingTemplate !== undefined) update.additionalPrompt = patch.briefingTemplate;
+
+    await db.transaction(async (tx) => {
+      await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async patchPersonality(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<AgentPersonality>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const merged: AgentPersonality = {
+      ...current.personality,
+      ...patch,
+    };
+
+    await db.transaction(async (tx) => {
+      // personality column is added by migration 0286
+      await tx.execute(
+        (await import('drizzle-orm')).sql`
+          UPDATE agents
+          SET personality = ${JSON.stringify(merged)}::jsonb, updated_at = NOW()
+          WHERE id = ${agentId} AND organisation_id = ${orgId}
+        `
+      );
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async replaceSkills(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    incoming: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }>,
+    options: { force?: boolean },
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const { diffByIdentityKey } = await import('../lib/identityKeyDiff.js');
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const diff = diffByIdentityKey(current.skills, incoming, (s) => s.id);
+
+    if (!options.force && diff.silentlyRemoved.length > 0) {
+      throw {
+        statusCode: 409,
+        message: 'Some skills would be removed. Pass force=true to confirm deletion.',
+        errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
+        removedIds: diff.silentlyRemoved.map((s) => s.id),
+      };
+    }
+
+    // Derive new slugs list from incoming (added + updated = all that remain)
+    const finalSlugs = incoming.map((s) => s.key);
+
+    await db.transaction(async (tx) => {
+      await tx.update(agents)
+        .set({ defaultSkillSlugs: finalSlugs, updatedAt: new Date() })
+        .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async replaceDataSources(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    incoming: Array<{ id: string; kind: string; ref: string; status: 'connected' | 'disconnected' | 'error' }>,
+    options: { force?: boolean },
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const { diffByIdentityKey } = await import('../lib/identityKeyDiff.js');
+    const { sql: drizzleSql } = await import('drizzle-orm');
+    const { agentDataSources: agentDataSourcesTable } = await import('../db/schema/index.js');
+
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const diff = diffByIdentityKey(current.dataSources, incoming, (d) => d.id);
+
+    if (!options.force && diff.silentlyRemoved.length > 0) {
+      throw {
+        statusCode: 409,
+        message: 'Some data sources would be removed. Pass force=true to confirm deletion.',
+        errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
+        removedIds: diff.silentlyRemoved.map((d) => d.id),
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      // Delete removed sources
+      const toRemove = diff.silentlyRemoved.map((d) => d.id);
+      if (toRemove.length > 0) {
+        const { inArray } = await import('drizzle-orm');
+        await tx.delete(agentDataSourcesTable).where(
+          and(
+            inArray(agentDataSourcesTable.id, toRemove),
+            eq(agentDataSourcesTable.agentId, agentId),
+          )
+        );
+      }
+      // Update existing rows (sourcePath / sourceType)
+      for (const d of diff.updated) {
+        await tx.update(agentDataSourcesTable)
+          .set({ sourcePath: d.ref, sourceType: d.kind as 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive', updatedAt: new Date() })
+          .where(and(eq(agentDataSourcesTable.id, d.id), eq(agentDataSourcesTable.agentId, agentId)));
+      }
+      // Insert new sources
+      for (const d of diff.added) {
+        await tx.insert(agentDataSourcesTable).values({
+          agentId,
+          name: d.ref,
+          sourceType: d.kind as 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive',
+          sourcePath: d.ref,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async replaceTriggers(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    incoming: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>,
+    options: { force?: boolean },
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const { diffByIdentityKey } = await import('../lib/identityKeyDiff.js');
+    const { agentTriggers: agentTriggersTable } = await import('../db/schema/index.js');
+
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const diff = diffByIdentityKey(current.triggers, incoming, (t) => t.id);
+
+    if (!options.force && diff.silentlyRemoved.length > 0) {
+      throw {
+        statusCode: 409,
+        message: 'Some triggers would be removed. Pass force=true to confirm deletion.',
+        errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
+        removedIds: diff.silentlyRemoved.map((t) => t.id),
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      // Soft-delete removed triggers
+      const toRemove = diff.silentlyRemoved.map((t) => t.id);
+      if (toRemove.length > 0) {
+        const { inArray } = await import('drizzle-orm');
+        await tx.update(agentTriggersTable)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              inArray(agentTriggersTable.id, toRemove),
+              eq(agentTriggersTable.organisationId, orgId),
+            )
+          );
+      }
+      // Update existing
+      for (const t of diff.updated) {
+        await tx.update(agentTriggersTable)
+          .set({
+            isActive: t.status === 'active',
+            eventFilter: t.spec as Record<string, unknown>,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(agentTriggersTable.id, t.id), eq(agentTriggersTable.organisationId, orgId)));
+      }
+      // Insert new triggers (kind maps to eventType; default org_task_created for unknown)
+      for (const t of diff.added) {
+        await tx.insert(agentTriggersTable).values({
+          organisationId: orgId,
+          eventType: 'org_task_created',
+          eventFilter: (t.spec as Record<string, unknown>) ?? {},
+          isActive: t.status === 'active',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async patchBudget(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<{ dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number }>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const { spendingBudgets } = await import('../db/schema/spendingBudgets.js');
+
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const monthlyMinor = patch.monthlyCapUsd !== undefined
+      ? patch.monthlyCapUsd !== null ? Math.round(patch.monthlyCapUsd * 100) : null
+      : undefined;
+
+    await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: spendingBudgets.id })
+        .from(spendingBudgets)
+        .where(and(eq(spendingBudgets.agentId, agentId), eq(spendingBudgets.organisationId, orgId)))
+        .limit(1);
+
+      if (existing) {
+        const upd: Record<string, unknown> = { updatedAt: new Date() };
+        if (monthlyMinor !== undefined) upd.monthlySpendAlertThresholdMinor = monthlyMinor;
+        await tx.update(spendingBudgets).set(upd).where(eq(spendingBudgets.id, existing.id));
+      } else if (monthlyMinor !== undefined && monthlyMinor !== null) {
+        await tx.insert(spendingBudgets).values({
+          organisationId: orgId,
+          agentId,
+          currency: 'USD',
+          name: 'Agent budget',
+          monthlySpendAlertThresholdMinor: monthlyMinor,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
 };

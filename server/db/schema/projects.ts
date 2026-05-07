@@ -36,6 +36,10 @@ export const projects = pgTable(
     goalId: uuid('goal_id')
       .references(() => goals.id),
     createdBy: uuid('created_by').references(() => users.id),
+    // Consolidation Build C1 — new columns (migration 0286)
+    objective: text('objective'),
+    linkedAgentIds: uuid('linked_agent_ids').array().notNull().default(sql`'{}'`),
+    migratedFromGoalsAt: timestamp('migrated_from_goals_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
