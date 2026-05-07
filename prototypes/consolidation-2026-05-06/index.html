@@ -123,10 +123,16 @@
     <li>Workflows + External automations consolidated under one Automations page with tabs.</li>
     <li>Goals retired. Replaced by a per-project Objective field that is read by agent execution at runtime.</li>
     <li>ClientPulse stays as a separate thread (links in sidebar, surface untouched).</li>
-    <li>Spend and cap widget on home; full Spending page consolidates Budgets and Ledger.</li>
+    <li>Spend and cap widget on home; full Spending page consolidates Budgets and Ledger; mode-aware (workspace operator sees their workspace only, org admin sees all workspaces).</li>
     <li>Connections page uses plain language: Sign in / Key / Web login replace OAuth / API key / web_login.</li>
     <li>Onboarding uses multi-select for integrations / agents / automations; background data pull begins on each connection.</li>
-    <li>Calendar nav: Today + previous / next inline with the period label; view switcher (Week / Fortnight / Month) on the right.</li>
+    <li>Calendar nav: Today + previous / next inline with the period label, view switcher (Week / Fortnight / Month), legend row separated with breathing room.</li>
+    <li>Knowledge categories: Identity / Voice / Positioning / Audience / Constraints / Proof. Schema "Tier 1/2/3" jargon dropped from UI.</li>
+    <li>Home layout: 2 columns, 3 rows, all widgets uniform height. Recent runs merged into Recent activity (with a Run column linking to run trace when applicable).</li>
+    <li>Recurring tasks: spreadsheet-style sortable / filterable columns including Scope and Project. Search at top-right. Inline "Run now" on Manual rows.</li>
+    <li>Personality field on agent-edit and org-agent-edit (org level allows / locks workspace overrides).</li>
+    <li>Form pages use a sticky footer Save / Discard / Delete bar so primary actions are always visible.</li>
+    <li>Health Audit tab retired from Manage Org; findings surface in Activity feed and Inbox.</li>
   </ul>
 </div>
 
@@ -385,10 +391,15 @@
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <a href="spending.html" class="proto-card-title-link">Spending</a>
+        <span class="proto-card-title-link" style="cursor: default;">Spending</span>
         <div class="proto-card-file">spending.html</div>
       </div>
-      <div class="proto-card-desc">Caps and budgets + Ledger tabs. Org-level cap with month-to-date vs cap progress and pace projection. Per-workspace caps with inline-editable amounts. Group-by views in the ledger.</div>
+      <div class="proto-card-desc">Mode-aware page. Workspace operators see their own caps and ledger only; org admins see the full all-workspaces view with per-workspace caps, ledger group-by, and pace projection.</div>
+      <div class="preview-links">
+        <a href="spending.html?view=workspace" class="preview-link">Workspace view (single client)</a>
+        <a href="spending.html?view=org" class="preview-link">Organisation view (all workspaces)</a>
+        <span class="preview-link-note">Each link sets the demo profile and renders the appropriate view.</span>
+      </div>
       <div class="proto-card-footer">
         <a href="before-spending.html" class="before-link">View before</a>
       </div>
