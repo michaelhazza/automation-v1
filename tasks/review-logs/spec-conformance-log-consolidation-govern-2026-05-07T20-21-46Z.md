@@ -7,6 +7,7 @@
 **Scope:** all chunks C1–C13 (caller-confirmed completed implementation)
 **Changed-code set:** 47 files (committed) + plan.md (untracked)
 **Run at:** 2026-05-07T20:21:46Z
+**Commit at finish:** `374af7f4`
 
 ---
 
