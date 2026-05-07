@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07
+**Last updated:** 2026-05-07 (Phase 0 patch — SearchBox/EmptyState/ErrorState + SortableTable filter controls)
 **Author:** michael
 **Build slug:** consolidation-foundation
 
@@ -65,9 +65,12 @@ Each row records what already exists, the verdict (reuse / extend / replace / ne
 | Workspace badge (clickable for org admin) | None. Each call site styles a badge inline. | **New** (`<WorkspaceBadge>`) | Clickable for `org_admin`, calls the `switchWorkspace(clientId, clientName)` helper (§4.5). Used by activity table rows, activity drawer, activity modal, run-trace embedded page. |
 | View-mode switcher control | None. Today the topbar has separate Org and Client switchers. | **New** (`<ViewModeSwitcher>`) | Three-segment control (Workspace / Org / System) shown in the sidebar above the client switcher when the user has org-admin permissions. System tab visible only for system admins. |
 | Tabs | No shared primitive; each tabbed page rolls its own with Tailwind. | Out of scope | Tabs are page-local enough that the cost of a new primitive isn't justified yet. Revisit if a third tabbed page lands without one. |
+| Search input | None reusable. Each list page hand-rolls a search input with bespoke debounce logic. | **New** (`SearchBox.tsx`) | Every Phase-2 list page (agents, activity, recurring tasks, spending, integrations) needs a debounced search input with consistent clear/icon treatment. One source of truth prevents three subtly-different implementations landing in Specs A/B/C. |
+| Empty state panel | None reusable. Each page renders a bespoke "nothing here" message with different copy, icon, and button patterns. | **New** (`EmptyState.tsx`) | Six consolidated pages need a zero-results panel. `SortableTable` already accepts an `emptyState` prop; this gives callers a standard component to pass. |
+| Error state panel | None reusable. List pages show raw error strings or nothing on fetch failure. | **New** (`ErrorState.tsx`) | Every list page needs a consistent "something went wrong + retry" panel. Standardising prevents per-page divergence in tone and layout. |
 | Toast / snackbar | Already exists somewhere, assume reusable. | Out of scope | Not used by any of the new primitives. |
 
-**Verdict summary:** 2 extensions to existing primitives (`Modal`, `Layout`/sidebar config), 4 new primitives (`SortableTable`, `Drawer`, `WorkspaceBadge`, `ViewModeSwitcher`), 1 new shared CSS pair + tiny wrapper (`form-footer` / `<FormFooter>`).
+**Verdict summary:** 2 extensions to existing primitives (`Modal`, `Layout`/sidebar config), 7 new primitives (`SortableTable`, `Drawer`, `WorkspaceBadge`, `ViewModeSwitcher`, `SearchBox`, `EmptyState`, `ErrorState`), 1 new shared CSS pair + tiny wrapper (`form-footer` / `<FormFooter>`). Additionally: 1 SortableTable contract extension (clearAllFilters + AND/OR filter indicator). Phase 0 patch dated 2026-05-07.
 
 ## 4. Public API contracts
 
@@ -204,6 +207,25 @@ Behaviour (locked here, do not redesign in A/B/C):
 - Callers pass the unprefixed, unversioned identifier; the component owns both the namespace AND the version.
 
 **Out of scope for Phase 0:** server-side sort/filter, virtualised rendering, column resize, column drag-reorder, multi-sort. Hooks are exposed in props (`getValue`, `getFilterOptions`) so Specs A/B/C can wire client-side filters without modifying the component.
+
+**clearAllFilters control (additive, Phase 0 patch):**
+
+When ANY column has an active filter, a "Clear filters" link renders above the table (or in the table header row — implementer chooses the placement that aligns cleanest with the funnel-icon filter triggers). Clicking resets all column filters and leaves sort intact.
+
+```typescript
+// SortableTableProps addition:
+showClearFilters?: boolean;  // default true; auto-shows when any active filter exists, hidden otherwise
+```
+
+The control is hidden when no filter is active (`showClearFilters` defaults to `true`; callers who want to suppress it entirely can pass `false`).
+
+**Filter logic indicator (additive, Phase 0 patch):**
+
+The existing filter behaviour is AND across columns, OR within a column. This rule is already implemented (C3); the contract now states it explicitly so the UI can surface it to users.
+
+When more than one column has an active filter, a small "AND" tag renders between the active filter indicators (e.g. between column headers or in a filter-summary bar above the table). No new prop is required; the indicator renders automatically when `activeFilterColumns.length > 1`.
+
+Contract statement (add to SortableTable JSDoc): *"Filters compose as AND across columns (a row must satisfy ALL active column filters) and OR within a column (a row satisfies a column's filter if its value matches ANY checked option). This is the canonical composition rule; consumers MUST NOT reimplement filter composition."*
 
 ### 4.4 `<FormFooter>` + CSS
 
@@ -436,6 +458,67 @@ interface PageShellProps {
 
 CSS additions (around 12 lines) in the production stylesheet.
 
+### 4.9 `<SearchBox>` (NEW — Phase 0 patch)
+
+`client/src/components/SearchBox.tsx`
+
+```typescript
+interface SearchBoxProps {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;       // default "Search..."
+  debounceMs?: number;        // default 200
+  autoFocus?: boolean;
+  "aria-label"?: string;
+}
+```
+
+Behaviour:
+- Debounced `onChange` (default 200ms). Caller owns the controlled `value` — SearchBox is presentational only. No internal fetch, no routing.
+- Renders a search-glyph SVG icon on the left.
+- When `value` is non-empty, renders a clear-X button on the right; clicking calls `onChange('')`.
+- Esc key clears (`onChange('')`).
+- ~50-60 lines including JSDoc.
+
+**Out of scope:** async search, API calls, pagination. SearchBox is a controlled input wrapper; callers filter their data in response to the value.
+
+### 4.10 `<EmptyState>` (NEW — Phase 0 patch)
+
+`client/src/components/EmptyState.tsx`
+
+```typescript
+interface EmptyStateProps {
+  title: string;                                          // e.g. "No agents yet"
+  body?: string;                                          // optional sub-text
+  icon?: React.ReactNode;                                 // optional 48x48 illustration or SVG
+  primaryAction?: { label: string; onClick: () => void };
+  secondaryAction?: { label: string; onClick: () => void };
+}
+```
+
+Behaviour:
+- Renders a centered card: icon (if provided) → title → body → action buttons.
+- Used by `SortableTable` when row count is 0 after filters are applied (caller passes via the existing `emptyState` prop) and by any list page with genuinely empty data.
+- ~40-50 lines.
+
+### 4.11 `<ErrorState>` (NEW — Phase 0 patch)
+
+`client/src/components/ErrorState.tsx`
+
+```typescript
+interface ErrorStateProps {
+  title?: string;               // default "Something went wrong"
+  body?: string;                // if omitted, shows error.message when error is provided
+  error?: Error | null;         // optional — dev-only detail display
+  retry?: () => void;           // optional retry button (indigo, primary style)
+}
+```
+
+Behaviour:
+- Same visual structure as `<EmptyState>` but with an error glyph (e.g. exclamation-circle SVG) and an indigo "Try again" button when `retry` is provided.
+- `error.message` shown as `body` fallback only in non-production (`process.env.NODE_ENV !== 'production'`); in production, shows generic "Something went wrong" unless `body` is explicitly passed.
+- ~30-40 lines.
+
 ## 5. File inventory
 
 Files **created** by this spec:
@@ -453,6 +536,9 @@ Files **created** by this spec:
 | `client/src/hooks/useViewMode.ts` | NEW hook returning `{ viewMode, setViewMode, availableModes }` derived from existing identity state; owns illegal-transition handling (§4.6) |
 | `client/src/lib/workspace.ts` | NEW `switchWorkspace(clientId, clientName)` helper isolating `setActiveClient + window.location.reload()` (§4.5). Single call site so the eventual router-level refresh is a one-file change. |
 | `client/src/lib/colorHash.ts` | NEW `hashToColor(input, palette)` util extracted from prototype-inline logic. Used by `<WorkspaceBadge>` today; shared with future consumers. |
+| `client/src/components/SearchBox.tsx` | NEW primitive — debounced search input with clear button |
+| `client/src/components/EmptyState.tsx` | NEW primitive — standard zero-results panel |
+| `client/src/components/ErrorState.tsx` | NEW primitive — standard fetch-error panel |
 | `tasks/builds/consolidation-foundation/plan.md` | Implementation plan written by `architect` after spec accepted |
 
 Files **modified** by this spec:
@@ -548,6 +634,7 @@ Spec A/B/C drafts MAY be authored in parallel with Phase 0 implementation, again
   - "Existing pages must continue to render unchanged", backed by additive-only changes to `Modal.tsx` and the no-visual-diff requirement in `§8` manual verification.
   - "Lock the contracts at the start of Phase 0 review", backed by `§9` boundary enforcement.
 - File inventory complete? Every component named in `§4` appears in `§5`. Yes.
+- Phase 0 patch primitives (SearchBox, EmptyState, ErrorState) each have a contract in §4 and a chunk (C6.5) in §7. SortableTable contract extensions have a chunk (C3.5). Patch self-consistent.
 - Phase dependency graph clean? `§7` lists C5's dependency on C4. No backward references.
 - Deferred items section exists? `§10`.
 - Testing posture matches framing? `§8` aligns with `frontend_tests: none_for_now`.
@@ -567,5 +654,6 @@ Spec A/B/C drafts MAY be authored in parallel with Phase 0 implementation, again
 - [x] **§9** Testing posture matches framing (`§8`).
 - [x] **§10** No new write paths, execution-safety contracts N/A; declared in `§6`.
 - [x] **§11** Frontmatter present (top of file).
+- [x] **Phase 0 patch** SearchBox/EmptyState/ErrorState contracts added in §4.9-4.11; files in §5; C3.5+C6.5 chunks added in plan.md.
 
 Spec ready for `spec-reviewer`.
