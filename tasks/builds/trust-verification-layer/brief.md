@@ -32,9 +32,9 @@ The three layers, in the order we will build them:
 
 1. **Skill verification.** Every skill declares a deterministic check that runs after the action: did it work mechanically?
 2. **Agent scorecards.** Each agent gets one or more scorecards: LLM-judged quality dimensions ("on-brand tone", "no hallucinated numbers"), sampled across runs, with a built-in model bench so we can compare quality across models for the same task.
-3. **Correction memory.** When a user corrects an output, that correction gets captured and fed back into the agent's future runs, either as a scorecard input or as a skill-prompt patch.
+3. **Correction-sourced auto-memory.** When a user corrects an agent output, the correction is captured as a high-signal entry in the existing auto-memory pipeline. It surfaces on the existing Knowledge page using the existing `Edit and override` and approve / reject actions. No new memory primitive, no new top-level surface.
 
-These three layers are complementary, not competing. Skill verification answers "did it work?" Scorecards answer "was it good?" Correction memory answers "what did the user actually want?"
+These three layers are complementary, not competing. Skill verification answers "did it work?" Scorecards answer "was it good?" Correction-sourced auto-memory answers "what did the user actually want?"
 
 ## 2. What we're trying to achieve
 
@@ -75,6 +75,18 @@ Three principles for the build:
 
 ## 6. What we are looking at building
 
+### IA alignment
+
+The recent four-spec consolidation (Foundation / Operate / Build / Govern) reduced ~25 pages to ~12. This brief rides that IA. It does not introduce a new top-level surface.
+
+| Layer | Where it surfaces | Why there |
+|---|---|---|
+| Skill verification | **Operate / Run-trace** — pass / fail badge per step. Verify-failed events also feed Inbox. | Verify is a per-step run signal. Operate already owns the run-time observation surface. |
+| Agent scorecards (and model bench) | **Govern / Quality** (new fourth Govern primitive alongside Knowledge / Spending / Connections). Scorecard *configuration* lives on Build / Agent edit. | Govern answers "what does the platform know about itself." Quality fits naturally as a sibling of Knowledge / Spending. Configuration belongs to the agent it's attached to, which lives on Build. |
+| Correction-sourced auto-memory | **Operate / Run-trace** for the in-context "Correct" action. **Govern / Knowledge** for the resulting auto-memory entries (existing surface, with a new "Source: from corrections" filter). | Capturing happens where the operator already sits looking at the run. Reviewing happens where they already manage knowledge. |
+
+No new top-level page. No new memory primitive. The operator sees a small new action ("Correct") at the step level on Run-trace, and a new filter on the existing Knowledge page.
+
 ### Layer 1: Skill verification
 
 Three new fields on every skill in the capabilities registry:
@@ -95,13 +107,24 @@ A new resource attached to agents, with a built-in bench workflow:
 - **Model bench.** A separate operator-triggered workflow: pick an agent or a skill, pick a candidate model set, pick a sample size (10-20), run the same task across all candidates, score each via the scorecard, output a table with mean score, variance, latency, cost, and a composite (cheapest model that clears the floor wins). Result writes to `bench-log.md`. Operator approves the suggested default before it takes effect.
 - **Regression detection.** When a model is updated by the provider, the bench can be re-run automatically against previously approved configurations. If a skill's score drops past a threshold, the operator gets a single notification.
 
-### Layer 3: Correction memory
+### Layer 3: Correction-sourced auto-memory
 
-Captured automatically whenever the operator edits, rejects, or replaces an agent output:
+Not a new memory system. A new capture trigger plus two small UX hooks, feeding the existing auto-memory pipeline and the existing Knowledge surface.
 
-- **What gets captured.** The original output, the operator's correction, a short structured reason (pulled from the operator's edit, or asked once if the edit alone is ambiguous), and the skill or agent it applies to.
-- **What it feeds.** Two things. First, future runs of the same skill or agent get the correction injected as a few-shot example or prompt patch. Second, if a pattern emerges (the operator keeps correcting the same dimension), the platform suggests adding or tightening a scorecard dimension.
-- **Scope.** Per tenant, per agent. Corrections do not leak across tenants. Corrections are visible to the operator and editable, so a one-off correction does not become a permanent rule by accident.
+**Existing primitives we ride on (no changes needed to the core schema):**
+
+- `memory_blocks.capturedVia` already supports `'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion'`. We add one enum value: `'operator_correction'`.
+- `memory_blocks.status` already covers `pending_review` / `in_use` / `ignored`.
+- The Knowledge page already exposes `Edit and override`, approve, and reject actions on auto-memory entries with provenance + confidence.
+- The auto-synthesis pipeline (memory spec S11) already promotes recurring high-quality entries to memory blocks via the existing review queue.
+
+**What we add:**
+
+- **In-context "Correct" action on Run-trace step outputs.** When the operator clicks it, we open a small dialog: edited output + optional reason. The system writes a memory entry tagged `capturedVia: 'operator_correction'`, scoped to the skill/agent that produced the step, with quality score boosted (high-signal). If a scorecard is attached to the agent, the corrected output is auto-evaluated to confirm the correction actually clears the floor.
+- **"Source: from corrections" filter on Knowledge page.** Operators can find correction-sourced entries quickly without leaving the existing page.
+- **Pattern-detector hook into S11.** When N corrections (default 3) cluster on the same skill/agent/dimension within a window, the existing auto-synthesis pipeline promotes them to a memory block at `status: pending_review`, `confidence: low`. Operator approves through the existing HITL queue. Optionally, the pattern detector also surfaces a scorecard suggestion ("operators keep correcting tone, consider tightening `tone_match` floor").
+
+**Scope.** Per tenant, per agent. Existing decay, supersession, recency, and tenant-isolation guarantees on the memory subsystem apply. We add nothing new to those rules.
 
 ## 7. Staged development process
 
@@ -126,14 +149,17 @@ We do not build all three layers at once. Each stage delivers value on its own a
 
 **Exit criteria:** operator can attach a scorecard to an agent, see scoring trends, and run a bench to pick a model with confidence.
 
-### Stage 3: Correction memory
+### Stage 3: Correction-sourced auto-memory
 
-- Capture corrections at the point of edit, not via a separate UI. The operator should not have to remember to "save this as a lesson."
-- Inject relevant corrections into future runs of the same skill or agent.
-- Surface pattern detection: when N corrections cluster on one dimension, suggest a scorecard update.
-- Per-tenant scoping, with operator-visible memory so they can prune.
+- Add the `'operator_correction'` value to `memory_blocks.capturedVia`. No schema migration of consequence (enum extension only).
+- Ship the in-context "Correct" action on Run-trace step outputs (Operate surface).
+- Ship the "Source: from corrections" filter on the existing Knowledge page (Govern surface).
+- Wire pattern detection into the existing auto-synthesis pipeline (memory spec S11). When N corrections cluster, promote to a memory block at `pending_review`.
+- Optional: when a scorecard is attached, surface a "tighten `dimension_X`" suggestion as a non-blocking nudge.
 
-**Exit criteria:** an operator who corrects the same mistake twice sees the correction reflected in the third run automatically, and the platform proposes a scorecard tightening when a pattern is clear.
+**Exit criteria:** an operator who corrects the same mistake twice on Run-trace sees the correction reflected in the third run automatically (via memory injection), and the platform proposes a scorecard or memory-block update when a pattern is clear. No new pages were added; the surfaces are Run-trace and Knowledge.
+
+**Upstream dependencies:** memory spec S7 (confidence-tiered HITL) and S11 (auto-synthesis from recurring entries) ideally land first. If they have not, Stage 3 implements a minimal pattern-detector inline rather than blocking.
 
 ## 8. What this is not
 
@@ -150,8 +176,9 @@ To keep scope honest:
 2. **How do we keep judge cost bounded?** A 20% sample rate is a starting point. Do we adapt the rate based on observed score variance (sample less when the agent is clearly stable, more when it's drifting)? Probably yes, but not in Stage 2.
 3. **How does the bench handle prompt portability?** A prompt tuned for Opus may unfairly disadvantage Sonnet. Stage 2 ships with same-prompt benching (most honest as a real-world test). Auto-prompt-adaptation is a possible Stage 4 if scores look unfair in practice.
 4. **Should scorecards be tenant-scoped or template-able across tenants?** Probably both, with platform-default scorecards per agent type that tenants can fork. To be confirmed in Stage 2 design.
-5. **Correction memory and privacy.** Corrections may contain sensitive operator commentary. They live in the same isolation tier as the agent's tenant data, with the same retention rules. Confirm with the security review when Stage 3 lands.
-6. **Naming.** This brief uses *scorecards* in place of HyperAgent's *rubrics* and *correction memory* for the third layer. Both names are placeholders, replaceable if better surface.
+5. **Correction privacy.** Corrections may contain sensitive operator commentary. They live in the existing memory tenant-isolation tier, with existing retention rules. Confirm with the security review when Stage 3 lands.
+6. **Naming, resolved.** *Scorecards* replaces HyperAgent's *rubrics*. The Layer 3 capability is intentionally not given a top-level marketing name — it rides the existing `auto-memory` umbrella and the existing `Edit and override` lifecycle on the consolidated Knowledge page. The only new operator-facing word is the verb **Correct** on Run-trace step outputs.
+7. **Govern / Quality as a fourth Govern primitive.** This brief assumes scorecards land as a new sibling of Knowledge / Spending / Connections in the Govern IA. To be confirmed in the spec — alternative is to surface the trend view on the Build / Agent edit page only.
 
 ## 10. Success metrics
 
