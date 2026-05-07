@@ -204,6 +204,39 @@ function SystemAdminGuard({ user }: { user: User | null }) {
   return <ErrorBoundary><Outlet /></ErrorBoundary>;
 }
 
+// Module-driven guard for routes whose visibility is governed by the org's sidebar
+// config (e.g. /clientpulse/*, /reports/*). System admins bypass. Mirrors the
+// fail-open default used by Layout's `hasSidebarItem`: a missing or empty
+// config is treated as "all items enabled" so a config-endpoint outage does
+// not lock users out of features they are entitled to. The authoritative gate
+// remains the corresponding API endpoint.
+function ModuleGuard({ user, slug }: { user: User | null; slug: string }) {
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!user) { setAllowed(false); return; }
+    if (user.role === 'system_admin') { setAllowed(true); return; }
+    let cancelled = false;
+    api.get<{ items?: string[] }>('/api/my-sidebar-config')
+      .then(({ data }) => {
+        if (cancelled) return;
+        const items = data?.items;
+        if (!Array.isArray(items) || items.length === 0) {
+          setAllowed(true);
+        } else {
+          setAllowed(items.includes(slug));
+        }
+      })
+      .catch(() => { if (!cancelled) setAllowed(true); });
+    return () => { cancelled = true; };
+  }, [user, slug]);
+
+  if (!user) return <Navigate to="/login" replace />;
+  if (allowed === null) return <PageLoader />;
+  if (!allowed) return <Navigate to="/" replace />;
+  return <ErrorBoundary><Outlet /></ErrorBoundary>;
+}
+
 function SubaccountIntegrationsRoute({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   return <IntegrationsAndCredentialsPage user={user} subaccountId={subaccountId} />;
@@ -438,12 +471,18 @@ export default function App() {
             <Route path="/admin/org-approval-channels" element={<OrgApprovalChannelsPage user={user!} />} />
           </Route>
 
-          {/* ClientPulse routes */}
-          <Route path="/clientpulse" element={<ClientPulseDashboardPage user={user!} />} />
-          <Route path="/clientpulse/clients" element={<ClientPulseClientsListPage user={user!} />} />
-          <Route path="/clientpulse/clients/:subaccountId" element={<ClientPulseDrilldownPage user={user!} />} />
-          <Route path="/reports" element={<ReportsListPage user={user!} />} />
-          <Route path="/reports/:id" element={<ReportDetailPage user={user!} />} />
+          {/* ClientPulse routes — gated by module subscription. Sidebar suppresses
+              the nav items via hasSidebarItem('clientpulse'); ModuleGuard mirrors
+              that gate at the route level to prevent direct-URL access. */}
+          <Route element={<ModuleGuard user={user} slug="clientpulse" />}>
+            <Route path="/clientpulse" element={<ClientPulseDashboardPage user={user!} />} />
+            <Route path="/clientpulse/clients" element={<ClientPulseClientsListPage user={user!} />} />
+            <Route path="/clientpulse/clients/:subaccountId" element={<ClientPulseDrilldownPage user={user!} />} />
+          </Route>
+          <Route element={<ModuleGuard user={user} slug="reports" />}>
+            <Route path="/reports" element={<ReportsListPage user={user!} />} />
+            <Route path="/reports/:id" element={<ReportDetailPage user={user!} />} />
+          </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
