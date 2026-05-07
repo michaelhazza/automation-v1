@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin, hasOrgPermission } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
@@ -9,10 +9,11 @@ import { resumeFromIntegrationConnect } from '../services/agentResumeService.js'
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
-import { agentRuns } from '../db/schema/index.js';
+import { agentRuns, agentRunSnapshots } from '../db/schema/index.js';
 import { eq, and, gte, sql, inArray, count } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
+import { mapAgentRunToTestResult } from '../services/agentTestRunMapperPure.js';
 
 const router = Router();
 
@@ -167,8 +168,84 @@ router.get(
   '/api/agent-runs/:id',
   authenticate,
   asyncHandler(async (req, res) => {
+    if (req.query.shape === 'test') {
+      const hasPermission = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_VIEW);
+      if (!hasPermission) {
+        res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+        return;
+      }
+      const [run] = await db
+        .select({
+          id: agentRuns.id,
+          status: agentRuns.status,
+          startedAt: agentRuns.startedAt,
+          completedAt: agentRuns.completedAt,
+          summary: agentRuns.summary,
+        })
+        .from(agentRuns)
+        .where(and(eq(agentRuns.id, req.params.id), eq(agentRuns.organisationId, req.orgId!)))
+        .limit(1);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      res.json(mapAgentRunToTestResult(run));
+      return;
+    }
     const run = await agentActivityService.getRunDetail(req.params.id, req.orgId!);
     res.json(run);
+  })
+);
+
+// ─── Run-trace events: role-aware masking projection (spec §4.8) ──────────────
+//
+// Returns the toolCallsLog for a run with masking applied per the caller's role.
+// Cache-Control: private, no-store — role-aware masking projection — must not
+// be shared-cacheable across roles or users; prevents future infra (CDN, edge
+// cache) from leaking masked/unmasked content across role boundaries.
+
+router.get(
+  '/api/agent-runs/:id/trace-events',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    // Verify run exists and belongs to this org before serving trace data.
+    const runId = req.params.id;
+    const [runRow] = await db
+      .select({ id: agentRuns.id, organisationId: agentRuns.organisationId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, req.orgId!)))
+      .limit(1);
+    if (!runRow) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    // Read toolCallsLog from the snapshot table (H-5 blob extraction).
+    // RLS on agent_run_snapshots forbids cross-org reads (backed by run_id FK → agent_runs).
+    const [snap] = await db
+      .select({ toolCallsLog: agentRunSnapshots.toolCallsLog })
+      .from(agentRunSnapshots)
+      .where(eq(agentRunSnapshots.runId, runId))
+      .limit(1);
+
+    const toolCallsLog = (Array.isArray(snap?.toolCallsLog) ? snap.toolCallsLog : []) as Array<{
+      tool?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+      output?: unknown;
+      durationMs?: number;
+      iteration?: number;
+    }>;
+
+    const role: string = req.user?.role ?? 'user';
+    const { projectForRole } = await import('../services/agentRunMessageServicePure.js');
+    const projected = projectForRole(toolCallsLog, role);
+
+    // Cache-Control: private, no-store — role-aware masking projection — must not
+    // be shared-cacheable across roles or users; prevents future infra (CDN, edge
+    // cache) from leaking masked/unmasked content across role boundaries.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ data: projected });
   })
 );
 

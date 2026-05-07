@@ -36,7 +36,7 @@ import { normaliseRouteError } from './asyncHandlerNormalisationPure.js';
  *  (reasons[], resultId, field) on 409s. `details` carries zod flatten()
  *  output on 400s. Kept minimal on purpose — extend only when a new
  *  contract genuinely needs it. */
-const FORWARDED_ERROR_FIELDS = ['reasons', 'resultId', 'field', 'details'] as const;
+const FORWARDED_ERROR_FIELDS = ['reasons', 'resultId', 'field', 'details', 'currentEtag', 'removedIds'] as const;
 
 export function asyncHandler(
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>

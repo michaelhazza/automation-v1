@@ -13,8 +13,8 @@ import {
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
-import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields } from './activityServicePure.js';
-import type { TriggerType } from './activityServicePure.js';
+import { mapAgentRunTriggerType, mapInternalTriggerToSource, sortActivityItems, addNullAdditiveFields, aggregateFilterOptions } from './activityServicePure.js';
+import type { TriggerType, TriggerSource, FilterOptionsResult } from './activityServicePure.js';
 
 const VALID_TRIGGER_TYPES = new Set<string>(['manual', 'scheduled', 'webhook', 'agent', 'system']);
 
@@ -73,6 +73,11 @@ export type ActivityItem = {
   triggeredByUserId: string | null;
   triggeredByUserName: string | null;
   triggerType: TriggerType | null;
+  /** C1 (ui-consolidation-operate): spec §4.1 public name for the trigger kind.
+   *  Non-nullable; sources with no recognised trigger emit 'unknown'. Both fields are
+   *  emitted during this stream; triggerType is deprecated and will be removed after
+   *  consumers migrate (see C9 doc-sync). */
+  triggerSource: TriggerSource;
   durationMs: number | null;
   runId: string | null;
 };
@@ -100,10 +105,27 @@ export type ActivityFilters = {
   to?: string;
   agentId?: string;
   actorId?: string;  // workspace_actors.id — covers humans + agents; takes precedence over agentId for workspace events
+  /** C1 (ui-consolidation-operate): multi-select actor display-name filter (spec §4.1).
+   *  OR semantics within the dimension; AND with other active dimensions. */
+  actor?: string[];
+  /** C1 (ui-consolidation-operate): multi-select subaccount ID filter (spec §4.1).
+   *  OR semantics within the dimension; AND with other active dimensions. */
+  subaccount?: string[];
   severity?: string[];
   assignee?: string;
   q?: string;
+  /** Legacy sort enum — kept for backward compat. If both `sort` and `sortKey`/`sortDir`
+   *  are present, `sortKey`/`sortDir` wins per spec §4.1. Maps via a thin shim:
+   *  attention_first → sortKey=createdAt sortDir=desc (special ranking applied in-memory),
+   *  newest → sortKey=createdAt sortDir=desc, oldest → sortKey=createdAt sortDir=asc,
+   *  severity → sortKey=severity sortDir=asc. */
   sort?: 'newest' | 'oldest' | 'severity' | 'attention_first';
+  /** C1 (ui-consolidation-operate): spec §4.1 sort grammar. Takes precedence over `sort`.
+   *  Pagination walks canonical `createdAt DESC, id ASC`; the sortKey/sortDir pair is
+   *  applied as a display-only re-sort over the canonical page slice. */
+  sortKey?: 'createdAt' | 'severity';
+  /** C1 (ui-consolidation-operate): sort direction for sortKey. */
+  sortDir?: 'asc' | 'desc';
   limit?: number;
   /** DE-CR-7: cursor pagination only — offset is forbidden by spec §12. */
   cursor?: ActivityCursor;
@@ -284,33 +306,38 @@ async function fetchAgentRuns(
     .orderBy(desc(agentRuns.createdAt), asc(agentRuns.id))
     .limit(200);
 
-  return rows.map(({ run, agentName, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => ({
-    id: run.id,
-    type: 'agent_run' as const,
-    status: normaliseAgentRunStatus(run.status),
-    subject: run.summary ?? `Agent run (${run.runType})`,
-    actor: agentName ?? 'Unknown agent',
-    subaccountId: run.subaccountId,
-    subaccountName,
-    agentId: run.agentId,
-    agentName,
-    severity: run.status === 'failed' || run.status === 'timeout' ? 'warning' as const : null,
-    createdAt: (run.createdAt ?? new Date()).toISOString(),
-    updatedAt: (run.updatedAt ?? run.createdAt ?? new Date()).toISOString(),
-    detailUrl: run.subaccountId
-      ? `/subaccounts/${run.subaccountId}/agents/${run.agentId}/runs/${run.id}`
-      : `/admin/agents/${run.agentId}/runs/${run.id}`,
-    // ── Additive fields ────────────────────────────────────────────────────
-    triggeredByUserId: triggeredByUserId ?? null,
-    triggeredByUserName: triggeredByUserName != null
-      ? (triggeredByUserLastName != null
-          ? `${triggeredByUserName} ${triggeredByUserLastName}`
-          : triggeredByUserName)
-      : null,
-    triggerType: mapAgentRunTriggerType(run.runType, run.runSource ?? null),
-    durationMs: run.durationMs ?? null,
-    runId: run.id,
-  }));
+  return rows.map(({ run, agentName, subaccountName, triggeredByUserId, triggeredByUserName, triggeredByUserLastName }) => {
+    const derivedTrigger = mapAgentRunTriggerType(run.runType, run.runSource ?? null);
+    return {
+      id: run.id,
+      type: 'agent_run' as const,
+      status: normaliseAgentRunStatus(run.status),
+      subject: run.summary ?? `Agent run (${run.runType})`,
+      actor: agentName ?? 'Unknown agent',
+      subaccountId: run.subaccountId,
+      subaccountName,
+      agentId: run.agentId,
+      agentName,
+      severity: run.status === 'failed' || run.status === 'timeout' ? 'warning' as const : null,
+      createdAt: (run.createdAt ?? new Date()).toISOString(),
+      updatedAt: (run.updatedAt ?? run.createdAt ?? new Date()).toISOString(),
+      detailUrl: run.subaccountId
+        ? `/subaccounts/${run.subaccountId}/agents/${run.agentId}/runs/${run.id}`
+        : `/admin/agents/${run.agentId}/runs/${run.id}`,
+      // ── Additive fields ───────────────────────────────────────────────────
+      triggeredByUserId: triggeredByUserId ?? null,
+      triggeredByUserName: triggeredByUserName != null
+        ? (triggeredByUserLastName != null
+            ? `${triggeredByUserName} ${triggeredByUserLastName}`
+            : triggeredByUserName)
+        : null,
+      triggerType: derivedTrigger,
+      /** C1: triggerSource is the spec §4.1 name; mapped from internal TriggerType. */
+      triggerSource: mapInternalTriggerToSource(derivedTrigger),
+      durationMs: run.durationMs ?? null,
+      runId: run.id,
+    };
+  });
 }
 
 async function fetchReviewItems(
@@ -558,6 +585,12 @@ async function fetchWorkflowExecutions(
     triggerType: (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
       ? (exec.triggerType as TriggerType)
       : null,
+    /** C1: triggerSource is the spec §4.1 name; mapped from internal TriggerType. */
+    triggerSource: mapInternalTriggerToSource(
+      (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
+        ? (exec.triggerType as TriggerType)
+        : null
+    ),
     durationMs: exec.durationMs ?? null,
     runId: exec.id,
   }));
@@ -693,6 +726,8 @@ async function fetchAuditEvents(
       triggeredByUserId: null,
       triggeredByUserName: null,
       triggerType: null,
+      /** C1: audit events have no trigger kind; spec mandates 'unknown' (not null). */
+      triggerSource: 'unknown' as TriggerSource,
       durationMs: null,
       runId: null,
     };
@@ -719,6 +754,44 @@ function filterBySeverity(items: ActivityItem[], severities: string[]): Activity
   return items.filter((i) => i.severity && set.has(i.severity));
 }
 
+/** C1: Filter by actor display name (multi-select, OR semantics within dimension). */
+function filterByActor(items: ActivityItem[], actors: string[]): ActivityItem[] {
+  if (actors.length === 0) return items;
+  const set = new Set(actors);
+  return items.filter((i) => set.has(i.actor));
+}
+
+/** C1: Filter by subaccount ID (multi-select, OR semantics within dimension). */
+function filterBySubaccount(items: ActivityItem[], subaccountIds: string[]): ActivityItem[] {
+  if (subaccountIds.length === 0) return items;
+  const set = new Set(subaccountIds);
+  return items.filter((i) => set.has(i.subaccountId ?? 'unknown'));
+}
+
+/**
+ * C1: Derive the effective sort key from filters. If sortKey/sortDir are provided,
+ * they win over the legacy `sort` enum.
+ *
+ * Pagination always walks the canonical `createdAt DESC, id ASC` order; the
+ * requested sort is applied as a display-only re-sort over the canonical slice.
+ * The id ASC tiebreaker is fixed — it does NOT flip when sortDir changes.
+ *
+ * Note: the plan's Architecture Notes Rule 2 ("when sortDir flips, the tiebreaker
+ * direction also flips") does NOT apply here. That rule describes cursor-walk
+ * direction at the DB layer. Here, `sortDir` is a display-only re-sort applied
+ * AFTER the canonical-order page slice is already taken — the cursor walk direction
+ * is never changed, so the tiebreaker stays `id ASC` regardless of sortDir.
+ */
+function resolveDisplaySort(filters: ActivityFilters): string {
+  if (filters.sortKey) {
+    // sortKey/sortDir grammar takes precedence over legacy sort enum
+    if (filters.sortKey === 'severity') return 'severity';
+    if (filters.sortDir === 'asc') return 'oldest';
+    return 'newest';
+  }
+  return filters.sort ?? 'attention_first';
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -726,7 +799,7 @@ function filterBySeverity(items: ActivityItem[], severities: string[]): Activity
 export async function listActivityItems(
   filters: ActivityFilters,
   scope: ActivityScope,
-): Promise<{ items: ActivityItem[]; nextCursor: ActivityCursor | null }> {
+): Promise<{ items: ActivityItem[]; nextCursor: ActivityCursor | null; filterOptions: FilterOptionsResult }> {
   const typeFilter = filters.type ?? [];
   const shouldFetch = (t: ActivityType) => typeFilter.length === 0 || typeFilter.includes(t);
 
@@ -771,9 +844,30 @@ export async function listActivityItems(
   if (filters.severity?.length) {
     items = filterBySeverity(items, filters.severity);
   }
+  // C1: multi-select actor/subaccount filters (AND across dimensions, OR within)
+  if (filters.actor?.length) {
+    items = filterByActor(items, filters.actor);
+  }
+  if (filters.subaccount?.length) {
+    items = filterBySubaccount(items, filters.subaccount);
+  }
+
+  // C1: Compute filterOptions BEFORE pagination/cursor slicing.
+  // INVARIANT: aggregator runs over the fully-merged, RLS-filtered, post-dimension-filter
+  // set with faceted-search semantics (counts for dimension D ignore the active filter on D).
+  // Faceted-search semantics apply to the four spec dimensions: type, status, actor, subaccount.
+  // Severity is pre-applied before this call (filterBySeverity above) — it is NOT a faceted
+  // dimension and its filter does narrow the count results.
+  // Cache-Control: private, no-store is enforced in the route handler — do NOT add public/s-maxage.
+  const filterOptions = aggregateFilterOptions(items, {
+    type: filters.type,
+    status: filters.status,
+    actor: filters.actor,
+    subaccount: filters.subaccount,
+  });
 
   const limit = Math.min(filters.limit ?? 50, 200);
-  const displaySort = filters.sort ?? 'attention_first';
+  const displaySort = resolveDisplaySort(filters);
 
   // Codex P2 (2026-04-30): cursor pagination MUST walk the canonical
   // (createdAt DESC, id ASC) ordering mandated by spec §12. The per-source
@@ -818,5 +912,5 @@ export async function listActivityItems(
     ? sortItems(paged, displaySort)
     : paged;
 
-  return { items: display, nextCursor };
+  return { items: display, nextCursor, filterOptions };
 }

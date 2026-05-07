@@ -4,6 +4,14 @@ import { organisations } from './organisations';
 import { systemAgents } from './systemAgents';
 import { workspaceActors } from './workspaceActors';
 
+// Local type for the personality JSONB column (shared type ships in C5 via shared/types/build.ts)
+interface AgentPersonality {
+  traits: string[];
+  tone: string;
+  description: string;
+  enabled: boolean;
+}
+
 export const agents = pgTable(
   'agents',
   {
@@ -67,6 +75,8 @@ export const agents = pgTable(
     // 'simple' = never plan (even if heuristics trigger).
     complexityHint: text('complexity_hint').$type<'simple' | 'complex'>(),
     workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
+    // Consolidation Build C1 — personality configuration (migration 0286)
+    personality: jsonb('personality').notNull().default(sql`'{}'::jsonb`).$type<AgentPersonality>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

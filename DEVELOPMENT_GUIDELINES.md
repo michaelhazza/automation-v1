@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-05-08 (§8.30 SQL CASE enum mappers use ELSE NULL — govern surface review)
+**Last updated:** 2026-05-08 (§8.30 SQL CASE enum mappers use ELSE NULL — govern surface review; §8.31 non-durable async PLAN_GAP documentation — consolidation-build, merged from main during S2 sync)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -228,6 +228,10 @@ Routes that need a tighter body cap than the global `express.json({ limit: '10mb
 ### 8.30 SQL CASE enum mappers use `ELSE NULL`, never a fallback string
 
 When a SQL `CASE` expression maps a DB enum column to a typed value for consumption by a TypeScript fail-closed mapper, write `ELSE NULL` — not `ELSE '<default>'`. Unknown enum values must propagate as `NULL` to the TypeScript layer, which throws `UnknownEnumValueError`; a string fallback silently coerces the unknown value and bypasses the safety guarantee.
+
+### 8.31 Non-durable async operations must carry an explicit durability comment
+
+Any fire-and-forget (`void promise.catch(...)`) that bypasses the pg-boss durable queue must carry a comment naming the residual risk (e.g. orphaned `agent_runs` rows on process restart) and a `tasks/builds/*/migration-gaps.md` PLAN_GAP entry. Silently non-durable is worse than explicitly deferred — a future developer cannot tell whether the omission was deliberate.
 
 ---
 

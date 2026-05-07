@@ -2021,6 +2021,89 @@ export const agentExecutionService = {
       };
     }
   },
+
+  /**
+   * Start an agent test run asynchronously (C2 — §4.3 async 202 + poll).
+   *
+   * Creates the `agentRuns` row immediately and detaches the LLM execution
+   * loop, returning `{ runId, status: 'running' }` without waiting for the
+   * run to complete. Callers poll `GET /api/agent-runs/:id?shape=test` for
+   * the final result.
+   *
+   * Idempotency: if any of the candidate keys matches an existing row the
+   * existing run is returned without starting a new execution.
+   */
+  async startRunAsync(request: AgentRunRequest): Promise<{ runId: string; status: 'running' | AgentRunResult['status']; isExisting?: true }> {
+    if (!request.idempotencyKey) {
+      throw Object.assign(new Error('startRunAsync: idempotencyKey is required'), {
+        statusCode: 400, errorCode: 'IDEMPOTENCY_KEY_REQUIRED',
+      });
+    }
+
+    // ── Idempotency check — mirror executeRun's early-return path ──────────
+    const idempotencyLookupKeys =
+      request.idempotencyCandidateKeys && request.idempotencyCandidateKeys.length > 0
+        ? Array.from(new Set(request.idempotencyCandidateKeys))
+        : request.idempotencyKey
+          ? [request.idempotencyKey]
+          : [];
+
+    if (idempotencyLookupKeys.length > 0) {
+      const [existing] = await db
+        .select()
+        .from(agentRuns)
+        .where(inArray(agentRuns.idempotencyKey, idempotencyLookupKeys))
+        .limit(1);
+
+      if (existing) {
+        const existingStatus = existing.status as AgentRunResult['status'];
+        return { runId: existing.id, status: existingStatus, isExisting: true };
+      }
+    }
+
+    // ── Insert the run row immediately so we can return the runId ──────────
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        agentId: request.agentId,
+        subaccountAgentId: request.subaccountAgentId ?? null,
+        idempotencyKey: request.idempotencyKey ?? null,
+        runType: request.runType ?? 'manual',
+        executionMode: request.executionMode ?? 'api',
+        executionScope: 'subaccount',
+        runSource: request.runSource ?? null,
+        status: 'running',
+        triggerContext: request.triggerContext ?? null,
+        taskId: request.taskId ?? null,
+        handoffDepth: request.handoffDepth ?? 0,
+        parentRunId: request.parentRunId ?? null,
+        isSubAgent: request.isSubAgent ?? false,
+        parentSpawnRunId: request.parentSpawnRunId ?? null,
+        workflowStepRunId: request.workflowStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
+        delegationScope: request.delegationScope ?? null,
+        delegationDirection: request.delegationDirection ?? null,
+        lastActivityAt: new Date(),
+        startedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    // PLAN_GAP: This is bare fire-and-forget (non-durable). A process restart between the 202
+    // response and run completion will leave the agent_runs row permanently in 'running' state.
+    // For test runs this is acceptable (low stakes, user will re-run). Phase 2 should route through
+    // the durable queue infrastructure (pg-boss) if orphaned test runs become a support issue.
+    // See tasks/builds/consolidation-build/migration-gaps.md.
+    void this.executeRun(request).catch((err: unknown) => {
+      logger.error('async_test_run_failed', { runId: run.id, err });
+    });
+
+    return { runId: run.id, status: 'running' };
+  },
 };
 
 // ---------------------------------------------------------------------------
