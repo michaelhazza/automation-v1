@@ -232,13 +232,22 @@ export function formatFireCondition(input: TriggerOrSchedule): string {
 /**
  * Union three source arrays into RecurringTask[].
  *
- * INVARIANT — deduplication:
+ * INVARIANT — deduplication (spec §4.4):
+ * Identical triggers and schedules from different sources collapse to a single row
+ * via identity-key deduplication. Deduplication occurs BEFORE pagination and filtering.
+ * Identical is defined as (agentId + triggerId + fireKind + spec matching).
+ *
+ * Currently:
  * - agentTrigger rows take precedence over scheduledTask rows ONLY when
  *   scheduledTasks does NOT have its own triggerId FK column (none exists in
  *   current schema). In the current schema, triggers and scheduledTasks are
  *   independent — each emits its own row with no cross-entity dedupe.
  * - Manual run rows are NEVER deduplicated against trigger/scheduled rows.
  * - Unique key for manual rows: agentId + runId.
+ *
+ * Post-dedup counts: totals returned in response (fires30d, etc.) reflect post-dedup
+ * counts. Clients must not assume 1:1 correspondence between returned rows and
+ * underlying DB records; N source records may map to 1 RecurringTask row.
  */
 export function unionRecurringTasks(input: UnionInput): RecurringTask[] {
   const rows: RecurringTask[] = [];

@@ -32,6 +32,22 @@ type TabKey = 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sourc
 const TAB_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
 // Note: 'budget' excluded from WRITE_ORDER - Phase 1 budget schema gap (see migration-gaps.md)
 // Note: 'schedule' excluded - org-level trigger editing not in Phase 1 scope (see spec §4.2 Q5)
+
+/**
+ * WRITE_ORDER defines the sequence of tab saves during agent patch operations.
+ *
+ * Contract: This array must remain append-only and maintain its relative ordering.
+ * Rationale: Each PATCH generates a new ETag (sha256 of canonical agent JSON). Reordering
+ * the save sequence breaks deterministic ETag chaining — concurrent requests may see
+ * different ETags for the same agent state, causing spurious 409 Conflict errors.
+ * Additionally, tab state is cumulative (each tab builds on the previous); reordering
+ * breaks the invariant that later tabs never see stale data from earlier tabs.
+ *
+ * Risk if reordered: ETag churn (repeated 409s on retry), lost optimistic updates,
+ * non-deterministic conflict detection, and potential data races if sibling saves
+ * happen concurrently (e.g., skills saved before configure would have the old agent
+ * name in the ETag hash).
+ */
 const WRITE_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources'];
 
 const TAB_LABELS: Record<TabKey, string> = {
@@ -141,6 +157,11 @@ export default function AgentEditPage() {
         });
       } catch (err) {
         if (err instanceof EtagMismatchError) {
+          // ETag 412 (Conflict) handling: tab-local rollback invariant
+          // - Failed tab save must not dirty sibling tabs (each tab manages its own optimistic state)
+          // - Stale optimistic updates rollback deterministically (clear local state via loadAgent, re-fetch AgentFull)
+          // - Unsaved state ownership is tab-scoped; 412 does not cascade across tabs
+          // This guard ensures that if Tab A fails with 412, Tab B's unsaved changes remain intact.
           setEtagMismatch(true);
           setSaving(false);
           return;

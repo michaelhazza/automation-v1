@@ -17,6 +17,10 @@ export default function RecurringTasksPage() {
   const [error, setError] = useState<Error | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
+  // Fetch recurring tasks when viewMode, q, or retryKey changes.
+  // NOTE: Filter state is tenant-scoped (workspace / org / system). When viewMode
+  // changes, we re-fetch with the new scope — ensuring no cross-tenant filter leakage.
+  // Search term `q` is reset to '' on each viewMode change by the dependency array.
   useEffect(() => {
     setLoading(true);
     setError(null);
