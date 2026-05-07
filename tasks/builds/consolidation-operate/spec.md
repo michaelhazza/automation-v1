@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07
+**Last updated:** 2026-05-07 (round 2 — bucket-1/bucket-2 polish folded in; foundation Phase 0 patch assumed available)
 **Author:** michael
 **Build slug:** consolidation-operate
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
@@ -68,6 +68,11 @@ This spec assumes `consolidation-foundation` has shipped or is in flight. The co
 | Existing InboxPage | `client/src/pages/InboxPage.tsx` (assumed) | **Replace** | Re-implemented with three priority bands per prototype § 6. |
 | Existing ActivityPage | `client/src/pages/ActivityPage.tsx` (assumed) | **Replace** | Re-implemented with `<SortableTable>` + drawer + modal. |
 | Existing RunTracePage | `client/src/pages/RunTracePage.tsx` (assumed) | **Replace / extend** | Re-implemented to support `?embedded=1` query flag that hides chrome (sidebar, breadcrumbs, replaces-strip, topbar). The full-page mode keeps existing functionality. |
+| `<SearchBox>` (foundation Phase 0 patch) | Foundation §4.9 | Consume | Inbox search, Activity search, Run-trace step search. |
+| `<EmptyState>` / `<ErrorState>` (foundation Phase 0 patch) | Foundation §4.10/4.11 | Consume | Inbox empty bands, Activity zero-rows, Home widgets, Run-trace error states. |
+| `<ConfirmDialog>` | `client/src/components/ConfirmDialog.tsx` | Reuse | Inbox archive confirmation, run-trace destructive admin actions. |
+
+**Out-of-scope items (deliberately deferred — see §10):** bulk multi-select on Inbox/Activity, keyboard shortcuts, audit-log UI, CSV/JSON export, run-trace step-level commenting/permalinks, real-time WebSocket push.
 
 **Verdict summary:** four pages replaced, two backend routes extended (activity, inbox), no new tables, no new services. All shared frontend primitives consumed from foundation; this stream introduces zero new shared components.
 
@@ -198,6 +203,47 @@ Per `patterns.md § 6`. Three collapsible bands:
 
 Items render with action buttons top-right and a "Added: <date>" / "Triggered: <date>" label bottom-right. Band header is `position: sticky; top: 0`. No keyboard-hint micro-copy.
 
+### 4.7 Page-level full-text search
+
+Each list page (Inbox, Activity) renders `<SearchBox>` (foundation §4.9, debounced 200ms) wired to the `q` query parameter:
+
+- **Inbox** `q` searches `title + body + actor.name`. Bands collapse if no items match within them.
+- **Activity** `q` searches `subject + actor + typeLabel`. Existing search behaviour (already implemented in the prototype) is preserved verbatim.
+- **Run-trace** an inline search filters the step list by step name / event type. Page-local; no backend round-trip.
+
+Empty results render `<EmptyState title="No matches" body="Try clearing filters or search">` with a "Clear filters" secondary action that calls `<SortableTable>`'s `clearAllFilters()` (foundation Phase 0 patch §4.3 addition).
+
+### 4.8 Sensitive data masking on run-trace
+
+LLM call payloads, tool-call arguments, and tool-call results may contain PII (emails, phone numbers, customer names) and prompts may leak system instructions. Run-trace masks these by role:
+
+| Field | Workspace user | Org admin | System admin |
+|---|---|---|---|
+| Step name + status + duration + cost | Visible | Visible | Visible |
+| Tool call **arguments** | Masked (`<redacted>`) | Visible | Visible |
+| Tool call **result body** | First 200 chars only | Visible | Visible |
+| LLM **system prompt** | Masked | Masked | Visible |
+| LLM **user prompt + completion** | Visible (own workspace only) | Visible | Visible |
+| Raw event JSON modal | Disabled | Read-only | Read-only with "copy" |
+
+Backend determines masking and emits the appropriate fields; the frontend never decides what to show. Consumer-visible field names remain stable across roles (masked fields return `null` or the mask token, never omitted) so the renderer doesn't branch on role. Producer: extend existing run-trace assembly in `server/services/agentRunMessageService.ts` (or equivalent) with a role-aware projection. Source-of-truth precedence: the backend projection is the SoT; the frontend never re-derives.
+
+### 4.9 Activity / Run-trace event metadata depth
+
+Several existing fields are already in the data model but not surfaced:
+
+- **Activity row**: add `triggerSource` field (`schedule | event | manual | api | retry`) so Home and Activity tables can render a "Source" column. Already derivable from `agent_run.trigger_kind`; expose in the API response.
+- **Run-trace LLM events**: render `tokensIn` / `tokensOut` / `costUsd` (already on `agent_run_messages.metadata`). Add to the run-trace event renderer.
+- **Run-trace tool-call events**: render `durationMs` (already on the row). Add a small "↔ matching result" affordance that scrolls the matching `tool_result` event into view (correlation by `tool_call_id`).
+- **Activity severity dot**: small inline legend (`<span class="severity-legend">critical / warning / info</span>` with three dots) renders above the table on first visit; sticky-dismissed via localStorage `activitySeverityLegendSeen=1`.
+
+### 4.10 Confirmation dialogs on destructive actions
+
+- Inbox **archive** (single item): no confirmation (reversible — items can be unarchived from Previous band).
+- Inbox **reject**: inline reason input directly inside the row card (no modal). Reason field is optional but encouraged via placeholder copy.
+- Run-trace admin actions (cancel run, force fail): `<ConfirmDialog>` with explicit consequence copy ("This will mark the run as failed. The agent will not retry.").
+- No bulk actions in this stream — multi-select is deferred per §10.
+
 ## 5. File inventory
 
 Files **created** by this spec:
@@ -212,8 +258,10 @@ Files **created** by this spec:
 | `client/src/pages/operate/components/ActivityDetailModal.tsx` | Modal opened from Home; uses foundation `<Modal size="md">` |
 | `client/src/pages/operate/components/RunTraceModal.tsx` | Modal that wraps run-trace.html in an iframe; uses foundation `<Modal size="iframe" zIndex={1010}>` |
 | `client/src/pages/operate/components/InboxBand.tsx` | Collapsible band wrapper (high / needs-action / previous) |
-| `client/src/pages/operate/components/InboxItemCard.tsx` | One inbox item row |
-| `shared/types/operate.ts` | TypeScript types for `ActivityItem`, `InboxItem`, query/response shapes |
+| `client/src/pages/operate/components/InboxItemCard.tsx` | One inbox item row (with inline reject-reason input) |
+| `client/src/pages/operate/components/SeverityLegend.tsx` | Tiny dismissible legend for Activity severity dots |
+| `client/src/pages/operate/components/RunTraceEventRenderer.tsx` | Renders LLM/tool/event rows with masking applied per role |
+| `shared/types/operate.ts` | TypeScript types for `ActivityItem` (with `triggerSource`), `InboxItem`, run-trace event shapes (with masking) |
 | `tasks/builds/consolidation-operate/plan.md` | Implementation plan written by `architect` after spec accepted |
 
 Files **modified** by this spec:
@@ -222,8 +270,9 @@ Files **modified** by this spec:
 |---|---|
 | `server/routes/activity.ts` | Add cursor-paged list with multi-select filters + sort + filterOptions response (additive) |
 | `server/services/activityService.ts` (+ `*Pure.ts`) | Add filtered list assembly; existing exports unchanged |
-| `server/routes/inbox.ts` | Add `?band=` query parameter; add `/snooze` and `/archive` action endpoints if missing |
-| `server/services/agentInboxService.ts` (or equivalent) | Add band derivation logic + snooze/archive |
+| `server/routes/inbox.ts` | Add `?band=` query parameter; add `/snooze` and `/archive` action endpoints if missing; add `q` search parameter |
+| `server/services/agentInboxService.ts` (or equivalent) | Add band derivation logic + snooze/archive + search |
+| `server/services/agentRunMessageService.ts` (or equivalent run-trace assembler) | Add role-aware masking projection per §4.8 |
 | `client/src/App.tsx` (or router config) | Re-route the consolidated paths: `/`, `/inbox`, `/activity`, `/run-trace/:id` |
 | `client/src/config/sidebar.ts` (foundation file) | Add/relabel rows: Home, Inbox, Activity (under Work group). Single-row-per-stream policy per foundation §9. |
 
@@ -243,6 +292,12 @@ Files **NOT modified** by this spec:
 - `scope=org` on activity feed: requires `org_admin` (existing helper).
 - `scope=system` on activity feed: requires system admin override (existing helper).
 - Inbox actions (approve/reject/snooze/archive): use the existing approval permission gates on `inbox.ts`. Do not introduce a new gate.
+- **Run-trace role-aware masking** (§4.8): backend determines visible fields by user role. No new permission keys; reads existing `req.user.role` + `system_admin_org_override` state.
+
+**Frontend permission gating (action visibility):**
+- Inbox approve/reject/snooze/archive buttons hidden when user lacks the inbox-write permission. Backend still enforces; frontend hide is UX-only.
+- Run-trace admin actions (cancel run, force fail) hidden for non-org-admin users. Backend enforces.
+- Home spend widget (cost MTD KPI) hidden for non-org-admin users. Backend's existing role gate applies; frontend reads identity from auth helper to decide visibility.
 
 **RLS:** No new tenant-scoped tables. Existing tables (`activity_events`, `inbox_items`, `agent_runs`) are already covered by RLS per `architecture.md §1155`. Multi-select filter logic must respect the existing predicate (e.g. when `scope=workspace`, the activity query filters by `subaccount_id = activeClient.id`).
 
@@ -271,6 +326,7 @@ Files **NOT modified** by this spec:
 | C6 | Frontend: `InboxPage.tsx` with three bands (`<InboxBand>` + `<InboxItemCard>`) | C3 |
 | C7 | Frontend: `HomePage.tsx` with KPIs, Runs chart, Recent activity widget (uses ActivityRow + ActivityDetailModal) | Foundation PageShell; C5 |
 | C8 | Sidebar config rows + router wiring + delete the old DashboardPage/InboxPage/ActivityPage/RunTracePage | C5, C6, C7 |
+| C5b | Run-trace role-aware masking projection (backend §4.8) + `<RunTraceEventRenderer>` (frontend) | C4 |
 | C9 | Doc-sync: `architecture.md` "Key files per domain" table updates; `KNOWLEDGE.md` only if a non-obvious gotcha was hit | All |
 
 **Dependency graph:** C3 depends on C1+C2; C5 depends on C3+C4; C6 depends on C3; C7 depends on C5; C8 depends on C5+C6+C7. No backward references.
@@ -298,6 +354,12 @@ frontend_tests: none_for_now
 - Run-trace `?embedded=1` hides chrome correctly; full-page mode unchanged.
 - Workspace badges clickable for org admin; `setActiveClient` + reload propagates correctly into iframe-embedded run-trace.
 - Existing pages (DashboardPage, etc) removed from router; visiting their old path 404s or redirects per router config.
+- **Search** (per §4.7): `<SearchBox>` debounces correctly on Inbox and Activity; clearing the box restores full results.
+- **Empty states**: empty Inbox bands render `<EmptyState>` with appropriate copy; empty Activity (after filters) renders empty state with "Clear filters" action.
+- **Sensitive data masking** (per §4.8): test as workspace user, org admin, and system admin; verify the projection table at each role.
+- **Severity legend**: dismissable on first visit; localStorage flag persists.
+- **Confirmation dialogs**: run-trace cancel/force-fail show confirmation; inbox reject inline reason input works.
+- **Action visibility**: workspace user does not see Home spend widget; non-org-admin does not see run-trace admin actions.
 
 ## 9. Coordination with Foundation, B, C
 
@@ -324,12 +386,15 @@ frontend_tests: none_for_now
 ## 10. Deferred items
 
 - **Real-time activity feed updates.** Phase 1 polls or reloads on user navigation. WebSocket / SSE push for activity is deferred until usage data shows manual reload is insufficient.
-- **Activity feed export to CSV.** Deferred — no consumer asked for it yet.
-- **Inbox keyboard shortcuts (A to approve, R to reject).** Deliberately removed from prototype rounds 8/10 per UX feedback. Defer until a clear use case re-emerges.
-- **Run-trace step-level commenting / annotation.** Out of scope; existing commenting UX (if any) preserved as-is.
-- **Run-trace permalinks with anchor to a specific step.** Possible follow-up; not blocking.
-- **Activity feed virtualised rendering.** Foundation SortableTable defers virtualisation; this stream inherits that deferral. Performance is acceptable at expected row counts (<1000 per page).
+- **Activity / Inbox bulk operations.** Multi-select checkbox column + batch approve/reject/archive deferred to Phase 1.5 follow-up. Single-row actions only in Phase 1.
+- **Activity / Inbox / Run-trace export to CSV/JSON.** Deferred. Single export-menu primitive, when introduced, will land as a foundation patch and apply across all list pages uniformly.
+- **Keyboard shortcuts (A to approve, R to reject, J/K to navigate rows, etc).** Foundation Modal already has Esc + Tab focus trap. Page-level shortcuts deferred until a coherent global shortcut model lands.
+- **Audit log / change history UI** for inbox actions, run-trace admin overrides. Data exists in `auditEvents.ts`; UI is its own spec.
+- **Run-trace step-level commenting / annotation / permalinks.** Out of scope; existing commenting UX (if any) preserved as-is.
+- **Activity feed virtualised rendering.** Foundation SortableTable defers virtualisation; this stream inherits.
 - **Mobile responsive layout tuning.** Pages render reasonably on narrow viewports via PageShell defaults; deeper polish deferred.
+- **Inbox per-kind approver-role gating** (different approvers for beliefs vs blocks vs memories). Today's inbox-write permission is uniform; per-kind gating deferred.
+- **Run-trace event correlation visual graph** (TOOL_CALL ↔ TOOL_RESULT linkage as a visual line). Phase 1 ships a "scroll to matching event" link; the graph is a follow-up.
 
 ## 11. Self-consistency check
 

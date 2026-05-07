@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07
+**Last updated:** 2026-05-07 (round 2 — bucket-1/bucket-2 polish folded in; foundation Phase 0 patch assumed available)
 **Author:** michael
 **Build slug:** consolidation-build
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
@@ -73,6 +73,12 @@ This spec assumes `consolidation-foundation` has shipped or is in flight; founda
 | Frontend useViewMode | Foundation §4.6 | Consume | Agents list view-mode awareness; Workspace context dropdown on agent-edit Test runner. |
 | Existing AdminAgentEditPage / AdminSkillsPage / AdminSkillEditPage / SkillStudioPage / SkillAnalyzerPage / SubaccountAgentEditPage / OrgAgentConfigsPage / SystemAgentsPage / `RecurringTasksPage`-equivalent | `client/src/pages/...` | **Replace** | Folded into the four consolidated pages. |
 | Existing `ProjectEditPage` / Goals page | `client/src/pages/...` | **Replace** | Consolidated into project-edit per prototype. The Goals subsystem retirement notice is rendered inline (read-only banner). |
+| `<SearchBox>` (foundation Phase 0 patch) | Foundation §4.9 | Consume | Agents list search, Recurring tasks search, Skill picker modal search, Data source picker search. |
+| `<EmptyState>` / `<ErrorState>` (foundation Phase 0 patch) | Foundation §4.10/4.11 | Consume | Agents list zero-rows, Recurring tasks empty result, agent-edit Runs tab empty, Skills tab empty. |
+| `<ConfirmDialog>` | `client/src/components/ConfirmDialog.tsx` | Reuse | Delete agent, Delete project, agent deploy/promote (when added), trigger pause/resume, skill remove. |
+| Agent prompt revisions | `server/db/schema/agentPromptRevisions.ts` | Reuse | Source of the agent version indicator on the agents list (latest deployed prompt-revision id is shown as a small `v23` chip). |
+
+**Out-of-scope items (deferred per §10):** bulk agent operations, keyboard shortcuts, audit-log UI, agent versioning UI for rollback (chip visible but no rollback flow), CSV export, dependency visualisation, agent health metrics dashboards, schedule visual cron editor.
 
 **Verdict summary:** four pages built (replace ~9 legacy pages), one new backend service (recurringTasksService), backend extensions on agents (skills/data-sources/test-run subroutes). Zero new shared frontend primitives. Zero new tables; possibly additive columns on `agent_data_sources` if metadata required (decided in C2 architect plan).
 
@@ -237,6 +243,48 @@ Per foundation §4.4. Agent-edit and project-edit each render `<FormFooter>` at 
 
 Per prototype round 15, the Test runner is an inline `<section class="section-card">` at the bottom of agent-edit content (always visible across tabs). Layout: 2-column grid (`1fr 240px`) for Test input + Workspace context, collapsing to single column at <720px. Action row: regular-width Run test button, inline meta line ("Last run completed in Xs"), right-aligned "View run trace" link. Result block: emerald-tinted card with header + body. **Not** a right rail; **not** a modal. Simple inline card.
 
+### 4.8 Page-level full-text search
+
+Agents list and Recurring tasks list each render `<SearchBox>` (foundation §4.9, debounced 200ms) wired to a `q` query parameter:
+
+- **Agents list** `q` searches `name + description + parentAgentName`.
+- **Recurring tasks list** `q` searches `name + fireCondition + action`.
+- **Skill picker modal** `q` searches the skill registry by `name + key + description`.
+- **Data source picker** `q` searches the connection list (cross-stream — reads from Spec C's connections endpoint).
+
+Empty results render `<EmptyState>` with a "Clear search and filters" action. Page list errors render `<ErrorState>` with a retry button.
+
+### 4.9 RRULE / fire-condition human-readable preview
+
+The Recurring tasks `fireCondition` field (`§4.4 RecurringTask`) is computed server-side from the underlying trigger spec into a human-readable string:
+
+- Schedule-fired: `"Daily 9am UTC"`, `"Weekly Mon 8am UTC"`, `"Monthly 1st 00:00"`, `"Hourly"`, `"Every 15 minutes"` (rrule-style → English projector).
+- Event-fired: `"On hubspot.contact.created"`, `"On stripe.invoice.paid"`.
+- Manual: `"Manual run"`.
+
+Producer: new pure helper `server/services/recurringTasksServicePure.ts > formatFireCondition(triggerSpec)`. No client-side library; the server emits the string. Test cases for the helper colocated.
+
+### 4.10 Agent versioning indicator
+
+Agents list shows a small version chip next to each agent name: `v<N>` where `N` is the count of `agent_prompt_revisions` rows for that agent. Tooltip: `"Deployed revision · last edited <relative time> by <user>"`. **No rollback UI in this stream** — the chip is read-only awareness; rollback flows are deferred per §10.
+
+Add `agent_revision_count` to `AgentListItem` (§4.1).
+
+### 4.11 Confirmation dialogs on destructive actions
+
+- **Delete agent**: `<ConfirmDialog>` with copy `"Deleting <name>. Active runs will continue but no new runs will start. This cannot be undone."`. Type-to-confirm input (`<name>`) for additional friction on production agents.
+- **Delete project**: `<ConfirmDialog>` with copy mentioning linked agents (`"<N> linked agents will be unlinked."`). Type-to-confirm if linked agents > 0.
+- **Trigger pause/resume from Recurring tasks row**: `<ConfirmDialog>` only on pause of a high-volume trigger (≥10 fires in last 30d). Resume is one-click.
+- **Skill remove from agent**: `<ConfirmDialog>` only if the skill has run in the last 7 days; cold skills remove silently.
+- **Agent test from Test runner card**: no confirmation (it's a sandbox).
+
+### 4.12 Agent edit tab UX details
+
+- **Skills tab tier chips** (System / Org / This client): each chip has a tooltip explaining the tier source — System chip says `"From system catalogue. Configurable per agent."`; Org chip says `"From your org's custom skills. Configurable per agent."`; Workspace chip says `"Defined for this client only."`. Tooltip rendered via existing `HelpHint.tsx` (already in `client/src/components/ui`).
+- **Data sources tab**: each binding shows a status pill (`connected` / `expired` / `error`) read from the underlying connection (cross-stream — reads Spec C's connection status). Cross-stream coupling is read-only; no Spec-C wait-on.
+- **Budget tab**: side-by-side actual vs limit comparison. Render small inline bar per cap (daily, monthly) showing `usedMtdUsd / capUsd` with the existing `<spending-bar>` style class.
+- **Runs tab**: add `costUsd` column to the runs preview list.
+
 ## 5. File inventory
 
 Files **created** by this spec:
@@ -256,9 +304,12 @@ Files **created** by this spec:
 | `client/src/pages/build/components/AgentEditTabs/BudgetTab.tsx` | Daily / monthly caps + warn threshold slider |
 | `client/src/pages/build/components/AgentEditTabs/RunsTab.tsx` | Recent runs preview + link to full Activity-filtered view |
 | `client/src/pages/build/components/TestRunnerCard.tsx` | Inline Test runner card (per round 15 prototype) |
-| `client/src/pages/build/components/SkillPickerModal.tsx` | Modal for adding skills to an agent |
-| `client/src/pages/build/components/DataSourcePickerModal.tsx` | Modal for adding data sources |
-| `server/services/recurringTasksService.ts` (+ `*Pure.ts`) | New aggregator over triggers/heartbeats/runs |
+| `client/src/pages/build/components/SkillPickerModal.tsx` | Modal for adding skills to an agent (with `<SearchBox>` over the skill registry) |
+| `client/src/pages/build/components/DataSourcePickerModal.tsx` | Modal for adding data sources (with `<SearchBox>` over connections) |
+| `client/src/pages/build/components/AgentVersionChip.tsx` | Small `vN` chip with tooltip on Agents list |
+| `client/src/pages/build/components/DeleteAgentDialog.tsx` | Type-to-confirm wrapper around `<ConfirmDialog>` for agent delete |
+| `client/src/pages/build/components/DeleteProjectDialog.tsx` | Type-to-confirm wrapper around `<ConfirmDialog>` for project delete |
+| `server/services/recurringTasksService.ts` (+ `*Pure.ts`) | New aggregator over triggers/heartbeats/runs; includes `formatFireCondition()` helper per §4.9 |
 | `server/routes/recurringTasks.ts` | New route serving the aggregator |
 | `shared/types/build.ts` | TypeScript types for `AgentFull`, `AgentListItem`, `RecurringTask`, etc |
 | `tasks/builds/consolidation-build/plan.md` | Implementation plan (architect output) |
@@ -293,6 +344,13 @@ Files **NOT modified** by this spec:
 - Recurring tasks: `requirePermission('triggers:read')` for list; mutations flow through underlying trigger/heartbeat endpoints with their existing gates.
 - Projects: `requirePermission('projects:write')` (existing) on PATCH.
 
+**Frontend permission gating (action visibility):**
+- **System agents**: read-only for non-system-admin users. Workspace admins viewing a system-tier agent see all tabs but Save / Discard / Delete buttons are hidden; the agent name renders with a "System agent (read-only)" label. Backend rejects any PATCH from non-system-admin on system agents.
+- **Delete agent / Delete project / Skill remove**: hidden for non-org-admin users. Backend enforces.
+- **Agent deploy / promote** (when added in a follow-up): org-admin only.
+- **Agent budget tab editing**: org-admin only when the agent is org-tier; workspace admins editing their workspace overrides allowed.
+- **Recurring tasks pause / resume**: workspace-admin or higher; runs into existing trigger-write gate.
+
 No new permission keys.
 
 **RLS:** All tables touched (`agents`, `agent_data_sources`, `agent_triggers`, `agent_runs`, `projects`) are already covered. If `agent_data_sources` gets a `metadata` column, no policy change needed (column-level, not row-level). RLS manifest in `server/config/rlsProtectedTables.ts` already includes these tables.
@@ -326,6 +384,8 @@ No new permission keys.
 | C8 | Frontend: `RecurringTasksPage.tsx` with `<SortableTable>` + filter dropdowns + scope/status filters | Foundation SortableTable; C3, C5 |
 | C9 | Frontend: `ProjectEditPage.tsx` with `<FormFooter>` and the Goals migration banner | Foundation FormFooter, PageShell; C5 |
 | C10 | Sidebar config + router wiring + delete legacy admin/skill pages | C6, C7, C8, C9 |
+| C3b | Backend: `formatFireCondition()` helper in `recurringTasksServicePure.ts` + tests | C3 |
+| C5b | Backend: agent-list response adds `agent_revision_count` (read from `agentPromptRevisions`) | C1 |
 | C11 | Doc-sync: `architecture.md` "Key files per domain" + remove references to retired admin/skill pages | All |
 
 **Dependency graph:** C1–C4 are independent backend chunks; C5 depends on C1–C4; C6 depends on C5; C7 / C8 / C9 each depend on C5; C10 depends on C6/C7/C8/C9. No backward references.
@@ -352,6 +412,16 @@ frontend_tests: none_for_now
 - Recurring tasks: union shows schedule-fired + event-fired + manual rows. Filter by fireKind, scope, status. Pause/resume from row action edits the underlying trigger.
 - Project edit: form-footer button alignment matches form column edges (Discard left = card left, Delete right = card right). Goals-migration banner shows for migrated projects.
 - Old admin/skill pages 404 / redirect from their previous routes.
+- **Search**: `<SearchBox>` debounces correctly on Agents list, Recurring tasks, and Skill picker modal.
+- **Empty / error states**: empty Agents / Recurring tasks / Runs render `<EmptyState>` with appropriate copy.
+- **RRULE preview**: spot-check `formatFireCondition()` against 5 common rrule shapes (daily, weekly Mon, monthly 1st, hourly, every 15 min).
+- **Version chip**: each agent on the list shows `vN`. Tooltip shows the last-edited timestamp + author.
+- **Confirmation dialogs**: type-to-confirm fires for Delete agent / Delete project (with linked agents > 0); skill remove confirms only for skills with recent runs; trigger pause confirms only for high-volume.
+- **Action visibility by role**: workspace user viewing a system agent sees no Save/Delete buttons. Non-org-admin users do not see Delete agent / Delete project. Read-only label visible.
+- **Skills tab tooltips**: hover over System / Org / Workspace tier chips shows the configured tooltip text.
+- **Data sources status**: each binding shows the upstream connection status pill correctly.
+- **Budget tab**: actual vs limit bar renders with current cap usage.
+- **Runs tab**: cost column visible per run.
 
 ## 9. Coordination with Foundation, A, C
 
@@ -380,12 +450,22 @@ frontend_tests: none_for_now
 ## 10. Deferred items
 
 - **Bulk agent operations.** Mass-pause / mass-archive deferred until volume warrants. Single-row actions only in Phase 1.
-- **Skill marketplace / discovery UI.** Skills tab is binding-only; discovering new skills lives in admin/skills (replaced by this spec). The "browse skills" UX is collapsed into the Skill picker modal; advanced discovery (semantic search, recommendations) deferred.
+- **Agent versioning / rollback flow.** Version chip is read-only in Phase 1. Rollback to previous prompt-revision, diff view between revisions, and revision history modal are deferred to a Phase 1.5 versioning spec. Data already exists in `agentPromptRevisions`.
+- **Agent deployment lifecycle UI** (deploy / promote / rollout health). Partial — deploy confirmation dialog covered in §4.11; rollout-status indicators (healthy/degraded/stale) deferred.
+- **Agent health dashboards** (error rate, latency trends, run-success rate). Defer to a separate observability spec; data partially exists in `agent_runs` aggregations.
+- **Skill marketplace / discovery UI.** Skills tab is binding-only; the "browse skills" UX is the picker modal. Semantic search, recommendations, ratings deferred.
 - **Data-source schema validation in UI.** Phase 1 ships a connection-level binding; per-field schema validation deferred.
-- **Schedule tab visual editor.** Phase 1 reuses the existing trigger editor (modal). Visual cron / drag-drop scheduling deferred.
+- **Schedule tab visual cron editor.** Phase 1 reuses the existing trigger editor (modal) plus the `formatFireCondition()` preview. Visual cron / drag-drop scheduling deferred.
 - **Agent-edit form auto-save.** Phase 1 uses explicit Save (form footer). Auto-save deferred.
-- **Cost forecasting on Budget tab.** Phase 1 shows current usage + caps; forecasting (e.g. "you'll hit cap in N days") deferred to a later spec.
+- **Cost forecasting on Budget tab.** Phase 1 shows current usage + caps; forecasting (e.g. "you'll hit cap in N days") deferred.
 - **Project-level Gantt / dependency view.** Out of scope; project-edit ships the form only.
+- **Project objective character-count guidance / examples.** Phase 1 ships a plain textarea with hint text; example-objective gallery deferred.
+- **Audit log / change history** for agent edits, project edits, skill bindings. Data exists; UI is its own spec.
+- **CSV / JSON export** of agents, recurring tasks, runs. Defer to a unified export-menu primitive in a foundation patch.
+- **Keyboard shortcuts** on agent-edit (Cmd+S to save, Cmd+Enter to test). Defer to global shortcut model.
+- **Recurring task dependency graph** (task A depends on task B completing). Defer.
+- **Recurring task estimated cost per run.** Add to deferred; data computable from agent budget × historical fire count.
+- **Agents list adoption metrics in context** ("5 runs in 30d" with peer comparison "vs avg 18"). Defer.
 
 ## 11. Self-consistency check
 

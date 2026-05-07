@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07
+**Last updated:** 2026-05-07 (round 2 — bucket-1/bucket-2 polish folded in; all 12 sections complete; foundation Phase 0 patch assumed available)
 **Author:** michael
 **Build slug:** consolidation-govern
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
@@ -74,8 +74,14 @@ This spec assumes `consolidation-foundation` has shipped or is in flight; founda
 | Existing SpendingBudgetDetailPage | `client/src/pages/SpendingBudgetDetailPage.tsx` | **Replace** | Folded into SpendingPage caps tab. |
 | Existing spending list / ledger pages | `client/src/pages/...` | **Replace** | Folded into SpendingPage Ledger tab. |
 | Existing integrations / logins page | `client/src/pages/...` | **Replace** | Replaced by ConnectionsPage. |
+| `<SearchBox>` (foundation Phase 0 patch) | Foundation §4.9 | Consume | Knowledge search (full-text), Spending ledger search, Connections search. |
+| `<EmptyState>` / `<ErrorState>` (foundation Phase 0 patch) | Foundation §4.10/4.11 | Consume | Empty knowledge results, empty ledger after filter, empty connections, network failure on any list. |
+| `<ConfirmDialog>` | `client/src/components/ConfirmDialog.tsx` | Reuse | Knowledge reject, knowledge override (when overwriting an in-use entry), connection disconnect (with impact warning), org-level memory bulk push (deferred). |
+| Audit events | `server/db/schema/auditEvents.ts` | Reuse | Override actions on knowledge entries write to existing audit log; no new table. |
 
 **Verdict summary:** three pages (or four — knowledge/org-knowledge may merge into one with view-mode toggle, decided in plan), two new pure-aggregator services (`spendInsightsService`, `spendTrendsService`), backend extensions on knowledge (Edit-and-override action) and integration-connections (unified list). Possibly one additive column (`memory_blocks.auto_update_disabled boolean`). One migration if so. Zero new shared frontend primitives.
+
+**Out-of-scope items (deferred per §10):** bulk operations (mass-approve knowledge entries, mass-disconnect connections), keyboard shortcuts, audit-log UI surface, CSV/JSON export, knowledge-block diff view + version-history modal, org-to-workspace bulk-push of memory, advanced spend forecasting, conflict resolution UI for memory.
 
 ## 4. Public API contracts
 
@@ -241,3 +247,290 @@ Per foundation §4.6, KnowledgePage and SpendingPage both read `viewMode` and sw
 - `org`: scope is the active org; insights tiles visible; trend charts visible; per-workspace caps table visible. Workspace column visible on Ledger.
 
 ConnectionsPage is org-scoped by default (connections live at the org level today); a workspace-scoped view shows only connections owned by the active workspace.
+
+### 4.8 Page-level full-text search
+
+Each list page renders `<SearchBox>` (foundation §4.9, debounced 200ms) wired to a `q` query parameter:
+
+- **Knowledge** `q` searches `body + source.agentName + source.runId`. Status / kind / agent filters compose via `<SortableTable>`.
+- **Spend Ledger** `q` searches `agent.name + workspace.name`.
+- **Connections** `q` searches `name + provider`.
+
+Empty results render `<EmptyState>` with a "Clear filters" action.
+
+### 4.9 Connection test/verify
+
+`POST /api/connections/:id/test` (new):
+
+```ts
+interface ConnectionTestResponse {
+  status: 'ok' | 'failed';
+  latencyMs: number;
+  testedAt: string;             // ISO
+  error?: { code: string; message: string };
+  capabilities?: string[];      // e.g. ['read:contacts', 'write:emails'] for OAuth — verified scopes
+}
+```
+
+Behaviour:
+- For OAuth connections: calls a lightweight ping endpoint on the provider (e.g. `GET /me` for Gmail) and reports latency + scope verification.
+- For web-login connections: validates the cookie/session is still alive by hitting a known auth-required endpoint.
+- For MCP connections: calls the MCP server's `initialize` and reports the returned capabilities.
+- For api-key connections: provider-specific ping (HubSpot, Stripe, etc).
+
+Producer: extends `connectionTokenService.ts` with a per-kind `testConnection()` dispatcher. **Idempotency:** unconditionally retryable; no state mutation. **Rate limit:** existing connection-test rate limiter (or add a new one if missing) — max 6 tests per connection per minute.
+
+### 4.10 Connection disconnect — impact warning
+
+`GET /api/connections/:id/usage` (new):
+
+```ts
+interface ConnectionUsage {
+  agents: Array<{ id: string; name: string; lastUsedAt: string | null }>;
+  recurringTasks: Array<{ id: string; name: string; nextFireAt: string | null }>;
+  workflows: Array<{ id: string; name: string }>;
+}
+```
+
+Producer: pure read aggregator over `agent_data_sources` + `agent_triggers` + workflow definitions. Used by the disconnect confirmation dialog so the user sees what will break.
+
+`POST /api/connections/:id/disconnect`: existing endpoint. Frontend pre-fetches `/usage` on the click to populate the `<ConfirmDialog>` body. Dialog copy: `"Disconnect <providerName>? <N> agents, <M> recurring tasks, and <K> workflows use this connection. They will fail until reconnected."` Type-to-confirm if `agents.length + recurringTasks.length + workflows.length > 0`.
+
+### 4.11 Spending — pace + period semantics
+
+The Caps & budgets tab pace bar and warning thresholds need explicit semantics for the user. Surface these in the UI:
+
+- **Pace line**: explanatory tooltip on the org-cap bar: `"Pace based on the last 7 days of spend extrapolated to the period end."` Render the tooltip via `<HelpHint>`.
+- **Period end / reset date**: render `"Resets <date>"` next to the bar (e.g. "Resets May 31 23:59 UTC").
+- **Days remaining**: explicit `<N> days remaining in this period` line below the bar.
+- **Pace status** (`on_track | warning | over`): inline coloured chip next to the org-cap value.
+
+Add to `CapsResponse` (§4.3):
+
+```ts
+interface CapsResponse {
+  // existing fields...
+  periodResetAt: string;         // ISO
+  paceWindow: '7d' | '14d' | '30d';  // which window pace is computed over (default 7d)
+  paceProjectedEndOfPeriodUsd: number;
+}
+```
+
+### 4.12 Knowledge — UX clarifiers
+
+- **Confidence score scale**: tooltip on the confidence bar header (`<HelpHint>`) reads `"Auto-extracted entries get a 0-1 confidence score from the extracting agent. Below 0.5: weak signal. 0.5-0.8: moderate. Above 0.8: strong."`.
+- **Category chips** (kind filter — belief / fact / observation / preference / issue): each chip has a tooltip via `<HelpHint>` clarifying the kind ("Beliefs are claims about a contact's intent. Facts are verifiable. Observations are events. Preferences are stated preferences. Issues are blockers.").
+- **Org-knowledge "Used by N of M workspaces" drill-in**: clicking the count opens a `<Modal>` listing the workspaces consuming the entry (read from `memory_block_workspace_links` if present, or computed from references).
+- **Pending-review priority indicator**: rows with `status='pending_review'` and `confidence > 0.8` show a small "high confidence" badge so reviewers prioritise. No new field; derived in the renderer.
+- **Provenance**: each row already shows `source.agentName + source.runId`. Make `source.runId` a clickable link to `/run-trace/<runId>?embedded=1` opening in a foundation `<Modal size="iframe">` (consistent with Spec A's run-trace popup pattern).
+- **Override confirmation**: when the user clicks "Edit and override" on an `in_use` entry, show `<ConfirmDialog>` with `"Override <body excerpt>? Future automatic memory updates will skip this entry. The current value stays unchanged until you save."`.
+
+### 4.13 Confirmation dialogs on destructive actions
+
+- Knowledge **reject**: `<ConfirmDialog>` with `"Reject this knowledge entry? It will be moved to ignored."` (one-click, reversible).
+- Knowledge **override** (on `in_use` entries): see §4.12.
+- Connection **disconnect**: see §4.10.
+- Spending: no destructive actions in this spec.
+
+### 4.14 Frontend permission gating (action visibility)
+
+- **Knowledge approve / reject / override** buttons hidden when user lacks the knowledge-write permission. Backend enforces.
+- **Connection disconnect / refresh / add** hidden for non-org-admin users on org-owned connections.
+- **Org-spend insights tiles + per-workspace caps + trend charts** hidden in workspace view (already covered by view-mode); also hidden for non-org-admin users in org view.
+- **Edit-and-override** hidden on entries where `auto_update_disabled = true` is locked at the org level (rare; controlled by an org-setting).
+
+## 5. File inventory
+
+Files **created** by this spec:
+
+| File | Purpose |
+|---|---|
+| `client/src/pages/govern/KnowledgePage.tsx` | Workspace knowledge view (uses `useViewMode='workspace'`) |
+| `client/src/pages/govern/OrgKnowledgePage.tsx` | Org knowledge view (or merged into KnowledgePage with view-mode toggle — decided in plan) |
+| `client/src/pages/govern/SpendingPage.tsx` | Two-tab page (Caps & budgets, Ledger), view-mode aware |
+| `client/src/pages/govern/ConnectionsPage.tsx` | Unified connections list |
+| `client/src/pages/govern/components/KnowledgeRow.tsx` | Row renderer with provenance, confidence, status, action menu |
+| `client/src/pages/govern/components/KnowledgeOverrideDialog.tsx` | Edit-and-override flow (reuses `<ConfirmDialog>` + a body editor) |
+| `client/src/pages/govern/components/SpendInsightsRow.tsx` | Three insight tiles (Top spender, Fastest grower, Most active agent) |
+| `client/src/pages/govern/components/SpendBarChart.tsx` | Inline SVG bar chart for top-5 workspaces this month |
+| `client/src/pages/govern/components/SpendTrendChart.tsx` | Inline SVG line chart for 6-month spend trend |
+| `client/src/pages/govern/components/CapUtilisationChart.tsx` | Inline SVG line chart for cap-utilisation trend (over-cap dashed segments) |
+| `client/src/pages/govern/components/ConnectionRow.tsx` | Row renderer with status pill, last-sync timestamp, owner, action menu |
+| `client/src/pages/govern/components/ConnectionTestButton.tsx` | Per-row test/verify button using `POST /api/connections/:id/test` |
+| `client/src/pages/govern/components/DisconnectConfirmDialog.tsx` | Pre-fetches `/usage`, renders impact warning |
+| `server/services/spendInsightsService.ts` (+ `*Pure.ts`) | New aggregator: top spender / fastest grower / most active agent |
+| `server/services/spendTrendsService.ts` (+ `*Pure.ts`) | New aggregator: top-5 workspaces, 6-month spend + cap-util series |
+| `shared/types/govern.ts` | TypeScript types: `KnowledgeEntry`, `LedgerRow`, `CapsResponse` (extended), `SpendInsights`, `SpendTrends`, `Connection`, `ConnectionUsage`, `ConnectionTestResponse` |
+| `tasks/builds/consolidation-govern/plan.md` | Implementation plan (architect output) |
+
+Files **modified** by this spec:
+
+| File | Change |
+|---|---|
+| `server/routes/knowledge.ts` | Add `?status=`, `?kind=`, `?agent=`, `?q=`, sort/cursor params; add `/approve`, `/reject`, `/override` endpoints (some may already exist) |
+| `server/services/agentBeliefService.ts` (or memory service) | Add `auto_update_disabled` filter logic to the auto-extraction pipeline (skip writes when true) |
+| `server/db/schema/memoryBlocks.ts` | Add `auto_update_disabled boolean default false not null` (additive) — single migration |
+| `server/config/rlsProtectedTables.ts` | Confirm `memory_blocks` entry (already present); no policy change |
+| `server/routes/agentCharges.ts` | Add `?from=`, `?to=`, `?agent=`, `?type=`, `?workspace=`, sort/cursor params for `GET /api/spend/ledger` |
+| `server/services/computeBudgetService.ts` (+ `*Pure.ts`) | Extend `CapsResponse` with `periodResetAt`, `paceWindow`, `paceProjectedEndOfPeriodUsd` |
+| `server/routes/integrationConnections.ts` | Add unified `GET /api/connections` listing across kinds; `POST /:id/test`; `GET /:id/usage` |
+| `server/services/connectionTokenService.ts` | Add per-kind `testConnection()` dispatcher |
+| `client/src/App.tsx` (router) | Re-route `/knowledge`, `/org-knowledge`, `/spending`, `/connections` |
+| `client/src/config/sidebar.ts` (foundation file) | Add/relabel rows: Knowledge under Build group; Spending under Setup; Connections under External. Per foundation §9 single-row-per-stream policy. |
+
+Files **NOT modified** by this spec:
+- Operate-stream pages, Build-stream pages, foundation primitives.
+- Schemas for `agents`, `agent_runs`, `agent_triggers`, `projects`, `inbox_items`, `activity_events`. No cross-stream schema change.
+
+**One new migration**: `memory_blocks.auto_update_disabled boolean default false not null`. RLS policy unchanged (column-level, not row-level). **No new tables.**
+
+## 6. Permissions / RLS / Execution model
+
+**Permissions:**
+- Knowledge list / read: existing `requirePermission('knowledge:read')` chain on `knowledge.ts`. No new permission keys.
+- Knowledge approve / reject / override: existing `requirePermission('knowledge:write')` chain. Override action additionally requires `org_admin` if the entry is org-tier (existing helper).
+- Spend ledger / caps / insights / trends: existing `requirePermission('spend:read')` (or equivalent). Org-scope reads require `org_admin`.
+- Connections list: existing `requirePermission('connections:read')`. Connect / disconnect: `org_admin`. Test: read permission sufficient (it's a read-side operation).
+- `auto_update_disabled` toggle: bound to the override action; no separate gate.
+
+No new permission keys.
+
+**Frontend permission gating (action visibility):** see §4.14.
+
+**RLS:** `memory_blocks`, `agent_charges` (or spend tables), `integration_connections` are all already covered by RLS per `architecture.md §1155`. Adding `auto_update_disabled` is column-level, no policy change. Spend insights and trends aggregators read from already-policy-covered base tables; no extra coverage needed.
+
+**Execution model:**
+- Knowledge list / spend ledger / caps / insights / trends / connections list: synchronous, cached at the route layer where the existing pattern applies.
+- Knowledge approve / reject: synchronous, state-based idempotency (`UPDATE ... WHERE status = 'pending_review'`). Second caller of same action returns `200 alreadyApplied: true`.
+- Knowledge override: synchronous, key-based idempotency (`(memory_block_id, body_hash)` unique per revision). Submitting the same body twice returns the existing revision; submitting a different body creates a new revision. Sets `auto_update_disabled = true` atomically. **Concurrency:** `UPDATE ... WHERE etag = $expected`. ETag mismatch → 409 with current ETag.
+- Connection disconnect: synchronous, calls existing per-kind disconnect flow. Idempotent (already-disconnected → 200).
+- Connection test: synchronous-with-network-call. Wraps the provider call with a 10s timeout; failure returns `status: 'failed'`, never bubbles 5xx. Rate-limited per §4.9.
+
+**Idempotency / retry / concurrency:**
+- Knowledge approve / reject: state-based predicate.
+- Knowledge override: key-based + ETag.
+- Connection test: unconditionally retryable; safe under retry.
+- Connection disconnect: state-based.
+- HTTP mapping: never bubble `23505` as 500. ETag mismatch → 409. Rate-limit hit on connection test → 429 with `Retry-After`.
+
+**State machine:** `memory_block.status` is closed: `pending_review | in_use | ignored | overridden`. `auto_update_disabled` is a boolean side-channel, not a state. Existing transitions preserved; the override action moves status from `in_use → in_use` (no state change) plus `auto_update_disabled := true`. No new states. No new transitions for connections (existing lifecycle preserved).
+
+## 7. Phase / chunk plan (preview)
+
+| Chunk | Scope | Depends on |
+|---|---|---|
+| C1 | Backend: migration `memory_blocks.auto_update_disabled` + extend `agentBeliefService` to skip when true; tests for the gate | — |
+| C2 | Backend: extend `knowledge.ts` with list query params + `/approve`, `/reject`, `/override` endpoints + ETag concurrency on override | C1 |
+| C3 | Backend: extend `agentCharges.ts` (or new `spendLedger.ts` route) with paged ledger list + filterOptions response | — |
+| C4 | Backend: `spendInsightsService.ts` + `spendTrendsService.ts` (pure aggregators) + endpoints; pure-function tests | C3 |
+| C5 | Backend: extend `computeBudgetService.ts` with `periodResetAt` / `paceWindow` / `paceProjectedEndOfPeriodUsd` | — |
+| C6 | Backend: unified `GET /api/connections` + `GET /:id/usage` aggregator + `POST /:id/test` dispatcher | — |
+| C7 | Frontend: `shared/types/govern.ts` + API client wrappers | C1–C6 |
+| C8 | Frontend: `KnowledgePage.tsx` + `KnowledgeRow.tsx` + `KnowledgeOverrideDialog.tsx` (workspace + org views; or merged page) | Foundation SortableTable, Modal, ConfirmDialog, useViewMode; C7 |
+| C9 | Frontend: `SpendingPage.tsx` Ledger tab with `<SortableTable>` | Foundation SortableTable, useViewMode; C7 |
+| C10 | Frontend: `SpendingPage.tsx` Caps & budgets tab with `<SpendInsightsRow>` + 3 SVG charts (`SpendBarChart`, `SpendTrendChart`, `CapUtilisationChart`) | C9 |
+| C11 | Frontend: `ConnectionsPage.tsx` + `ConnectionTestButton.tsx` + `DisconnectConfirmDialog.tsx` | Foundation SortableTable, ConfirmDialog; C7 |
+| C12 | Sidebar config + router wiring + delete legacy memory / spending / integrations pages | C8, C9, C10, C11 |
+| C13 | Doc-sync: `architecture.md` "Key files per domain" + auto-memory pipeline reference (note `auto_update_disabled` gate); KNOWLEDGE.md only if non-obvious gotcha hit | All |
+
+**Dependency graph:** C1–C6 are mostly independent backend chunks (C2 depends on C1, C4 on C3); C7 depends on C1–C6; C8/C9/C11 each depend on C7; C10 depends on C9; C12 depends on C8+C9+C10+C11. No backward references.
+
+Estimated total: 6–8 days of one builder. Likely two PRs (backend C1–C6, frontend C7–C13).
+
+## 8. Testing posture
+
+Per `docs/spec-context.md`:
+
+```
+testing_posture: static_gates_primary
+runtime_tests: pure_function_only
+frontend_tests: none_for_now
+```
+
+- **Pure-function tests** for: spend insights ranking + delta computation, spend trends top-5 + Other-rollup logic, cap utilisation segment classification (normal vs over-cap), pace projector (last-N-days extrapolation), `auto_update_disabled` gate predicate, connection-usage aggregator. Each colocated `*Pure.test.ts`.
+- **No frontend tests, no E2E, no API-contract tests, no visual regression** per framing.
+- **Static gates** (lint, typecheck, build:server, build:client) are the verification surface.
+
+**Manual verification at G2:**
+- Knowledge: filter by status / kind / agent. Approve / reject / override all work. Override sets `auto_update_disabled = true`; re-running the auto-extraction pipeline does NOT touch the entry. Confidence tooltip + category-chip tooltips visible. Provenance run-id link opens run-trace iframe modal. Pending-review high-confidence badge shows correctly.
+- Spending Ledger: workspace view drops Workspace column + filters to active workspace. Org view shows three insight tiles. Filters / sort behave per `<SortableTable>` contract.
+- Spending Caps & budgets: org view shows split top row (org cap left, top-5 bar chart right) + second row (spend trend left, cap-util trend right). Globex over-cap segment renders as dashed red. Pace tooltip + period-reset date visible.
+- Connections: 15-row list filters/sorts correctly. Test button works (mock all kinds). Disconnect dialog shows impact (`<N> agents, <M> tasks, <K> workflows`); type-to-confirm fires when impact > 0.
+- Action visibility by role: workspace user does not see org-spend insights; non-org-admin does not see disconnect / connect actions.
+- Search box on each list page debounces correctly.
+- Empty / error states render when expected.
+
+## 9. Coordination with Foundation, A, B
+
+**Foundation primitives consumed:**
+
+- `<SortableTable>` (foundation §4.3 + Phase 0 patch additions: `clearAllFilters`, AND/OR indicator) — Knowledge entries, Spending Ledger, Spending caps table, Connections.
+- `<Modal>` (foundation §4.1) — Override editor, drill-in modal for "used by N workspaces", knowledge-detail modal.
+- `<ViewModeSwitcher>` / `useViewMode` (foundation §4.4–4.6) — Knowledge and Spending workspace/org views.
+- `<WorkspaceBadge>` (foundation §4.5) — Spend Ledger workspace column, knowledge org-view subaccount column, Connections owner column.
+- `<PageShell>` (foundation §4.8) — Wrapper for all pages.
+- `<SearchBox>`, `<EmptyState>`, `<ErrorState>` (foundation Phase 0 patch §4.9-4.11).
+- `<ConfirmDialog>` — Existing primitive (`client/src/components/ConfirmDialog.tsx`).
+- `<HelpHint>` — Existing primitive (`client/src/components/ui/HelpHint.tsx`).
+
+**Shared-file edit policy** (per foundation §9):
+
+- `client/src/config/sidebar.ts`: Govern stream owns rows for Knowledge (under Build), Spending (under Setup), Connections (under External). Coordinate row order at merge time with Specs A and B.
+- Production shared stylesheet: page-scoped classes only (`.knowledge-row`, `.spend-insight-card`, `.connection-status-pill`, etc). No edits to `.form-footer`, `.page-shell`, etc.
+- `shared/types/govern.ts`: scoped to this stream.
+- DB migrations: one migration (additive `memory_blocks.auto_update_disabled`).
+
+**Cross-stream integration points:**
+- Knowledge `source.runId` links to `/run-trace/<id>?embedded=1` opened in a foundation `<Modal size="iframe">` — same pattern as Spec A's run-trace popup. No coupling; the route already exists.
+- Spec B's agent-edit Data sources tab reads connection status from this stream's `GET /api/connections/:id`. Read-only coupling; no Spec B dependency at write time.
+- Spec B's agent-edit Budget tab reads spend roll-ups from this stream's `GET /api/spend/caps?scope=agent&agentId=<id>` (or equivalent extension). Existing aggregator already supports per-agent reads.
+- Connection `usage` aggregator reads from `agent_data_sources` (Spec B territory) and `agent_triggers` — read-only.
+
+## 10. Deferred items
+
+- **Bulk operations** on knowledge (mass-approve, mass-reject) and connections (mass-disconnect). Defer to Phase 1.5 follow-up.
+- **Knowledge version history modal with diff view.** Data exists in `memoryBlockVersions`; UI is a follow-up. Phase 1 ships only "current value + last-edited-by".
+- **Conflict resolution UI** for memory (auto-extracted value vs human-authored value). Today's pipeline writes the latest extraction; manual override stops auto-updates. Visual conflict-resolution UX deferred.
+- **Org-to-workspace bulk push** of memory blocks. The "used by N of M workspaces" drill-in lists consumers; pushing to all is a follow-up.
+- **CSV / JSON export** of knowledge, ledger, connections. Defer to a unified export-menu primitive.
+- **Audit log UI** for override actions, disconnect actions, knowledge approvals. Data exists; UI is its own spec.
+- **Spend cost forecasting** beyond linear pace ("you'll exceed cap on day 23 at current rate" with confidence interval). Phase 1 ships only linear pace.
+- **Spend per-agent / per-skill cost allocation drill-down** beyond the Most-active-agent insight tile. Defer.
+- **Connection scope verification UI** — the test endpoint returns capabilities, but a "what scopes does this need vs has?" diff UI is deferred.
+- **Web-login session-expiry preview** (countdown to cookie expiration). Status pill shows `expired`; preview is a follow-up.
+- **Connection cloning / templating.** Defer.
+- **Memory-block category management** (rename categories, custom kinds). Phase 1 uses the existing fixed set.
+- **Knowledge full-text search ranking tuning** (e.g. boost recent, boost high-confidence). Phase 1 uses default postgres ts_rank or LIKE.
+- **Spend currency selector / multi-currency support.** Phase 1 hardcodes USD with `$` glyph.
+- **Keyboard shortcuts** (e.g. A to approve a selected knowledge entry). Defer.
+
+## 11. Self-consistency check
+
+- Goals (§1) match Implementation (§4–7)? Yes — every page in §1 has contracts in §4, inventory in §5, chunks in §7. Reuse-vs-extend-vs-new verdicts in §3 match §5.
+- Every "must" / "guarantees" claim has a backing mechanism?
+  - Knowledge override sets `auto_update_disabled = true` atomically: stated in §6 (key-based + ETag).
+  - Auto-extraction pipeline skips when `auto_update_disabled = true`: backed by C1 chunk in §7.
+  - Connection test never bubbles 5xx: backed by §6 (10s timeout + structured error response).
+  - Top-5 ranking with Other rollup: stated in §4.5; pure-function test in §8.
+- File inventory complete? Every page/component/service named in §4 appears in §5.
+- Phase dependency graph clean? §7 lists C2 → C1, C4 → C3, C7 → all C1–C6, C8/C9/C11 → C7, C10 → C9, C12 → C8+C9+C10+C11. No cycles.
+- Deferred items section exists? §10.
+- Testing posture matches framing? §8 aligns with `frontend_tests: none_for_now`. Pure-function tests on the new aggregators.
+- Permissions/RLS/execution-model statements explicit? §6.
+
+## 12. Pre-review checklist
+
+- [x] §0 No deferred-item references; greenfield consolidation.
+- [x] §1 Every reused/extended primitive has an audit row in §3.
+- [x] §2 Every new file is in §5.
+- [x] §3 Public APIs in §4 include shape + types + producer/consumer.
+- [x] §4 New column (`memory_blocks.auto_update_disabled`) declared additive in §5; existing RLS coverage retained per §6.
+- [x] §5 Execution model declared (sync + state-based knowledge approve/reject; key-based + ETag override; sync connection test with timeout) in §6.
+- [x] §6 Phase graph in §7 acyclic.
+- [x] §7 `## Deferred Items` (§10) present.
+- [x] §8 Self-consistency pass complete (§11).
+- [x] §9 Testing posture matches framing (§8).
+- [x] §10 ETag-mismatch HTTP mapping (409) declared; rate-limit (429) on connection test declared.
+- [x] §11 Frontmatter present (top of file).
+
+Spec ready for `spec-reviewer`.
