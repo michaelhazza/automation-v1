@@ -132,3 +132,83 @@ Integrity check: 1 issue found this round (auto: 1, escalated: 0). §3 audit row
 
 ### Top themes
 Internal contract tightening for cross-spec consumer consistency; prop/type defaults; helper extraction. No user-visible behaviour drift.
+
+---
+
+## Round 2 — 2026-05-07T02:55:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary
+
+This is now tight, consistent, and build-ready. You addressed every high-risk ambiguity from Round 1 properly and, more importantly, you pushed the rules down into the primitives instead of leaving them to consumers. That's exactly what prevents drift in A/B/C.
+
+No blockers. One or two final micro-tightenings worth applying, but you're effectively at "approve and build".
+
+What materially improved (and is now solid)
+1. SortableTable is now deterministic
+2. ViewMode is correctly centralized
+3. Overlay system is now coherent
+4. Workspace switching is properly contained
+5. Route typing closes a real class of bugs
+6. FormFooter contract is now enforceable
+
+Final tightenings (very minor, but worth it)
+
+1. SortableTable: lock NaN handling
+   - Number('abc') → NaN
+   - Add: if (Number.isNaN(a) || Number.isNaN(b)) fallback to string comparison
+
+2. Filter sentinel collision guard
+   - '__NULL__' could collide with real data
+   - Safer: '__NULL__::internal' or '__NULL__::' + column.key
+
+3. ViewMode: document side effects explicitly
+   - setViewMode('org') → clears activeClient
+   - setViewMode('system') → enables override flag
+   - setViewMode('workspace') → no mutation if invalid
+
+4. Overlay exclusivity: clarify enforcement boundary
+   - "Primitives do not guard against double-open; last-mounted overlay wins visually."
+
+5. PageShell: lock padding defaults
+   - Default horizontal padding (e.g. 24px or 28px)
+
+Things you got exactly right (do not touch)
+- No OverlayManager abstraction
+- No backend persistence creep
+- No virtualization yet
+- No Layout rewrite
+- No test overreach
+
+Risk check: only remaining meaningful risk is Spec A/B/C extending primitives instead of using them. Mitigation already exists (contract locking, boundary enforcement). Hold the line on "If you need to change the primitive, patch Spec 0".
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F13 — SortableTable: NaN guard in number comparator (fall back to string compare on `Number.isNaN(a) \|\| Number.isNaN(b)`) | technical | apply | auto (apply) | low | Internal sort robustness; prevents unstable ordering when dirty data passes the type narrowing. |
+| F14 — Filter sentinel scoped to column key (`__NULL__::${column.key}` instead of `__NULL__`) | technical | apply | auto (apply) | low | Internal collision guard against rare real-data overlap; column-scoping also keeps filter keys disjoint across columns. |
+| F15 — Lock useViewMode side-effect table (locked transition matrix in §4.6) | technical | apply | auto (apply) | low | Documentation tightening; codifies refactor invariant so future changes to the hook cannot silently drop a side effect. |
+| F16 — Overlay exclusivity: failure-mode boundary clarification (last-mounted wins visually) | technical | apply | auto (apply) | low | Documentation tightening; describes failure mode without policing it. |
+| F17 — PageShell explicit horizontal padding default (`28px` to match `.form-footer` inner padding) | technical | apply | auto (apply) | low | Internal default; prevents A/B/C consumers picking divergent gutters and avoids misalignment with the fixed footer. |
+
+### Triage rationale
+
+All 5 findings classify as `technical` — every recommendation tightens an internal behaviour, default, or documentation invariant. None modify described user-visible behaviour. Severities are low (edge cases, doc clarifications, default values); no escalation carveouts triggered. Auto-apply.
+
+### Escalations to operator
+None this round.
+
+### Applied (auto-applied technical + user-approved user-facing)
+- [auto] F13 — Added NaN fallback in §4.3 sort comparator semantics
+- [auto] F14 — Replaced `'__NULL__'` with column-scoped `'__NULL__::${column.key}'` in §4.3 filter value identity
+- [auto] F15 — Replaced ViewMode transition prose with locked side-effects table in §4.6
+- [auto] F16 — Added failure-mode boundary clause to §4.2 overlay exclusivity invariant
+- [auto] F17 — Added explicit `28px` horizontal padding default to §4.8 PageShell
+
+### Integrity check
+Integrity check: 0 issues found this round (auto: 0, escalated: 0). No forward references introduced; no contradictions surfaced.
+
+### Top themes
+Final micro-tightenings on edge cases (NaN, sentinel collision), documentation invariants (side-effect table, failure-mode), and the last missing default (page-shell padding). Spec is now build-ready per ChatGPT's verdict.

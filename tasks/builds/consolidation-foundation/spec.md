@@ -131,6 +131,7 @@ Behaviour: portal-rendered, fade-in backdrop, slide-in panel, Esc closes, backdr
 - Only one top-level overlay (Modal OR Drawer) is active at a time. Consumers MUST close the active overlay before opening another of the same kind.
 - Carveout: a Modal MAY open over an active Drawer (the run-trace-popup-over-activity-drawer case). The Modal sets `zIndex={drawerZ + 10}` per the ladder in §4.1; both primitives keep their own focus trap and scroll lock without conflict because the Modal's trap takes precedence while it is mounted, and the Drawer's trap reactivates on Modal close.
 - Two simultaneous Modals or two simultaneous Drawers are a consumer bug, not a primitive concern. The primitives do NOT police global overlay state in Phase 0 (would require introducing an OverlayManager, explicitly deferred per §10).
+- **Failure-mode boundary (locked):** if a consumer bug DOES open two overlays of the same kind at once, the primitives do not guard or recover. The last-mounted overlay wins visually because its portal renders on top of the prior one in DOM order; both keep their own focus trap, but the older trap is functionally inert until the newer overlay closes. This behaviour is predictable, not "right": the contract is "do not open two", and the visual outcome is documented only so the failure mode is debuggable.
 
 ### 4.3 `<SortableTable>` (NEW)
 
@@ -177,14 +178,14 @@ Behaviour (locked here, do not redesign in A/B/C):
 **Sort comparator semantics (locked):**
 
 - **String sort:** `localeCompare` with `{ sensitivity: 'base' }` (case- and accent-insensitive).
-- **Number sort:** numeric subtraction (`a - b`); both values coerced via `Number(...)` first.
+- **Number sort:** numeric subtraction (`a - b`); both values coerced via `Number(...)` first. **NaN guard:** if either coerced value is `NaN` (e.g. `Number('abc')`), the comparator falls back to the locale-aware string comparison for that pair only. Prevents unstable ordering when dirty data slips through.
 - **Null handling:** `null` and `undefined` always sort to the bottom in BOTH ascending and descending directions. The directional arrow flips ordering of non-null values only.
 - **Mixed types:** if `getValue` returns mixed types across rows for the same column, the comparator coerces every value with `String(v)` and falls back to the locale-aware string comparison above. Implementation must NOT throw on mixed input.
 - The default comparator is exposed but not extensible in Phase 0; consumers needing custom sort precompute a sortable scalar via `getValue`.
 
 **Filter value identity (locked):**
 
-- Each filter option is keyed by `String(getValue(row) ?? '__NULL__')`. The `'__NULL__'` sentinel ensures null/undefined values collapse into a single distinguishable filter option rather than producing duplicate empty-string entries for non-string inputs (dates, floats, derived values).
+- Each filter option is keyed by `String(getValue(row) ?? `__NULL__::${column.key}`)`. The column-scoped `'__NULL__::<column.key>'` sentinel ensures null/undefined values collapse into a single distinguishable filter option rather than producing duplicate empty-string entries for non-string inputs (dates, floats, derived values), AND avoids the rare collision where real row data equals a literal `'__NULL__'` string.
 - A custom `getFilterOptions` MUST return options whose `value` field is a deterministic string; non-string `value` fields are a type error.
 - This rule prevents subtle equality bugs where two visually-identical options (e.g. `Date` instances representing the same instant) produce two filter entries.
 
@@ -334,11 +335,17 @@ export interface UseViewModeOptions {
 export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn;
 ```
 
-Transition rules:
-- `setViewMode('org')` clears `activeClient` and switches mode. Returns `true`.
-- `setViewMode('workspace')` with `activeClient` set → switches mode. Returns `true`.
-- `setViewMode('workspace')` with NO `activeClient` → no-op, returns `false`, invokes `options.onRequireClientSelection?.()` if provided. The hook does NOT change state.
-- `setViewMode('system')` with `system_admin` permission → enables `system_admin_org_override`. Returns `true`. Without the permission → no-op, returns `false`.
+Transition rules and side effects (locked):
+
+| Call | Precondition | Side effects | Return |
+|---|---|---|---|
+| `setViewMode('org')` | always allowed for users with org-admin permission | Clears `activeClient`. Disables `system_admin_org_override` if previously set. | `true` |
+| `setViewMode('workspace')` | `activeClient` is set | No mutation to identity state; mode flips to `workspace`. | `true` |
+| `setViewMode('workspace')` | NO `activeClient` | No mutation. Invokes `options.onRequireClientSelection?.()`. | `false` |
+| `setViewMode('system')` | user has `system_admin` permission | Enables `system_admin_org_override`. | `true` |
+| `setViewMode('system')` | user lacks `system_admin` | No mutation. | `false` |
+
+Refactor invariant: any future change to `useViewMode` MUST preserve the table above. The boolean return + optional callback pattern is the only signalling channel; consumers do not read identity state directly to detect a rejected transition.
 
 `<ViewModeSwitcher onChange={setViewMode}>` propagates the boolean return implicitly via React state; consumers that need to react to a rejected transition wire `onRequireClientSelection`. `Layout.tsx` is the canonical consumer and wires it to its client picker.
 
@@ -416,7 +423,9 @@ interface PageShellProps {
 
 **Default max-width: `1280px`** (locked). Applied via `.page-content { max-width: 1280px; margin: 0 auto; }`. Consumers needing a wider band (e.g. a six-column table) pass `maxWidth` explicitly; the default applies otherwise so A/B/C consumers do not pick divergent values.
 
-CSS additions (around 10 lines) in the production stylesheet.
+**Default horizontal padding: `28px`** (locked). Applied via `.page-content` and matches the inner padding used by `.form-footer` (`padding: 14px 28px`) so a fixed footer aligns flush with the page-content gutters. Consumers do not override; pages needing a different gutter use a nested element rather than fighting the default.
+
+CSS additions (around 12 lines) in the production stylesheet.
 
 ## 5. File inventory
 
