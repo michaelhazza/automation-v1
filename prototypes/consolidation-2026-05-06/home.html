@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<!--
+  Round 10 changes:
+  - Runs chart: flex:1 fill so bars stretch to card height
+  - Row 3: back to 2-col (Recent activity left, Quick actions right)
+  - Recent activity: drop Run column, 8 rows, row click opens activity modal
+  - Activity modal: description/subaccount/actor/type/project/run/when
+  - Run link in modal opens run-trace in modal-card-xl iframe (run-trace-modal)
+  - Workspace badge clicking: org_admin profile can click to switch subaccount
+  - Quick actions card on right to balance the row
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Page layout ───────────────────────────────────── */
+.home-rows { display: flex; flex-direction: column; gap: 16px; }
+.home-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+/* ── Uniform card height ───────────────────────────── */
+.home-card-uniform {
+  min-height: 400px;
+}
+
+/* ── Greeting ──────────────────────────────────────── */
+.greeting-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 20px; gap: 12px;
+}
+.greeting-name { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.02em; }
+.greeting-sub { font-size: 13.5px; color: var(--slate-500); margin-top: 3px; }
+
+.widget {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column;
+}
+.widget-head {
+  padding: 12px 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100);
+  flex-shrink: 0;
+}
+.widget-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
+.widget-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+.widget-link:hover { text-decoration: underline; }
+.widget-body { padding: 12px 16px; flex: 1; display: flex; flex-direction: column; }
+.widget-subline {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--slate-100);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.widget-metric { display: flex; align-items: baseline; gap: 4px; }
+.widget-metric-num { font-size: 18px; font-weight: 800; color: var(--slate-900); line-height: 1; }
+.widget-metric-label { font-size: 11px; color: var(--slate-500); font-weight: 500; }
+
+/* ── Sparkline ─────────────────────────────────────── */
+/* chart-fill makes the bar container stretch to fill available space */
+.chart-fill {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.sparkline-wrap {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 80px;
+}
+.spark-bar {
+  flex: 1; border-radius: 3px 3px 0 0;
+  background: var(--indigo-200);
+  transition: background 0.1s;
+  min-width: 6px;
+}
+.spark-bar.active { background: var(--indigo-500); }
+.spark-bar.current { background: var(--indigo-600); }
+
+/* ── Active agents widget ──────────────────────────── */
+.active-agent-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer; transition: background 0.08s;
+}
+.active-agent-row:last-child { border-bottom: none; }
+.active-agent-row:hover { background: var(--slate-50); margin: 0 -16px; padding: 8px 16px; border-radius: 6px; }
+.active-agent-name { font-size: 12.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.active-agent-step { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+.active-agent-elapsed { font-size: 11px; color: var(--indigo-600); font-weight: 600; white-space: nowrap; }
+.active-header-stat { font-size: 11.5px; color: var(--slate-500); margin-bottom: 10px; }
+
+/* ── Timeframe pills ───────────────────────────────── */
+.timeframe-pills {
+  display: flex; gap: 3px; background: var(--slate-100);
+  padding: 3px; border-radius: 7px; width: fit-content;
+}
+.tf-pill {
+  padding: 3px 9px; border-radius: 5px;
+  font-size: 11.5px; font-weight: 500; color: var(--slate-500);
+  border: none; background: transparent; cursor: pointer;
+  transition: all 0.1s;
+}
+.tf-pill.active { background: white; color: var(--indigo-700); box-shadow: var(--shadow-sm); font-weight: 600; }
+
+/* ── Spend & cap widget ────────────────────────────── */
+.spend-section { padding: 10px 0; border-bottom: 1px solid var(--slate-100); }
+.spend-section:last-of-type { border-bottom: none; }
+.spend-section-label { font-size: 10.5px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.spend-metric { font-size: 12.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 5px; }
+.spend-metric .spend-pct { font-size: 11.5px; font-weight: 500; color: var(--slate-500); }
+.spend-bar-track { background: var(--slate-100); border-radius: 99px; position: relative; overflow: visible; }
+.spend-bar-fill { border-radius: 99px; height: 100%; transition: width 0.3s; }
+.spend-bar-fill.indigo { background: var(--indigo-500); }
+.spend-bar-fill.amber-fill { background: #f59e0b; }
+.spend-bar-fill.red-fill { background: var(--red-500); }
+.spend-pace-line {
+  position: absolute; top: -3px; bottom: -3px; width: 0;
+  border-left: 1.5px dotted var(--slate-400);
+  pointer-events: none;
+}
+.spend-projection { font-size: 11px; color: var(--slate-500); margin-top: 4px; }
+.spend-projection.amber { color: #92400e; }
+.spend-projection.red { color: var(--red-600); }
+.spend-warning-chip {
+  display: inline-block; background: #fef3c7; border: 1px solid #fde68a;
+  color: #92400e; font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px; margin-left: 4px;
+}
+.spend-scope { font-size: 10.5px; color: var(--slate-400); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--slate-100); }
+
+/* ── Spend drawer ──────────────────────────────────── */
+.drawer-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(15,23,42,0.3); z-index: 50;
+}
+.drawer-overlay.open { display: block; }
+.spend-drawer {
+  position: fixed; top: 0; right: -420px; bottom: 0;
+  width: 400px; background: white; box-shadow: -4px 0 24px rgba(15,23,42,0.12);
+  z-index: 51; transition: right 0.22s ease; display: flex; flex-direction: column;
+}
+.spend-drawer.open { right: 0; }
+.spend-drawer-head {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.spend-drawer-title { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+.spend-drawer-close {
+  background: none; border: none; cursor: pointer; padding: 4px;
+  color: var(--slate-400); border-radius: 4px;
+}
+.spend-drawer-close:hover { background: var(--slate-100); color: var(--slate-700); }
+.spend-drawer-body { padding: 16px 20px; flex: 1; overflow-y: auto; }
+.spend-table-stub { width: 100%; border-collapse: collapse; font-size: 12px; }
+.spend-table-stub th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 8px; border-bottom: 1px solid var(--slate-200); }
+.spend-table-stub td { padding: 8px 8px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); }
+.spend-table-stub td:last-child { text-align: right; font-weight: 600; color: var(--slate-900); font-variant-numeric: tabular-nums; }
+.spend-drawer-note { font-size: 11.5px; color: var(--slate-400); margin-top: 16px; padding: 10px; background: var(--slate-50); border-radius: 6px; }
+
+/* ── Inbox sidebar card ────────────────────────────── */
+.inbox-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.inbox-card-head {
+  padding: 12px 16px; background: var(--slate-50);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.inbox-card-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); display: flex; align-items: center; gap: 6px; }
+.inbox-card-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+.inbox-card-link:hover { text-decoration: underline; }
+.inbox-card-body { padding: 10px 16px; }
+.inbox-item-preview {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 0; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer;
+}
+.inbox-item-preview:last-child { border-bottom: none; }
+.inbox-item-preview:hover { background: var(--slate-50); margin: 0 -16px; padding: 9px 16px; border-radius: 6px; }
+.inbox-preview-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.inbox-preview-body { flex: 1; min-width: 0; }
+.inbox-preview-title { font-size: 12px; font-weight: 600; color: var(--slate-800); line-height: 1.4; }
+.inbox-preview-sub { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+
+/* ── Recent activity table card ────────────────────── */
+.list-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column;
+}
+.list-card-head {
+  padding: 12px 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100);
+}
+.list-card-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
+.list-card-body { flex: 1; overflow-x: auto; overflow-y: auto; }
+.list-card-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--slate-100);
+  font-size: 11.5px;
+}
+.list-card-footer a { color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+.list-card-footer a:hover { text-decoration: underline; }
+
+/* Mini table inside card */
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mini-table thead th {
+  padding: 7px 12px;
+  text-align: left; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-400); background: var(--slate-50);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+  position: sticky; top: 0; z-index: 2;
+}
+.mini-table tbody tr {
+  border-bottom: 1px solid var(--slate-100);
+  cursor: pointer; transition: background 0.08s;
+}
+.mini-table tbody tr:last-child { border-bottom: none; }
+.mini-table tbody tr:hover { background: var(--slate-50); }
+.mini-table tbody td { padding: 8px 12px; vertical-align: middle; }
+
+/* Actor text */
+.actor-text { font-size: 11.5px; color: var(--slate-500); white-space: nowrap; }
+
+/* Type chip */
+.type-chip {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200);
+}
+.type-chip-run      { background: var(--emerald-50);  color: #166534;  border-color: #a7f3d0; }
+.type-chip-memory   { background: var(--indigo-50);   color: #3730a3;  border-color: #c7d2fe; }
+.type-chip-skill    { background: #f5f3ff;            color: #5b21b6;  border-color: #ddd6fe; }
+.type-chip-integ    { background: var(--sky-50);      color: #0c4a6e;  border-color: #bae6fd; }
+.type-chip-doc      { background: #fff7ed;            color: #c2410c;  border-color: #fed7aa; }
+.type-chip-inbox    { background: var(--amber-50);    color: #92400e;  border-color: #fde68a; }
+.type-chip-fail     { background: #fef2f2;            color: #b91c1c;  border-color: #fecaca; }
+.type-chip-workflow { background: #eff6ff;            color: #1d4ed8;  border-color: #bfdbfe; }
+.type-chip-identity { background: var(--slate-100);   color: var(--slate-500); }
+
+/* Time cell */
+.time-cell { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+
+/* Subaccount badge (colored) */
+.sub-badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 600;
+  white-space: nowrap; flex-shrink: 0;
+  user-select: none;
+}
+
+/* Activity table description cell */
+.act-desc { font-size: 12px; font-weight: 500; color: var(--slate-800); line-height: 1.35; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Replaces banner ───────────────────────────────── */
+.replaces-banner {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 20px;
+  font-size: 12px; color: #92400e;
+  display: flex; align-items: center; gap: 8px;
+}
+.replaces-banner strong { font-weight: 700; }
+
+/* ── Quick actions card ────────────────────────────── */
+.quick-actions-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column;
+}
+.quick-action-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+  cursor: pointer; text-decoration: none;
+  transition: background 0.08s;
+}
+.quick-action-row:last-child { border-bottom: none; }
+.quick-action-row:hover { background: var(--slate-50); }
+.quick-action-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; color: var(--indigo-600);
+  background: var(--indigo-50); border: 1px solid var(--indigo-100);
+}
+.quick-action-label { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+.quick-action-sub { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+
+/* ── Activity modal detail rows ────────────────────── */
+.act-modal-row {
+  display: flex; gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--slate-100); align-items: flex-start;
+  font-size: 13px;
+}
+.act-modal-row:last-child { border-bottom: none; }
+.act-modal-label { width: 90px; flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 1px; }
+.act-modal-value { flex: 1; color: var(--slate-800); line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (three-mode shared) -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'home.html');</script>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Home</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:var(--slate-500);margin-right:12px;">Wednesday, 6 May 2026</span>
+      <button class="btn btn-primary" style="display:flex;align-items:center;gap:6px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New agent
+      </button>
+    </div>
+
+    <div class="page-body">
+
+      <div class="replaces-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span><strong>Round 10:</strong> Runs chart fills card. Recent activity back to half-width. Row click opens activity modal. Run links open run-trace popup. Workspace badges clickable for org admins.
+        <a href="before-home.html" style="color:#b45309;font-weight:700;margin-left:6px;">View before (DashboardPage)</a></span>
+      </div>
+
+      <!-- Greeting -->
+      <div class="greeting-row">
+        <div>
+          <div class="greeting-name">Good morning, Sarah</div>
+          <div class="greeting-sub">3 agents running now, 18 total. 7 items in your inbox need attention.</div>
+        </div>
+      </div>
+
+      <div class="home-rows">
+
+        <!-- Row 1: Inbox preview (left) + Active agents (right) -->
+        <div class="home-2col">
+
+          <!-- Inbox preview widget -->
+          <div class="inbox-card home-card-uniform">
+            <div class="inbox-card-head">
+              <span class="inbox-card-title">
+                Inbox
+                <span style="min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--amber-500);color:white;border-radius:9px;font-size:10.5px;font-weight:700;">7</span>
+              </span>
+              <a href="inbox.html" class="inbox-card-link">Open all</a>
+            </div>
+            <div class="inbox-card-body">
+              <div class="inbox-item-preview">
+                <div class="inbox-preview-dot" style="background:var(--amber-500);"></div>
+                <div class="inbox-preview-body">
+                  <div class="inbox-preview-title">Approval needed: "Weekly nurture sequence"</div>
+                  <div class="inbox-preview-sub">Email Automation Agent, 32m ago</div>
+                </div>
+              </div>
+              <div class="inbox-item-preview">
+                <div class="inbox-preview-dot" style="background:var(--amber-500);"></div>
+                <div class="inbox-preview-body">
+                  <div class="inbox-preview-title">Belief conflict: Acme Corp contact phone</div>
+                  <div class="inbox-preview-sub">Research Agent, 14m ago</div>
+                </div>
+              </div>
+              <div class="inbox-item-preview">
+                <div class="inbox-preview-dot" style="background:var(--red-500);"></div>
+                <div class="inbox-preview-body">
+                  <div class="inbox-preview-title">Run failed: Morning report, Maple Digital</div>
+                  <div class="inbox-preview-sub">Gmail credential expired, 2h ago</div>
+                </div>
+              </div>
+              <div style="margin-top:6px;padding-top:8px;border-top:1px solid var(--slate-100);">
+                <a href="inbox.html" class="inbox-card-link">View all 7 unread items</a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active agents widget -->
+          <div class="widget home-card-uniform">
+            <div class="widget-head">
+              <span class="widget-title">Active agents</span>
+              <a class="widget-link" href="agents.html">All agents</a>
+            </div>
+            <div class="widget-body">
+              <div class="active-header-stat">3 of 18 agents running now</div>
+              <div class="active-agent-row">
+                <div class="status-dot dot-blue dot-pulse"></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="active-agent-name">Outreach Agent</div>
+                  <div class="active-agent-step">Step 7: awaiting HITL gate</div>
+                </div>
+                <div class="active-agent-elapsed">0:42</div>
+              </div>
+              <div class="active-agent-row">
+                <div class="status-dot dot-blue dot-pulse"></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="active-agent-name">Research Agent</div>
+                  <div class="active-agent-step">Step 3: LLM reasoning</div>
+                </div>
+                <div class="active-agent-elapsed">0:08</div>
+              </div>
+              <div class="active-agent-row">
+                <div class="status-dot dot-blue dot-pulse"></div>
+                <div style="flex:1;min-width:0;">
+                  <div class="active-agent-name">CRM Hygiene Agent</div>
+                  <div class="active-agent-step">Step 12: writing CRM records</div>
+                </div>
+                <div class="active-agent-elapsed">1:14</div>
+              </div>
+              <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--slate-100);font-size:11.5px;color:var(--slate-400);">
+                15 agents idle, 0 failed
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /row 1 -->
+
+        <!-- Row 2: Runs sparkline with timeframe (left) + Spend & cap (right) -->
+        <div class="home-2col">
+
+          <!-- Runs widget with timeframe selector and full-height chart -->
+          <div class="widget home-card-uniform">
+            <div class="widget-head">
+              <span class="widget-title">Runs</span>
+              <div class="timeframe-pills">
+                <button class="tf-pill active" id="tf-today" onclick="setTimeframe('today',this)">Today</button>
+                <button class="tf-pill" id="tf-week" onclick="setTimeframe('week',this)">This week</button>
+                <button class="tf-pill" id="tf-month" onclick="setTimeframe('month',this)">This month</button>
+                <button class="tf-pill" id="tf-quarter" onclick="setTimeframe('quarter',this)">This quarter</button>
+              </div>
+            </div>
+            <div class="widget-body">
+              <!-- chart-fill stretches to fill remaining card height -->
+              <div class="chart-fill">
+                <div class="sparkline-wrap" id="sparkline-bars">
+                  <!-- populated by JS -->
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:4px;flex-shrink:0;">
+                  <span style="font-size:10.5px;color:var(--slate-400);" id="spark-label-left">12am</span>
+                  <span style="font-size:10.5px;color:var(--slate-400);" id="spark-label-right">now</span>
+                </div>
+              </div>
+              <div class="widget-subline" id="spark-metrics">
+                <!-- populated by JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Spend & cap widget -->
+          <div class="widget home-card-uniform" id="spend-widget" style="cursor:pointer;" onclick="openSpendDrawer()">
+            <div class="widget-head">
+              <span class="widget-title">Spend &amp; cap</span>
+              <span class="widget-link" style="cursor:pointer;">Details</span>
+            </div>
+            <div class="widget-body">
+              <div class="spend-section">
+                <div class="spend-section-label">Today</div>
+                <div class="spend-metric">$9.50 / $50 daily cap <span class="spend-pct">(19%)</span></div>
+                <div class="spend-bar-track" style="height:4px;">
+                  <div class="spend-bar-fill indigo" style="width:19%;height:4px;"></div>
+                </div>
+              </div>
+              <div class="spend-section">
+                <div class="spend-section-label">This month</div>
+                <div class="spend-metric">$325 / $1,500 monthly cap <span class="spend-pct">(22%)</span></div>
+                <div class="spend-bar-track" style="height:8px;">
+                  <div class="spend-bar-fill indigo" style="width:21.7%;height:8px;"></div>
+                  <div class="spend-pace-line" style="left:19.4%;top:-4px;bottom:-4px;"></div>
+                </div>
+                <div class="spend-projection amber">On pace for $1,680 / month <span class="spend-warning-chip">Over pace</span></div>
+              </div>
+              <div class="spend-scope">Scope: Acme Corp</div>
+            </div>
+          </div>
+
+        </div><!-- /row 2 -->
+
+        <!-- Row 3: Recent activity (left, half-width) + Quick actions (right) -->
+        <div class="home-2col">
+
+          <!-- Recent activity: half-width, 8 rows, no Run column, click opens modal -->
+          <div class="list-card home-card-uniform">
+            <div class="list-card-head">
+              <span class="list-card-title">Recent activity</span>
+              <a href="activity.html?scope=subaccount" class="widget-link">View all activity</a>
+            </div>
+            <div class="list-card-body">
+              <table class="mini-table">
+                <thead>
+                  <tr>
+                    <th>Activity</th>
+                    <th>Subaccount</th>
+                    <th>Actor</th>
+                    <th>Type</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr onclick="openActivityModal('1')">
+                    <td><span class="act-desc">Run completed: Outreach Agent</span></td>
+                    <td><span class="sub-badge" id="home-badge-1" style="background:#eff6ff;color:#1d4ed8;" data-subaccount="Acme Corp">Acme Corp</span></td>
+                    <td><span class="actor-text">Schedule</span></td>
+                    <td><span class="type-chip type-chip-run">Agent run</span></td>
+                    <td><span class="time-cell">2 min ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('2')">
+                    <td><span class="act-desc">Memory block updated: Acme Voice Standards</span></td>
+                    <td><span class="sub-badge" id="home-badge-2" style="background:#eff6ff;color:#1d4ed8;" data-subaccount="Acme Corp">Acme Corp</span></td>
+                    <td><span class="actor-text">you</span></td>
+                    <td><span class="type-chip type-chip-memory">Memory</span></td>
+                    <td><span class="time-cell">14 min ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('3')">
+                    <td><span class="act-desc">Skill enabled: Sentiment analysis</span></td>
+                    <td><span class="sub-badge" id="home-badge-3" style="background:#eff6ff;color:#1d4ed8;" data-subaccount="Acme Corp">Acme Corp</span></td>
+                    <td><span class="actor-text">you</span></td>
+                    <td><span class="type-chip type-chip-skill">Skill</span></td>
+                    <td><span class="time-cell">28 min ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('4')">
+                    <td><span class="act-desc">HubSpot sync: 47 contacts pulled</span></td>
+                    <td><span class="sub-badge" id="home-badge-4" style="background:#f0fdf4;color:#166534;" data-subaccount="TerraForm">TerraForm</span></td>
+                    <td><span class="actor-text">CRM Sync Agent</span></td>
+                    <td><span class="type-chip type-chip-integ">Integration</span></td>
+                    <td><span class="time-cell">42 min ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('5')">
+                    <td><span class="act-desc">Document uploaded: Sales playbook v3</span></td>
+                    <td><span class="sub-badge" id="home-badge-5" style="background:#eff6ff;color:#1d4ed8;" data-subaccount="Acme Corp">Acme Corp</span></td>
+                    <td><span class="actor-text">you</span></td>
+                    <td><span class="type-chip type-chip-doc">Document</span></td>
+                    <td><span class="time-cell">1h 5m ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('6')">
+                    <td><span class="act-desc">Approval resolved: sent draft email</span></td>
+                    <td><span class="sub-badge" id="home-badge-6" style="background:#eff6ff;color:#1d4ed8;" data-subaccount="Acme Corp">Acme Corp</span></td>
+                    <td><span class="actor-text">Outreach Agent</span></td>
+                    <td><span class="type-chip type-chip-inbox">Inbox</span></td>
+                    <td><span class="time-cell">1h 22m ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('7')">
+                    <td><span class="act-desc">Run failed: CRM Sync Agent</span></td>
+                    <td><span class="sub-badge" id="home-badge-7" style="background:#fdf4ff;color:#6b21a8;" data-subaccount="Globex">Globex</span></td>
+                    <td><span class="actor-text">System</span></td>
+                    <td><span class="type-chip type-chip-fail">Failure</span></td>
+                    <td><span class="time-cell">2h 11m ago</span></td>
+                  </tr>
+                  <tr onclick="openActivityModal('8')">
+                    <td><span class="act-desc">Memory proposal: competitor pricing update</span></td>
+                    <td><span class="sub-badge" id="home-badge-8" style="background:#eff6ff;color:#1d4ed8;" data-subaccount="Acme Corp">Acme Corp</span></td>
+                    <td><span class="actor-text">System</span></td>
+                    <td><span class="type-chip type-chip-memory">Memory</span></td>
+                    <td><span class="time-cell">3h 40m ago</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="list-card-footer">
+              <a href="activity.html">View all activity</a>
+            </div>
+          </div>
+
+          <!-- Quick actions card -->
+          <div class="quick-actions-card home-card-uniform">
+            <div class="widget-head">
+              <span class="widget-title">Quick actions</span>
+            </div>
+            <div style="flex:1;">
+              <a class="quick-action-row" href="agents.html">
+                <div class="quick-action-icon">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                </div>
+                <div>
+                  <div class="quick-action-label">New agent</div>
+                  <div class="quick-action-sub">Create and configure an agent</div>
+                </div>
+              </a>
+              <a class="quick-action-row" href="recurring-tasks.html">
+                <div class="quick-action-icon">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                </div>
+                <div>
+                  <div class="quick-action-label">Schedule a task</div>
+                  <div class="quick-action-sub">Set up a recurring agent run</div>
+                </div>
+              </a>
+              <a class="quick-action-row" href="integrations.html">
+                <div class="quick-action-icon">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                </div>
+                <div>
+                  <div class="quick-action-label">Connect integration</div>
+                  <div class="quick-action-sub">Add a new service connection</div>
+                </div>
+              </a>
+              <a class="quick-action-row" href="knowledge.html">
+                <div class="quick-action-icon">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                </div>
+                <div>
+                  <div class="quick-action-label">Add knowledge</div>
+                  <div class="quick-action-sub">Upload docs or author memory blocks</div>
+                </div>
+              </a>
+              <a class="quick-action-row" href="inbox.html">
+                <div class="quick-action-icon" style="background:var(--amber-50);border-color:#fde68a;color:var(--amber-600);">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 17H2a3 3 0 0 0 3-3V9a7 7 0 0 1 14 0v5a3 3 0 0 0 3 3z"/><path d="M9 17v1a3 3 0 0 0 6 0v-1"/></svg>
+                </div>
+                <div>
+                  <div class="quick-action-label">Review inbox</div>
+                  <div class="quick-action-sub">7 items need your attention</div>
+                </div>
+              </a>
+            </div>
+          </div>
+
+        </div><!-- /row 3 -->
+
+      </div><!-- /home-rows -->
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- Spend drawer overlay -->
+<div class="drawer-overlay" id="spend-overlay" onclick="closeSpendDrawer()"></div>
+<div class="spend-drawer" id="spend-drawer">
+  <div class="spend-drawer-head">
+    <span class="spend-drawer-title">Spending detail - May 2026</span>
+    <button class="spend-drawer-close" onclick="closeSpendDrawer()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="spend-drawer-body">
+    <p style="font-size:12px;color:var(--slate-500);margin:0 0 14px;">Top spenders this month across Acme Corp.</p>
+    <table class="spend-table-stub">
+      <thead><tr><th>Agent</th><th>Runs</th><th>MTD spend</th></tr></thead>
+      <tbody>
+        <tr><td>Outreach Agent</td><td style="color:var(--slate-500);">142</td><td>$98.20</td></tr>
+        <tr><td>Research Agent</td><td style="color:var(--slate-500);">87</td><td>$74.55</td></tr>
+        <tr><td>Lead Scoring Agent</td><td style="color:var(--slate-500);">203</td><td>$61.40</td></tr>
+        <tr><td>CRM Hygiene Agent</td><td style="color:var(--slate-500);">56</td><td>$52.80</td></tr>
+        <tr><td>Reporting Agent</td><td style="color:var(--slate-500);">31</td><td>$38.05</td></tr>
+      </tbody>
+    </table>
+    <div class="spend-drawer-note"><a href="spending.html" style="color:var(--indigo-600);font-weight:500;">View full spending breakdown</a></div>
+  </div>
+</div>
+
+<!-- Activity detail modal -->
+<div id="activity-modal" class="modal-overlay" hidden onclick="if(event.target===this)closeModal(this)">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span class="modal-title" id="act-modal-title">Activity</span>
+      <button class="modal-close" onclick="closeModal(document.getElementById('activity-modal'))">&times;</button>
+    </div>
+    <div class="modal-body" id="act-modal-body">
+      <!-- filled by openActivityModal() -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal(document.getElementById('activity-modal'))">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Run trace modal (higher z-index, opens on top of activity modal) -->
+<div id="run-trace-modal" class="modal-overlay" hidden style="z-index:210;" onclick="if(event.target===this)closeModal(this)">
+  <div class="modal-card modal-card-xl" style="height:calc(100vh - 48px);">
+    <div class="modal-header">
+      <span class="modal-title" id="run-trace-modal-title">Run trace</span>
+      <button class="modal-close" onclick="closeModal(document.getElementById('run-trace-modal'))">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:0;overflow:hidden;">
+      <iframe id="run-trace-iframe" src="" style="width:100%;height:100%;border:none;" title="Run trace"></iframe>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Modal helpers ─────────────────────────────────── */
+function openModal(el) { el.hidden = false; document.body.style.overflow = 'hidden'; }
+function closeModal(el) { el.hidden = true; document.body.style.overflow = ''; }
+
+/* ── Activity mock data ────────────────────────────── */
+const ACTIVITY_DATA = {
+  '1': {
+    title: 'Activity',
+    description: 'Run completed: Outreach Agent — heartbeat run against all Acme Corp contacts. 47 emails drafted, 12 queued for HITL review.',
+    subaccount: 'Acme Corp', subStyle: 'background:#eff6ff;color:#1d4ed8;',
+    actor: 'Schedule',
+    type: 'Agent run', typeClass: 'type-chip-run',
+    project: 'Q1 Outreach Campaign',
+    run: { label: 'Outreach run #4827', id: '4827' },
+    when: 'May 6, 2026 at 9:02am (2 minutes ago)'
+  },
+  '2': {
+    title: 'Activity',
+    description: 'Memory block updated: Acme Voice Standards — updated tone guidelines to include "conversational" directive for cold outreach emails.',
+    subaccount: 'Acme Corp', subStyle: 'background:#eff6ff;color:#1d4ed8;',
+    actor: 'you',
+    type: 'Memory', typeClass: 'type-chip-memory',
+    project: null,
+    run: null,
+    when: 'May 6, 2026 at 8:50am (14 minutes ago)'
+  },
+  '3': {
+    title: 'Activity',
+    description: 'Skill enabled: Sentiment analysis — activated for Outreach Agent to improve lead scoring accuracy.',
+    subaccount: 'Acme Corp', subStyle: 'background:#eff6ff;color:#1d4ed8;',
+    actor: 'you',
+    type: 'Skill', typeClass: 'type-chip-skill',
+    project: null,
+    run: null,
+    when: 'May 6, 2026 at 8:36am (28 minutes ago)'
+  },
+  '4': {
+    title: 'Activity',
+    description: 'HubSpot sync: 47 contacts pulled from TerraForm CRM pipeline. 3 new contacts added, 44 records updated.',
+    subaccount: 'TerraForm', subStyle: 'background:#f0fdf4;color:#166534;',
+    actor: 'CRM Sync Agent',
+    type: 'Integration', typeClass: 'type-chip-integ',
+    project: 'CRM Hygiene Q2',
+    run: { label: 'CRM sync #4801', id: '4801' },
+    when: 'May 6, 2026 at 8:22am (42 minutes ago)'
+  },
+  '5': {
+    title: 'Activity',
+    description: 'Document uploaded: Sales playbook v3.pdf — 42 pages. Processed into knowledge base for Acme Corp agents.',
+    subaccount: 'Acme Corp', subStyle: 'background:#eff6ff;color:#1d4ed8;',
+    actor: 'you',
+    type: 'Document', typeClass: 'type-chip-doc',
+    project: null,
+    run: null,
+    when: 'May 6, 2026 at 7:59am (1 hour 5 minutes ago)'
+  },
+  '6': {
+    title: 'Activity',
+    description: 'Approval resolved: Outreach Agent submitted a draft email for Sarah Chen. You approved it. Email sent.',
+    subaccount: 'Acme Corp', subStyle: 'background:#eff6ff;color:#1d4ed8;',
+    actor: 'Outreach Agent',
+    type: 'Inbox', typeClass: 'type-chip-inbox',
+    project: 'Q1 Outreach Campaign',
+    run: { label: 'Outreach run #4795', id: '4795' },
+    when: 'May 6, 2026 at 7:42am (1 hour 22 minutes ago)'
+  },
+  '7': {
+    title: 'Activity',
+    description: 'Run failed: CRM Sync Agent — HubSpot connection timed out after 60s. No records were written. Retry scheduled for 3h.',
+    subaccount: 'Globex', subStyle: 'background:#fdf4ff;color:#6b21a8;',
+    actor: 'System',
+    type: 'Failure', typeClass: 'type-chip-fail',
+    project: null,
+    run: { label: 'CRM sync #4789', id: '4789' },
+    when: 'May 6, 2026 at 6:53am (2 hours 11 minutes ago)'
+  },
+  '8': {
+    title: 'Activity',
+    description: 'Memory proposal: Research Agent identified updated competitor pricing for Apex Software. Proposed adding to knowledge base.',
+    subaccount: 'Acme Corp', subStyle: 'background:#eff6ff;color:#1d4ed8;',
+    actor: 'System',
+    type: 'Memory', typeClass: 'type-chip-memory',
+    project: null,
+    run: { label: 'Research run #4780', id: '4780' },
+    when: 'May 6, 2026 at 5:24am (3 hours 40 minutes ago)'
+  }
+};
+
+function openActivityModal(id) {
+  const d = ACTIVITY_DATA[id];
+  if (!d) return;
+  document.getElementById('act-modal-title').textContent = d.title;
+
+  const runHtml = d.run
+    ? `<a href="#" style="color:var(--indigo-600);font-weight:500;" onclick="event.preventDefault();openRunTraceModal('${d.run.id}','${d.run.label}')">${d.run.label}</a>`
+    : '<span style="color:var(--slate-400);">-</span>';
+
+  const projectHtml = d.project
+    ? `<a href="#" style="color:var(--indigo-600);" onclick="event.preventDefault();">${d.project}</a>`
+    : '<span style="color:var(--slate-400);">-</span>';
+
+  document.getElementById('act-modal-body').innerHTML = `
+    <div class="act-modal-row">
+      <div class="act-modal-label">Description</div>
+      <div class="act-modal-value" style="font-size:13.5px;">${d.description}</div>
+    </div>
+    <div class="act-modal-row">
+      <div class="act-modal-label">Subaccount</div>
+      <div class="act-modal-value">
+        <span class="sub-badge" style="${d.subStyle};cursor:pointer;" id="modal-sub-badge"
+          onclick="handleModalBadgeClick(event, '${d.subaccount}')"
+          title="Click to switch to ${d.subaccount} (org admin only)">${d.subaccount}</span>
+      </div>
+    </div>
+    <div class="act-modal-row">
+      <div class="act-modal-label">Actor</div>
+      <div class="act-modal-value">${d.actor}</div>
+    </div>
+    <div class="act-modal-row">
+      <div class="act-modal-label">Type</div>
+      <div class="act-modal-value"><span class="type-chip ${d.typeClass}">${d.type}</span></div>
+    </div>
+    <div class="act-modal-row">
+      <div class="act-modal-label">Project</div>
+      <div class="act-modal-value">${projectHtml}</div>
+    </div>
+    <div class="act-modal-row">
+      <div class="act-modal-label">Run</div>
+      <div class="act-modal-value">${runHtml}</div>
+    </div>
+    <div class="act-modal-row">
+      <div class="act-modal-label">When</div>
+      <div class="act-modal-value">${d.when}</div>
+    </div>
+  `;
+
+  openModal(document.getElementById('activity-modal'));
+}
+
+function handleModalBadgeClick(e, subaccountName) {
+  e.stopPropagation();
+  if (window.getActiveProfile && window.getActiveProfile() === 'org_admin') {
+    if (window.setActiveSubaccount) window.setActiveSubaccount(subaccountName);
+    location.reload();
+  }
+}
+
+function openRunTraceModal(runId, runLabel) {
+  document.getElementById('run-trace-modal-title').textContent = runLabel || ('Run #' + runId);
+  document.getElementById('run-trace-iframe').src = 'run-trace.html?embedded=1&run=' + runId;
+  openModal(document.getElementById('run-trace-modal'));
+}
+
+/* ── Workspace badge clickability helper ────────────── */
+function makeWorkspaceBadgeClickable(badgeEl, subaccountName) {
+  if (window.getActiveProfile && window.getActiveProfile() === 'org_admin') {
+    badgeEl.style.cursor = 'pointer';
+    badgeEl.title = 'Click to switch to ' + subaccountName + ' workspace';
+    badgeEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (window.setActiveSubaccount) window.setActiveSubaccount(subaccountName);
+      location.reload();
+    });
+  }
+}
+
+/* ── Spend drawer ──────────────────────────────────── */
+function openSpendDrawer() {
+  document.getElementById('spend-overlay').classList.add('open');
+  document.getElementById('spend-drawer').classList.add('open');
+}
+function closeSpendDrawer() {
+  document.getElementById('spend-overlay').classList.remove('open');
+  document.getElementById('spend-drawer').classList.remove('open');
+}
+
+/* ── Timeframe sparkline data ──────────────────────── */
+const TIMEFRAMES = {
+  today: {
+    bars: [8,4,4,4,4,10,20,28,35,55,48,38,42,65,100,90,72,58,45,30,40,14,10,6],
+    future: [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true],
+    labelLeft: '12am', labelRight: 'now',
+    count: 84, rate: 97, failed: 2, label: 'runs today',
+  },
+  week: {
+    bars: [55,82,91,78,100,76,62],
+    future: [false,false,false,false,false,false,false],
+    labelLeft: 'Mon', labelRight: 'Sun',
+    count: 520, rate: 95, failed: 26, label: 'runs this week',
+  },
+  month: {
+    bars: [60,55,72,78,82,88,84,91,95,100,87,76,83,89,92,88,80,75,78,84,86,90,85,80,77,82,88,84,79,75],
+    future: Array(30).fill(false),
+    labelLeft: 'May 1', labelRight: 'May 30',
+    count: 2100, rate: 94, failed: 126, label: 'runs this month',
+  },
+  quarter: {
+    bars: [45,55,60,70,78,85,90,95,100,92,88,84,79],
+    future: Array(13).fill(false),
+    labelLeft: 'Feb', labelRight: 'May',
+    count: 6100, rate: 93, failed: 427, label: 'runs this quarter',
+  },
+};
+
+function setTimeframe(tf, btn) {
+  document.querySelectorAll('.tf-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  const d = TIMEFRAMES[tf];
+  const max = Math.max(...d.bars);
+  const wrap = document.getElementById('sparkline-bars');
+  wrap.innerHTML = d.bars.map((h, i) => {
+    const pct = Math.round((h / max) * 100);
+    const isFuture = d.future[i];
+    if (isFuture) return `<div class="spark-bar" style="height:${pct}%;opacity:0.3;"></div>`;
+    let cls = 'spark-bar';
+    if (tf === 'today' && i >= 14 && !isFuture) cls += ' active';
+    if (tf === 'today' && i === 20) return `<div class="spark-bar current" style="height:${pct}%;"></div>`;
+    return `<div class="${cls}" style="height:${pct}%;"></div>`;
+  }).join('');
+  document.getElementById('spark-label-left').textContent = d.labelLeft;
+  document.getElementById('spark-label-right').textContent = d.labelRight;
+  document.getElementById('spark-metrics').innerHTML = `
+    <div class="widget-metric">
+      <span class="widget-metric-num">${d.count.toLocaleString()}</span>
+      <span class="widget-metric-label">${d.label}</span>
+    </div>
+    <div class="widget-metric">
+      <span class="widget-metric-num" style="color:var(--emerald-600);">${d.rate}%</span>
+      <span class="widget-metric-label">success rate</span>
+    </div>
+    <div class="widget-metric">
+      <span class="widget-metric-num" style="color:var(--red-500);">${d.failed}</span>
+      <span class="widget-metric-label">failed</span>
+    </div>`;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeframe('today', document.getElementById('tf-today'));
+
+  /* Wire workspace badges in the activity table for org admin */
+  document.querySelectorAll('.sub-badge[data-subaccount]').forEach(function(el) {
+    makeWorkspaceBadgeClickable(el, el.dataset.subaccount);
+  });
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeSpendDrawer();
+    closeModal(document.getElementById('run-trace-modal'));
+    closeModal(document.getElementById('activity-modal'));
+  }
+});
+</script>
+</body>
+</html>

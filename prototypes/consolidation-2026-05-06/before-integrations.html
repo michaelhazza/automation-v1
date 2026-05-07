@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Integrations (2 pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 24px; max-width: 1200px; margin: 0 auto;
+}
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.mini-tab {
+  padding: 5px 10px; font-size: 11px; color: var(--slate-500); cursor: default;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mini-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.cred-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px;
+}
+.cred-icon {
+  width: 28px; height: 28px; border-radius: 6px; background: var(--slate-100);
+  display: flex; align-items: center; justify-content: center; font-size: 10px;
+  color: var(--slate-500); font-weight: 700; flex-shrink: 0;
+}
+.finding-card {
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 6px;
+}
+.finding-card.critical { border-left: 3px solid var(--red-500); }
+.finding-card.warning { border-left: 3px solid var(--amber-400); }
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.impact-item { text-align: center; }
+.impact-item .big { font-size: 28px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 20px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 24px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>BEFORE: integrations page used technical terminology (OAuth, API key, cookie session, client certificate). MCP servers were exposed as a separate concept alongside app connections, causing confusion (Gmail integration vs Gmail MCP server -- operators could not tell which to use). Web logins were lumped together with API integrations rather than being a distinct utility section.</span>
+  <a href="integrations.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- IntegrationsAndCredentialsPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      IntegrationsAndCredentialsPage
+      <span class="route">/settings/integrations</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Integrations and credentials</h3>
+        <span class="mini-btn mini-btn-primary">Add credential</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">Credentials</div>
+        <div class="mini-tab">MCP integrations</div>
+      </div>
+      <div class="mini-section-hdr">API credentials</div>
+      <div class="cred-row">
+        <div class="cred-icon">GM</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">Gmail SMTP</div>
+          <div style="font-size:9px;color:var(--slate-500)">API key / SMTP auth</div>
+        </div>
+        <span class="badge badge-green" style="font-size:9px">Valid</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+      <div class="cred-row">
+        <div class="cred-icon">SF</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">Salesforce</div>
+          <div style="font-size:9px;color:var(--slate-500)">OAuth 2.0</div>
+        </div>
+        <span class="badge badge-green" style="font-size:9px">Valid</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+      <div class="cred-row">
+        <div class="cred-icon">S3</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">AWS S3</div>
+          <div style="font-size:9px;color:var(--slate-500)">API key</div>
+        </div>
+        <span class="badge badge-amber" style="font-size:9px">Expiring</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Renew</span>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Only shows credentials. No info on which agents use each credential. No health findings here.
+      </div>
+    </div>
+  </div>
+
+  <!-- AdminHealthFindingsPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminHealthFindingsPage
+      <span class="route">/admin/health-findings</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Health findings</h3>
+        <span class="badge badge-amber">Admin only</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
+        <div style="background:var(--red-50);border:1px solid var(--red-200);border-radius:4px;padding:6px;text-align:center;">
+          <div style="font-size:18px;font-weight:700;color:var(--red-600)">2</div>
+          <div style="font-size:9px;color:var(--red-500)">Critical</div>
+        </div>
+        <div style="background:var(--amber-50);border:1px solid var(--amber-200);border-radius:4px;padding:6px;text-align:center;">
+          <div style="font-size:18px;font-weight:700;color:var(--amber-600)">5</div>
+          <div style="font-size:9px;color:var(--amber-500)">Warning</div>
+        </div>
+        <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;text-align:center;">
+          <div style="font-size:18px;font-weight:700;color:var(--slate-600)">3</div>
+          <div style="font-size:9px;color:var(--slate-400)">Info</div>
+        </div>
+      </div>
+      <div class="finding-card critical">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+          <span class="badge badge-red" style="font-size:9px">Critical</span>
+          <span style="font-size:11px;font-weight:600">AWS S3 credential expiring</span>
+        </div>
+        <div style="font-size:10px;color:var(--slate-500)">Expires in 3 days. 4 agents affected.</div>
+      </div>
+      <div class="finding-card warning">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+          <span class="badge badge-amber" style="font-size:9px">Warning</span>
+          <span style="font-size:11px;font-weight:600">Zapier webhook latency high</span>
+        </div>
+        <div style="font-size:10px;color:var(--slate-500)">Avg response 8.4s, threshold 5s.</div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Admin-only page. Operators can't see health findings. Findings not linked to credential rows on IntegrationsAndCredentialsPage.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav-impact">
+  <h3>Navigation impact before consolidation</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">2</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Pages (2 separate routes)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">No</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Yes</div>
+      <div class="lbl">Issues visible alongside credential</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">No</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Yes</div>
+      <div class="lbl">Agent tool access visible per service</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">Type</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Service</div>
+      <div class="lbl">Organisation model (by cred type vs service)</div>
+    </div>
+  </div>
+  <div style="margin-top:12px;background:var(--red-50);border:1px solid #fca5a5;border-radius:8px;padding:12px 16px;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--red-600);margin-bottom:8px;">Problems fixed in Round 7-final-A rebuild</div>
+    <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--slate-700);line-height:1.7;">
+      <li>Technical jargon (OAuth, API key) leaked into the picker UI -- replaced with plain-language method chips: Sign in / Key / Web login</li>
+      <li>Cookie session and client certificate credential types were visible as options despite not being in the schema</li>
+      <li>MCP servers exposed alongside native connections caused confusion -- "which one am I using, Gmail integration or Gmail MCP server?" MCP is now invisible to operators (lives inside agent Skills tab)</li>
+      <li>No visual distinction between connection methods (all just labelled by credential type)</li>
+      <li>No universal search across connection types</li>
+      <li>Web logins not differentiated from full integrations -- now a separate Logins sub-tab with table view and detail drawer</li>
+    </ul>
+  </div>
+</div>
+
+</body>
+</html>

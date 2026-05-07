@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT, Inbox (new page, Round 2)
+
+  Consolidates all HITL surfaces:
+    KEEP from InboxPage: task / review / failed_run types, status filter, sort, subaccount filter, archive, mark-read
+    KEEP from MemoryReviewQueuePage: belief_conflict, block_proposal, clarification_pending items
+    KEEP from ReviewQueuePage: approval-pending items (approval channels)
+    KEEP from OrgApprovalChannelsPage: approval routing context (shown on item cards)
+    ADD: clarification_pending agent message type (agent awaiting human reply)
+    ADD: belief_conflict diff view in drawer
+    ADD: block_proposal preview in drawer
+    ADD: inline approve/reject for simple items (approval_pending, block_proposal)
+    DROP: separate MemoryReviewQueuePage, ReviewQueuePage as nav items (both folded here)
+    DEFERRED: AgentMailboxPage, has different UX semantics (two-way agent comms); folded as a type here
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inbox | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .inbox-tabs {
+    display: flex; gap: 4px; padding: 4px;
+    background: var(--slate-100); border-radius: 10px;
+    width: fit-content; margin-bottom: 20px;
+  }
+  .inbox-tab-btn {
+    padding: 6px 14px; border-radius: 7px;
+    font-size: 13px; font-weight: 500;
+    border: none; cursor: pointer; background: transparent;
+    color: var(--slate-500); transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .inbox-tab-btn.active {
+    background: white; color: var(--slate-900);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .inbox-tab-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 16px; padding: 0 5px;
+    border-radius: 8px; font-size: 10.5px; font-weight: 700;
+    margin-left: 5px;
+  }
+  .count-red { background: #fee2e2; color: #b91c1c; }
+  .count-indigo { background: var(--indigo-100); color: var(--indigo-700); }
+  .count-amber { background: var(--amber-50); color: var(--amber-700); }
+
+  .inbox-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px 16px; background: white;
+    border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 8px; transition: all 0.12s;
+    position: relative;
+  }
+  .inbox-item:hover { border-color: var(--slate-300); box-shadow: var(--shadow-sm); }
+  .inbox-item.unread { border-left: 3px solid var(--indigo-500); }
+  .inbox-item.unread-amber { border-left: 3px solid var(--amber-500); }
+  .inbox-item.unread-red { border-left: 3px solid var(--red-500); }
+
+  .item-type-icon {
+    width: 34px; height: 34px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; border: 1px solid; margin-top: 1px;
+  }
+  .icon-task { background: var(--indigo-50); border-color: var(--indigo-100); color: var(--indigo-600); }
+  .icon-review { background: var(--amber-50); border-color: #fde68a; color: var(--amber-600); }
+  .icon-failed { background: var(--red-50); border-color: #fecaca; color: var(--red-600); }
+  .icon-belief { background: var(--violet-50); border-color: var(--violet-200); color: var(--violet-500); }
+  .icon-block { background: var(--emerald-50); border-color: #a7f3d0; color: var(--emerald-600); }
+  .icon-clarification { background: var(--sky-50); border-color: #bae6fd; color: var(--sky-500); }
+
+  .item-main { flex: 1; min-width: 0; }
+  .item-title { font-size: 14px; font-weight: 600; color: var(--slate-900); margin-bottom: 3px; }
+  .item-subtitle { font-size: 12.5px; color: var(--slate-500); line-height: 1.45; margin-bottom: 6px; }
+  .item-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  .unread-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--indigo-500); flex-shrink: 0; margin-top: 13px;
+  }
+
+  .item-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; margin-top: 2px; }
+
+  /*
+   * Round 7b-1: Uniform inbox action button sizing.
+   * All action buttons: padding 7px 14px, font-size 13px, font-weight 600, border-radius 6px.
+   * Primary (Approve, Reply to agent, Open task, View run trace, Re-authenticate): solid indigo.
+   * Secondary (Reject, View draft, Keep ignoring, Keep existing): white bg, slate-300 border, slate-700 text.
+   * Archive: white bg, slate-300 border, slate-500 text (muted to differentiate without being a plain link).
+   * Override btn-xs sizing with .inbox-btn base.
+   */
+  .inbox-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 7px 14px; font-size: 13px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+    transition: all 0.12s; line-height: 1; text-decoration: none;
+  }
+  .inbox-btn-primary {
+    background: var(--indigo-600); color: white; border: none;
+  }
+  .inbox-btn-primary:hover { background: var(--indigo-700); }
+  .inbox-btn-secondary {
+    background: white; color: var(--slate-700);
+    border: 1px solid var(--slate-300);
+  }
+  .inbox-btn-secondary:hover { background: var(--slate-50); border-color: var(--slate-400); }
+  .inbox-btn-archive {
+    background: white; color: var(--slate-500);
+    border: 1px solid var(--slate-300);
+  }
+  .inbox-btn-archive:hover { background: var(--slate-50); border-color: var(--slate-300); }
+
+  /* Legacy aliases so older inline-approve / inline-reject still work */
+  .inline-approve {
+    background: var(--indigo-600); color: white; border: none;
+    padding: 7px 14px; font-size: 13px; font-weight: 600; border-radius: 6px;
+  }
+  .inline-approve:hover { background: var(--indigo-700); }
+  .inline-reject {
+    background: white; color: var(--slate-700); border: 1px solid var(--slate-300);
+    padding: 7px 14px; font-size: 13px; font-weight: 600; border-radius: 6px;
+  }
+  .inline-reject:hover { background: var(--slate-50); border-color: var(--slate-400); }
+  .kb-hint { font-size: 10.5px; color: var(--slate-400); white-space: nowrap; margin-top: 4px; }
+
+  /* Decision 6b: collapsible earlier/read section */
+  .collapsible-header {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    user-select: none;
+  }
+  .collapsible-header .caret {
+    font-size: 10px; color: var(--slate-400);
+    transition: transform 0.15s;
+  }
+  .collapsible-header.open .caret { transform: rotate(90deg); }
+
+  /* Suppressed memory item type */
+  .icon-suppressed { background: var(--slate-50); border-color: var(--slate-200); color: var(--slate-500); }
+
+  .item-time { font-size: 12px; color: var(--slate-400); white-space: nowrap; margin-top: 2px; }
+
+  .client-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10.5px; font-weight: 500;
+    padding: 2px 8px; border-radius: 20px;
+  }
+  .client-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* Belief diff drawer */
+  .belief-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+  .belief-side {
+    padding: 10px 12px; background: var(--slate-50);
+    border: 1px solid var(--slate-200); border-radius: 8px;
+  }
+  .belief-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 5px; }
+  .belief-value { font-size: 13px; color: var(--slate-800); line-height: 1.4; }
+  .belief-conf { font-size: 11px; color: var(--slate-400); margin-top: 4px; }
+  .belief-new { border-color: var(--indigo-200); background: var(--indigo-50); }
+  .belief-new .belief-label { color: var(--indigo-500); }
+  .belief-new .belief-value { color: var(--indigo-800); }
+
+  .filters-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+
+  .section-divider {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--slate-400); padding: 4px 0 6px; margin-top: 8px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-divider::after { content: ''; flex: 1; border-top: 1px solid var(--slate-100); }
+
+  /* ── Priority bands ────────────────────────────────── */
+  .band-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer; user-select: none;
+    font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    position: sticky; top: 0; z-index: 5;
+    margin-bottom: 6px;
+  }
+  .band-header-high {
+    background: var(--slate-50);
+    border-left: 3px solid var(--red-500);
+    color: var(--red-700);
+  }
+  .band-header-needs {
+    background: white;
+    border-left: 3px solid var(--amber-500);
+    color: var(--amber-700);
+    border-top: 1px solid var(--border);
+  }
+  .band-header-prev {
+    background: var(--slate-50);
+    border-left: 3px solid var(--slate-300);
+    color: var(--slate-500);
+    border-top: 1px solid var(--border);
+  }
+  .band-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 9px; font-size: 10.5px; font-weight: 700;
+  }
+  .band-count-high { background: var(--red-500); color: white; }
+  .band-count-needs { background: var(--amber-500); color: white; }
+  .band-count-prev { background: var(--slate-300); color: white; }
+  .band-caret { margin-left: auto; font-size: 10px; transition: transform 0.15s; }
+  .band-caret.collapsed { transform: rotate(-90deg); }
+  .band-body { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (three-mode shared) -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'inbox.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Inbox</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Replaces callout -->
+      <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:8px 14px;margin-bottom:18px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Consolidates: InboxPage + MemoryReviewQueuePage + ReviewQueuePage (approval) + AgentMailboxPage (clarification awaiting reply).
+        <a href="before-inbox.html" style="color:var(--indigo-700);font-weight:600;margin-left:2px;">View before state</a>
+      </div>
+
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <h1>Inbox</h1>
+          <p>Tasks, approvals, belief conflicts, and failed runs across all clients, one place to act.</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-secondary">Mark all read</button>
+          <button class="btn btn-sm btn-secondary">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Filters row -->
+      <div class="filters-row">
+        <div class="search-wrap" style="width:280px;">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-box" type="search" placeholder="Search inbox...">
+        </div>
+        <select class="form-select" style="font-size:12px;padding:5px 10px;">
+          <option>Type: All</option>
+          <option>Task</option>
+          <option>Approval pending</option>
+          <option>Belief conflict</option>
+          <option>Block proposal</option>
+          <option>Clarification</option>
+          <option>Failed run</option>
+        </select>
+        <select class="form-select" style="font-size:12px;padding:5px 10px;">
+          <option>Client: All</option>
+          <option>Acme Corp</option>
+          <option>TerraForm Partners</option>
+          <option>Revel Group</option>
+          <option>Brightside Digital</option>
+        </select>
+        <select class="form-select" style="font-size:12px;padding:5px 10px;">
+          <option>Sort: Most recent</option>
+          <option>Oldest first</option>
+          <option>Priority</option>
+          <option>Type</option>
+          <option>Client</option>
+        </select>
+        <select class="form-select" style="font-size:12px;padding:5px 10px;">
+          <option>Age: All time</option>
+          <option>Today</option>
+          <option>Last 24h</option>
+          <option>Last 7 days</option>
+        </select>
+      </div>
+
+      <!-- Tabs -->
+      <div class="inbox-tabs">
+        <button class="inbox-tab-btn active" onclick="setInboxTab('all',this)">
+          All <span class="inbox-tab-count count-amber">7</span>
+        </button>
+        <button class="inbox-tab-btn" onclick="setInboxTab('tasks',this)">
+          Tasks <span class="inbox-tab-count count-indigo">2</span>
+        </button>
+        <button class="inbox-tab-btn" onclick="setInboxTab('reviews',this)">
+          Reviews <span class="inbox-tab-count count-amber">4</span>
+        </button>
+        <button class="inbox-tab-btn" onclick="setInboxTab('failed',this)">
+          Failed runs <span class="inbox-tab-count count-red">1</span>
+        </button>
+      </div>
+
+      <!-- All tab content (visible by default) -->
+      <div id="inbox-all">
+
+        <!-- ── BAND 1: HIGH PRIORITY (expanded by default) ── -->
+        <div class="band-header band-header-high" onclick="toggleBand('high')">
+          HIGH PRIORITY
+          <span class="band-count band-count-high">3</span>
+          <span class="band-caret" id="caret-high">&#9660;</span>
+        </div>
+        <div class="band-body" id="band-high">
+
+        <!-- HIGH 1: Run failed -->
+        <div class="inbox-item unread-red">
+          <div class="unread-dot" style="background:var(--red-500);"></div>
+          <div class="item-type-icon icon-failed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Run failed: Morning report, Maple Digital</div>
+            <div class="item-subtitle">Gmail credential expired. Morning report run failed after 3 retries. Re-authentication required to resume.</div>
+            <div class="item-meta">
+              <span class="badge badge-red" style="font-size:10px;">Failed run</span>
+              <span class="client-pill" style="background:#dcfce7;color:#166534;"><span class="client-dot" style="background:#22c55e;"></span>Maple Digital</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:180px;">
+            <div class="item-actions">
+              <a href="integrations.html" class="inbox-btn inbox-btn-primary" style="text-decoration:none;">Re-authenticate</a>
+              <button class="inbox-btn inbox-btn-archive">Archive</button>
+            </div>
+            <div style="font-size:11px;color:var(--slate-500);">Triggered: May 6, 6:00am</div>
+          </div>
+        </div>
+
+        <!-- HIGH 2: Spending cap reached -->
+        <div class="inbox-item unread-red">
+          <div class="unread-dot" style="background:var(--red-500);"></div>
+          <div class="item-type-icon icon-failed" style="background:var(--amber-50);border-color:#fde68a;color:var(--amber-600);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Spending cap reached: Globex daily cap</div>
+            <div class="item-subtitle">Globex daily spending cap of $50 was reached at 9:14am. All queued runs paused until midnight or cap is raised.</div>
+            <div class="item-meta">
+              <span class="badge badge-red" style="font-size:10px;">Cap reached</span>
+              <span class="client-pill" style="background:#fdf4ff;color:#6b21a8;"><span class="client-dot" style="background:#a855f7;"></span>Globex</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:180px;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary">Raise cap</button>
+              <button class="inbox-btn inbox-btn-archive">Archive</button>
+            </div>
+            <div style="font-size:11px;color:var(--slate-500);">Triggered: May 6, 9:14am</div>
+          </div>
+        </div>
+
+        <!-- HIGH 3: Security alert -->
+        <div class="inbox-item unread-red">
+          <div class="unread-dot" style="background:var(--red-500);"></div>
+          <div class="item-type-icon icon-failed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Security: 2 connections expired</div>
+            <div class="item-subtitle">HubSpot and Gmail connections expired and require re-authentication. Agents using these connections are paused.</div>
+            <div class="item-meta">
+              <span class="badge badge-red" style="font-size:10px;">Security</span>
+              <span style="font-size:11px;color:var(--slate-400);">HubSpot, Gmail</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:180px;">
+            <div class="item-actions">
+              <a href="integrations.html" class="inbox-btn inbox-btn-primary" style="text-decoration:none;">Fix connections</a>
+              <button class="inbox-btn inbox-btn-archive">Archive</button>
+            </div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: May 6, 7:00am</div>
+          </div>
+        </div>
+
+        </div><!-- /band-high -->
+
+        <!-- ── BAND 2: NEEDS ACTION (expanded by default) ── -->
+        <div class="band-header band-header-needs" onclick="toggleBand('needs')">
+          NEEDS ACTION
+          <span class="band-count band-count-needs">5</span>
+          <span class="band-caret" id="caret-needs">&#9660;</span>
+        </div>
+        <div class="band-body" id="band-needs">
+
+        <!-- NEEDS 1: Belief conflict -->
+        <!-- Item 1: Belief conflict -->
+        <div class="inbox-item unread-amber" onclick="document.getElementById('belief-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--amber-500);"></div>
+          <div class="item-type-icon icon-belief">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Belief conflict: procurement_lead identity</div>
+            <div class="item-subtitle">Agent identified Marcus Hill (Finance Manager) as likely procurement lead, conflicting with existing "unknown" belief. Confidence 0.74 vs. existing confidence 1.00. Click to review the diff.</div>
+            <div class="item-meta">
+              <span class="badge badge-amber" style="font-size:10px;">Belief conflict</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
+                <span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Accept new</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep existing</button>
+              <button class="inbox-btn inbox-btn-archive" onclick="event.stopPropagation();">Archive</button>
+            </div>
+            <div class="item-time">May 5, 2:14pm</div>
+          </div>
+        </div>
+
+        <!-- Item 2: Block proposal -->
+        <div class="inbox-item unread-amber" onclick="document.getElementById('block-proposal-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--amber-500);"></div>
+          <div class="item-type-icon icon-block">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Block proposal: Competitive response playbook</div>
+            <div class="item-subtitle">CRM Agent synthesised a new memory block for handling FieldEdge mentions during outreach. Preview available, approve to activate this block in all runs.</div>
+            <div class="item-meta">
+              <span class="badge badge-green" style="font-size:10px;">Block proposal</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
+                <span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">CRM Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.77</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Approve</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Reject</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Details</button>
+            </div>
+            <div class="item-time">May 4, 10:02am</div>
+          </div>
+        </div>
+
+        <!-- Item 3: Approval pending (email) -->
+        <div class="inbox-item unread">
+          <div class="unread-dot"></div>
+          <div class="item-type-icon icon-review">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Approval needed: Proposal follow-up email to Sarah Chen</div>
+            <div class="item-subtitle">Outreach Agent drafted a follow-up referencing the Kubernetes architecture doc. Review before sending, deal value exceeds $20k approval threshold.</div>
+            <div class="item-meta">
+              <span class="badge badge-indigo" style="font-size:10px;">Approval pending</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
+                <span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary">Approve</button>
+              <button class="inbox-btn inbox-btn-secondary">Reject</button>
+              <button class="inbox-btn inbox-btn-secondary">View draft</button>
+            </div>
+            <div class="item-time">May 5, 11:30am</div>
+          </div>
+        </div>
+
+        <!-- Item 4: Clarification pending -->
+        <div class="inbox-item unread">
+          <div class="unread-dot"></div>
+          <div class="item-type-icon icon-clarification">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Clarification needed: sister company mention</div>
+            <div class="item-subtitle">Outreach Agent needs clarification: "In the April 22 call, Sarah mentioned a 'sister company' that might also benefit from the platform. Is this a separate opportunity or is she referring to Acme's parent group?"</div>
+            <div class="item-meta">
+              <span class="badge badge-sky" style="font-size:10px;">Clarification</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
+                <span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:180px;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary">Reply to agent</button>
+              <button class="inbox-btn inbox-btn-archive">Archive</button>
+            </div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: May 3, 4:30pm</div>
+          </div>
+        </div>
+
+        <!-- Item 5: Task assigned -->
+        <div class="inbox-item unread">
+          <div class="unread-dot"></div>
+          <div class="item-type-icon icon-task">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Task: Draft Kubernetes architecture document</div>
+            <div class="item-subtitle">Assigned by CRM Agent based on commitment made in the April 28 call. Document should cover container orchestration and multi-region failover. Required before May 9 procurement meeting.</div>
+            <div class="item-meta">
+              <span class="badge badge-indigo" style="font-size:10px;">Task</span>
+              <span class="badge badge-red" style="font-size:10px;">High priority</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;">
+                <span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp
+              </span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:180px;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary">Open task</button>
+              <button class="inbox-btn inbox-btn-archive">Archive</button>
+            </div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: Apr 28, 5:00pm</div>
+          </div>
+        </div>
+
+        <!-- Item 6: Approval pending (content piece) -->
+        <div class="inbox-item unread">
+          <div class="unread-dot"></div>
+          <div class="item-type-icon icon-review">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Approval needed: LinkedIn post for TerraForm Partners</div>
+            <div class="item-subtitle">Content Agent drafted a thought leadership post for your review. Targeting: property managers and compliance officers. Estimated reach: 1,400 followers.</div>
+            <div class="item-meta">
+              <span class="badge badge-indigo" style="font-size:10px;">Approval pending</span>
+              <span class="client-pill" style="background:#dcfce7;color:#166534;">
+                <span class="client-dot" style="background:#22c55e;"></span>TerraForm Partners
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">Content Agent</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary">Approve</button>
+              <button class="inbox-btn inbox-btn-secondary">Reject</button>
+              <button class="inbox-btn inbox-btn-secondary">View draft</button>
+            </div>
+            <div class="item-time">May 5, 9:15am</div>
+          </div>
+        </div>
+
+        <!-- Item 7: Failed run -->
+        <div class="inbox-item unread-red">
+          <div class="unread-dot" style="background:var(--red-500);"></div>
+          <div class="item-type-icon icon-failed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Failed run: CRM Sync Agent</div>
+            <div class="item-subtitle">Run failed after 3 retries. HubSpot connection expired. Re-authentication required to resume CRM syncing for Revel Group.</div>
+            <div class="item-meta">
+              <span class="badge badge-red" style="font-size:10px;">Failed run</span>
+              <span class="client-pill" style="background:#fef3c7;color:#b45309;">
+                <span class="client-dot" style="background:#f59e0b;"></span>Revel Group
+              </span>
+              <span style="font-size:11px;color:var(--slate-400);">CRM Sync Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">3 retries</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:200px;">
+            <div class="item-actions">
+              <a href="run-trace.html" class="inbox-btn inbox-btn-primary" style="text-decoration:none;">View run trace</a>
+              <a href="integrations.html" class="inbox-btn inbox-btn-secondary" style="text-decoration:none;">Re-authenticate</a>
+              <button class="inbox-btn inbox-btn-archive">Archive</button>
+            </div>
+            <div style="font-size:11px;color:var(--slate-500);">Triggered: May 5, 7:45am</div>
+          </div>
+        </div>
+
+        <!-- Round 7d: Memory update items (was "Suppressed memory") -->
+        <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--slate-400);"></div>
+          <div class="item-type-icon icon-suppressed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Memory update: Acme Corp prospect</div>
+            <div class="item-subtitle">CRM Agent flagged a possible memory update. On Apr 10 you removed the note "Prospect is not a technical buyer". James Watt was just heard discussing container orchestration architecture in a recent call, which suggests the opposite. Should I track this again?</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Memory update</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+              <span style="font-size:11px;color:var(--slate-400);">CRM Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.88</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Track again</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep ignoring</button>
+            </div>
+            <div class="item-time">May 6, 8:14am</div>
+          </div>
+        </div>
+
+        <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--slate-400);"></div>
+          <div class="item-type-icon icon-suppressed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Memory update: H2 2026 budget review</div>
+            <div class="item-subtitle">Outreach Agent flagged a possible memory update. On Apr 28 you removed the note "Budget is under review for H2 2026". A LinkedIn post from Sarah Chen referenced a "phase 2 budget review" for Q3. Should I track this again?</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Memory update</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.71</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Track again</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep ignoring</button>
+            </div>
+            <div class="item-time">May 5, 3:30pm</div>
+          </div>
+        </div>
+
+        <div class="inbox-item unread-amber" onclick="document.getElementById('suppressed-memory-drawer').style.display='flex';event.stopPropagation();" style="cursor:pointer;">
+          <div class="unread-dot" style="background:var(--slate-400);"></div>
+          <div class="item-type-icon icon-suppressed">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title">Memory update: Acme Corp primary contact</div>
+            <div class="item-subtitle">Outreach Agent flagged a possible memory update. On Apr 15 you removed the note "Primary contact is Jennifer Park (EA)". Jennifer just introduced herself as "the onboarding coordinator" on a call, not just a scheduling contact. Should I track this again?</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Memory update</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+              <span style="font-size:11px;color:var(--slate-400);">Outreach Agent</span>
+              <span style="font-size:11px;color:var(--slate-400);">Confidence 0.82</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+            <div class="item-actions">
+              <button class="inbox-btn inbox-btn-primary" onclick="event.stopPropagation();">Track again</button>
+              <button class="inbox-btn inbox-btn-secondary" onclick="event.stopPropagation();">Keep ignoring</button>
+            </div>
+            <div class="item-time">May 5, 11:45am</div>
+          </div>
+        </div>
+
+        </div><!-- /band-needs -->
+
+        <!-- ── BAND 3: PREVIOUS (collapsed by default) ── -->
+        <div class="band-header band-header-prev" onclick="toggleBand('prev')">
+          PREVIOUS
+          <span class="band-count band-count-prev">4</span>
+          <span class="band-caret collapsed" id="caret-prev">&#9660;</span>
+        </div>
+        <div class="band-body" id="band-prev" style="display:none;">
+
+        <!-- Item 8: Approval approved (past) -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-review">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+          </div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Approved: Q2 proposal email to Sarah Chen</div>
+            <div class="item-subtitle">Email approved and sent on May 2. No errors reported.</div>
+            <div class="item-meta">
+              <span class="badge badge-green" style="font-size:10px;">Approved</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:120px;">
+            <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: May 2</div>
+          </div>
+        </div>
+
+        <!-- Item 9: Block proposal approved -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-block"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Approved: Memory block "client.acme.stakeholders"</div>
+            <div class="item-subtitle">Stakeholder block approved and now active in all Acme runs.</div>
+            <div class="item-meta">
+              <span class="badge badge-green" style="font-size:10px;">Approved</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:120px;">
+            <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: May 2</div>
+          </div>
+        </div>
+
+        <!-- Item 10: Task completed -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-task"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Completed: CRM contact enrichment run</div>
+            <div class="item-subtitle">48 contacts enriched across Revel Group. 3 new LinkedIn profiles added.</div>
+            <div class="item-meta">
+              <span class="badge badge-green" style="font-size:10px;">Completed</span>
+              <span class="client-pill" style="background:#fef3c7;color:#b45309;"><span class="client-dot" style="background:#f59e0b;"></span>Revel Group</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:120px;">
+            <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: May 1</div>
+          </div>
+        </div>
+
+        <!-- Item 11: Clarification resolved -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-clarification"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Clarification resolved: Brand voice for TerraForm</div>
+            <div class="item-subtitle">Content Agent used your reply to update its tone configuration for TerraForm Partners.</div>
+            <div class="item-meta">
+              <span class="badge badge-green" style="font-size:10px;">Resolved</span>
+              <span class="client-pill" style="background:#dcfce7;color:#166534;"><span class="client-dot" style="background:#22c55e;"></span>TerraForm Partners</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:120px;">
+            <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: Apr 30</div>
+          </div>
+        </div>
+
+        <!-- Item 12: Failed run resolved -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-failed"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Resolved: Outreach Agent timeout (Apr 29)</div>
+            <div class="item-subtitle">Run timed out waiting for Gmail rate-limit window. Subsequent run succeeded. No action needed.</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Resolved</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:120px;">
+            <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+            <div style="font-size:11px;color:var(--slate-500);">Added: Apr 29</div>
+          </div>
+        </div>
+
+        <!-- Item 13: Belief conflict resolved -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-belief"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Resolved: Budget approval stakeholder</div>
+            <div class="item-subtitle">Accepted new belief: Sarah Chen confirmed as budget approval authority. Memory updated.</div>
+            <div class="item-meta">
+              <span class="badge badge-green" style="font-size:10px;">Accepted</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+            </div>
+          </div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+          <div class="item-time">Apr 27</div>
+        </div>
+
+        <!-- Item 14: Approval rejected -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-review"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Rejected: Cold outreach to Brightside Digital CEO</div>
+            <div class="item-subtitle">Rejected: prospect is an existing trial user, routing to onboarding flow instead.</div>
+            <div class="item-meta">
+              <span class="badge badge-slate" style="font-size:10px;">Rejected</span>
+              <span class="client-pill" style="background:#e0f2fe;color:#0369a1;"><span class="client-dot" style="background:#38bdf8;"></span>Brightside Digital</span>
+            </div>
+          </div>
+          <div class="item-actions"><button class="inbox-btn inbox-btn-archive">Archive</button></div>
+          <div class="item-time">Apr 26</div>
+        </div>
+
+        <!-- Item 15: Task deferred -->
+        <div class="inbox-item" style="opacity:0.75;">
+          <div style="width:7px;flex-shrink:0;"></div>
+          <div class="item-type-icon icon-task"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+          <div class="item-main">
+            <div class="item-title" style="font-weight:500;">Task: Update competitor comparison sheet (Q2 refresh)</div>
+            <div class="item-subtitle">Due May 15. CRM Agent will auto-complete initial draft from public data, final review needed before sending to Acme.</div>
+            <div class="item-meta">
+              <span class="badge badge-amber" style="font-size:10px;">In progress</span>
+              <span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span>
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="inbox-btn inbox-btn-secondary">View task</button>
+            <button class="inbox-btn inbox-btn-archive">Archive</button>
+          </div>
+          <div class="item-time">Apr 25</div>
+        </div>
+
+        </div><!-- /band-prev -->
+
+        <div id="earlier-30-90" style="display:none;">
+          <!-- Items from days 31-90 -->
+          <div class="section-divider" style="margin-top:12px;">Days 31-90 ago</div>
+          <div class="inbox-item" style="opacity:0.7;">
+            <div style="width:7px;flex-shrink:0;"></div>
+            <div class="item-type-icon icon-task"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+            <div class="item-main">
+              <div class="item-title" style="font-weight:500;">Completed: Initial CRM data audit for Acme</div>
+              <div class="item-subtitle">147 contacts imported, 23 duplicates merged, 8 records enriched from LinkedIn.</div>
+              <div class="item-meta"><span class="badge badge-green" style="font-size:10px;">Completed</span><span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span></div>
+            </div>
+            <div class="item-time">Mar 10</div>
+          </div>
+          <div class="inbox-item" style="opacity:0.7;">
+            <div style="width:7px;flex-shrink:0;"></div>
+            <div class="item-type-icon icon-review"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg></div>
+            <div class="item-main">
+              <div class="item-title" style="font-weight:500;">Approved: Discovery call debrief email to Sarah Chen</div>
+              <div class="item-subtitle">Email sent Mar 8. Confirmed follow-up date of April 22 in response.</div>
+              <div class="item-meta"><span class="badge badge-green" style="font-size:10px;">Approved</span><span class="client-pill" style="background:#ede9fe;color:#6d28d9;"><span class="client-dot" style="background:#8b5cf6;"></span>Acme Corp</span></div>
+            </div>
+            <div class="item-time">Mar 8</div>
+          </div>
+          <div style="text-align:center;padding:14px 0;border-top:1px solid var(--slate-100);margin-top:8px;">
+            <a href="#" style="font-size:12.5px;color:var(--slate-500);text-decoration:none;">Archive (items older than 90 days are archived)</a>
+          </div>
+        </div>
+
+      </div><!-- /inbox-all -->
+
+    </div><!-- /page-body -->
+  </div>
+</div>
+
+<!-- ── MEMORY UPDATE DRAWER (Round 7d: was "Suppressed memory") ───────────────────── -->
+<div id="suppressed-memory-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:560px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Memory update: Acme Corp prospect</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Note removed Apr 10 · new evidence found May 6</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <!-- What was ignored -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">Note you removed</div>
+        <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;">
+            <span class="badge badge-amber" style="font-size:10px;">observation</span>
+            <span style="font-size:11px;color:var(--slate-400);">Outreach Agent · removed Apr 10</span>
+          </div>
+          <div style="font-size:13px;color:var(--slate-700);line-height:1.55;">Prospect is not a technical buyer. James Watt defers all technical evaluations to the engineering team and focuses only on business outcomes.</div>
+        </div>
+      </div>
+
+      <!-- New evidence -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400);margin-bottom:6px;">New evidence</div>
+        <div style="background:var(--indigo-50);border:1px solid var(--indigo-200);border-radius:8px;padding:12px 14px;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;">
+            <span style="font-size:11px;color:var(--indigo-500);">CRM Agent · May 6 · Run 8d4f2a</span>
+            <span style="margin-left:auto;font-size:11px;font-weight:600;color:var(--emerald-600);">Confidence 0.88</span>
+          </div>
+          <div style="font-size:13px;color:var(--indigo-800);line-height:1.55;">James Watt was just heard discussing container orchestration architecture in a recent call, which suggests the opposite. He referenced Kubernetes cluster sizing unprompted, indicating hands-on technical familiarity.</div>
+          <div style="margin-top:8px;">
+            <a href="run-trace.html" style="font-size:12px;color:var(--indigo-600);">View run trace</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confidence bar -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <span style="font-size:12px;color:var(--slate-500);">Evidence confidence</span>
+        <div style="height:6px;border-radius:3px;background:var(--slate-200);flex:1;overflow:hidden;">
+          <div style="width:88%;height:100%;background:var(--emerald-500);border-radius:3px;"></div>
+        </div>
+        <span style="font-size:12px;font-weight:600;color:var(--slate-700);">0.88</span>
+      </div>
+
+      <div style="font-size:12.5px;color:var(--slate-500);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:10px 14px;">
+        Tracking again adds this back to auto-memory for agents to use. Keeping it ignored means agents won't track this note unless you change your mind.
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Close</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Keep ignoring</button>
+      <button class="btn btn-primary" onclick="document.getElementById('suppressed-memory-drawer').style.display='none'">Track again</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── BELIEF CONFLICT DRAWER ──────────────────────────────────────── -->
+<div id="belief-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:520px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Belief conflict</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Entity: procurement_lead identity</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('belief-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 12px;background:var(--amber-50);border:1px solid #fde68a;border-radius:8px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span style="font-size:12.5px;color:var(--amber-700);">Outreach Agent raised a belief conflict on May 5. Accepting the new belief will update the memory block for this client.</span>
+      </div>
+
+      <div class="belief-grid">
+        <div class="belief-side belief-new">
+          <div class="belief-label">New belief (from agent)</div>
+          <div class="belief-value">Procurement lead is Marcus Hill, Finance Manager</div>
+          <div class="belief-conf">Confidence 0.74, inferred from April 28 call transcript</div>
+        </div>
+        <div class="belief-side">
+          <div class="belief-label">Existing belief</div>
+          <div class="belief-value">Procurement lead is unknown</div>
+          <div class="belief-conf">Confidence 1.00, manually set on Apr 15</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--slate-700);margin-bottom:6px;">Evidence cited by agent</div>
+        <div style="font-size:12.5px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;line-height:1.55;">"In the April 28 call, Sarah confirmed that all new vendor commitments above $20k require sign-off from the Finance team. Marcus Hill joined briefly at the end of the call and was introduced as 'the person who handles vendor approvals'."</div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div style="font-size:11px;color:var(--slate-400);margin-bottom:4px;">Impact: This belief feeds the <code style="background:var(--slate-100);border-radius:3px;padding:1px 4px;font-size:11px;">client.acme.stakeholders</code> memory block.</div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" onclick="document.getElementById('belief-drawer').style.display='none'">Archive</button>
+      <button class="btn btn-secondary" style="color:var(--slate-700);">Keep existing belief</button>
+      <button class="btn btn-primary">Accept new belief</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── BLOCK PROPOSAL DRAWER ───────────────────────────────────────── -->
+<div id="block-proposal-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:520px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Block proposal</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Proposed by CRM Agent on May 4</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('block-proposal-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div style="margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--slate-700);margin-bottom:5px;">Proposed block label</div>
+        <code style="font-size:13px;background:var(--slate-100);border:1px solid var(--slate-200);border-radius:6px;padding:5px 10px;display:inline-block;font-family:'JetBrains Mono',monospace;">client.acme.competitor-response</code>
+      </div>
+      <div style="margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--slate-700);margin-bottom:5px;">Content preview</div>
+        <pre style="font-size:12px;color:var(--slate-600);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;max-height:160px;overflow-y:auto;white-space:pre-wrap;font-family:inherit;line-height:1.55;">When FieldEdge is mentioned: acknowledge their current investment, then pivot to our real-time compliance dashboard differentiator and our Zapier integration (which they lack). Do not lead with price. Offer a side-by-side comparison if they request it, use the Q1-2026 comparison sheet in the Acme authored knowledge.</pre>
+      </div>
+      <div style="padding:10px 12px;background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:600;color:var(--emerald-700);margin-bottom:3px;">If approved</div>
+        <div style="font-size:12.5px;color:var(--emerald-700);">This block will be loaded into all Outreach Agent and CRM Agent runs for Acme Corp. Scope: subaccount. You can edit or demote it at any time from Knowledge.</div>
+      </div>
+      <div style="font-size:11px;color:var(--slate-400);">Confidence: 0.77. Based on 4 observed FieldEdge competitor mentions across agent runs.</div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" onclick="document.getElementById('block-proposal-drawer').style.display='none'">Reject</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('block-proposal-drawer').style.display='none'">Edit before approving</button>
+      <button class="btn btn-primary">Approve and activate</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function setInboxTab(id, btn) {
+  document.querySelectorAll('.inbox-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// Priority band toggle
+function toggleBand(band) {
+  var body = document.getElementById('band-' + band);
+  var caret = document.getElementById('caret-' + band);
+  if (!body) return;
+  var isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (caret) caret.classList.toggle('collapsed', isOpen);
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    ['belief-drawer','block-proposal-drawer','suppressed-memory-drawer'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+});
+</script>
+</body>
+</html>
