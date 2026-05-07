@@ -344,6 +344,27 @@ function SubaccountAgentInboxRedirect() {
   return <Navigate to={to} replace />;
 }
 
+/** /admin/subaccounts/:subaccountId/activity?<query>
+ *  → /activity?subaccountId=:subaccountId&<query>
+ *
+ *  Preserves the workspace scope as a query param so a downstream consumer
+ *  (ActivityPage URL-param wiring — deferred to Phase 3) can pick it up.
+ *  Even before the page wires it, preserving the param keeps the URL lossless
+ *  for bookmarks/copy-paste sharing.
+ */
+function AdminSubaccountActivityRedirect() {
+  const { subaccountId } = useParams<{ subaccountId: string }>();
+  const { search, hash } = useLocation();
+  if (!subaccountId) return <Navigate to="/activity" replace />;
+  const to = buildOperateRedirectUrl(
+    '/activity',
+    search,
+    { key: 'subaccountId', value: subaccountId },
+    hash,
+  );
+  return <Navigate to={to} replace />;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -502,8 +523,8 @@ export default function App() {
             <Route path="/admin/activity" element={<Navigate to="/" replace />} />
             {/* Agent Inbox — redirects to canonical /inbox (locked redirect grammar C8) */}
             <Route path="/admin/agent-inbox" element={<AdminAgentInboxRedirect />} />
-            {/* Activity — subaccount scope (redirects to canonical /activity) */}
-            <Route path="/admin/subaccounts/:subaccountId/activity" element={<Navigate to="/activity" replace />} />
+            {/* Activity — subaccount scope (redirects to canonical /activity, scope promoted per locked C8 grammar) */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<AdminSubaccountActivityRedirect />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
             {/* Configuration Assistant */}
