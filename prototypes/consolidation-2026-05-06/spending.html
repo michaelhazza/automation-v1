@@ -695,10 +695,10 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
             </div>
           </div>
 
-          <!-- Right: Org spend this month — bar chart by workspace -->
+          <!-- Right: Top 5 spend this month — bar chart by workspace -->
           <div class="chart-card" id="org-spend-chart-card">
-            <div class="chart-card-title">Org spend this month</div>
-            <div class="chart-card-sub">MTD spend by workspace ($1,283 total)</div>
+            <div class="chart-card-title">Top 5 workspaces this month</div>
+            <div class="chart-card-sub">MTD spend by workspace, top 5 only ($4,267 total)</div>
             <!-- Inline SVG bar chart -->
             <svg width="100%" height="140" viewBox="0 0 340 140" class="chart-svg-wrap">
               <!-- Bars: Acme $312 (24.3%), TerraForm $1247 wait — use correct MTD values -->
@@ -756,10 +756,10 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
         <!-- SECOND ROW: Trend charts — org only -->
         <div class="caps-row org-only" data-view-org-only id="trend-charts-row">
 
-          <!-- Left: Spend trend by workspace (last 6 months) -->
+          <!-- Left: Top 5 spend trend (last 6 months) -->
           <div class="chart-card">
-            <div class="chart-card-title">Spend trend by workspace (last 6 months)</div>
-            <div class="chart-card-sub">Apr 2026 to current month</div>
+            <div class="chart-card-title">Top 5 spend trend (last 6 months)</div>
+            <div class="chart-card-sub">Apr 2026 to current month, top 5 workspaces by MTD spend</div>
             <!-- Inline SVG line chart — 340x140 viewBox, 6 x-points -->
             <!-- X positions: 35, 95, 155, 215, 275, 335 (6 months) -->
             <!-- Y scale: 0–1500, chart area 10–120px from top (110px range) -->
@@ -815,10 +815,10 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
             </div>
           </div>
 
-          <!-- Right: Cap utilisation trend (last 6 months) -->
+          <!-- Right: Top 5 cap utilisation trend (last 6 months) -->
           <div class="chart-card">
-            <div class="chart-card-title">Cap utilisation trend</div>
-            <div class="chart-card-sub">% of monthly cap used per workspace, last 6 months</div>
+            <div class="chart-card-title">Top 5 cap utilisation trend</div>
+            <div class="chart-card-sub">% of monthly cap used per workspace, last 6 months, top 5 only</div>
             <!-- Y scale: 0–120%, chart area 10–118px (108px range). y = 118 - (pct/120)*108 -->
             <!-- Acme: 36,41,45,47,51,59 -->
             <!-- Terra: 59,70,79,87,96,83 -->
@@ -889,7 +889,7 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
               <tr>
                 <th class="sf-th">
                   <span class="sf-th-inner" onclick="capsSortBy('name')">Workspace <span class="sf-sort-indicator active" id="caps-sort-name">&#9650;</span></span>
-                  <button class="sf-caret-btn" id="caps-fcaret-name" onclick="capsToggleFilter(event,'name')" title="Filter workspace">&#9660;</button>
+                  <button class="sf-caret-btn" id="caps-fcaret-name" onclick="capsToggleFilter(event,'name')" title="Filter workspace"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button>
                   <div class="sf-dropdown" id="caps-fdrop-name"></div>
                 </th>
                 <th class="sf-th" onclick="capsSortBy('daily')">
@@ -1257,17 +1257,17 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
                   </th>
                   <th class="sf-th" data-view-org-only>
                     <span class="sf-th-inner" onclick="ledgerSortBy('sa')">Workspace <span class="sf-sort-indicator" id="ledger-sort-sa">&#9650;</span></span>
-                    <button class="sf-caret-btn" id="ledger-fcaret-sa" onclick="ledgerToggleFilter(event,'sa')" title="Filter by workspace">&#9660;</button>
+                    <button class="sf-caret-btn" id="ledger-fcaret-sa" onclick="ledgerToggleFilter(event,'sa')" title="Filter by workspace"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button>
                     <div class="sf-dropdown" id="ledger-fdrop-sa"></div>
                   </th>
                   <th class="sf-th">
                     <span class="sf-th-inner" onclick="ledgerSortBy('agent')">Agent / Source <span class="sf-sort-indicator" id="ledger-sort-agent">&#9650;</span></span>
-                    <button class="sf-caret-btn" id="ledger-fcaret-agent" onclick="ledgerToggleFilter(event,'agent')" title="Filter by agent">&#9660;</button>
+                    <button class="sf-caret-btn" id="ledger-fcaret-agent" onclick="ledgerToggleFilter(event,'agent')" title="Filter by agent"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button>
                     <div class="sf-dropdown" id="ledger-fdrop-agent"></div>
                   </th>
                   <th class="sf-th">
                     <span class="sf-th-inner" onclick="ledgerSortBy('type')">Type <span class="sf-sort-indicator" id="ledger-sort-type">&#9650;</span></span>
-                    <button class="sf-caret-btn" id="ledger-fcaret-type" onclick="ledgerToggleFilter(event,'type')" title="Filter by type">&#9660;</button>
+                    <button class="sf-caret-btn" id="ledger-fcaret-type" onclick="ledgerToggleFilter(event,'type')" title="Filter by type"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button>
                     <div class="sf-dropdown" id="ledger-fdrop-type"></div>
                   </th>
                   <th class="sf-th" onclick="ledgerSortBy('provider')">

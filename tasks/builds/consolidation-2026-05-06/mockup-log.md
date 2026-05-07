@@ -1707,3 +1707,46 @@ patterns.md (§ 5):
 - `prototypes/consolidation-2026-05-06/activity.html`
 - `tasks/builds/consolidation-2026-05-06/patterns.md`
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry, plus round 11 entry above)
+
+## Round 14 — 2026-05-07 (search bar inline, agent-edit grid, footer alignment, Top 5 charts, filter funnel icon)
+
+Five UI polish fixes from a final-review pass.
+
+recurring-tasks.html (search bar inline with filters):
+- `.search-box` flex changed from `0 0 500px; min-width: 480px` to `1 1 320px; min-width: 320px; max-width: 640px`. Search now grows to fill remaining space on the same row as the filter chips.
+- Mobile breakpoint (max-width: 768px) keeps `flex: 1 1 100%; min-width: 0; max-width: none` so the search wraps to its own line on phones.
+- Removed inline `style="min-width:480px"` from the search-box div in markup — the CSS handles it.
+
+agent-edit.html (Test panel layout reliable at all widths):
+- Replaced flex-based three-column layout with CSS grid (`grid-template-columns: minmax(0, 1fr) 360px`). Grid wraps more predictably than flex+wrap when the form column gets cramped.
+- Removed `flex: 1` / `flex-shrink: 0` / `flex-wrap: wrap` rules from the layout.
+- Right rail now uses `align-self: start` so the sticky positioning works inside the grid track.
+- Breakpoint lowered from 1280px to 1180px so the right rail stays visible at common laptop widths (1280-1440) and only collapses below the form on truly narrow viewports.
+
+project-edit.html / agent-edit.html / _shared.css (footer button alignment):
+- Moved the footer's horizontal 28px padding from `.form-footer` (outer) to `.form-footer-inner` (inner), with `box-sizing: border-box`. This makes Discard's left edge line up exactly with the form card's left edge, and Delete's right edge with the card's right edge. Previously the button group was offset 28px left of the card column due to the outer-padding-plus-margin-auto stacking.
+- Applied to all three locations: the canonical `_shared.css` block, the project-edit local override, and the agent-edit local override.
+
+spending.html (charts limited to top 5):
+- "Org spend this month" bar chart renamed to "Top 5 workspaces this month" (subtitle: "MTD spend by workspace, top 5 only ($4,267 total)").
+- "Spend trend by workspace (last 6 months)" line chart renamed to "Top 5 spend trend (last 6 months)" (subtitle: "Apr 2026 to current month, top 5 workspaces by MTD spend").
+- "Cap utilisation trend" line chart renamed to "Top 5 cap utilisation trend" (subtitle: "% of monthly cap used per workspace, last 6 months, top 5 only").
+- Chart visuals already showed exactly 5 workspaces (Acme + TerraForm + Globex + Revel + Other rollup), so no SVG path changes were needed. The "Other" series correctly represents the rollup of any sub-accounts beyond the top 4.
+
+Filter funnel icon (replaces down-arrow caret on filter buttons):
+- New inline SVG: Material-style funnel (path `M2 3h12l-4.5 6v4l-3 1.5V9z`), 11x11, `stroke="currentColor"` so it inherits the existing `.sf-caret-btn` colour states (slate-400 default, slate-700 hover, indigo-500 filtered).
+- Replaced 13 instances of `&#9660;</button>` and `&#9662;</button>` with the SVG across spending.html (4), agents.html (2), integrations.html (3), activity.html (4).
+- No CSS changes needed; the existing button hover/filtered styles continue to drive the icon colour through `currentColor`.
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html`
+- `prototypes/consolidation-2026-05-06/agent-edit.html`
+- `prototypes/consolidation-2026-05-06/project-edit.html`
+- `prototypes/consolidation-2026-05-06/spending.html`
+- `prototypes/consolidation-2026-05-06/agents.html`
+- `prototypes/consolidation-2026-05-06/integrations.html`
+- `prototypes/consolidation-2026-05-06/activity.html`
+- `prototypes/consolidation-2026-05-06/_shared.css`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+Note: tasks/builds/consolidation-foundation/ deliberately untouched in this round per operator instruction (Phase 0 build plan in flight; will fold these UI changes back into the plan once the current chunk completes).

@@ -520,7 +520,10 @@ html {
 
 /* ── FIXED FORM FOOTER (edit pages: project-edit, agent-edit) ─────── */
 /* Always visible at bottom of viewport. Button group aligns to form    */
-/* column (max-width 720px, centered). Discard left, Delete right.      */
+/* column (max-width 720px centered, 28px horizontal padding to match   */
+/* the .form-body card padding). Discard's left edge sits flush with    */
+/* the card's left edge; Delete's right edge sits flush with the card's */
+/* right edge.                                                          */
 .form-footer {
   position: fixed;
   bottom: 0;
@@ -528,13 +531,15 @@ html {
   right: 0;
   background: white;
   border-top: 1px solid var(--border);
-  padding: 14px 28px;
+  padding: 14px 0; /* horizontal padding moved to .form-footer-inner */
   z-index: 100;
   box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
 }
 .form-footer-inner {
   max-width: 720px;
   margin: 0 auto;
+  padding: 0 28px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 10px;

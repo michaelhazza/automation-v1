@@ -30,24 +30,22 @@
 <style>
   /* ── Three-column layout ──────────────────────────────────────────── */
   /* Left sidebar (from _shared.css) | Center form | Right rail          */
+  /* Grid layout (more predictable than flex+wrap at narrow widths)      */
   .agent-layout {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
     gap: 0;
     min-height: calc(100vh - 88px);
-    /* No overflow:hidden — center column must scroll naturally */
+    align-items: start;
   }
   .agent-content {
-    flex: 1;
-    overflow-y: auto;
     padding: 24px 28px 100px 28px; /* bottom pad = footer height + breathing room */
     display: flex;
     flex-direction: column;
     min-width: 0;
   }
-  /* Right rail — sticky, 360px */
+  /* Right rail — sticky to the viewport, 360px */
   .agent-right-rail {
-    width: 360px;
-    flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: white;
     position: sticky;
@@ -56,6 +54,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    align-self: start;
   }
   .test-panel {
     display: flex;
@@ -70,6 +69,8 @@
   .test-panel-body { flex: 1; overflow-y: auto; padding: 16px; }
 
   /* ── Full-width fixed footer (same look as project-edit.html) ─────── */
+  /* Inner band has 28px horizontal padding so Discard left + Delete     */
+  /* right line up with the form column edges (matches .form-body).     */
   .form-footer {
     position: fixed;
     bottom: 0;
@@ -77,13 +78,15 @@
     right: 0;
     background: white;
     border-top: 1px solid var(--border);
-    padding: 14px 28px;
+    padding: 14px 0;
     z-index: 100;
     box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
   }
   .form-footer-inner {
     max-width: 720px;
     margin: 0 auto;
+    padding: 0 28px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -93,17 +96,15 @@
   }
 
   /* ── Collapse right rail on narrow viewports ──────────────────────── */
-  @media (max-width: 1280px) {
-    .agent-layout { flex-wrap: wrap; }
+  /* Below 1180px the right rail moves to a regular section below the form. */
+  @media (max-width: 1180px) {
+    .agent-layout { grid-template-columns: minmax(0, 1fr); }
     .agent-right-rail {
       position: static;
-      width: 100%;
       height: auto;
       border-left: none;
       border-top: 1px solid var(--border);
-      order: 2;
     }
-    .agent-content { order: 1; }
   }
 
   .section-card {

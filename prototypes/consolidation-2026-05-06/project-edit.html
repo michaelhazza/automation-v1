@@ -428,6 +428,9 @@
   }
 
   /* ── Footer actions (fixed to bottom of viewport, always visible) ── */
+  /* Discard left edge aligns to form-body card left edge; Delete right  */
+  /* edge aligns to form-body card right edge. Achieved by giving the    */
+  /* inner band the same 28px horizontal padding as .form-body.          */
   .form-footer {
     position: fixed;
     bottom: 0;
@@ -435,15 +438,15 @@
     right: 0;
     background: white;
     border-top: 1px solid var(--border, #e2e8f0);
-    padding: 14px 28px;
+    padding: 14px 0;
     z-index: 20;
     box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
   }
-  /* Align button group to the form column width (max-width: 720px centered).
-     Discard on the left, Save next to it, Delete project pushed to the right. */
   .form-footer-inner {
     max-width: 720px;
     margin: 0 auto;
+    padding: 0 28px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     gap: 10px;
