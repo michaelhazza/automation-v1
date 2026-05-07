@@ -3506,7 +3506,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Caps + pace | `server/services/computeBudgetService.ts` (extended), `server/services/computeBudgetServicePure.ts` (pace projector), `client/src/pages/govern/SpendingPage.tsx` (CapsTab) |
 | Connections list / usage / test / disconnect | `server/routes/integrationConnections.ts` (`GET /api/connections`, `GET /:id/usage`, `POST /:id/test`, `POST /:id/disconnect`), `server/services/connectionsService.ts` (incl. `disconnectConnection`), `server/services/connectionsListPure.ts`, `server/services/connectionTokenService.ts` (testConnection dispatcher with closed-enum error.code mapping), `client/src/pages/govern/ConnectionsPage.tsx`, `client/src/pages/govern/components/ConnectionTestButton.tsx`, `client/src/pages/govern/components/DisconnectConfirmDialog.tsx` |
 | Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
-| Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0286_govern_auto_update_disabled.sql` |
+| Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
 
 ---
 

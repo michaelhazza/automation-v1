@@ -1,4 +1,4 @@
--- 0286_govern_auto_update_disabled.sql
+-- 0287_govern_auto_update_disabled.sql
 -- Consolidation C — Govern (spec.md §4.1, §6)
 --
 -- Adds:
