@@ -1,0 +1,1108 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019df7bf-5957-7de2-9704-7433c3c62d0e
+--------
+user
+commit 039e3e8: pre-launch-phase-3 spec review iteration 3
+  → Inspect commit diff and context
+  • Identify regressions and affected code
+  • Return JSON findings
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show --stat --oneline --decorate --no-renames 039e3e8a; git show --name-only --format=fuller 039e3e8a' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 482ms:
+039e3e8a (HEAD -> claude/pre-launch-phase-3) docs(pre-launch-phase-3): spec-reviewer iter 2 — fix 1 mechanical finding (ON CONFLICT predicate)
+ tasks/builds/pre-launch-phase-3/spec.md            |  4 ++--
+ ...-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md | 26 ++++++++++++++++++++++
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+commit 039e3e8af662004b219ba6f54fde47e08b117990
+Author:     Michael <michael@michaelhazilias.com>
+AuthorDate: Tue May 5 20:46:41 2026 +1000
+Commit:     Michael <michael@michaelhazilias.com>
+CommitDate: Tue May 5 20:46:41 2026 +1000
+
+    docs(pre-launch-phase-3): spec-reviewer iter 2 — fix 1 mechanical finding (ON CONFLICT predicate)
+    
+    Codex iteration 2 caught a Postgres correctness bug: the ON CONFLICT predicate must
+    match the partial-unique-index predicate exactly. Index uses `external_id_namespace =
+    'ghl_location' AND deleted_at IS NULL`; ON CONFLICT was using only `external_id_namespace
+    = 'ghl_location'`. Without the deleted_at clause, Postgres errors with "no unique or
+    exclusion constraint matching the ON CONFLICT specification".
+    
+    Fix: appended `AND deleted_at IS NULL` to both occurrences of the ON CONFLICT clause
+    in the spec (§11 D.5 + §12.1).
+    
+    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+tasks/builds/pre-launch-phase-3/spec.md
+tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show --no-ext-diff --unified=80 --no-renames 039e3e8a -- tasks/builds/pre-launch-phase-3/spec.md' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 446ms:
+commit 039e3e8af662004b219ba6f54fde47e08b117990
+Author: Michael <michael@michaelhazilias.com>
+Date:   Tue May 5 20:46:41 2026 +1000
+
+    docs(pre-launch-phase-3): spec-reviewer iter 2 — fix 1 mechanical finding (ON CONFLICT predicate)
+    
+    Codex iteration 2 caught a Postgres correctness bug: the ON CONFLICT predicate must
+    match the partial-unique-index predicate exactly. Index uses `external_id_namespace =
+    'ghl_location' AND deleted_at IS NULL`; ON CONFLICT was using only `external_id_namespace
+    = 'ghl_location'`. Without the deleted_at clause, Postgres errors with "no unique or
+    exclusion constraint matching the ON CONFLICT specification".
+    
+    Fix: appended `AND deleted_at IS NULL` to both occurrences of the ON CONFLICT clause
+    in the spec (§11 D.5 + §12.1).
+    
+    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+diff --git a/tasks/builds/pre-launch-phase-3/spec.md b/tasks/builds/pre-launch-phase-3/spec.md
+index ffe9106b..c424bf03 100644
+--- a/tasks/builds/pre-launch-phase-3/spec.md
++++ b/tasks/builds/pre-launch-phase-3/spec.md
+@@ -205,202 +205,202 @@ Each contract that changes is named here. Producer/consumer pairs explicit per c
+ 
+ ### 7.7 `connectionTokenService.refreshIfExpired` cross-tenant assertion (extended)
+ 
+ - **Producer:** unchanged caller contract — connection object passed in by caller via org-scoped fetch.
+ - **Consumer:** `connectionTokenService.refreshIfExpired` adds an org-id assertion before the existing UPDATE. Reads `principalOrgId` from the in-scope `PrincipalContext` ALS.
+ - **New assertion:** `if (principalOrgId !== null && principalOrgId !== connection.organisationId) throw new AppError({code: 'CROSS_TENANT_TOKEN_REFRESH', statusCode: 403, message: '...', context: { connectionOrgId: connection.organisationId, principalOrgId }})`. The `principalOrgId !== null` guard preserves the existing system-admin override path (no PrincipalContext set during boot-time refresh sweeps).
+ - **Idempotency posture:** unchanged — assertion fires before the existing optimistic predicate.
+ 
+ ## 8. Permissions / RLS checklist (per checklist §4)
+ 
+ No new tenant-scoped tables. Phase 3 touches existing tables `security_audit_events`, `oauth_state_nonces`, `integration_connections` — all already in `RLS_PROTECTED_TABLES` per Phase 1/2 manifest entries.
+ 
+ The two new audit-event types (`oauth.state_expired`, `oauth.state_not_found`) write under the sentinel-org UUID — same posture as existing pre-auth events. RLS `WITH CHECK` clause already permits sentinel-org writes per Phase 2 migration `0281`.
+ 
+ The login email-only RL bucket (§7.3) writes to the existing rate-limit storage (DB table or in-process — confirm at build time per existing pattern). No new table; no RLS implication.
+ 
+ The `connectionTokenService` discipline assertion (§7.7) is service-layer defence-in-depth — every existing call site already runs through an org-scoped fetch; the assertion catches the future-caller bug, not a present permission boundary.
+ 
+ ## 9. Execution model (per checklist §5)
+ 
+ | Item | Model | Rationale |
+ |------|-------|-----------|
+ | AppError throws (R3-2) | Inline / synchronous | Throw-and-catch is by definition sync |
+ | Audit namespace rename (R3-6) | Inline / synchronous | Type-system change; no runtime cost |
+ | OAuth state telemetry (R1-7) | Inline / synchronous | `recordSecurityEvent` is already sync within `withOrgTx` |
+ | `logAndSwallow` critical → endpoint (R2-2) | Async / fire-and-forget | Caller continues; failure swallowed |
+ | client-errors dedupe (R2-3) | Inline / synchronous | LRU lookup is in-process |
+ | CI grep invariants (R3-1) | CI-only | Run by GitHub Actions; no runtime cost |
+ | GHL pagination (R1-8) | Queued / pg-boss | Auto-enrol becomes a job emission, not inline |
+ | GHL enrol cap (Phase-1 residue) | Inline / synchronous | A constant compared against array length pre-loop |
+ | Login email-only RL (AR-5.1) | Inline / synchronous | Existing rate-limit middleware path |
+ | Subaccount audit event (AR-2.2) | Inline / synchronous | Already in middleware path |
+ | PII substring (AR-4.1) | Inline / synchronous | Pure function in `securityAuditServicePure.ts` |
+ | Connection-token assertion (AR-6.1) | Inline / synchronous | Refresh path is sync |
+ | `withOrgTx({tx:db})` refactor (residue) | Inline / synchronous | Replaces existing sync wrapper |
+ | `isActive` constraint tightening (R1-6) | Compile-time | TypeScript-only |
+ | Migration header comment | Build-time / advisory | File edit only |
+ 
+ The only async addition is R1-8 GHL pagination (a new pg-boss job). All other items are inline extensions of existing sync paths.
+ 
+ ## 10. Phase sequencing (dependency graph, per checklist §6)
+ 
+ Phase 3 is a single shipping unit (one PR, one squash merge). The chunk plan in §11 sequences chunks by dependency, not by phase boundary. Backward-dependency check:
+ 
+ - Chunk A (`AppError` + audit-namespace types) lands before Chunk B (R3-1 grep gates) because two of the gates (audit-namespace consistency, error-shape consistency) reference the types.
+ - Chunk C (auth observability events: AR-1.1, AR-2.2, OAuth-state telemetry) lands AFTER Chunk A only because the new event names use the namespace types from Chunk A.
+ - Chunk D (rate-limit + GHL pagination + GHL enrol cap + connection-token assertion + PII substring + advisory-lock scope) is independent of Chunks A/B/C.
+ - Chunk E (cleanup: migration-header comment, `withOrgTx({tx:db})` refactor, `isActive` constraint tighten, `logAndSwallow` severity tagging, client-errors dedupe, REQ #15 skill-envelope CI gate, REQ #29 baseline capture) — independent chunk; may run in parallel.
+ 
+ No chunk references a primitive built in a later chunk. No orphaned deferrals — every "deferred to Phase 4" item in §13 is named explicitly.
+ 
+ ## 11. Chunk plan
+ 
+ The build chunks below are presented in dependency order. Each is sized to fit a single sub-agent build session per `subagent-driven-development` convention. The Phase 2 `feature-coordinator` will decompose further if needed.
+ 
+ ### Chunk A — Canonical types (foundation)
+ - **A.1** New `shared/errorCodes.ts` registry — discriminated union of error codes seeded with codes already used in the codebase (e.g. `ARTEFACT_ALREADY_COMPLETED`, `OPTIMISTIC_LOCK_FAILED`). Initial enum is closed; additions require spec amendment.
+ - **A.2** New `server/lib/errors.ts` — `AppError` class. `asyncHandler` updated to handle `AppError` first.
+ - **A.3** New `shared/types/securityAuditEvents.ts` — closed union of audit event names across `auth.* | oauth.* | security.* | audit.*` namespaces. `securityAuditService` re-typed.
+ - **A.4** Rename pass — every existing `recordSecurityEvent` / `recordEvent` call site updated to use the typed constant. Mechanical fix; CI grep gate from Chunk B will catch regressions.
+ - **A.5** Convention doc — new `docs/security-audit-namespace.md` describing the four namespaces. Update `architecture.md` § Layer 4 to reference it.
+ 
+ ### Chunk B — CI grep invariants (depends on A)
+ - **B.1** `scripts/verify-assert-active.sh` — grep guard that flags any service-layer fetch on a soft-deletable table that doesn't pass through `assertActive` / `isActive`. Allowlist file co-located.
+ - **B.2** `scripts/verify-no-raw-console.sh` — grep guard that forbids raw `console.*` calls outside an explicit allowlist (`server/index.ts` boot, `server/lib/logger.ts` internals, `scripts/**`, `server/__tests__/**`).
+ - **B.3** `scripts/verify-rate-limit-key-normalisation.sh` — grep guard that ensures every call to `loginIpEmailKey` / `loginEmailOnlyKey` (and any future `*Key` helper) receives a normalised email. The gate enforces the value-flow contract by tracing the email argument back to its assignment site and confirming the assignment matches one of: (a) inline `email.trim().toLowerCase()` / `normaliseEmail(email)`, or (b) a function parameter typed as `NormalisedEmail` (a new branded string type from `server/lib/rateLimitKeys.ts` returned only by `normaliseEmail()`). The branded-type approach is the canonical fix — it lets the grep gate compile to a simple "argument must be of type `NormalisedEmail`" check via TypeScript, with the grep-only fallback used only for files outside the type-checked scope. Centralised normalisation into a helper that returns `NormalisedEmail` is the intended pattern, not duplicated inline normalisation.
+ - **B.4** `scripts/verify-audit-event-namespace.sh` — grep guard that every call to `recordSecurityEvent` / `securityAuditService.recordEvent` uses a value from the `SecurityAuditEventName` union. Bypass-string detection: if `as SecurityAuditEventName` cast appears, fail with reviewer note.
+ - **B.5** Each gate gets a known-bad fixture file (gitignored, reproduced via shell snippet in the gate script's docstring) that's run in dev to prove the gate trips. Gates wired into the CI workflow alongside existing `verify-*.sh`.
+ 
+ ### Chunk C — Observability and audit additions (depends on A)
+ - **C.1** OAuth state lifecycle telemetry — `consumeGhlOAuthState` emits `oauth.state_consumed` / `oauth.state_expired` / `oauth.state_not_found` per §7.4. `setGhlOAuthState` emits `oauth.state_issued`.
+ - **C.2** AR-2.2 — `requireSubaccountPermission` emits `auth.permission_denied` event in 403 branch, mirroring `requireOrgPermission`.
+ - **C.3** AR-1.1 — admin-query helper for `security_audit_events` exposes `includeSentinelOrg: boolean` parameter; doc note added to `architecture.md` Layer 4 section. No data migration.
+ - **C.4** Documentation: `docs/oauth-state-telemetry.md` describes the four event types and the post-launch revert decision criteria (segment breakdown, mobile vs desktop, IdP type — captured as `context` fields on the audit event so the admin can filter).
+ 
+ ### Chunk D — Independent hardening
+ - **D.1** AR-5.1 — new `loginEmailOnlyKey` helper in `rateLimitKeys.ts`; `routes/auth.ts` login path checks both buckets. Limit: 100/3600s (rationale §7.3). Both buckets fail-open if storage backend errors (existing posture, unchanged).
+ - **D.2** AR-4.1 — `securityAuditServicePure.ts` extended with `PII_SUBSTRINGS = ['password','token','secret','authorization','credential']`. Substring match runs in addition to exact-key match. Pure-function test added.
+ - **D.3** AR-6.1 — `connectionTokenService.refreshIfExpired` adds an org-id assertion: `if (principalOrgId !== null && principalOrgId !== connection.organisationId) throw new AppError({code:'CROSS_TENANT_TOKEN_REFRESH', statusCode:403, ...})`. Sourced from the `PrincipalContext` ALS already in scope. Existing `guard-ignore-next-line` retained but augmented with the new assertion.
+ - **D.4** GHL enrol cap (Phase-1 residue) — `MAX_GHL_LOCATIONS_TO_ENROL = 250` in `server/config/systemLimits.ts`. `oauthIntegrations.ts:424` aborts and emits `oauth.enrol_capped` audit event when the agency exceeds the cap; the response redirects with a "partial-enrol" status flag, and the remaining locations are picked up by the D.5 background job. Cap value rationale: a 250-location agency at ~50ms/location auto-enrol completes in ~12.5s, comfortably under the existing 15s timeout; agencies beyond 250 locations always require the pagination job from R1-8.
+-- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
++- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
+ - **D.6** AR-3.1 advisory-lock scope verification — read `workflowEngineService.ts:840-1924` and confirm whether `pgboss.send()` runs inside the same transaction as `pg_try_advisory_xact_lock`. If yes (xact lock holds across send): document via inline code comment + `architecture.md` note, no code change. If no (lock released before send): wrap the send in the same transaction, document in same comment + KNOWLEDGE.md entry. Decision routed to build-time after `feature-coordinator`'s `architect` invocation.
+ 
+ ### Chunk E — Cleanup and convenience
+ - **E.1** R1-6 — narrow `isActive` and `assertActive` generics in `server/lib/queryHelpers.ts` to Drizzle `PgTable`-derived types. No behaviour change. CI typecheck + `verify-assert-active.sh` from B.1 catch new misuse.
+ - **E.2** R2-2 — `logAndSwallow` accepts `{ severity: 'critical' | 'noisy' }`. Default `'noisy'`. Critical sites (≤10) enumerated:
+   - `client/src/pages/AdminAgentEditPage.tsx` — agent save catch
+   - `client/src/pages/SystemOrganisationsPage.tsx` — org-load catch
+   - `client/src/pages/SystemIncidentsPage.tsx` — incident-load catch
+   - `client/src/pages/OnboardingWizardPage.tsx` — wizard step catch
+   - `client/src/pages/SptOnboardingPage.tsx` — SPT step catch
+   - `client/src/components/Layout.tsx` — top-level error boundary fallback
+   - `client/src/App.tsx` — auth-token refresh catch
+   - `client/src/hooks/useConversation.ts` — websocket failure catch
+   - All other 11 call sites stay `'noisy'`. Critical sites POST to `/api/client-errors`.
+ - **E.3** R2-3 — LRU dedupe in `server/routes/clientErrors.ts` per §7.6.
+ - **E.4** Phase-1 residue: migration `0277_oauth_state_nonces.sql` — add inline `-- system-scoped: pre-auth OAuth state, no organisation_id available pre-callback` comment. File edit only; migration version unchanged.
+ - **E.5** Phase-1 residue: `withOrgTx({ tx: db })` refactor — replace the pattern in `oauthIntegrations.ts` callback with a real `db.transaction(async (tx) => { await setGUC(tx, orgId); ... })` wrapper. New `setOrgGUC(tx, orgId)` helper in `server/middleware/orgScoping.ts`. KNOWLEDGE.md "Gotcha" entry refreshed to reference the now-canonical helper.
+ - **E.6** REQ #15 — `scripts/verify-skill-error-envelope.sh`. In-scope paths: `server/skills/**/*.ts`, `server/tools/**/*.ts`, `server/services/skillExecutor.ts` `SKILL_HANDLERS`. Out-of-scope: `connectorConfigService.ts`, `ghlAgencyOauthService.ts`, `locationTokenService.ts` — these emit event payloads, not skill envelopes. The gate enforces the flat-string envelope shape: every return path matches `{ ok: true, ... } | { ok: false, error: string, errorCode?: string }` per the C4a-6-RETSHAPE contract. Mixed-shape allowlist (event-payload services) declared inline in the gate script.
+ - **E.7** REQ #29 — capture actual SC-COVERAGE-BASELINE numbers from the next CI run on `claude/pre-launch-phase-3` and write into `tasks/builds/pre-launch-phase-3/progress.md`. (Not `pre-launch-phase-2/progress.md` — that file is sealed; Phase 3 captures its own baseline against post-Phase-2 main.)
+ 
+ ### Verdicts not in chunk plan (recorded for completeness)
+ 
+ | Item | Verdict | Reason |
+ |------|---------|--------|
+ | CHATGPT-R2-6 invalidation guards double-read | **DEFER (Phase 4 / post-launch)** | No profiling data; re-evaluate after first production traffic |
+ | CHATGPT-R1-7 OAuth TTL revert decision | **DEFER (post-launch)** | Telemetry emission ships in C.1 but the revert decision waits on baseline data |
+ | Phase-1 residue: agent-triggered GHL OAuth resume wiring | **DEFER (until agent-triggered GHL OAuth path is built)** | The wiring requires the consumer (an agent run that triggers OAuth) to exist. None today. The infrastructure (`pendingRunId` column, `enqueueResumeAfterOAuth` function) is ready; wiring is a one-line change at the future call site |
+ | REQ #4 maintenance-job tests | **WONT-DO (mini-spec amendment)** | Operator-locked decision per `feedback_unit-tests-mid-build` memory. Phase 3 amends the mini-spec done criteria to match pure-function tests as canonical |
+ 
+ ## 12. Execution-safety contracts (per checklist §10)
+ 
+ Phase 3 introduces a small number of new write paths and one new state machine. Each is pinned below.
+ 
+ ### 12.1 New write paths
+ 
+ | Path | Idempotency | Retry | Concurrency guard | Terminal event |
+ |------|-------------|-------|-------------------|----------------|
+ | `recordSecurityEvent` for new `oauth.*` events (C.1) | non-idempotent (intentional — append-only audit log) | safe (write retries are duplicate audit rows; admin queries deduplicate at read time if needed) | none required (append-only) | n/a (no chain) |
+ | `auth.permission_denied` from `requireSubaccountPermission` (C.2) | non-idempotent (intentional) | safe | none required | n/a |
+ | Login email-only RL bucket increment (D.1) | non-idempotent — race-tolerant counter | safe | atomic INCR / DB-row UPDATE per existing pattern | n/a |
+-| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations of the same page; per-location partial uniqueness handles cross-page retries | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
++| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations of the same page; per-location partial uniqueness handles cross-page retries | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
+ | `connectionTokenService.refreshIfExpired` cross-tenant assertion (D.3) | n/a — read assertion before existing write | safe — assertion failure throws before the UPDATE | existing optimistic predicate retained | n/a |
+ 
+ ### 12.2 State machine — GHL enrolment (D.5)
+ 
+ States: `pending → in_progress → completed | failed | partial`.
+ 
+ - Valid transitions: `pending → in_progress`, `in_progress → completed`, `in_progress → failed`, `in_progress → partial`.
+ - Forbidden: any backward transition (no `completed → in_progress`); no transition from terminal (`completed | failed | partial`) except via a fresh `(connectionId, newRunId)` chain — i.e. a re-trigger creates a new run, not a re-open of the old terminal.
+ - Status set is **closed** — adding a new status (e.g. `cancelled`) requires spec amendment.
+ - Pre-terminal state: an `in_progress` execution record (`oauth.enrol_progress` events) MUST exist before any terminal event is emitted.
+ - `partial`: emitted when the job hits `MAX_GHL_LOCATIONS_TO_ENROL` cap AND the operator-facing message includes a "resume" hint pointing at the manual re-trigger path.
+ - `failed`: emitted on unrecoverable error (auth-token revoked mid-page, GHL API 5xx beyond `withBackoff` retry budget).
+ - `completed`: emitted only after the last page returns 0 unprocessed locations.
+ 
+ ### 12.3 DB unique constraints
+ 
+ One new partial-unique index in Phase 3 (D.5): `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. HTTP-mapping for `23505 unique_violation` raised through this index: catch in the D.5 job handler and short-circuit to "already enrolled" (this is the intended ON CONFLICT path). The route layer never surfaces this error — it's job-internal. No HTTP status-code mapping needed. The `AppError` class supports a `code: 'UNIQUE_VIOLATION_*'` prefix for the route-layer catch-and-rethrow pattern in general; the D.5 job uses ON CONFLICT directly to suppress the violation in the SQL layer.
+ 
+ Existing constraints (e.g. `agent_run_prompts (run_id, assembly_number)`) are unchanged.
+ 
+ ## 13. Deferred items
+ 
+ - **OAuth state TTL revert decision (R1-7).** Phase 3 emits the four `oauth.state_*` events. The decision to keep 5min or revert to 10min waits on post-launch telemetry — minimum two weeks of staging traffic with mobile/desktop and IdP-type segment breakdown.
+ - **Invalidation-guards double-read profiling (R2-6).** Phase 3 ships no work. Re-evaluate after first production traffic spike OR after pre-launch load-testing run, whichever comes first.
+ - **Agent-triggered GHL OAuth resume wiring** (Phase-1 residue). The `pendingRunId` column + `enqueueResumeAfterOAuth` are infrastructure for a future feature where an agent run triggers an OAuth connection. No such consumer exists today; wiring is one line at the future call site. Not Phase 4 either — wired when the consumer is built.
+ - **Canonical error taxonomy backfill (R3-2 Phase 4).** Phase 3 ships the `AppError` class and `shared/errorCodes.ts` registry. Existing throw sites are NOT retrofitted — that's a Phase 4 sweep. New throws in Phase 3 use `AppError`; old throws continue to use `{statusCode, message, errorCode}` duck shape.
+ - **Audit namespace rename Phase 4 sweep.** Phase 3 renames every existing call site (Chunk A.4) — there is no Phase 4 sweep needed for this. Recorded here for completeness so the absence is intentional, not forgotten.
+ - **REQ #4 integration tests.** Permanently DEFER — pure-function tests are canonical per `feedback_unit-tests-mid-build`. The mini-spec text is amended in Chunk E (one-line edit to `docs/pre-launch-hardening-mini-spec.md`) to reflect this.
+ - **AR-3.1 advisory-lock scope** — if Chunk D.6 confirms the dispatch is outside the lock's transaction, the fix lands in Phase 3. If the lock + send are correctly co-located, no code change ships and the verification is documented inline. The decision is an artefact of the build, not a deferral.
+ 
+ ## 14. Self-consistency pass
+ 
+ | Question | Verdict |
+ |----------|---------|
+ | Goals (close 24 deferred items with explicit verdicts) match Implementation (chunks A-E + verdicts table)? | yes |
+ | Every "single source of truth" claim survives? `AppError` is the canonical typed error (asyncHandler reads it first); `SecurityAuditEventName` union is the canonical event-name source; `MAX_GHL_LOCATIONS_TO_ENROL` is the canonical cap | yes |
+ | Non-functional claims match execution model? No latency/throughput claims made; cardinality budget for OAuth events explicitly bounded; GHL pagination explicitly async | yes |
+ | Every "must" / "guarantees" backed by mechanism? Audit-namespace rename gated by B.4 grep; `assertActive` adoption gated by B.1; raw-console regression gated by B.2; rate-limit normalisation gated by B.3 | yes |
+ | File inventory? Every file mentioned in §5–§11 is enumerated below | see §15 |
+ 
+ ## 15. File inventory lock
+ 
+ ### Files to create
+ - `shared/errorCodes.ts` — error-code registry (A.1)
+ - `shared/types/securityAuditEvents.ts` — audit event-name union (A.3)
+ - `server/lib/errors.ts` — `AppError` class (A.2)
+ - `docs/security-audit-namespace.md` — convention doc (A.5)
+ - `docs/oauth-state-telemetry.md` — telemetry doc (C.4)
+ - `scripts/verify-assert-active.sh` (B.1)
+ - `scripts/verify-no-raw-console.sh` (B.2)
+ - `scripts/verify-rate-limit-key-normalisation.sh` (B.3)
+ - `scripts/verify-audit-event-namespace.sh` (B.4)
+ - `scripts/verify-skill-error-envelope.sh` (E.6)
+ - `server/jobs/ghlAutoEnrolLocationsPageJob.ts` — pagination job (D.5)
+ - `migrations/<next-sequential>_subaccounts_external_id_namespace.sql` — adds `external_id_namespace` column + partial-unique index + backfill UPDATE (D.5)
+ 
+ ### Files to modify
+ - `server/lib/asyncHandler.ts` — handle `AppError` first (A.2)
+ - `server/services/securityAuditService.ts` — re-typed `eventType` parameter (A.3)
+ - All existing call sites of `recordSecurityEvent` / `securityAuditService.recordEvent` — rename to use union constants (A.4); enumerated at build time, expected ~30 sites
+ - `architecture.md` § Layer 4 — namespace + telemetry references (A.5, C.4)
+ - `server/lib/queryHelpers.ts` — narrow `isActive` / `assertActive` generics (E.1)
+ - `client/src/lib/silentCatchHelper.ts` — accept `severity` param (E.2)
+ - `client/src/pages/{AdminAgentEditPage,SystemOrganisationsPage,SystemIncidentsPage,OnboardingWizardPage,SptOnboardingPage}.tsx` — tag critical (E.2)
+ - `client/src/components/Layout.tsx` — tag critical (E.2)
+ - `client/src/App.tsx` — tag critical (E.2)
+ - `client/src/hooks/useConversation.ts` — tag critical (E.2)
+ - `server/routes/clientErrors.ts` — LRU dedupe (E.3)
+ - `migrations/0277_oauth_state_nonces.sql` — inline header comment (E.4)
+ - `server/middleware/orgScoping.ts` — `setOrgGUC(tx, orgId)` helper (E.5)
+ - `server/routes/oauthIntegrations.ts` — replace `withOrgTx({tx:db})` pattern (E.5); enrol cap (D.4)
+ - `server/services/ghlAgencyOauthService.ts` — emit OAuth state lifecycle events (C.1); enrol-page job dispatch (D.5)
+ - `server/services/ghlOAuthStateStore.ts` — emit `oauth.state_consumed` / `oauth.state_expired` / `oauth.state_not_found` (C.1)
+ - `server/middleware/auth.ts` — `requireSubaccountPermission` emits `auth.permission_denied` (C.2)
+ - `server/lib/rateLimitKeys.ts` — `loginEmailOnlyKey` helper (D.1)
+ - `server/routes/auth.ts` — login checks both RL buckets (D.1)
+ - `server/services/securityAuditServicePure.ts` — `PII_SUBSTRINGS` extension (D.2)
+ - `server/services/connectionTokenService.ts` — cross-tenant assertion (D.3)
+ - `server/config/systemLimits.ts` — `MAX_GHL_LOCATIONS_TO_ENROL = 250` (D.4)
+ - `server/services/workflowEngineService.ts` — advisory-lock scope verification (D.6, may or may not change code)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show --no-ext-diff --unified=120 --no-renames 039e3e8a -- tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 427ms:
+commit 039e3e8af662004b219ba6f54fde47e08b117990
+Author: Michael <michael@michaelhazilias.com>
+Date:   Tue May 5 20:46:41 2026 +1000
+
+    docs(pre-launch-phase-3): spec-reviewer iter 2 — fix 1 mechanical finding (ON CONFLICT predicate)
+    
+    Codex iteration 2 caught a Postgres correctness bug: the ON CONFLICT predicate must
+    match the partial-unique-index predicate exactly. Index uses `external_id_namespace =
+    'ghl_location' AND deleted_at IS NULL`; ON CONFLICT was using only `external_id_namespace
+    = 'ghl_location'`. Without the deleted_at clause, Postgres errors with "no unique or
+    exclusion constraint matching the ON CONFLICT specification".
+    
+    Fix: appended `AND deleted_at IS NULL` to both occurrences of the ON CONFLICT clause
+    in the spec (§11 D.5 + §12.1).
+    
+    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+diff --git a/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md b/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
+index 97c69d98..515a5f06 100644
+--- a/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
++++ b/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
+@@ -1,55 +1,81 @@
+ # spec-reviewer log — pre-launch-phase-3
+ 
+ **Spec:** `tasks/builds/pre-launch-phase-3/spec.md`
+ **Branch:** `claude/pre-launch-phase-3`
+ **Reviewer:** spec-coordinator (Opus, inline) running spec-reviewer playbook
+ **Cap:** MAX_ITERATIONS = 5
+ **Codex CLI:** v0.125.0 (authenticated via ChatGPT login)
+ 
+ ---
+ 
+ ## Pre-loop context check
+ 
+ - `docs/spec-context.md` last_reviewed_at: 2026-04-16. Current date: 2026-05-05. Age: 19 days. Within `stale_after_days: 60`. GREEN — proceed.
+ - Spec framing matches spec-context.md (pre-production, no live users, commit-and-revert, prefer existing primitives, no feature flags). No mismatches logged.
+ 
+ ---
+ 
+ ## Iteration 1
+ 
+ **Codex command:** `codex review --commit d9949056 --title "pre-launch-phase-3 spec review iteration 1"`
+ **Codex verdict:** "introduces actionable implementation guidance that would produce a brittle CI gate and a non-idempotent GHL pagination job under retries"
+ **Findings:** 2 (both P2 / important)
+ 
+ ### Finding 1 — B.3 grep gate brittleness
+ 
+ - **Source:** Codex
+ - **Section:** §11 B.3 (verify-rate-limit-key-normalisation.sh)
+ - **Description:** Gate spec says "Pattern-match for `.toLowerCase().trim()` or `normaliseEmail(` in the same expression" — would reject the existing valid pattern where email is normalised once into a variable then passed.
+ - **Codex's suggested fix:** Allow normalised-variable patterns at the call site, not inline normalisation only.
+ - **Classification:** mechanical (load-bearing claim with mechanically-broken enforcement)
+ - **Disposition:** auto-apply
+ 
+ ### Finding 2 — D.5 GHL pagination idempotency
+ 
+ - **Source:** Codex
+ - **Section:** §11 D.5 (`ghl:auto-enrol-locations-page` job) + §12.1 (job idempotency row)
+ - **Description:** `WHERE NOT EXISTS subaccount.ghl_location_id = page_cursor` predicate uses a pagination token in place of a location id. Re-runs would duplicate work or hit uniqueness errors.
+ - **Codex's suggested fix:** Key the predicate on each page item's location id, not the page cursor.
+ - **Classification:** mechanical (broken idempotency posture — exact §10.1 finding the spec-authoring checklist catches)
+ - **Disposition:** auto-apply
+ 
+ ---
+ 
+ ## Iteration 1 — fixes applied
+ 
+ Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.md` post-iter-1 commit.
+ 
+ ---
+ 
+ ## Iteration 1 — stopping heuristic
+ 
+ - Findings: 2 mechanical, 0 directional, 0 ambiguous, 0 rejected.
+ - Continue: yes — at least one round of mechanical-only is required to verify no follow-on findings.
+ 
+ ---
++
++## Iteration 2
++
++**Codex command:** `codex review --commit 5729d580 --title "pre-launch-phase-3 spec review iteration 2"`
++**Codex verdict:** "directs implementers to use an ON CONFLICT target that will not match the partial unique index it also defines"
++**Findings:** 1 (P2 / important)
++
++### Finding 3 — D.5 ON CONFLICT predicate mismatch
++
++- **Source:** Codex
++- **Section:** §11 D.5 + §12.1
++- **Description:** ON CONFLICT clause `WHERE external_id_namespace = 'ghl_location'` is a subset of the partial-unique-index predicate `external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Postgres requires the conflict target's WHERE clause to match the index predicate exactly to infer the index — otherwise: `there is no unique or exclusion constraint matching the ON CONFLICT specification`.
++- **Codex's suggested fix:** include `AND deleted_at IS NULL` in the ON CONFLICT predicate.
++- **Classification:** mechanical (broken SQL — exact replication of a known-bad pattern)
++- **Disposition:** auto-apply
++
++## Iteration 2 — fixes applied
++
++`INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` — applied via Edit `replace_all` to both §11 D.5 and §12.1 GHL job row.
++
++## Iteration 2 — stopping heuristic
++
++- Findings: 1 mechanical, 0 directional, 0 ambiguous, 0 rejected.
++- Continue: yes — one more round to confirm convergence.
++
++---
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-05T10:47:12.218007Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\**\\*.ts,shared\\**\\*.ts,migrations\\*.sql -Pattern \"subaccounts|sub_accounts|deleted_at|external_id_namespace\" -CaseSensitive:"'$false | Select-Object -First 100 | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\**\\*.ts,shared\\**\\*.ts,migrations\\*.sql -Pattern \"subaccounts|sub_accounts|deleted_at|external_id_namespace\" -CaseSensitive:"'$false | Select-Object -First 100 | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\**\\*.ts,shared\\**\\*.ts,migrations\\*.sql -Pattern \"subaccounts|sub_accounts|deleted_at|external_id_namespace\" -CaseSensitive:"'$false | Select-Object -First 100 | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }'` rejected: blocked by policy
+2026-05-05T10:47:15.356373Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Recurse -File | Select-String -Pattern 'external_id_namespace' | Select-Object -First 50 | ForEach-Object { "'$_.Path + '"':' + "'$_.LineNumber + '"': ' + "'$_.Line }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Recurse -File | Select-String -Pattern 'external_id_namespace' | Select-Object -First 50 | ForEach-Object { "'$_.Path + '"':' + "'$_.LineNumber + '"': ' + "'$_.Line }' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Recurse -File | Select-String -Pattern 'external_id_namespace' | Select-Object -First 50 | ForEach-Object { "'$_.Path + '"':' + "'$_.LineNumber + '"': ' + "'$_.Line }'` rejected: blocked by policy
+2026-05-05T10:47:18.687918Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n "external_id_namespace"'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n "external_id_namespace"' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n "external_id_namespace"'` rejected: blocked by policy
+2026-05-05T10:47:23.409636Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n external_id_namespace'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n external_id_namespace' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n external_id_namespace'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff 039e3e8a''^ 039e3e8a --unified=0 -- tasks/builds/pre-launch-phase-3/spec.md tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 439ms:
+diff --git a/tasks/builds/pre-launch-phase-3/spec.md b/tasks/builds/pre-launch-phase-3/spec.md
+index ffe9106b..c424bf03 100644
+--- a/tasks/builds/pre-launch-phase-3/spec.md
++++ b/tasks/builds/pre-launch-phase-3/spec.md
+@@ -285 +285 @@ The build chunks below are presented in dependency order. Each is sized to fit a
+-- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
++- **D.5** R1-8 GHL pagination (background job) — new pg-boss job `ghl:auto-enrol-locations-page` that processes 50 locations per invocation, re-enqueues itself for the next page, and emits `oauth.enrol_progress` / `oauth.enrol_completed` / `oauth.enrol_failed` / `oauth.enrol_partial` audit events. Triggered when the inline path hits the §D.4 cap. Idempotency posture: `key-based`, keyed on each GHL location id (NOT the page cursor — page cursor is just a pagination token, not a stable identifier). The job queries the GHL locations API for the current page (`pageCursor` for the cursor, `limit=50`), then for each returned location performs an `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` on the `subaccounts` table. This makes per-location work idempotent under retry: re-running the same page (or any subset of locations) is a no-op for already-enrolled locations because the partial-unique constraint short-circuits the insert. **Required schema change** (folded into D.5): add `external_id_namespace text` column to `subaccounts` (default `null`, set to `'ghl_location'` for rows the job enrols), plus a partial-unique index `subaccounts_org_external_ghl_location_idx ON (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Backfill: existing GHL-enrolled subaccounts already have `external_id` populated by the inline path; a one-row-per-existing-row backfill UPDATE in the same migration sets `external_id_namespace = 'ghl_location'` for them. UI consumes the audit-event stream (the workflow runs page tab is the existing surface — no new UI).
+@@ -326 +326 @@ Phase 3 introduces a small number of new write paths and one new state machine.
+-| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations of the same page; per-location partial uniqueness handles cross-page retries | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
++| GHL enrol-locations-page job (D.5) | key-based — `INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` per location returned by the GHL API | guarded — partial-unique index short-circuits already-enrolled locations under retry | pg-boss `singletonKey: ghl-enrol:${connectionId}:${pageCursor}` collapses concurrent invocations of the same page; per-location partial uniqueness handles cross-page retries | `oauth.enrol_completed` (success) `oauth.enrol_failed` (failure) `oauth.enrol_partial` (cap hit, more pages remain). Mutually exclusive — exactly one terminal event per `(connectionId, runId)` chain. |
+diff --git a/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md b/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
+index 97c69d98..515a5f06 100644
+--- a/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
++++ b/tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-2026-05-05T10-41-20Z.md
+@@ -55,0 +56,26 @@ Both findings auto-applied via Edit. See `tasks/builds/pre-launch-phase-3/spec.m
++
++## Iteration 2
++
++**Codex command:** `codex review --commit 5729d580 --title "pre-launch-phase-3 spec review iteration 2"`
++**Codex verdict:** "directs implementers to use an ON CONFLICT target that will not match the partial unique index it also defines"
++**Findings:** 1 (P2 / important)
++
++### Finding 3 — D.5 ON CONFLICT predicate mismatch
++
++- **Source:** Codex
++- **Section:** §11 D.5 + §12.1
++- **Description:** ON CONFLICT clause `WHERE external_id_namespace = 'ghl_location'` is a subset of the partial-unique-index predicate `external_id_namespace = 'ghl_location' AND deleted_at IS NULL`. Postgres requires the conflict target's WHERE clause to match the index predicate exactly to infer the index — otherwise: `there is no unique or exclusion constraint matching the ON CONFLICT specification`.
++- **Codex's suggested fix:** include `AND deleted_at IS NULL` in the ON CONFLICT predicate.
++- **Classification:** mechanical (broken SQL — exact replication of a known-bad pattern)
++- **Disposition:** auto-apply
++
++## Iteration 2 — fixes applied
++
++`INSERT ... ON CONFLICT (organisation_id, external_id) WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL DO NOTHING` — applied via Edit `replace_all` to both §11 D.5 and §12.1 GHL job row.
++
++## Iteration 2 — stopping heuristic
++
++- Findings: 1 mechanical, 0 directional, 0 ambiguous, 0 rejected.
++- Continue: yes — one more round to confirm convergence.
++
++---
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-05T10:47:38.782243Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files | findstr /i "schema subaccount migration"'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files | findstr /i "schema subaccount migration"' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files | findstr /i "schema subaccount migration"'` rejected: blocked by policy
+2026-05-05T10:47:42.917211Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command Get-ChildItem in C:\Files\Projects\automation-v1-2nd
+ succeeded in 670ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-2nd
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         5/05/2026   7:32 PM                .chatgpt-diffs                                                       
+d-----         5/05/2026   8:21 PM                .claude                                                              
+d-----        30/04/2026   2:25 PM                .github                                                              
+d-----        29/04/2026  10:30 AM                .tmp-review                                                          
+d-----         2/05/2026   8:03 PM                .worktrees                                                           
+d-----        22/04/2026   1:13 PM                attached_assets                                                      
+d-----        24/04/2026   3:21 PM                client                                                               
+d-----        22/04/2026   1:13 PM                companies                                                            
+d-----        22/04/2026   1:13 PM                db-init                                                              
+d-----        24/04/2026   2:09 PM                dist                                                                 
+d-----         5/05/2026   8:19 PM                docs                                                                 
+d-----         5/05/2026   8:19 PM                migrations                                                           
+d-----         5/05/2026   7:45 AM                node_modules                                                         
+d-----         4/05/2026   9:45 PM                prototypes                                                           
+d-----         5/05/2026   8:19 PM                references                                                           
+d-----        22/04/2026   1:13 PM                reports                                                              
+d-----         5/05/2026   8:19 PM                scripts                                                              
+d-----         5/05/2026   8:19 PM                server                                                               
+d-----         4/05/2026   9:45 PM                setup                                                                
+d-----         5/05/2026   8:19 PM                shared                                                               
+d-----         5/05/2026   8:22 PM                tasks                                                                
+d-----        22/04/2026   1:13 PM                tests                                                                
+d-----        29/04/2026   9:16 AM                tools                                                                
+d-----         4/05/2026   9:45 PM                worker                                                               
+-a----        22/04/2026   1:13 PM            152 .dockerignore                                                        
+-a----        27/04/2026   4:31 PM           3978 .env                                                                 
+-a----         5/05/2026  12:03 PM          11592 .env.example                                                         
+-a----         5/05/2026   8:19 PM            940 .gitignore                                                           
+-a----        30/04/2026   2:25 PM              4 .nvmrc                                                               
+-a----        22/04/2026   1:13 PM           1075 .replit                                                              
+-a----         5/05/2026   8:19 PM         364176 architecture.md                                                      
+-a----         4/05/2026   9:45 PM          36760 CLAUDE.md                                                            
+-a----         4/05/2026   9:45 PM           4071 CONTRIBUTING.md                                                      
+-a----         5/05/2026   8:19 PM          24746 DEVELOPMENT_GUIDELINES.md                                            
+-a----        22/04/2026   1:13 PM           3564 docker-compose.yml                                                   
+-a----        22/04/2026   1:13 PM           1106 Dockerfile                                                           
+-a----         4/05/2026   9:45 PM            234 drizzle.config.ts                                                    
+-a----         4/05/2026   9:45 PM           2812 eslint.config.js                                                     
+-a----         5/05/2026   8:19 PM         362693 KNOWLEDGE.md                                                         
+-a----         5/05/2026   7:45 AM         486924 package-lock.json                                                    
+-a----         4/05/2026   9:45 PM           4719 package.json                                                         
+-a----         4/05/2026   9:45 PM           3666 replit.md                                                            
+-a----        22/04/2026   1:13 PM            403 tsconfig.json                                                        
+-a----        22/04/2026   1:13 PM            841 vite.config.ts                                                       
+-a----        30/04/2026   2:25 PM           1629 vitest.config.ts                                                     
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-05T10:47:53.080762Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Path shared,server,migrations -Recurse -File -Include *schema*.ts,*.sql | Select-Object -First 100 FullName'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Path shared,server,migrations -Recurse -File -Include *schema*.ts,*.sql | Select-Object -First 100 FullName' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Path shared,server,migrations -Recurse -File -Include *schema*.ts,*.sql | Select-Object -First 100 FullName'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem shared' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 608ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-2nd\shared
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----        30/04/2026   2:25 PM                billing                                                              
+d-----         5/05/2026  12:03 PM                constants                                                            
+d-----         4/05/2026   9:45 PM                iee                                                                  
+d-----        30/04/2026   2:25 PM                lib                                                                  
+d-----         5/05/2026  12:03 PM                schemas                                                              
+d-----         5/05/2026  12:03 PM                types                                                                
+d-----         5/05/2026   8:19 PM                __tests__                                                            
+-a----        29/04/2026   9:16 AM           3564 errorCode.ts                                                         
+-a----         5/05/2026   8:19 PM            665 errorEnvelope.ts                                                     
+-a----         4/05/2026   9:45 PM           3005 runStatus.ts                                                         
+-a----         4/05/2026   9:45 PM           8031 skillParameters.ts                                                   
+-a----         4/05/2026   9:45 PM          11874 stateMachineGuards.ts                                                
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem shared\\schemas" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 617ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-2nd\shared\schemas
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         5/05/2026  12:03 PM                __tests__                                                            
+-a----         5/05/2026  12:03 PM           1655 baselineArtefactsForms.ts                                            
+-a----         5/05/2026  12:03 PM           3074 subaccount.ts                                                        
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content shared\\schemas\\subaccount.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 565ms:
+import { z } from 'zod';
+
+const tier12ArtefactEntry = z.object({
+  status: z.enum(['not_started', 'in_progress', 'completed', 'skipped']),
+  captured_at: z.string().datetime().nullable(),
+  skipped_at: z.string().datetime().nullable(),
+  memory_block_id: z.string().uuid().nullable(),
+  captured_by_user_id: z.string().uuid().nullable(),
+}).refine(
+  (entry) => !(entry.captured_at !== null && entry.skipped_at !== null),
+  { message: 'captured_at and skipped_at are mutually exclusive' },
+);
+
+const tier3ArtefactEntry = z.object({
+  status: z.enum(['not_started', 'in_progress', 'completed', 'skipped']),
+  captured_at: z.string().datetime().nullable(),
+  skipped_at: z.string().datetime().nullable(),
+  workspace_memory_id: z.string().uuid().nullable(),
+  captured_by_user_id: z.string().uuid().nullable(),
+}).refine(
+  (entry) => !(entry.captured_at !== null && entry.skipped_at !== null),
+  { message: 'captured_at and skipped_at are mutually exclusive' },
+);
+
+export const baselineArtefactsStatusSchema = z.object({
+  version: z.literal(1),
+  tier1: z.object({
+    brand_identity: tier12ArtefactEntry,
+    voice_tone: tier12ArtefactEntry,
+  }),
+  tier2: z.object({
+    offer_positioning: tier12ArtefactEntry,
+    audience_icp: tier12ArtefactEntry,
+  }),
+  tier3: z.object({
+    operating_constraints: tier3ArtefactEntry,
+    proof_library: tier3ArtefactEntry,
+  }),
+}).superRefine((data, ctx) => {
+  const tier12Entries = [
+    data.tier1.brand_identity,
+    data.tier1.voice_tone,
+    data.tier2.offer_positioning,
+    data.tier2.audience_icp,
+  ];
+  for (const entry of tier12Entries) {
+    if (entry.status === 'skipped') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Tier-1 and Tier-2 artefacts cannot be skipped',
+      });
+    }
+  }
+});
+
+export type BaselineArtefactsStatus = z.infer<typeof baselineArtefactsStatusSchema>;
+
+/**
+ * Returns true when all Tier-1 and Tier-2 artefacts are 'completed'.
+ * Tier-3 may be in any state ƒ?" skip-and-complete-later is permitted.
+ */
+export function isWizardCompletable(status: BaselineArtefactsStatus): boolean {
+  const tier12Entries = [
+    status.tier1.brand_identity,
+    status.tier1.voice_tone,
+    status.tier2.offer_positioning,
+    status.tier2.audience_icp,
+  ];
+  return tier12Entries.every((e) => e.status === 'completed');
+}
+
+/**
+ * Parses the JSONB blob and verifies it carries the expected version.
+ * Throws a typed error if the version does not match ƒ?" service code must not
+ * operate on an unknown shape.
+ */
+export function assertVersionGate(
+  raw: unknown,
+  expectedVersion: 1,
+): BaselineArtefactsStatus {
+  const version = (raw != null && typeof raw === 'object' ? (raw as Record<string, unknown>).version : undefined);
+  if (version !== expectedVersion) {
+    throw {
+      statusCode: 500,
+      message: 'baseline_artefacts_status version mismatch',
+      errorCode: 'BASELINE_ARTEFACTS_VERSION_MISMATCH',
+    };
+  }
+  return baselineArtefactsStatusSchema.parse(raw);
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem server' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 631ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-2nd\server
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         4/05/2026   9:45 PM                actions                                                              
+d-----         4/05/2026   9:45 PM                adapters                                                             
+d-----        29/04/2026   9:16 AM                agents                                                               
+d-----         4/05/2026   9:45 PM                api                                                                  
+d-----         5/05/2026   8:19 PM                config                                                               
+d-----         5/05/2026  12:03 PM                db                                                                   
+d-----         5/05/2026   8:19 PM                jobs                                                                 
+d-----         5/05/2026   8:19 PM                lib                                                                  
+d-----        22/04/2026   1:13 PM                mcp                                                                  
+d-----         5/05/2026   8:19 PM                middleware                                                           
+d-----        22/04/2026   1:13 PM                modules                                                              
+d-----         4/05/2026   9:45 PM                processors                                                           
+d-----         5/05/2026   8:19 PM                routes                                                               
+d-----         4/05/2026   9:45 PM                schemas                                                              
+d-----         5/05/2026   8:19 PM                services                                                             
+d-----         5/05/2026  12:03 PM                skills                                                               
+d-----        29/04/2026   9:16 AM                tests                                                                
+d-----        29/04/2026  11:09 AM                tools                                                                
+d-----        29/04/2026   9:16 AM                types                                                                
+d-----         4/05/2026   9:45 PM                websocket                                                            
+d-----         5/05/2026  12:03 PM                workflows                                                            
+-a----         5/05/2026   8:19 PM          38013 index.ts                                                             
+-a----        22/04/2026   1:13 PM           7138 instrumentation.ts                                                   
+-a----         4/05/2026   9:45 PM            447 tsconfig.json                                                        
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem server\\db" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 586ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-2nd\server\db
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         5/05/2026   8:19 PM                schema                                                               
+-a----        22/04/2026   1:13 PM            761 index.ts                                                             
+-a----         5/05/2026  12:03 PM           1365 rlsExclusions.ts                                                     
+-a----        23/04/2026   6:31 AM           4094 withPrincipalContext.ts                                              
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem server\\db\\schema" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 821ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-2nd\server\db\schema
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         4/05/2026   9:45 PM                __tests__                                                            
+-a----        22/04/2026   1:13 PM           1586 accountOverrides.ts                                                  
+-a----        22/04/2026   1:13 PM           1615 actionEvents.ts                                                      
+-a----        22/04/2026   1:13 PM           1857 actionResumeEvents.ts                                                
+-a----         4/05/2026   9:45 PM           4549 actions.ts                                                           
+-a----        22/04/2026   1:13 PM           3164 agentBeliefs.ts                                                      
+-a----        22/04/2026   1:13 PM           1722 agentBriefings.ts                                                    
+-a----         4/05/2026   9:45 PM           7235 agentCharges.ts                                                      
+-a----        22/04/2026   1:13 PM           1672 agentConversations.ts                                                
+-a----         4/05/2026   9:45 PM           4162 agentDataSources.ts                                                  
+-a----        22/04/2026   1:13 PM           1939 agentEmbeddings.ts                                                   
+-a----         4/05/2026   9:45 PM           4464 agentExecutionEvents.ts                                              
+-a----         4/05/2026   9:45 PM           2574 agentMessages.ts                                                     
+-a----        22/04/2026   1:13 PM           1507 agentPromptRevisions.ts                                              
+-a----         4/05/2026   9:45 PM           3745 agentRecommendations.ts                                              
+-a----        29/04/2026   9:16 AM           3390 agentRunLlmPayloads.ts                                               
+-a----        22/04/2026   1:13 PM           3630 agentRunMessages.ts                                                  
+-a----        22/04/2026   1:13 PM           2494 agentRunPrompts.ts                                                   
+-a----         4/05/2026   9:45 PM          16497 agentRuns.ts                                                         
+-a----        29/04/2026   9:16 AM           2916 agentRunSnapshots.ts                                                 
+-a----        30/04/2026   2:25 PM           5066 agents.ts                                                            
+-a----        22/04/2026   1:13 PM           2750 agentTemplates.ts                                                    
+-a----        22/04/2026   1:13 PM           2386 agentTestFixtures.ts                                                 
+-a----        22/04/2026   1:13 PM           2391 agentTriggers.ts                                                     
+-a----        30/04/2026   2:25 PM           2150 auditEvents.ts                                                       
+-a----        29/04/2026   9:16 AM           1338 automationCategories.ts                                              
+-a----        29/04/2026   9:16 AM           2111 automationConnectionMappings.ts                                      
+-a----        29/04/2026   9:16 AM           2114 automationEngines.ts                                                 
+-a----        29/04/2026   9:16 AM           4772 automations.ts                                                       
+-a----        22/04/2026   1:13 PM           1602 boardConfigs.ts                                                      
+-a----        22/04/2026   1:13 PM            863 boardTemplates.ts                                                    
+-a----        24/04/2026   1:15 PM           2388 bundleResolutionSnapshots.ts                                         
+-a----        29/04/2026   9:16 AM           2095 bundleSuggestionDismissals.ts                                        
+-a----        22/04/2026   1:13 PM           2873 canonicalAccounts.ts                                                 
+-a----        22/04/2026   1:13 PM          15381 canonicalEntities.ts                                                 
+-a----        22/04/2026   1:13 PM           6456 canonicalMetrics.ts                                                  
+-a----        22/04/2026   1:13 PM           1559 canonicalRowSubaccountScopes.ts                                      
+-a----        29/04/2026   9:16 AM          25873 clientPulseCanonicalTables.ts                                        
+-a----         4/05/2026   9:45 PM           2012 computeReservations.ts                                               
+-a----        22/04/2026   1:13 PM           2535 configBackups.ts                                                     
+-a----        22/04/2026   1:13 PM           1800 configHistory.ts                                                     
+-a----         4/05/2026   9:45 PM           2754 connectorConfigs.ts                                                  
+-a----         4/05/2026   9:45 PM           1310 connectorLocationTokens.ts                                           
+-a----        29/04/2026   9:16 AM           2751 conversations.ts                                                     
+-a----         4/05/2026   9:45 PM           1650 conversationThreadContext.ts                                         
+-a----        22/04/2026   1:13 PM           1211 conversionEvents.ts                                                  
+-a----         4/05/2026   9:45 PM           2676 costAggregates.ts                                                    
+-a----        22/04/2026   1:13 PM           1926 delegationGrants.ts                                                  
+-a----        24/04/2026   1:15 PM           2500 delegationOutcomes.ts                                                
+-a----         4/05/2026   9:45 PM           2658 documentBundleAttachments.ts                                         
+-a----        24/04/2026   1:15 PM           1710 documentBundleMembers.ts                                             
+-a----        24/04/2026   1:15 PM           2603 documentBundles.ts                                                   
+-a----         4/05/2026   9:45 PM           1795 documentCache.ts                                                     
+-a----         4/05/2026   9:45 PM           2247 documentFetchEvents.ts                                               
+-a----        22/04/2026   1:13 PM           1756 dropZoneProcessingLog.ts                                             
+-a----        22/04/2026   1:13 PM           2320 dropZoneUploadAudit.ts                                               
+-a----        22/04/2026   1:13 PM           1211 executionFiles.ts                                                    
+-a----        22/04/2026   1:13 PM           1382 executionPayloads.ts                                                 
+-a----        29/04/2026   9:16 AM           4082 executions.ts                                                        
+-a----        23/04/2026   6:31 AM           1757 fastPathDecisions.ts                                                 
+-a----        22/04/2026   1:13 PM           3623 featureRequests.ts                                                   
+-a----        22/04/2026   1:13 PM           1945 feedbackVotes.ts                                                     
+-a----        29/04/2026   9:16 AM           4203 flowRuns.ts                                                          
+-a----        22/04/2026   1:13 PM           1298 formSubmissions.ts                                                   
+-a----        22/04/2026   1:13 PM           3326 geoAudits.ts                                                         
+-a----        22/04/2026   1:13 PM           1882 goals.ts                                                             
+-a----        22/04/2026   1:13 PM           3218 hierarchyTemplates.ts                                                
+-a----        22/04/2026   1:13 PM           2642 hierarchyTemplateSlots.ts                                            
+-a----        22/04/2026   1:13 PM           2293 ieeArtifacts.ts                                                      
+-a----        22/04/2026   1:13 PM           9295 ieeRuns.ts                                                           
+-a----        22/04/2026   1:13 PM           2442 ieeSteps.ts                                                          
+-a----        22/04/2026   1:13 PM           1460 inboxReadStates.ts                                                   
+-a----         5/05/2026   8:19 PM          10849 index.ts                                                             
+-a----         4/05/2026   9:45 PM           5151 integrationConnections.ts                                            
+-a----        22/04/2026   1:13 PM           2051 integrationIngestionStats.ts                                         
+-a----        30/04/2026   2:25 PM           2339 interventionOutcomes.ts                                              
+-a----        22/04/2026   1:13 PM           2667 llmInflightHistory.ts                                                
+-a----        22/04/2026   1:13 PM            952 llmPricing.ts                                                        
+-a----        24/04/2026   1:15 PM          14495 llmRequests.ts                                                       
+-a----        22/04/2026   1:13 PM           4733 llmRequestsArchive.ts                                                
+-a----        22/04/2026   1:13 PM           1495 mcpServerAgentLinks.ts                                               
+-a----        22/04/2026   1:13 PM           4347 mcpServerConfigs.ts                                                  
+-a----        22/04/2026   1:13 PM           4185 mcpToolInvocations.ts                                                
+-a----        22/04/2026   1:13 PM           1882 memoryBlockAttachments.ts                                            
+-a----         5/05/2026  12:03 PM           8281 memoryBlocks.ts                                                      
+-a----        29/04/2026   9:16 AM           1640 memoryBlockVersions.ts                                               
+-a----        22/04/2026   1:13 PM           1830 memoryCitationScores.ts                                              
+-a----        22/04/2026   1:13 PM           3321 memoryReviewQueue.ts                                                 
+-a----        22/04/2026   1:13 PM           1741 metricDefinitions.ts                                                 
+-a----        22/04/2026   1:13 PM            545 migrationStates.ts                                                   
+-a----        24/04/2026   1:15 PM           1855 modelTierBudgetPolicies.ts                                           
+-a----        29/04/2026   9:16 AM           1515 modules.ts                                                           
+-a----         5/05/2026  12:03 PM           1151 oauthStateNonces.ts                                                  
+-a----        29/04/2026   9:16 AM           1516 onboardingBundleConfigs.ts                                           
+-a----         5/05/2026  12:03 PM            897 optimiserSkillPeerMedians.ts                                         
+-a----        22/04/2026   1:13 PM           3623 orgAgentConfigs.ts                                                   
+-a----         4/05/2026   9:45 PM           6333 organisations.ts                                                     
+-a----        22/04/2026   1:13 PM           1419 organisationSecrets.ts                                               
+-a----         4/05/2026   9:45 PM           1606 orgApprovalChannels.ts                                               
+-a----         4/05/2026   9:45 PM            889 orgComputeBudgets.ts                                                 
+-a----        22/04/2026   1:13 PM           1063 orgMarginConfigs.ts                                                  
+-a----        22/04/2026   1:13 PM           3829 orgMemories.ts                                                       
+-a----         4/05/2026   9:45 PM           2593 orgSubaccountChannelGrants.ts                                        
+-a----        30/04/2026   2:25 PM           2232 orgSubscriptions.ts                                                  
+-a----        22/04/2026   1:13 PM           1244 orgUserRoles.ts                                                      
+-a----        22/04/2026   1:13 PM           1494 pageProjects.ts                                                      
+-a----        22/04/2026   1:13 PM           1784 pages.ts                                                             
+-a----        22/04/2026   1:13 PM            702 pageVersions.ts                                                      
+-a----        22/04/2026   1:13 PM            928 pageViews.ts                                                         
+-a----        22/04/2026   1:13 PM            478 permissions.ts                                                       
+-a----        22/04/2026   1:13 PM           1104 permissionSetItems.ts                                                
+-a----        22/04/2026   1:13 PM           1483 permissionSets.ts                                                    
+-a----        22/04/2026   1:13 PM           3291 policyRules.ts                                                       
+-a----        29/04/2026   9:16 AM           2745 portalBriefs.ts                                                      
+-a----        22/04/2026   1:13 PM           1238 priorityFeedClaims.ts                                                
+-a----        22/04/2026   1:13 PM           1779 processedResources.ts                                                
+-a----        22/04/2026   1:13 PM           1074 projectIntegrations.ts                                               
+-a----        22/04/2026   1:13 PM           2503 projects.ts                                                          
+-a----        30/04/2026   2:25 PM           1236 rateLimitBuckets.ts                                                  
+-a----         4/05/2026   9:45 PM           3749 referenceDocuments.ts                                                
+-a----        24/04/2026   1:15 PM           2192 referenceDocumentVersions.ts                                         
+-a----        22/04/2026   1:13 PM           5316 regressionCases.ts                                                   
+-a----        22/04/2026   1:13 PM           1728 reports.ts                                                           
+-a----        29/04/2026   9:16 AM           3188 reviewAuditRecords.ts                                                
+-a----         5/05/2026   8:19 PM           2155 reviewItems.ts                                                       
+-a----        22/04/2026   1:13 PM           2287 routingOutcomes.ts                                                   
+-a----         4/05/2026   9:45 PM           6311 scheduledTasks.ts                                                    
+-a----        22/04/2026   1:13 PM           1383 scrapingCache.ts                                                     
+-a----        22/04/2026   1:13 PM           2145 scrapingSelectors.ts                                                 
+-a----         5/05/2026   8:19 PM           1183 securityAuditEvents.ts                                               
+-a----        22/04/2026   1:13 PM           1258 servicePrincipals.ts                                                 
+-a----        22/04/2026   1:13 PM           3330 skillAnalyzerConfig.ts                                               
+-a----        29/04/2026   9:16 AM           5010 skillAnalyzerJobs.ts                                                 
+-a----        22/04/2026   1:13 PM           7505 skillAnalyzerResults.ts                                              
+-a----        22/04/2026   1:13 PM           2013 skillEmbeddings.ts                                                   
+-a----        29/04/2026   9:16 AM           1240 skillIdempotencyKeys.ts                                              
+-a----        22/04/2026   1:13 PM           3216 skills.ts                                                            
+-a----        22/04/2026   1:13 PM           1997 skillVersions.ts                                                     
+-a----        22/04/2026   1:13 PM           1795 slackConversations.ts                                                
+-a----         4/05/2026   9:45 PM           1729 spendingBudgetApprovers.ts                                           
+-a----         4/05/2026   9:45 PM           2800 spendingBudgets.ts                                                   
+-a----         4/05/2026   9:45 PM           3144 spendingPolicies.ts                                                  
+-a----        29/04/2026   9:16 AM           8214 subaccountAgents.ts                                                  
+-a----         4/05/2026   9:45 PM           1940 subaccountApprovalChannels.ts                                        
+-a----        29/04/2026   9:16 AM           1907 subaccountAutomationLinks.ts                                         
+-a----        22/04/2026   1:13 PM           1257 subaccountCategories.ts                                              
+-a----        29/04/2026   9:16 AM           3088 subaccountOnboardingState.ts                                         
+-a----         5/05/2026  12:03 PM           6261 subaccounts.ts                                                       
+-a----        22/04/2026   1:13 PM           1749 subaccountStateSummaries.ts                                          
+-a----        22/04/2026   1:13 PM           1151 subaccountTags.ts                                                    
+-a----        22/04/2026   1:13 PM           1375 subaccountUserAssignments.ts                                         
+-a----        22/04/2026   1:13 PM           1740 subscriptions.ts                                                     
+-a----        29/04/2026   9:15 AM           3714 systemAgents.ts                                                      
+-a----        22/04/2026   1:13 PM           2736 systemHierarchyTemplates.ts                                          
+-a----        22/04/2026   1:13 PM           2626 systemHierarchyTemplateSlots.ts                                      
+-a----         4/05/2026   9:45 PM           2946 systemIncidentEvents.ts                                              
+-a----         4/05/2026   9:45 PM           5934 systemIncidents.ts                                                   
+-a----        29/04/2026   9:16 AM           2106 systemIncidentSuppressions.ts                                        
+-a----        29/04/2026   9:16 AM           1545 systemMonitorBaselines.ts                                            
+-a----        29/04/2026   9:16 AM           1364 systemMonitorHeuristicFires.ts                                       
+-a----        22/04/2026   1:13 PM            422 systemSettings.ts                                                    
+-a----        29/04/2026   9:16 AM           2873 systemSkills.ts                                                      
+-a----        22/04/2026   1:13 PM           1551 taskActivities.ts                                                    
+-a----        22/04/2026   1:13 PM           2077 taskAttachments.ts                                                   
+-a----        22/04/2026   1:13 PM           1530 taskDeliverables.ts                                                  
+-a----         5/05/2026  12:03 PM           1598 taskEvents.ts                                                        
+-a----         4/05/2026   9:45 PM           5178 tasks.ts                                                             
+-a----        22/04/2026   1:13 PM           1132 teamMembers.ts                                                       
+-a----        22/04/2026   1:13 PM           1046 teams.ts                                                             
+-a----        22/04/2026   1:13 PM           3048 toolCallSecurityEvents.ts                                            
+-a----        22/04/2026   1:13 PM           2091 trustCalibrationState.ts                                             
+-a----         5/05/2026   8:19 PM           2596 users.ts                                                             
+-a----        23/04/2026   6:31 AM           1390 userSettings.ts                                                      
+-a----        22/04/2026   1:13 PM           1918 webhookAdapterConfigs.ts                                             
+-a----         4/05/2026   9:45 PM           1891 workflowDrafts.ts                                                    
+-a----         4/05/2026   9:45 PM          12562 workflowRuns.ts                                                      
+-a----         4/05/2026   9:45 PM           2204 workflowStepGates.ts                                                 
+-a----         4/05/2026   9:45 PM           6083 workflowTemplates.ts                                                 
+-a----        30/04/2026   2:25 PM           1590 workspaceActors.ts                                                   
+-a----        30/04/2026   2:25 PM           1941 workspaceCalendarEvents.ts                                           
+-a----        22/04/2026   1:13 PM           2790 workspaceEntities.ts                                                 
+-a----        29/04/2026   9:16 AM           2581 workspaceHealthFindings.ts                                           
+-a----        30/04/2026   2:25 PM           2517 workspaceIdentities.ts                                               
+-a----        22/04/2026   1:13 PM           1626 workspaceLimits.ts                                                   
+-a----        22/04/2026   1:13 PM          10004 workspaceMemories.ts                                                 
+-a----        30/04/2026   2:25 PM           2592 workspaceMessages.ts                                                 
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\db\\schema\\subaccounts.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 585ms:
+import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { organisations } from './organisations';
+import { connectorConfigs } from './connectorConfigs.js';
+
+// Memory & Briefings spec ƒ?" portal mode tier enum (migration 0131, ¶õ6.2)
+export type PortalMode = 'hidden' | 'transparency' | 'collaborative';
+
+// Memory & Briefings spec ƒ?" clarification routing config shape (migration 0134, ¶õ5.4)
+// Null at the column level means "use fallback chain defaults".
+export interface ClarificationRoutingConfig {
+  /** Explicit user ID to route clarifications to. Overrides the fallback chain. */
+  primaryUserId?: string;
+  /** Route client-domain questions through the portal when in collaborative mode. */
+  routeClientQuestionsToPortal?: boolean;
+}
+
+export const subaccounts = pgTable(
+  'subaccounts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id')
+      .notNull()
+      .references(() => organisations.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    status: text('status').notNull().default('active').$type<'active' | 'suspended' | 'inactive'>(),
+    settings: jsonb('settings'),
+
+    // ƒ"?ƒ"? Org-level inbox visibility ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+    // When true, inbox items from this subaccount appear in the org-wide inbox.
+    // Configurable per subaccount by org admins.
+    includeInOrgInbox: boolean('include_in_org_inbox').notNull().default(true),
+
+    // ƒ"?ƒ"? Org subaccount flag ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+    // When true, this subaccount is the organisation's own workspace.
+    // One per org (enforced by partial unique index). Cannot be soft-deleted
+    // or have status changed away from 'active' (enforced by DB CHECK constraints).
+    isOrgSubaccount: boolean('is_org_subaccount').notNull().default(false),
+
+    // ƒ"?ƒ"? Memory & Briefings ƒ?" portal mode (migration 0131, ¶õ6.2) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+    // Controls which client-portal features are visible to client contacts.
+    // Default 'hidden' = portal exists but no memory/clarification surfaces shown.
+    portalMode: text('portal_mode').notNull().default('hidden').$type<PortalMode>(),
+
+    // ƒ"?ƒ"? Memory & Briefings ƒ?" clarification routing (migration 0134, ¶õ5.4) ƒ"?ƒ"?
+    // Null = use default fallback chain (subaccount_manager ƒÅ' agency_owner).
+    clarificationRoutingConfig: jsonb('clarification_routing_config')
+      .$type<ClarificationRoutingConfig | null>(),
+
+    // ƒ"?ƒ"? Phase 4 ƒ?" portal features toggle grid (migration 0132, ¶õ6.3) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+    // Per-client feature-level toggles. Only consulted when portalMode is
+    // 'collaborative'. Empty object is valid ƒ?" portalGate falls back to
+    // registry defaults (all ON).
+    portalFeatures: jsonb('portal_features')
+      .notNull()
+      .default({})
+      .$type<Partial<{
+        dropZone: boolean;
+        clarificationRouting: boolean;
+        taskRequests: boolean;
+        memoryInspector: boolean;
+        healthDigest: boolean;
+      }>>(),
+
+    // ƒ"?ƒ"? Phase 4 ƒ?" client upload trust state (migration 0133, ¶õ5.5) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+    clientUploadTrustState: jsonb('client_upload_trust_state')
+      .notNull()
+      .default({ approvedCount: 0, trustedAt: null, resetAt: null })
+      .$type<{ approvedCount: number; trustedAt: string | null; resetAt: string | null }>(),
+
+    // ƒ"?ƒ"? Pulse ƒ?" per-subaccount retention override (migration 0160) ƒ"?ƒ"?
+    runRetentionDays: integer('run_retention_days'),
+
+    // ƒ"?ƒ"? Sub-Account Optimiser ƒ?" opt-out toggle (migration 0267, spec ¶õ4) ƒ"?ƒ"?
+    // Default true: every sub-account participates in daily optimiser scans
+    // unless the operator explicitly opts out via admin SQL or Configuration Assistant.
+    optimiserEnabled: boolean('optimiser_enabled').notNull().default(true),
+
+    // ƒ"?ƒ"? F1 baseline artefacts capture status (migration 0277, spec ¶õ3) ƒ"?ƒ"?
+    // Tracks per-artefact completion state across three tiers. Null until
+    // first onboarding wizard visit; default set by migration for existing rows.
+    baselineArtefactsStatus: jsonb('baseline_artefacts_status').default(
+      sql`'{"version":1,"tier1":{"brand_identity":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null},"voice_tone":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null}},"tier2":{"offer_positioning":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null},"audience_icp":{"status":"not_started","captured_at":null,"skipped_at":null,"memory_block_id":null,"captured_by_user_id":null}},"tier3":{"operating_constraints":{"status":"not_started","captured_at":null,"skipped_at":null,"workspace_memory_id":null,"captured_by_user_id":null},"proof_library":{"status":"not_started","captured_at":null,"skipped_at":null,"workspace_memory_id":null,"captured_by_user_id":null}}}'::jsonb`
+    ),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    connectorConfigId: uuid('connector_config_id').references((): AnyPgColumn => connectorConfigs.id),
+    externalId: text('external_id'),
+  },
+  (table) => ({
+    orgIdx: index('subaccounts_org_idx').on(table.organisationId),
+    orgStatusIdx: index('subaccounts_org_status_idx').on(table.organisationId, table.status),
+    slugUniqueIdx: uniqueIndex('subaccounts_slug_unique_idx')
+      .on(table.organisationId, table.slug)
+      .where(sql`${table.deletedAt} IS NULL`),
+  })
+);
+
+export type Subaccount = typeof subaccounts.$inferSelect;
+export type NewSubaccount = typeof subaccounts.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+  ✓ Inspect commit diff and context
+  ✓ Identify regressions and affected code
+  → Return JSON findings
+codex
+The commit only updates the spec and review log to align the ON CONFLICT predicate with the documented partial unique index predicate. I did not find any introduced correctness issue in the changed lines.
+2026-05-05T10:48:31.517898Z ERROR codex_core::session: failed to record rollout items: thread 019df7bf-5981-7b43-9d64-822b7e6c416e not found
+2026-05-05T10:48:31.577335Z ERROR codex_core::session: failed to record rollout items: thread 019df7bf-5957-7de2-9704-7433c3c62d0e not found
+The commit only updates the spec and review log to align the ON CONFLICT predicate with the documented partial unique index predicate. I did not find any introduced correctness issue in the changed lines.

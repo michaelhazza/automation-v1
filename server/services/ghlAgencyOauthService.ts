@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { sql } from 'drizzle-orm';
 import { withBackoff } from '../lib/withBackoff.js';
 import { logger } from '../lib/logger.js';
@@ -13,6 +14,11 @@ import {
 import { connectionTokenService } from './connectionTokenService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { db } from '../db/index.js';
+import { MAX_GHL_LOCATIONS_TO_ENROL } from '../config/limits.js';
+import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from './securityAuditService.js';
+import { auditEvent } from '../../shared/types/securityAuditEvents.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { GHL_AUTO_ENROL_PAGE_JOB } from '../jobs/ghlAutoEnrolLocationsPageJob.js';
 
 export async function exchangeGhlAuthCode(
   code: string,
@@ -209,20 +215,55 @@ export async function autoEnrolAgencyLocations(
   orgId: string,
   agencyConnection: { id: string; companyId: string | null; organisationId: string; accessToken?: string | null },
   correlationId?: string,
-): Promise<{ enrolled: number; insertedCount: number }> {
-  const MAX_GHL_LOCATIONS_TO_ENROL = 50;
+): Promise<{ enrolled: number; insertedCount: number; backgroundJobDispatched?: boolean }> {
   const effectiveCorrelationId = correlationId ?? agencyConnection.id;
   const allLocations = await enumerateAgencyLocations(agencyConnection, effectiveCorrelationId);
-  const locations = allLocations.slice(0, MAX_GHL_LOCATIONS_TO_ENROL);
+
+  // D.4: if location count exceeds the cap, emit audit event and dispatch the
+  // background pagination job instead of enrolling inline.
   if (allLocations.length > MAX_GHL_LOCATIONS_TO_ENROL) {
-    logger.warn('ghl.enrol.locations_capped', {
-      event: 'ghl.enrol.locations_capped',
-      provider: 'ghl',
-      orgId,
-      total: allLocations.length,
-      enrolled: MAX_GHL_LOCATIONS_TO_ENROL,
+    void recordSecurityEvent({
+      event: auditEvent.oauth.enrolCapped,
+      organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+      meta: {
+        connectionId: agencyConnection.id,
+        agencyId: agencyConnection.companyId,
+        locationCount: allLocations.length,
+        cap: MAX_GHL_LOCATIONS_TO_ENROL,
+        orgId,
+      },
     });
+
+    try {
+      const boss = await getPgBoss();
+      const runId = crypto.randomUUID();
+      await (boss as any).send(
+        GHL_AUTO_ENROL_PAGE_JOB,
+        { connectionId: agencyConnection.id, runId, pageCursor: null, pageIndex: 0 },
+        { singletonKey: `ghl-enrol:${agencyConnection.id}` },
+      );
+      logger.info('ghl.enrol.backgroundJobDispatched', {
+        event: 'ghl.enrol.backgroundJobDispatched',
+        provider: 'ghl',
+        orgId,
+        connectionId: agencyConnection.id,
+        locationCount: allLocations.length,
+        runId,
+      });
+    } catch (err) {
+      logger.error('ghl.enrol.backgroundJobDispatchFailed', {
+        event: 'ghl.enrol.backgroundJobDispatchFailed',
+        provider: 'ghl',
+        orgId,
+        connectionId: agencyConnection.id,
+        error: String(err),
+      });
+    }
+
+    return { enrolled: 0, insertedCount: 0, backgroundJobDispatched: true };
   }
+
+  const locations = allLocations;
   let insertedCount = 0;
 
   // FORCE RLS on subaccounts — both the OAuth callback and INSTALL_company
@@ -251,15 +292,13 @@ export async function autoEnrolAgencyLocations(
           const rows = await tx.execute<{ id: string; inserted: boolean }>(sql`
             INSERT INTO subaccounts (
               id, organisation_id, name, slug, status,
-              connector_config_id, external_id, created_at, updated_at
+              connector_config_id, external_id, external_id_namespace, created_at, updated_at
             ) VALUES (
               gen_random_uuid(), ${orgId}, ${loc.name}, ${slug}, 'active',
-              ${agencyConnection.id}, ${loc.id}, now(), now()
+              ${agencyConnection.id}, ${loc.id}, 'ghl_location', now(), now()
             )
-            ON CONFLICT (connector_config_id, external_id)
-              WHERE deleted_at IS NULL
-                AND connector_config_id IS NOT NULL
-                AND external_id IS NOT NULL
+            ON CONFLICT (organisation_id, external_id)
+              WHERE external_id_namespace = 'ghl_location' AND deleted_at IS NULL
             DO UPDATE SET name = EXCLUDED.name, updated_at = now()
             RETURNING id, (xmax = 0) AS inserted
           `);

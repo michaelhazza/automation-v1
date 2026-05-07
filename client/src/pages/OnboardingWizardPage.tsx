@@ -595,7 +595,7 @@ function Step4Baseline({ onComplete }: { onComplete: () => void }) {
                         : t2?.audience_icp.status !== 'completed' ? 'audience_icp'
                         : t3?.operating_constraints.status !== 'completed' ? 'operating_constraints'
                         : 'proof_library';
-                      api.post(`/api/subaccounts/${row.subaccountId}/baseline-artefacts/started`, { slug: `baseline.${firstIncomplete}` }).catch(logAndSwallow('OnboardingWizardPage: baseline artefact started telemetry'));
+                      api.post(`/api/subaccounts/${row.subaccountId}/baseline-artefacts/started`, { slug: `baseline.${firstIncomplete}` }).catch(logAndSwallow('OnboardingWizardPage: baseline artefact started telemetry', { severity: 'critical' }));
                     }}
                   >
                     Start capture
@@ -707,7 +707,7 @@ export default function OnboardingWizardPage() {
           c.providerType === 'stripe_agent' && c.connectionStatus === 'active',
         );
       setNeedsSptOnboarding(hasBudgets && !hasStripeAgent);
-    }).catch(logAndSwallow('OnboardingWizardPage: SPT onboarding check'));
+    }).catch(logAndSwallow('OnboardingWizardPage: SPT onboarding check', { severity: 'critical' }));
   }, []);
 
   // Handle GHL OAuth callback errors

@@ -216,7 +216,7 @@ export default function SptOnboardingPage() {
         );
         setConnection(active ?? null);
       })
-      .catch(logAndSwallow('SptOnboardingPage: existing stripe connection check'))
+      .catch(logAndSwallow('SptOnboardingPage: existing stripe connection check', { severity: 'critical' }))
       .finally(() => setStep(1));
   };
 

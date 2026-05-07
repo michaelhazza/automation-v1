@@ -946,6 +946,10 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 
 ### Phase 4 — System Consistency
 
+- [ ] **D.6 advisory-lock — narrowed critical-section refactor (claim-pattern).** Source: chatgpt-plan-review round 1, Finding 2; deferred 2026-05-05 from `pre-launch-phase-3-deferred-backlog` plan §8.2. ChatGPT recommended replacing the locked Option A in §8.2 (wrap the entire ~1000-line `automationSchedulerService.tick()` body in a single `db.transaction(...)` while holding `pg_advisory_xact_lock(SCHEDULER_TICK_LOCK)`) with a *narrow* critical section: hold the lock just long enough to (1) acquire it, (2) claim the next batch of due work, and (3) enqueue the resulting jobs — then release the lock and run job execution outside the lock. **Why we deferred it for this build:** the narrow scope is structurally a different architecture (Option C / claim-pattern) — it expands D.6's scope from "add a lock" to "refactor tick() into claim-then-execute halves", and it re-introduces the split-brain risk that §8.2 Option A was specifically chosen to eliminate (between release-lock and execute-jobs, a second worker can claim the same window if claim-state is not durably persisted). Locked decision §8.2 stays Option A for this build. **Why it's worth revisiting in Phase 4:** wrapping a ~1000-line `tick()` body in one transaction is a heavy posture — long-held row locks, large WAL bursts, and any LLM/HTTP I/O inside `tick()` would block the lock for the duration of the call. A claim-then-execute refactor would shorten the held-lock window to milliseconds at the cost of a separate spec to handle: durable claim state (what stops a worker re-claiming after release?), partial-failure recovery (claimed-but-not-executed jobs), and idempotency on re-claim. Recommended next step: write a standalone spec under `tasks/builds/scheduler-claim-pattern/spec.md` covering (a) claim table or claim columns on the existing job table, (b) lease semantics (TTL, heartbeat), (c) crash recovery, (d) interaction with the existing dedupe/retry logic; route through spec-coordinator. **Round 1 log:** `tasks/review-logs/chatgpt-plan-review-pre-launch-phase-3-deferred-backlog-2026-05-05T21-15-04Z.md` Finding 2.
+
+- [ ] **D.5 chain-closure performance — partial index on `security_audit_events`.** Source: chatgpt-plan-review round 2, Finding 2; deferred 2026-05-05 from `pre-launch-phase-3-deferred-backlog` plan §6 D.5. The current `isChainClosed(connectionId, runId)` implementation queries `security_audit_events` for terminal events (`oauth.enrol.completed | enrolFailed | enrolPartial`) filtered by `meta->>'connectionId'` and `meta->>'runId'`. Without an index, this is a sequential scan of the audit stream — fine at zero/low volume, latent O(n) cost as `security_audit_events` grows. ChatGPT proposed two options: **Option A (preferred but heavier)** — a derived `ghl_enrol_runs` table maintained on terminal-event emission, giving an O(1) keyed lookup; requires schema, RLS policy, and write-paths from terminal-event emitters. **Option B (lighter, recommended for this scope)** — a partial index on `security_audit_events` with the form below, making `isChainClosed()` an indexed lookup with no schema change beyond the index itself: ```sql CREATE INDEX idx_enrol_terminal_lookup ON security_audit_events ((meta->>'connectionId'), (meta->>'runId')) WHERE event_type IN ('oauth.enrol.completed', 'oauth.enrol.failed', 'oauth.enrol.partial'); ``` **Why we deferred for this build:** pre-launch user volume is zero, so the scan-vs-indexed-lookup difference is unobservable today. Adding a new migration here would expand D.5's commit footprint and force migration-numbering coordination with any other in-flight backlog work. The partial-index predicate is sensible on paper, but actual selectivity (how many terminal events vs total audit rows, write-amplification on a table that already gets every security event) only becomes diagnosable with real traffic. ChatGPT itself flagged this as "only apply if you want maximum robustness". **Recommended approach when picking up:** Option B unless evidence points to high write contention on `security_audit_events`. Concrete steps: (1) confirm the index predicate against current event-name conventions in `securityAuditService` (the names may shift if A.3 rename pass changes them); (2) author the migration as `0286_security_audit_events_enrol_terminal_idx.sql` (or whatever the next free number is at that point); (3) update plan/spec doc posture from "scan audit stream" to "indexed lookup on terminal events"; (4) verify with `EXPLAIN ANALYZE` on a representative dataset that the index is selected by the planner. If write-amplification or contention shows up, re-evaluate against Option A. **Round 2 log:** `tasks/review-logs/chatgpt-plan-review-pre-launch-phase-3-deferred-backlog-2026-05-05T21-15-04Z.md` Round 2 Finding 2.
+
 - [ ] **P3-M10 — Skill visibility drift**: `smart_skip_from_website` and `weekly_digest_gather` have visibility `internal`, expected `basic`. medium/high. Fix: run `npx tsx scripts/apply-skill-visibility.ts`; re-run `skills:verify-visibility`.
 - [ ] **P3-M11 — 5 workflow skills missing YAML frontmatter**: `workflow_estimate_cost`, `workflow_propose_save`, `workflow_read_existing`, `workflow_simulate`, `workflow_validate`. medium/high. Fix: add YAML frontmatter block to each skill markdown file.
 - [ ] **P3-M12 — `scripts/verify-integration-reference.mjs` crashes** with `ERR_MODULE_NOT_FOUND: 'yaml'`. medium/high. Fix: `npm install --save-dev yaml`; re-run gate to confirm pass.
@@ -2453,6 +2457,11 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 
 - [ ] Formalize `/dev/primitives` playground route as a Phase-0 deliverable (Modal sizes, Drawer, SortableTable filters/edge cases, ViewModeSwitcher states) — ChatGPT R1 F10 + R3 re-raise. Spec §7 C3 already permits an inline dev demo if helpful; formalizing as a deliverable expands Phase-0 scope by ~half a chunk for marginal A/B/C velocity benefit. Reconsider if real iteration friction shows up during A/B/C build. [user]
 
+### pre-launch-phase-3-deferred-backlog (2026-05-05)
+
+- [ ] CI gate: "no raw DB writes outside transaction helpers" — Phase 4 candidate. Source: chatgpt-spec-review round 1 finding F6. Forbids `db.insert/update/delete` outside `withOrgTx` / explicit `db.transaction(...)` blocks. Allowlist for system bootstrap, migrations, RLS policy enforcement queries, admin tooling. Aligns with org-scoping invariants but outside Phase 3's deferred-backlog charter. Co-locate with R3-2 `AppError` taxonomy backfill (also Phase 4) — both items "tighten the write surface." [user]
+- [ ] Author OAuth-enrol + connection-token failure runbooks — post-launch task. Source: chatgpt-spec-review round 4 finding F11. Build a 1-page operational playbook covering `auditEvent.oauth.enrolFailed`, `auditEvent.oauth.enrolPartial`, `auditEvent.security.crossTenantAttempt`, `auditEvent.security.missingPrincipalContext` — what each event means, what to check, expected operator action. Defer until first-agency monitoring + on-call rotation are in place so the runbook is grounded in real signal patterns, not speculation. Lives at `docs/runbooks/oauth-enrol-failures.md` (or similar) — separate from the spec. [user]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
@@ -3028,20 +3037,11 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 **Source log:** `tasks/review-logs/spec-conformance-log-pre-launch-phase-2-2026-05-05T04-56-49Z.md`
 **Spec:** `docs/pre-launch-hardening-mini-spec.md`
 
-- [ ] REQ #4 — Maintenance-job done criteria: pure-function tests vs real-row integration tests
-  - Spec section: Mini-spec § Chunk 4 done criteria
-  - Gap: mini-spec says "test added per job that verifies a real row is decayed/pruned/recalibrated"; implementation ships pure-function tests of computation logic only (`ruleAutoDeprecateJobPure.test.ts`, `fastPathDecisionsPruneJobPure.test.ts`, `fastPathRecalibrateJobPure.test.ts`).
-  - Suggested approach: documented divergence — operator-locked decision per plan § 12 "no unit test suite during development" + memory note `feedback_unit-tests-mid-build`. Either (a) accept the divergence and amend the mini-spec done criteria to match the project's pure-test posture, OR (b) author DB-backed integration tests for the three jobs in a follow-up branch. No code change needed in this branch.
+- [x] **REQ #4** — Maintenance-job done criteria: pure-function tests vs real-row integration tests. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267 — WONT-DO]** — Phase 3 E.6 amended `docs/pre-launch-hardening-mini-spec.md` REQ #4 done criteria from "real-row integration test" to "pure-function test". Operator-locked decision per `feedback_unit-tests-mid-build` memory.
 
-- [ ] REQ #15 — Skill error envelope CI grep gate not implemented (C4a-6-RETSHAPE adherence enforcement)
-  - Spec section: Mini-spec § Chunk 5 done criteria — *"Skill error envelope contract is one of two documented options and 100% adherent."*
-  - Gap: plan Task 6b.7 last bullet promised "Add a CI grep gate (Chunk 7) that asserts every skill handler return shape matches the flat-string pattern (no mixed shapes — invariant 2.4 closure)." Chunk 7 shipped audit-stream-split gate and RLS-CONTRACT-IMPORT gate but did NOT ship the skill envelope adherence gate. Grep finds nested `error: { code, message, ... }` shapes in `connectorConfigService.ts`, `ghlAgencyOauthService.ts`, `locationTokenService.ts`, `skillExecutor.ts` (delegation skills) — i.e. mixed shapes still in the code.
-  - Suggested approach: author `scripts/verify-skill-error-envelope.sh` that scans `server/skills/**`, `server/tools/**`, and `server/services/skillExecutor.ts` `SKILL_HANDLERS` for return shapes; compare against the grandfather flat-string contract. Decisions required: (a) which file paths are in scope (skill handlers only, or every service that returns a skill envelope?), (b) whether the existing nested shapes in connector/oauth services represent skill returns or are out of scope (they appear to be event payloads, not skill envelopes — needs human confirmation). Not a mechanical fix because the scope decision is a design choice.
+- [x] **REQ #15** — Skill error envelope CI grep gate. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 E.6 shipped `scripts/verify-skill-error-envelope.sh` + known-bad fixture, wired into `.github/workflows/ci.yml § grep_invariants`. CRM provider-call builders (`crmCreateTaskServicePure.ts`, etc.) added to allowlist (return `ProviderCall` objects, not skill envelopes).
 
-- [ ] REQ #29 — SC-COVERAGE-BASELINE numbers are placeholders, not actual CI counts
-  - Spec section: Mini-spec § Chunk 6 — *"capture pre-Phase-2 baseline counts before testing changes them"*
-  - Gap: `tasks/builds/pre-launch-phase-2/progress.md` records section heading but the two count rows are placeholder text ("update with actual count from first CI run"), not actual numbers from a CI run.
-  - Suggested approach: after the next CI run on this branch, read the warning counts from `verify-input-validation.sh` and `verify-permission-scope.sh` outputs and update progress.md. Not auto-fixable from a local session because the values come from CI, not local invocation, and CLAUDE.md forbids local gate runs.
+- [ ] **REQ #29 — SC-COVERAGE-BASELINE numbers (post-merge CI capture).** Phase 3 E.7 shipped placeholder section in `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md`. Real numbers come from `coverage-baseline` CI job output after PR #267 merges to main. Operator action: after merge, copy CI output into the placeholder section.
 
 ---
 
@@ -3056,31 +3056,19 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 
 **Likely holes — design decisions required:**
 
-- [ ] AR-3.1 — Advisory lock scope ambiguity for pg-boss dispatch
-  - `server/services/workflowEngineService.ts:840, 1897-1924`
-  - `pg_try_advisory_xact_lock` at line 840 is `xact`-scoped (releases on commit). Confirm that `pgboss.send()` at line 1897 runs inside the same DB transaction so the lock holds for the full dispatch. If outside, two concurrent workers can both pass the lock check (though `singletonKey` deduplication at the pg-boss level prevents double-execution). Verify the transaction boundary; if send() is outside, either accept the singletonKey defence or move the lock to cover the send.
+- [x] **AR-3.1** — Advisory lock scope ambiguity for pg-boss dispatch. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 D.6 documented in-situ that the advisory lock is NOT in same transaction as `pgboss.send` (auto-commit via `db.execute`); singletonKey deduplication is the load-bearing defence. Comment + KNOWLEDGE.md entry shipped. Full transaction wrap deferred to Phase 4 if profiling shows the singletonKey isn't sufficient.
 
-- [ ] AR-5.1 — Login rate limiter bypassable via IP rotation (no per-email bucket)
-  - `server/lib/rateLimitKeys.ts:24-28`, `server/routes/auth.ts:64-77`
-  - Both rate-limit windows key on `ip:email`. A botnet rotating IPs can exceed the nominal 50/hour limit against a single email. Add a separate `rl:v1:auth:login:email:<normalised-email>` bucket (e.g., 100/3600s) as a belt-and-suspenders cap. Design decision: what limit makes sense vs. false-positive risk for shared IPs (offices, universities)?
+- [x] **AR-5.1** — Login rate limiter bypassable via IP rotation. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 D.1 added 4-bucket login RL: 2 IP+email buckets (existing) + 2 email-only buckets (`loginEmailOnlyKey`/`loginEmailOnlyKeyBurst`, 100/3600s). NormalisedEmail brand enforces normalisation at type level. Fail-open posture preserved with audit emit on backend error.
 
 **Worth-confirming — may close without code change:**
 
-- [ ] AR-1.1 — `security_audit_events` login-failure rows stored under sentinel UUID `00000000-0000-0000-0000-000000000000`
-  - `server/routes/auth.ts:92`, `server/services/securityAuditService.ts:16`
-  - Intentional for pre-auth events. Admin queries scoped to a real org UUID will not see login-failure rows. Confirm the admin login-failure audit query is aware of this and handles the sentinel UUID explicitly if needed.
+- [x] **AR-1.1** — `security_audit_events` login-failure rows stored under sentinel UUID. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 C.3 added admin-query helper for sentinel-org rows; sentinel boot validation already enforces FK-safety. Doc note added to `architecture.md § Layer 4`.
 
-- [ ] AR-2.2 — `requireSubaccountPermission` emits no `auth.permission_denied` security event
-  - `server/middleware/auth.ts:349-394`
-  - `requireOrgPermission` records the event; subaccount variant does not. Add `recordSecurityEvent({ eventType: 'auth.permission_denied', ... })` in the 403 branch of `requireSubaccountPermission`, matching the org-level pattern.
+- [x] **AR-2.2** — `requireSubaccountPermission` emits no `auth.permission_denied` event. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 C.2 mirrored `requireOrgPermission` 403-path emit into `requireSubaccountPermission` via `recordSecurityEvent({ event: auditEvent.auth.permissionDenied, ... })`. Skips emit when neither `req.orgId` nor `req.user.organisationId` is available.
 
-- [ ] AR-4.1 — PII blacklist in `normaliseSecurityEvent` is exact-key-match only
-  - `server/services/securityAuditServicePure.ts:31-38`
-  - `PII_BLACKLIST` does not match composite keys like `accessToken`, `refreshToken`, `passwordHash`. Extend to substring-match (e.g., `PII_SUBSTRINGS = ['password', 'token', 'secret', 'authorization', 'credential']`) so future callers can't accidentally store credential material. Low urgency — current callers are safe.
+- [x] **AR-4.1** — PII blacklist exact-key-match only. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 D.2 added `PII_SUBSTRINGS = ['password','token','secret','authorization','credential']` substring check in `securityAuditServicePure.ts::sanitiseMeta()`. Pure-function test added.
 
-- [ ] AR-6.1 — `connectionTokenService.refreshIfExpired` relies on caller discipline for org scoping
-  - `server/services/connectionTokenService.ts:147-174`
-  - The `guard-ignore-next-line` exemption requires every caller to fetch the connection via an org-scoped query. Audit all call sites of `getAccessToken` to confirm each path obtains the connection through an org-scoped lookup before passing it here. If any admin-path caller exists, add an assertion: `if (connection.organisationId !== principalOrgId) throw new Error(...)`.
+- [x] **AR-6.1** — `connectionTokenService.refreshIfExpired` relies on caller discipline. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 D.3 added two ordered assertions in `refreshIfExpired`: `MISSING_PRINCIPAL_CONTEXT` (ALS context absent), `CROSS_TENANT_TOKEN_REFRESH` (cross-tenant violation). Both emit `auditEvent.security.*` BEFORE throwing — security-boundary failures observable independent of error-log routing. `setSystemWorkerContext()` + `isSystemContext()` helpers added for system-worker paths.
 
 ---
 
@@ -3091,22 +3079,13 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 **Branch:** `claude/pre-launch-phase-2`
 **PR:** #264
 
-- [ ] CHATGPT-R1-4 — Tighten audit-stream split enforcement
-  - Current `scripts/verify-audit-stream-split.sh` is a grep gate. Replace with either a centralised audit API that mechanically enforces routing (operational vs. security streams) or a TypeScript ESLint rule that flags writes to the wrong stream at lint time. Grep gates drift; an API or lint rule is structurally enforced.
-  - Out of scope for this PR — design decision required on which approach (API vs. lint rule), and a non-trivial refactor of every audit call site.
+- [x] **CHATGPT-R1-4** — Tighten audit-stream split enforcement. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 B.4 (`verify-audit-event-namespace.sh`) is the type-system-anchored namespace gate; the `auditEvent` factory IS the union (`shared/types/securityAuditEvents.ts`). Pass 4 (round 1 chatgpt-pr-review fix) closes dynamic-construction bypasses (template-literal + string-concat). ESLint rule deferred — type system + grep is sufficient.
 
-- [ ] CHATGPT-R1-6 — Tighten `isActive` helper generic constraint
-  - `server/lib/softDelete.ts` (or wherever the helper lives) — the generic constraint accepts any object with a `deletedAt` field, which is broader than the intended Drizzle-table use. Either narrow the generic to Drizzle table types (`PgTable` with a `deletedAt` column), or add overloads for the known soft-deletable tables (users, organisations, agents, …).
-  - Mechanical-feeling but the constraint design is a small architecture call (do we want a single generic helper or per-table overloads?). Defer until we have time to decide.
+- [x] **CHATGPT-R1-6** — Tighten `isActive` helper generic constraint. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 E.1 narrowed `server/lib/queryHelpers.ts` `isActive`/`assertActive` generic constraint from `<T extends { deletedAt: unknown }>` to `<T extends { deletedAt: Date | null }>`. CI typecheck + B.1 (`verify-assert-active.sh`) catch new misuse.
 
-- [ ] CHATGPT-R1-7 — Instrument OAuth state TTL before deciding on revert
-  - `server/services/ghlAgencyOauthService.ts` (and similar OAuth state stores) — the state TTL was tightened from 10min → 5min in this branch. Before committing to the new value (or reverting), instrument the state-store with a metric for `expired-on-callback` vs `not-found-on-callback` rate and observe it for a week in staging. If `expired-on-callback` is non-trivial, revert to 10min.
-  - Pre-launch we don't have telemetry yet, so this is correctly a follow-up after we have a baseline.
-  - **UX-risk scenarios driving the revert decision (ChatGPT Round 2):** mobile users on flaky cellular paths (consent flow easily exceeds 5min); slow-consent paths where the IdP shows extra prompts (MFA, scope review, re-authentication); enterprise SSO with multi-factor or admin-approval interstitials. Any non-trivial `expired-on-callback` rate from these segments argues for the 10min default. Capture segment breakdown in the metric (mobile vs desktop, IdP type) so the revert call has signal, not just a global rate.
+- [ ] **CHATGPT-R1-7 — OAuth state TTL revert decision (post-launch).** Telemetry side closed by Phase 3 C.1 + C.4 (the four `auditEvent.oauth.state*` events ship with `latencyMs` on `stateConsumed` per `docs/oauth-state-telemetry.md`). The revert decision (5min vs 10min) is post-launch — minimum 2 weeks of staging traffic with mobile/desktop + IdP-type segment breakdown plus latency distribution required. UX-risk scenarios: mobile users on flaky cellular, slow-consent IdP flows (MFA/scope review), enterprise SSO with multi-factor/admin-approval interstitials. Any non-trivial `stateExpired` rate from these segments argues for the 10min default.
 
-- [ ] CHATGPT-R1-8 — GHL auto-enrol pagination / partial-onboarding UX
-  - `server/services/ghlAgencyOauthService.ts` `autoEnrolLocations` (or similar) — the auto-enrol loop iterates GHL locations to create/link subaccounts; for agencies with hundreds of locations, the request can time out or partially succeed without surfacing state to the operator. Either add a cursor/pagination strategy with a background-job continuation, or surface partial-onboarding status to the UI so the operator can resume.
-  - Design call required (background job vs. UI surface). Defer until we have a concrete agency hitting the limit or post-launch telemetry suggesting risk.
+- [x] **CHATGPT-R1-8** — GHL auto-enrol pagination / partial-onboarding. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 D.4 + D.5 shipped: enrol cap (`MAX_GHL_LOCATIONS_TO_ENROL = 250`), pagination job (`MAX_GHL_PAGES_PER_RUN = 200`, single-writer per connection via `singletonKey: ghl-enrol:${connectionId}`, opaque cursor in payload, runId chain identity, ON CONFLICT idempotency on partial-unique index `external_id_namespace = 'ghl_location'`). Three-state event taxonomy (terminal `enrolCompleted`/`enrolFailed`, non-terminal `enrolPartial` checkpoint).
 
 ---
 
@@ -3117,17 +3096,11 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 **Branch:** `claude/pre-launch-phase-2`
 **PR:** #264
 
-- [ ] CHATGPT-R2-2 — `logAndSwallow` production observability
-  - `server/lib/logAndSwallow.ts` (or wherever the helper lives) — currently good for local debugging but provides no production observability. Either (a) sample-log to the backend at 1–5% so failures surface in System Monitor without flooding it, or (b) upgrade specific critical-path call sites to `console.warn` so they always emit. ChatGPT framing: "good for debugging, not for observability."
-  - Defer because the right answer (sample vs upgrade) depends on which call sites we treat as critical, and that classification is post-launch work.
+- [x] **CHATGPT-R2-2** — `logAndSwallow` production observability. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 E.2 added optional `{ severity: 'critical' | 'noisy' }` parameter; critical sites (≤10 enumerated: 3× App.tsx permissions fetch, 2× OnboardingWizardPage, 2× Layout.tsx, 1× SystemOrganisationsPage, 1× SystemIncidentsPage, 1× AdminAgentEditPage, 1× SptOnboardingPage, 1× useConversation) POST to `/api/client-errors`; noisy sites `console.debug` only. Round-2 chatgpt-pr-review tightening: `severity: 'critical'` framed as operator-actionable; helper documented as best-effort observability, not reliable capture.
 
-- [ ] CHATGPT-R2-3 — `/api/client-errors` endpoint dedupe
-  - `server/routes/clientErrors.ts` — under heavy client-side error spam, identical errors flood the endpoint and consume rate-limit budget without informational value. Add a hash(message + stack) dedupe that drops duplicates within a short window (e.g. 60s) before they hit the rate-limiter. ChatGPT framing: "Future improvement (not now)."
-  - Defer — endpoint is rate-limited (30/300s per user) and tight-bodied (16kb), so the abuse surface is bounded. Dedupe is an optimisation, not a correctness fix.
+- [x] **CHATGPT-R2-3** — `/api/client-errors` endpoint dedupe. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 E.3 added LRU dedupe in `server/routes/clientErrors.ts`: SHA-256 hash (256 bits, in-memory, process-bound, 60s window, 1000-entry cap) before rate-limit check. `decideDedupe` exported as pure helper; pure tests cover 4 scenarios.
 
-- [ ] CHATGPT-R2-6 — Pre+post invalidation guards double DB reads under heavy workflow load
-  - The new validation/invalidation guards added in this branch read state both before and after the protected operation. Under heavy workflow load this doubles the read cost for the guarded paths. Options: (a) cache the pre-read for the duration of the call where consistency permits, (b) collapse to post-read only where the pre-read was defensive rather than load-bearing, or (c) accept the cost if profiling shows it's negligible. ChatGPT framing: "not a problem now, just something to track."
-  - Defer — we don't have load profiling against the new guards yet. Re-evaluate after pre-launch load testing or first production traffic spike.
+- [ ] **CHATGPT-R2-6 — Pre+post invalidation guards double DB reads (post-launch profiling).** No Phase 3 work. Re-evaluate after pre-launch load testing or first production traffic spike. Options: (a) cache pre-read for call duration where consistency permits, (b) collapse to post-read only where pre-read was defensive, (c) accept cost if profiling shows it's negligible.
 
 ---
 
@@ -3139,24 +3112,98 @@ Source: ChatGPT Round 2 feedback on PR #261. Two must-fix items applied in-branc
 **PR:** #264
 **ChatGPT verdict:** "You are genuinely done." Round 3 closed all open findings; the items below are scoped follow-ups, not blockers.
 
-- [ ] CHATGPT-R3-1 — Extend CI grep invariants pattern to additional safety guards
-  - The audit-stream split grep guard added in Round 1 (`scripts/verify-audit-stream-split.sh`) is a useful pattern: a CI-grep that triggers on a known-bad usage. Extend the pattern to other invariants ChatGPT flagged in Round 3:
-    - **`assertActive` on entity fetch paths** — every service-layer fetch that returns a soft-deletable entity should pass through `assertActive`/`isActive` before the row is consumed. Grep guard would fail-fast on any new fetch path that bypasses the helper.
-    - **Forbid raw `console.*` outside allowed zones** — bootstrap, logger internals, build scripts, test fixtures. Production runtime paths must use the structured logger. Grep guard would catch new `console.*` regressions.
-    - **Normalized email at rate-limit-key construction sites** — every call site that builds a rate-limit key from an email must use the normalised form (lowercased, trimmed). Grep guard would catch raw email-as-key regressions.
-  - Wants its own scoped session: define the invariant set, write each guard, prove each one triggers on a known-bad fixture, then wire into CI.
-  - **ChatGPT framing:** "Optional. The pattern is sound; extending it is leverage."
+- [x] **CHATGPT-R3-1** — Extend CI grep invariants pattern. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 Chunk B shipped 4 new gates wired into `.github/workflows/ci.yml § grep_invariants`: `verify-assert-active.sh` (B.1), `verify-no-raw-console.sh` (B.2 with grandfathered legacy allowlist), `verify-rate-limit-key-normalisation.sh` (B.3 — cast-bypass detection only; type system canonical via `NormalisedEmail` brand), `verify-audit-event-namespace.sh` (B.4 — 4-pass detection including round-1 dynamic-construction Pass 4). Plus E.6 `verify-skill-error-envelope.sh`. Each gate ships with a known-bad fixture proven to trip it.
 
-- [ ] CHATGPT-R3-2 — Canonical error taxonomy `{ code, statusCode, message, context? }`
-  - Define a single error class shape across the server: `{ code: string, statusCode: number, message: string, context?: Record<string, unknown> }`. Every thrown error in `server/services/**`, `server/routes/**`, and `server/middleware/**` constructs through this shape. The error envelope at `server/index.ts` reads `code` and `statusCode` mechanically rather than mapping ad-hoc by `message` or `instanceof`.
-  - Belongs in its own spec — touches every module that throws and every route that surfaces an error. Coordinate with the error-envelope and correlation-ID work already in place; this is the type-system follow-up that lets the envelope be authoritative.
-  - **ChatGPT framing:** "Not urgent, but high leverage later."
+- [x] **CHATGPT-R3-2 — Canonical error taxonomy.** **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 A.1 + A.2 shipped `shared/errorCodes.ts` (`APP_ERROR_CODES` const array + `AppErrorCode` union) and `server/lib/errors.ts` (`AppError` class with `readonly` fields + `Object.freeze` immutability). `asyncHandler` normalises legacy duck-shape `{statusCode, message, errorCode}` errors into synthetic `AppError` shapes. Existing throw-site backfill is intentionally Phase 4 — co-located with Phase 4 raw-DB-writes gate and the `tasks/todo.md` adversarial pass (CHATGPT-R2-PH4-1).
 
-- [ ] CHATGPT-R3-6 — Audit event namespace consistency
-  - Audit event names currently mix conventions across the security-audit and operational-audit streams. Define the namespace convention and align existing call sites:
-    - `auth.*` — user authentication events (login, logout, password change, MFA enrol/verify).
-    - `oauth.*` — provider OAuth flows (state issued, callback success/expired, token refresh).
-    - `security.*` — threat / abuse events (rate-limit trip, suspicious-activity, sentinel-row violation).
-    - `audit.*` — business events (resource created/updated/deleted, ownership changed, permission granted).
-  - Write a short convention doc (likely under `docs/` alongside the security runbook) and run a one-shot rename pass across existing audit call sites. Update `securityAuditService` typing if it currently accepts free-form strings.
-  - **ChatGPT framing:** "Optional. Define a simple convention."
+- [x] **CHATGPT-R3-6** — Audit event namespace consistency. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Phase 3 A.3-A.5 shipped `shared/types/securityAuditEvents.ts` with `auditEvent` factory const-object (4 namespaces: `auth`, `oauth`, `security`, `audit`); `SecurityAuditEventName` derived via `typeof` (no separate raw-string source); `SecurityEventSeverity` closed enum bound at factory entry, never call-site. Convention doc at `docs/security-audit-namespace.md`. ~30 call-sites migrated from raw-string `eventType:` literals to factory member access. Grep gate B.4 (4 passes) + indirect-aliasing rule (round-2 doc-only addition) close the bypass classes.
+
+---
+
+## Deferred from spec-reviewer — pre-launch-phase-3-deferred-backlog iteration 3 (2026-05-05)
+
+**Captured:** 2026-05-05T10-50-00Z
+**Source log:** `tasks/review-logs/spec-reviewer-log-pre-launch-phase-3-deferred-backlog-2026-05-05T10-41-20Z.md` (Iteration 3 entry)
+**Branch:** `claude/pre-launch-phase-3`
+**Spec:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
+
+- [ ] PARALLEL-BUILD-DASHBOARD-VISIBILITY — Mission Control parser does not understand parallel build pointers
+  - `tasks/current-focus.md` carries a `<!-- mission-control-parallel ... -->` block alongside the canonical `<!-- mission-control ... -->` to track the Phase 3 build alongside `baseline-capture` (REVIEWING). The dashboard parser at `tools/mission-control/` reads only the canonical regex (`<!-- mission-control ... -->`), so the parallel block is invisible.
+  - Two routes to close: (a) extend `parseCurrentFocusBlock` + `readActiveBuildSlug` to read the canonical block PLUS any `mission-control-parallel` blocks, returning a list rather than a single active build; (b) drop the parallel-block convention and use `tasks/builds/<slug>/progress.md` files alone for tracking concurrent builds (status pointer becomes informational only).
+  - Out of scope for Phase 3 — this is dashboard tooling drift, not a spec or code-correctness issue. The Phase 3 build is correctly tracked via `tasks/builds/pre-launch-phase-3-deferred-backlog/progress.md` and the handoff file regardless of dashboard visibility. Operator authorised the parallel-build pattern explicitly in the Phase 3 invocation instructions.
+  - **Codex framing:** "Either teach the parser about parallel blocks or use an existing supported mechanism for in-flight builds."
+
+---
+
+## Deferred from spec-conformance review — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+**Captured:** 2026-05-06T02:10:53Z
+**Source log:** `tasks/review-logs/spec-conformance-log-pre-launch-phase-3-deferred-backlog-2026-05-06T02-10-53Z.md`
+**Spec:** `tasks/builds/pre-launch-phase-3-deferred-backlog/spec.md`
+
+- [x] **DG-1** — `architecture.md § Layer 4` does not link to `docs/oauth-state-telemetry.md`. **[CLOSED 2026-05-06 — pre-launch-phase-3 PR #267]** — Fixed in commit `319151dc` during Phase 3 finalisation; reference added at `architecture.md` Layer 4 section.
+
+- [ ] DG-2 — `setOrgGUC` helper created but not adopted at the spec-named call sites
+  - Spec section: §11 E.5
+  - Gap: `server/lib/orgScoping.ts` exports `setOrgGUC(tx, orgId)` (E-7 PASS), but the two refactor sites at `server/routes/oauthIntegrations.ts:434-445` and `server/middleware/auth.ts:148-154` call `tx.execute(sql` + "`SELECT set_config(...)`" + `)` inline rather than `await setOrgGUC(tx, orgId)`. Both sites also keep `withOrgTx({ tx, ... }, callback)` as an outer wrapper, which spec/plan did not prescribe. Functionally equivalent — KNOWLEDGE.md endorses both shapes — but the implementation deviates from the spec's literal helper-adoption contract.
+  - Suggested approach: Confirm the current `db.transaction + inline set_config + withOrgTx({tx,...})` shape is intentional final state; if so, update KNOWLEDGE.md's "Usage pattern" snippet to reflect the dual canonical shapes; alternatively, replace the inline `set_config` with `await setOrgGUC(tx, orgId)` at both sites for consistency with the new helper.
+
+- [ ] DG-3 — Connection-token service uses `getOrgTxContext` instead of `withPrincipalContext` for principal context
+  - Spec section: §7.7
+  - Gap: `connectionTokenService.ts:50-54` reads via `getOrgTxContext()` from `server/instrumentation.ts`, treating its `organisationId` as the principal org. Spec §7.7 wanted reads via the `PrincipalContext` ALS specifically. Builder noted in `progress.md` that `withPrincipalContext.ts` does not export a principal-org accessor, so the substitution was made. Three-state contract (undefined/null/string) is preserved. Conflating principal context with org-tx context means a future principal-context-without-org-tx flow would not be caught by D-5.
+  - Suggested approach: If the org-tx context IS the principal context in all current call sites (verified true today), accept the substitution and add a one-line note in `connectionTokenService.ts` near `getPrincipalOrgId` explaining the substitution and the future-caller risk. Otherwise, introduce a `getPrincipalOrgId()` export on `withPrincipalContext.ts` and switch the helper to use it.
+
+---
+
+## Deferred from pr-reviewer + adversarial-reviewer — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+**Captured:** 2026-05-06T03:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-pre-launch-phase-3-deferred-backlog-2026-05-06T03-00-00Z.md` (S-1, S-4); `tasks/review-logs/adversarial-review-log-pre-launch-phase-3-deferred-backlog-2026-05-06T03-10-00Z.md` (A-1)
+**Branch:** `claude/pre-launch-phase-3`
+
+- [ ] **S-1 — Test defines `decideTokenRefreshAssertion` inline rather than importing production function**
+  - File: `server/services/__tests__/connectionTokenServiceAssertionsPure.test.ts`
+  - Gap: The test defines its own copy of the assertion logic inline. Any change to the production function signature or behaviour will not be caught — the test tests its own copy, not the real function.
+  - Suggested approach: Import the production `decideTokenRefreshAssertion` from `connectionTokenService` (or a pure helper module) and assert its output directly. Retire the inline copy.
+  - Priority: medium. No functional regression today; creates coverage gap on future refactors.
+
+- [ ] **S-4 / A-1 — `setSystemWorkerContext(true)` not called in in-memory queue fallback**
+  - File: `server/services/queueService.ts`
+  - Gap: `setSystemWorkerContext(true)` is called at pg-boss bootstrap but the in-memory queue fallback path (used in dev/test without a database) never calls it. Workers registered on the in-memory queue will throw `MISSING_PRINCIPAL_CONTEXT` (or equivalent) on any operation that checks `isSystemWorkerContext()`.
+  - Blast radius: dev/test only — in-memory queue is not used in production.
+  - Suggested approach: Call `setSystemWorkerContext(true)` in the in-memory queue initialisation path, parallel to the pg-boss boot path.
+  - Priority: low. Masks bugs in test environments; no production impact.
+
+---
+
+## Deferred from chatgpt-pr-review round 1 — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+**Captured:** 2026-05-06T03:06:30Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-3-deferred-backlog-2026-05-06T03-02-29Z.md`
+**PR:** #267 — verdict APPROVE for merge with minor tightenings
+**Branch:** `claude/pre-launch-phase-3`
+
+- [ ] **CHATGPT-R1-PH3-1 — Extend E.6 skill-envelope gate to assert `asyncHandler` wrapping.** Source: chatgpt-pr-review round 1 finding #6. The current E.6 gate checks return-path object literals contain an `ok:` field. Async branches (e.g. `if (x) throw new Error(); return { ok: true }`) bypass the envelope on the throw path. The `asyncHandler` middleware already normalises thrown errors to `{ ok: false, error }` shapes via the Chunk A `AppError` normalisation. Extending the gate to additionally assert that all skill/tool handlers in `server/skills/**` and `server/tools/**` are wrapped via `asyncHandler` (or a thin wrapper that delegates to it) would close the throw-bypass class. Out of scope for Phase 3's chartered backlog; Phase 4 candidate. Co-locate with the Phase 4 "no raw DB writes outside transaction helpers" gate and the R3-2 `AppError` taxonomy backfill — same write-surface-tightening posture.
+
+- [ ] **CHATGPT-R1-PH3-2 — Add 1-line rationale comments per CI step in `.github/workflows/ci.yml § grep_invariants`.** Source: chatgpt-pr-review round 1 finding #8. Current step names already explain what each gate enforces (e.g. `B.1 Assert-active guard...`). Adding a short rationale comment per step ("what failure means, why it matters") would reduce future "why is this blocking me?" friction for new contributors. Polish; not blocking.
+
+- [ ] **CHATGPT-R1-PH3-3 — Add `/scripts/README.md` indexing each verify-*.sh invariant.** Source: chatgpt-pr-review round 1 finding #11. Current scripts each carry a header comment with invariant + fixture references. A consolidated index README listing all `verify-*.sh` gates with one-line descriptions and the safe update procedure would help new contributors find the right gate to extend. Polish; not blocking.
+
+---
+
+## Deferred from chatgpt-pr-review round 2 — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+**Captured:** 2026-05-06T03:32:07Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-3-deferred-backlog-2026-05-06T03-02-29Z.md` § Round 2
+**PR:** #267 — Round 2 confirmed merge-as-is posture, surfaced 4 doc tightenings + 1 lint warning (all auto-applied)
+**Branch:** `claude/pre-launch-phase-3`
+
+- [ ] **CHATGPT-R2-PH4-1 — Adversarial pass: intentionally violate each Phase 3 invariant to confirm CI fails for each.** Source: chatgpt-pr-review round 2 finding #6. Each B.1–B.4 + E.6 + audit Pass 4 gate ships with a known-bad fixture proven to trip it in isolation, but a "break the system on purpose" pass — submitting a PR that violates each invariant in turn against real codebase context — would build operational confidence that the gates fire at PR review time, not just in fixture isolation. Out of scope for Phase 3's chartered backlog; Phase 4 candidate. Run after CHATGPT-R1-OP-1 (branch protection) lands so the test PR is meaningful.
+
+---
+
+## Operator action items — pre-launch-phase-3-deferred-backlog (2026-05-06)
+
+These items require operator action outside the file system (repo/GitHub settings).
+
+- [ ] **CHATGPT-R1-OP-1 — Make `grep_invariants` a required status check on `main`.** Source: chatgpt-pr-review round 1 finding #2. Current branch protection on `main` has zero required status checks (`gh api repos/<owner>/<repo>/branches/main/protection` confirms). PRs can merge red. Recommended action: Settings → Branches → main → Branch protection → Required status checks → add `Grep invariants (Phase 3 B.1-B.4)`, `lint-typecheck`, `Portable framework tests`. Without this, the grep gates protect the codebase only as long as merge discipline holds.

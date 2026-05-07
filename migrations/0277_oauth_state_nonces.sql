@@ -1,3 +1,4 @@
+-- system-scoped: pre-auth OAuth state, no organisation_id available pre-callback
 CREATE TABLE oauth_state_nonces (
   nonce            text        PRIMARY KEY,
   organisation_id  uuid        NOT NULL,

@@ -5,11 +5,11 @@ build_slug: consolidation-foundation
 branch: claude/learn-harbour-ui-B4k7a
 status: BUILDING
 last_updated: 2026-05-07
-last_merged_pr: #265
-last_merged_slug: baseline-capture
-last_merged_branch: claude/baseline-capture
-last_merged_at: 2026-05-05T10:16:56Z
-last_merged_commit: TBD
+last_merged_pr: #267
+last_merged_slug: pre-launch-phase-3-deferred-backlog
+last_merged_branch: claude/pre-launch-phase-3
+last_merged_at: 2026-05-06T14:15:00Z
+last_merged_commit: 8b6f8d80
 -->
 
 # Current Focus
@@ -30,6 +30,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Status:** **BUILDING** — Phase 1 complete via manual chatgpt-spec-review workflow (spec finalised in commit `649f94be`; rounds 1-3 in commits `e71760c5`, `b87091dd`, `eee9967d`, `94752162`). Phase 1 handoff at `tasks/builds/consolidation-foundation/handoff.md` (written retrospectively at Phase 2 launch). chatgpt-spec-review log at `tasks/review-logs/chatgpt-spec-review-consolidation-foundation-2026-05-07T02-35-29Z.md`. Next step: feature-coordinator → architect → plan gate.
 
 **Just merged:** PR #265 — `baseline-capture` (`claude/baseline-capture`, MERGED 2026-05-05T10:16:56Z). F3 opening-state baseline capture at sub-account onboarding. All 12 plan chunks built, spec-conformance CONFORMANT (re-run), pr-reviewer APPROVED after fix-loop, adversarial-reviewer ALL_CLOSED. 3 migrations (0280/0281/0282), partial UNIQUE index, FORCE RLS on both tables, FK-walked policy on the child table, 9 telemetry events. Phase 3 handoff at `tasks/builds/baseline-capture/handoff.md`. Dual-reviewer skipped (Codex unavailable); chatgpt-pr-review covered the second-opinion pass.
+
+---
+
+**Just merged:** PR #267 — `pre-launch-phase-3-deferred-backlog`. Pre-launch Phase 3 closes the 24-item deferred backlog from Phases 1+2 — hardening only, no new features. Five chunks: (A) canonical typed errors and audit-event factory locked at the type system, (B) four CI grep gates that fail-fast on raw-string slips (table-list, error envelope, rate-limit key normalisation, audit namespace including B.4 Pass 4 dynamic-construction detector), (C) OAuth state telemetry plus admin-query helper for sentinel rows, (D) per-email login rate-limit bucket, GHL pagination job with single-writer-per-connection guarantee and 250-location cap, connection-token cross-tenant assertions, (E) cleanup including LRU dedupe on `/api/client-errors` and severity tagging on the silent-catch helper. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer CHANGES_REQUESTED → 4 blocking fixed → re-check APPROVED → adversarial-reviewer 2 confirmed holes closed → dual-reviewer SKIPPED (Codex CLI unavailable, REVIEW_GAP) → chatgpt-pr-review 2 rounds CLOSED (round 1: B.4 Pass 4 grep added, 3 Phase 4 deferrals, 1 operator escalation; round 2: 4 doc tightenings + 1 React hook missing-dep fix). Late CI fix: 7 Phase 3 pure tests had landed as bare-script `node:assert` files; reworked them (and 3 pre-existing siblings) to vitest `expect()` plus extracted 3 inline decision helpers into Pure sibling modules (`ghlEnrolCapDecisionPure`, `connectionTokenAssertionsPure`, `ghlAutoEnrolLocationsPageJobPure`) so production and tests share one source of truth — required to satisfy `verify-test-quality.sh` and `verify-pure-helper-convention.sh` gates. Doc-sync sweep complete (12 KNOWLEDGE.md entries, architecture.md indirect-aliasing rule added). 16 tasks/todo.md items closed; 1 new Phase 4 item logged (CHATGPT-R2-PH4-1 adversarial invariant pass). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-launch-phase-3-deferred-backlog-2026-05-06T03-02-29Z.md`. Phase 3 handoff: `tasks/builds/pre-launch-phase-3-deferred-backlog/handoff.md`.
+
+> ⚠ **Dual-reviewer was skipped — reduced review coverage for this build.** The Codex CLI was unavailable. `chatgpt-pr-review` ran 2 rounds as the primary second-opinion pass and closed cleanly. **Operator action — CHATGPT-R1-OP-1:** apply branch-protection required-checks on `main` (`Grep invariants`, `Lint + Typecheck`, `unit tests`, `integration tests`, `Portable framework tests`) so future PRs cannot merge red. See `tasks/todo.md`.
 
 ---
 
@@ -63,7 +69,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06T14:15:00Z
 
 ---
 

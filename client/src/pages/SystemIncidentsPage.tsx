@@ -135,7 +135,7 @@ function IncidentDetailDrawer({
   useEffect(() => {
     api.get(`/api/system/incidents/${incident.id}`)
       .then(({ data }) => { setEvents(data.events ?? []); })
-      .catch(logAndSwallow('SystemIncidentsPage: incident events fetch'))
+      .catch(logAndSwallow('SystemIncidentsPage: incident events fetch', { severity: 'critical' }))
       .finally(() => setLoadingEvents(false));
   }, [incident.id]);
 
