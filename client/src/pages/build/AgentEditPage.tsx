@@ -160,7 +160,7 @@ export default function AgentEditPage() {
     if (!id) return;
     try {
       await api.delete(`/api/agents/${id}`);
-      navigate('/build/agents');
+      navigate('/agents');
     } catch {
       setDeleteError('Failed to delete agent. Please try again.');
     }
