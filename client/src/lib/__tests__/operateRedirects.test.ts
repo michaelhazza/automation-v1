@@ -54,5 +54,11 @@ describe('buildOperateRedirectUrl', () => {
       const result = buildOperateRedirectUrl('/inbox', '?tab=open', { key: 'subaccountId', value: 'x1' }, '#top');
       expect(result).toBe('/inbox?subaccountId=x1&tab=open#top');
     });
+
+    it('handles hash + promoted param + duplicate inbound param (highest-risk composition)', () => {
+      // Exercises: duplicate suppression + promoted-key precedence + insertion-order preservation + hash preservation
+      const result = buildOperateRedirectUrl('/activity', '?subaccountId=old&tab=open', { key: 'subaccountId', value: 'x1' }, '#recent');
+      expect(result).toBe('/activity?subaccountId=x1&tab=open#recent');
+    });
   });
 });

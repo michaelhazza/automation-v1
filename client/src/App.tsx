@@ -519,8 +519,8 @@ export default function App() {
             {/* Pulse — retired; redirect to home */}
             <Route path="/admin/pulse" element={<Navigate to="/" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/pulse" element={<Navigate to="/" replace />} />
-            {/* Activity — org scope (redirects to home) */}
-            <Route path="/admin/activity" element={<Navigate to="/" replace />} />
+            {/* Activity — org scope (redirects to canonical /activity) */}
+            <Route path="/admin/activity" element={<Navigate to="/activity" replace />} />
             {/* Agent Inbox — redirects to canonical /inbox (locked redirect grammar C8) */}
             <Route path="/admin/agent-inbox" element={<AdminAgentInboxRedirect />} />
             {/* Activity — subaccount scope (redirects to canonical /activity, scope promoted per locked C8 grammar) */}
