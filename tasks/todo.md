@@ -2449,6 +2449,10 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 - [ ] Per-skill execution-timeout overrides (`executionTimeoutMinutes: number | null` on `ActionDefinition`) — v1 ships single global `EXECUTION_TIMEOUT_MINUTES` default 30; non-breaking addition when needed. Defer until a specific v1 skill produces evidence 30 min is too short. [user]
 - [ ] Implementation Contract Checklist — pre-build artifact translating spec invariants to enforceable DB/code rules (constraint map, allowed-transitions table, idempotency enforcement points, webhook validation checklist, retry classification enforcement, required logs per transition). ChatGPT advisory from R4; high ROI for engineer handoff. [user]
 
+### consolidation-foundation (2026-05-07)
+
+- [ ] Formalize `/dev/primitives` playground route as a Phase-0 deliverable (Modal sizes, Drawer, SortableTable filters/edge cases, ViewModeSwitcher states) — ChatGPT R1 F10 + R3 re-raise. Spec §7 C3 already permits an inline dev demo if helpful; formalizing as a deliverable expands Phase-0 scope by ~half a chunk for marginal A/B/C velocity benefit. Reconsider if real iteration friction shows up during A/B/C build. [user]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03

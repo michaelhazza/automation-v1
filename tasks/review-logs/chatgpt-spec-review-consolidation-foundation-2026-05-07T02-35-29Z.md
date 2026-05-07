@@ -6,6 +6,7 @@
 - PR: #268 — https://github.com/michaelhazza/automation-v1/pull/268
 - Mode: manual
 - Started: 2026-05-07T02:35:29Z
+- **Verdict:** APPROVED (3 rounds, build-ready)
 
 ---
 
@@ -277,3 +278,40 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0). The persistK
 
 ### Top themes
 Three locked invariants close out the spec: persistence migration safety, sort stability as a contract, and scroll-lock ownership for stacked overlays. ChatGPT's final verdict: DONE. APPROVED. BUILD.
+
+---
+
+## Final Summary
+
+- **Rounds:** 3
+- **Auto-accepted (technical):** 19 applied | 1 rejected (F21 duplicate of R1 F10) | 0 deferred
+- **User-decided:** 0 applied | 0 rejected | 1 deferred (F10 — `/dev/primitives` playground)
+- **Index write failures:** 0
+- **Cross-round consistency warnings:** none. R2 F14 refines R1 F2 (sentinel column-scoping); R3 F18 refines R1 F9 (persistKey versioning); R3 F21 consistent with R1 F10 (both "do not formalize playground"). All later-round refinements are tightenings of earlier locked behaviour, not contradictions.
+- **Implementation readiness checklist:**
+  - Inputs defined: pass (typed prop interfaces with defaults for every primitive in §4)
+  - Outputs defined: pass (return types named, e.g. `UseViewModeReturn`, `SortableTableProps<Row>`)
+  - Failure modes covered: pass (illegal transitions return false; scroll-lock failure-mode boundary documented; overlay double-open documented)
+  - Ordering guarantees explicit: pass (chunk dependency graph §7; sort stability §4.3; intra-chunk routes-before-sidebar in C5)
+  - No unresolved forward references: pass (integrity check clean every round)
+- **Deferred to tasks/todo.md § Spec Review deferred items / consolidation-foundation:**
+  - [user] Formalize `/dev/primitives` playground route as a Phase-0 deliverable — operator opted to keep Phase-0 scope tight; reconsider if A/B/C iteration friction surfaces.
+
+### Doc sync sweep — verdicts
+
+- **KNOWLEDGE.md updated:** yes (3 entries — Phase-0 cross-cutting frontend-primitive contract surfaces; versioned localStorage key prefix; hook-owned illegal-transition handling)
+- **architecture.md updated:** n/a — spec describes future Phase-0 chunk work; the "Key files per domain" table is updated by C7 during implementation, not at spec-finalisation. Grep terms checked against doc: `Modal`, `Layout.tsx`, `useViewMode`, `SortableTable`, `Drawer`, `WorkspaceBadge`, `ViewModeSwitcher`, `PageShell`, `FormFooter`, `switchWorkspace`, `hashToColor`, `AppRoute`, `NAV_ITEMS` — none yet referenced because they don't exist.
+- **capabilities.md updated:** n/a — no add/remove/rename of product capability, agency capability, skill, or integration; primitives are internal layer.
+- **integration-reference.md updated:** n/a — no integration touched.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — checked grep terms `frontend primitive`, `cross-cutting primitive`, `consolidation`, `Phase 0`, `view mode`, `sort stability`, `localStorage`, `overlay`, `z-index ladder`, `scroll lock`, `Modal`, `Drawer` against both files; spec consumes existing rules (§8 sort tiebreaker in DEVELOPMENT_GUIDELINES) without changing them. No build-discipline / convention / agent-fleet / review-pipeline change.
+- **CONTRIBUTING.md updated:** n/a — no lint-suppression / contributor-convention change.
+- **frontend-design-principles.md updated:** no — checked: principles file scope is user-facing UX (5 hard rules: start with task, default to hidden, one primary action, inline state, re-check). Spec is internal primitive contract layer below the design layer; no new design principle, hard rule, or worked example introduced. Grep terms `primitive`, `contract`, `overlay`, `modal`, `drawer`, `sortable`, `viewmode` against the file confirmed no overlap.
+- **spec-context.md updated:** no — checked accepted_primitives / convention_rejections / framing-statement set against spec content; spec consumes existing framing (`frontend_tests: none_for_now`, `prefer_existing_primitives_over_new_ones: yes`, `rapid_evolution`) as-is. New primitives (Drawer, SortableTable, FormFooter, WorkspaceBadge, ViewModeSwitcher, PageShell, useViewMode, switchWorkspace, hashToColor, AppRoute) become candidates for `accepted_primitives` only after build lands, not at spec-finalisation. last_reviewed_at: 2026-04-16 (within 60-day staleness window; no bump needed).
+- **decisions/ updated:** n/a — no cross-spec architectural choice locked beyond what the Phase-0 spec itself records; spec serves as the durable contract for A/B/C downstream specs. ADR not authored to avoid duplication.
+- **context-packs/ updated:** n/a — no architecture.md section anchor changed.
+- **test-gate-policy.md updated:** n/a — no test-gate posture change.
+- **spec-review-directional-signals.md updated:** n/a — chatgpt-spec-review iterations do not feed spec-reviewer signal tracking.
+- **.claude/FRAMEWORK_VERSION + CHANGELOG.md updated:** n/a — repo-specific spec, not framework-level.
+
+### PR
+- PR: #268 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/268

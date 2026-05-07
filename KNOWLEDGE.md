@@ -2332,3 +2332,40 @@ Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05
 ### [2026-05-06] Correction — Calendar period navigation: keep nav controls inline with the period label, not clumped with view switchers
 
 In `prototypes/consolidation-2026-05-06/calendar.html` Round 6, I placed the previous/next chevrons in the same top-right cluster as the period view selector (Week/Fortnight/Month). User flagged this as non-conventional. Standard practice (Google Calendar, Outlook, every well-designed calendar): `[Today] < period-label >` is one cluster on the LEFT inline with the calendar content, and the view switcher (Week/Fortnight/Month) is a separate cluster on the RIGHT. Period nav belongs WITH the period label it controls, not with the view selector. Lesson: when designing dense control bars, group controls by what they ACT on, not by physical proximity. View switcher acts on which view; period nav acts on the period label — different concerns, different clusters.
+
+### [2026-05-07] Pattern — Phase-0 cross-cutting frontend-primitive specs: lock contracts at the start, not during build
+
+**Date:** 2026-05-07
+**Source:** chatgpt-spec-review on `tasks/builds/consolidation-foundation/spec.md` (3 rounds, APPROVED verdict).
+
+When a programme decomposes into N parallel feature specs (here: A/B/C consuming the same primitives), a Phase-0 spec that ships the cross-cutting primitives MUST lock the contract surface BEFORE downstream specs draft. The natural lock surfaces, learned across this review:
+
+1. **Sort comparator semantics** — comparator algorithm per type (`localeCompare { sensitivity: 'base' }`, numeric subtraction, NaN→string fallback), null handling (always bottom regardless of direction), mixed-type fallback rules, stability as a contract (not implementation detail).
+2. **Filter identity** — deterministic key derivation (`String(getValue(row) ?? '__NULL__::${column.key}')`), with a column-scoped sentinel to avoid both real-data collision and cross-column option overlap.
+3. **Persistence-key versioning** — namespaced + versioned prefix (`<scope>:v1:<key>`); component owns the version, callers pass the unversioned identifier.
+4. **Overlay z-index ladder** — layer constants (Modal 1000, Drawer 900, backdrop -1, nested +10) so stacking is predictable.
+5. **Scroll-lock ownership** — mount-counter + deferred restore so closing one of two stacked overlays does not leak `overflow: auto` while the other is still mounted.
+6. **Hook-owned illegal-transition handling** — when N consumers would each implement the same edge case (e.g. `setViewMode('workspace')` with no active client), the hook returns `boolean` + an optional callback (`onRequireClientSelection`); consumers do not detect rejection by reading state.
+7. **Spacing contract at the page-shell level** — `<PageShell bottomPadding={N}>` instead of relying on per-page bottom-padding comments; the primitive that USES the contract (FormFooter) does NOT inject its own spacer.
+
+**The shape of a good Phase-0 review:** ChatGPT round 1 surfaced 9 of these 7 surfaces; rounds 2-3 tightened the rest (NaN guard, sentinel collision, padding default, persistence versioning, sort stability, scroll-lock ownership). Each round was APPROVED with tightenings — meaning every surface was a real ambiguity, not a stylistic preference. **If a Phase-0 spec for cross-cutting primitives does not surface findings on these areas, the review is not done.**
+
+### [2026-05-07] Pattern — Versioned localStorage key prefix for component-owned persistence
+
+**Date:** 2026-05-07
+**Source:** Same review session, finding F18 (round 3).
+
+Format: `<scope>:v<N>:<key>` (e.g. `table:v1:spending-ledger`). The version segment is owned by the component, not the caller. Callers pass an unversioned, unscoped identifier; the component prepends both. When the persisted shape (e.g. sort tuple, filter selections, column-key set) changes incompatibly, bump `v1` → `v2`; the old keys become absent rather than corrupted state. Zero migration cost; zero risk of de-serialisation crashes when an old client meets a new schema.
+
+The pattern generalises to any component that owns localStorage state with a non-trivial shape: list-view toggles, column-visibility prefs, collapsed-section state, draft autosave. Without versioning, the first incompatible shape change either corrupts state silently or forces consumer migrations.
+
+### [2026-05-07] Pattern — Hook-owned illegal-transition handling instead of consumer-side guards
+
+**Date:** 2026-05-07
+**Source:** Same review session, finding F3 (round 1) + F15 (round 2).
+
+When a state-transition hook serves multiple consumers, illegal-transition handling MUST live in the hook, not in each consumer. Shape: `setViewMode(next): boolean` returns `true`/`false` for the transition outcome, with an optional `onRequireClientSelection` callback (configured at hook construction) invoked for the specific failure case (`'workspace'` with no `activeClient`). The hook also publishes a locked side-effect table (`'org'` clears `activeClient`; `'system'` enables override flag; etc.) as a refactor invariant.
+
+Before: each of three consumers (Layout, sidebar, badge) would implement the same "no active client → open picker" branch. After: one consumer (Layout) wires `onRequireClientSelection`; the others consume `setViewMode` and react to the boolean. The pattern prevents 3 divergent implementations and centralises the rule for future maintainers.
+
+Generalises to any state-transition hook with N>1 consumers: workspace switching, mode switches, draft saves with conflict resolution, optimistic-update rollbacks. The signal that you need it: when the same edge-case branch starts appearing in multiple consumers, the hook is the right owner.
