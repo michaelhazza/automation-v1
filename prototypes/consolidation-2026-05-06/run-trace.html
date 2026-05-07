@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT, Unified Run Trace (AgentRunLivePage + RunTraceViewerPage)
+
+  AgentRunLivePage fields/actions:
+    KEEP: timeline of events (sequence, type, content) -> main panel
+    KEEP: event detail drawer (EventDetailDrawer) -> right panel on click
+    KEEP: run meta (agentName, status, durationMs, eventCount, startedAt) -> header
+    KEEP: status badge (completed/failed/running/cancelling/cancelled) -> header
+    KEEP: AgentRunCancelButton -> header (live state only)
+    KEEP: live streaming mode indicator (WebSocket room) -> "Live" badge
+    KEEP: sliding window cap note (2000 events) -> info note in header
+    KEEP: sequence gap / collision warnings -> collapsed diagnostics
+
+  RunTraceViewerPage fields/actions:
+    KEEP: RunTraceView (full trace) -> main panel
+    KEEP: TraceChainSidebar (chain of runs) -> left sidebar within page
+    KEEP: TraceChainTimeline -> within chain sidebar
+    KEEP: ExecutionPlanPane -> collapsible within main panel
+    KEEP: DelegationGraphView -> second tab within page
+    KEEP: IEE progress polling (delegated state: stepCount, heartbeatAge, status) -> shown in header for delegated runs
+    KEEP: activeTab (trace | delegation-graph) -> tabs within run view
+    KEEP: back navigation
+    DROP: exposed runId as heading text (internal ID, per design principles)
+
+  Merged design:
+    Same URL pattern resolves to this component. Auto-detects live vs historical.
+    Header shows state badge + live/historical indicator.
+    Left sidebar: chain of runs (trace chain).
+    Main area: tabs: Trace | Delegation graph
+    Event detail: right-side slide-in on click
+    Cancel button only shown for live/running state.
+
+  Round 6: All 8 events wired with type-specific right panel content.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Trace | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .run-layout {
+    display: flex;
+    height: calc(100vh - 52px); /* minus topbar */
+    overflow: hidden;
+  }
+
+  /* Chain sidebar */
+  .chain-sidebar {
+    width: 220px; flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: white;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .chain-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--slate-400); flex-shrink: 0;
+  }
+  .chain-run {
+    padding: 9px 14px; border-bottom: 1px solid var(--slate-100);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .chain-run:hover { background: var(--slate-50); }
+  .chain-run.active { background: var(--indigo-50); border-left: 2px solid var(--indigo-500); }
+  .chain-run-name { font-size: 12.5px; font-weight: 500; color: var(--slate-800); margin-bottom: 2px; }
+  .chain-run-meta { font-size: 11px; color: var(--slate-400); display: flex; align-items: center; gap: 5px; }
+  .chain-run-sub { padding-left: 12px; border-left: 1px solid var(--slate-200); margin-left: 10px; }
+
+  /* Main run area */
+  .run-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .run-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: white;
+    display: flex; align-items: center; gap: 12px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .run-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+  .run-meta-items { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: 1; }
+  .run-meta-item { font-size: 12px; color: var(--slate-500); }
+
+  .live-indicator {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
+    color: var(--emerald-600); background: var(--emerald-50);
+    border: 1px solid #a7f3d0; border-radius: 20px; padding: 3px 9px;
+  }
+  .live-dot {
+    width: 6px; height: 6px; background: var(--emerald-500);
+    border-radius: 50%; animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  /* Trace timeline */
+  .trace-scroll { flex: 1; overflow-y: auto; padding: 0; }
+
+  .event-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 7px 16px; border-bottom: 1px solid var(--slate-100);
+    cursor: pointer; transition: background 0.1s;
+    font-size: 12.5px;
+  }
+  .event-row:hover { background: var(--slate-50); }
+  .event-row.selected { background: var(--indigo-50); }
+  .event-seq { font-family: monospace; font-size: 11px; color: var(--slate-400); width: 32px; flex-shrink: 0; padding-top: 2px; }
+  .event-type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .event-body { flex: 1; min-width: 0; }
+  .event-type-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+  .event-content { color: var(--slate-700); line-height: 1.4; }
+  .event-time { font-size: 11px; color: var(--slate-400); flex-shrink: 0; padding-top: 2px; }
+
+  /* Event type colours */
+  .etype-llm_call     { color: var(--indigo-500); }
+  .etype-tool_call    { color: var(--sky-500); }
+  .etype-tool_result  { color: var(--emerald-500); }
+  .etype-error        { color: var(--red-500); }
+  .etype-run_start    { color: var(--slate-400); }
+  .etype-run_complete { color: var(--emerald-600); }
+  .etype-delegation   { color: var(--violet-500); }
+
+  .dot-llm     { background: var(--indigo-500); }
+  .dot-tool    { background: var(--sky-500); }
+  .dot-result  { background: var(--emerald-500); }
+  .dot-error   { background: var(--red-500); }
+  .dot-meta    { background: var(--slate-300); }
+  .dot-deleg   { background: var(--violet-500); }
+
+  /* Event detail panel — wider (540px) */
+  .event-detail {
+    width: 540px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: white; display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .event-detail-header {
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50);
+  }
+  .event-detail-title { font-size: 12.5px; font-weight: 700; color: var(--slate-800); }
+  .event-detail-sub { font-size: 11px; color: var(--slate-400); margin-top: 2px; }
+  .event-detail-body { padding: 14px; flex: 1; }
+  .detail-field { margin-bottom: 14px; }
+  .detail-field-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 4px; }
+  .detail-field-value { font-size: 12.5px; color: var(--slate-700); line-height: 1.5; }
+  .detail-field-pre {
+    font-size: 11px; font-family: monospace; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 6px; padding: 10px; max-height: 160px;
+    overflow-y: auto; white-space: pre-wrap; line-height: 1.5;
+  }
+  .detail-field-pre.expandable { max-height: 80px; }
+
+  .expand-link {
+    font-size: 11px; color: var(--indigo-600); font-weight: 600;
+    cursor: pointer; text-decoration: none; margin-top: 3px; display: block;
+  }
+  .expand-link:hover { text-decoration: underline; }
+
+  .detail-footer {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--slate-50);
+  }
+  .raw-json-link {
+    font-size: 11.5px; color: var(--indigo-600); font-weight: 600;
+    text-decoration: none; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .raw-json-link:hover { text-decoration: underline; }
+
+  .detail-placeholder {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; padding: 32px 20px; text-align: center;
+    color: var(--slate-400);
+  }
+
+  /* State toggle */
+  .state-toggle { display: flex; gap: 8px; margin-bottom: 0; }
+  .state-toggle-btn {
+    padding: 4px 12px; border-radius: 20px;
+    font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200);
+    background: white; color: var(--slate-600);
+    cursor: pointer; transition: all 0.12s;
+  }
+  .state-toggle-btn.selected {
+    border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700);
+  }
+
+  /* Raw JSON modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9000;
+  }
+  .modal-box {
+    background: white; border-radius: 10px; width: 600px; max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .modal-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .modal-head-title { font-size: 13px; font-weight: 700; color: var(--slate-800); }
+  .modal-close {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: var(--slate-100); color: var(--slate-600);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 300; line-height: 1;
+  }
+  .modal-close:hover { background: var(--slate-200); }
+  .modal-body {
+    padding: 16px; overflow-y: auto; flex: 1;
+  }
+  .modal-json {
+    font-size: 11.5px; font-family: monospace; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 6px; padding: 12px; white-space: pre; line-height: 1.6;
+    overflow-x: auto;
+  }
+</style>
+</head>
+<body style="overflow:hidden;">
+<div class="app-shell" style="height:100vh;overflow:hidden;">
+
+  <!-- Sidebar — hidden in embedded mode -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>
+    (function() {
+      var p = new URLSearchParams(window.location.search);
+      if (p.get('embedded') !== '1') {
+        renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'run-trace.html');
+      }
+    })();
+  </script>
+
+  <div class="main" style="overflow:hidden;">
+    <!-- Replaces strip — hidden in embedded mode -->
+    <div id="replaces-strip" style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+      Replaces 2 pages:
+      <a href="before-run-trace.html" style="color:var(--indigo-600);font-weight:600;">AgentRunLivePage + RunTraceViewerPage (before)</a>
+    </div>
+    <div class="topbar" id="run-trace-topbar">
+      <div class="topbar-breadcrumb">
+        <span>Agents</span>
+        <span style="color:#cbd5e1">/</span>
+        <span>Outreach Agent</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Run details</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <!-- State mode toggle for demo only -->
+      <div class="state-toggle" style="margin-right:8px;">
+        <button class="state-toggle-btn selected" onclick="setMode('live',this)">Live run</button>
+        <button class="state-toggle-btn" onclick="setMode('historical',this)">Historical</button>
+      </div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="run-layout">
+
+      <!-- Chain sidebar -->
+      <div class="chain-sidebar">
+        <div class="chain-header">Run chain</div>
+        <div class="chain-run active">
+          <div class="chain-run-name">Outreach Agent</div>
+          <div class="chain-run-meta">
+            <span class="status-dot dot-blue dot-pulse"></span>
+            <span>running</span>
+            <span style="margin-left:auto;">+5m 32s</span>
+          </div>
+        </div>
+        <div class="chain-run" style="padding-left:24px;border-left:2px solid var(--slate-100);">
+          <div class="chain-run-name" style="font-size:12px;">CRM sub-agent</div>
+          <div class="chain-run-meta" style="font-size:10.5px;">
+            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
+            <span>completed</span>
+            <span style="margin-left:auto;">+1m 12s</span>
+          </div>
+        </div>
+        <div style="padding:6px 14px;font-size:10.5px;color:var(--slate-400);">Parent run</div>
+        <div class="chain-run">
+          <div class="chain-run-name">CRM Orchestrator</div>
+          <div class="chain-run-meta">
+            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
+            <span>completed</span>
+            <span style="margin-left:auto;">Apr 28</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main run area -->
+      <div class="run-main">
+
+        <!-- Run header -->
+        <div class="run-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <div class="run-title">Outreach Agent: Run #4827</div>
+              <div class="live-indicator" id="live-badge">
+                <div class="live-dot"></div>
+                Live
+              </div>
+              <div id="hist-badge" style="display:none;" class="badge badge-green">Completed</div>
+            </div>
+            <div class="run-meta-items">
+              <span class="run-meta-item">Started: May 6 2026, 2:14:32 PM &middot; 5 minutes ago</span>
+            </div>
+            <div class="run-meta-items" style="margin-top:2px;">
+              <span class="run-meta-item" id="duration-label">Duration: 5 min 32 sec</span>
+              <span class="run-meta-item" style="color:var(--slate-300);">|</span>
+              <span class="run-meta-item">Status: <span id="status-text" style="font-weight:600;color:var(--indigo-600);">Running</span></span>
+              <span class="run-meta-item" style="color:var(--slate-300);">|</span>
+              <span class="run-meta-item" id="event-count-label">47 events</span>
+            </div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <div class="tabs" style="border-bottom:none;margin-bottom:0;">
+              <button class="tab-btn active" onclick="switchRunTab('trace',this)" style="padding:5px 12px;font-size:12.5px;">Trace</button>
+              <button class="tab-btn" onclick="switchRunTab('graph',this)" style="padding:5px 12px;font-size:12.5px;">Delegation graph</button>
+            </div>
+            <button class="btn btn-sm btn-danger" id="cancel-btn">Cancel run</button>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;overflow:hidden;" id="run-content">
+          <!-- Trace tab -->
+          <div id="tab-trace" style="display:flex;flex:1;overflow:hidden;">
+            <div class="trace-scroll" id="event-list">
+
+              <!-- Event 1: RUN_START -->
+              <div class="event-row" onclick="selectEvent(1)">
+                <div class="event-seq">1</div>
+                <div class="event-type-dot dot-meta"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-run_start">run_start</div>
+                  <div class="event-content">Run initiated. Input: "Draft follow-up email to Sarah Chen at Acme Corp..."</div>
+                </div>
+                <div class="event-time">+0s</div>
+              </div>
+
+              <!-- Event 2: LLM_CALL -->
+              <div class="event-row" onclick="selectEvent(2)">
+                <div class="event-seq">2</div>
+                <div class="event-type-dot dot-llm"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-llm_call">llm_call</div>
+                  <div class="event-content">Planning step: identified 3 required actions, retrieve memory, draft email, confirm send.</div>
+                </div>
+                <div class="event-time">+3s</div>
+              </div>
+
+              <!-- Event 3: TOOL_CALL -->
+              <div class="event-row" onclick="selectEvent(3)">
+                <div class="event-seq">3</div>
+                <div class="event-type-dot dot-tool"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-tool_call">tool_call: search_crm</div>
+                  <div class="event-content">Querying HubSpot for "Sarah Chen" at "Acme Corp"</div>
+                </div>
+                <div class="event-time">+4s</div>
+              </div>
+
+              <!-- Event 4: TOOL_RESULT -->
+              <div class="event-row" onclick="selectEvent(4)">
+                <div class="event-seq">4</div>
+                <div class="event-type-dot dot-result"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-tool_result">tool_result: search_crm</div>
+                  <div class="event-content">Found 1 contact. Sarah Chen, VP Operations, sarah.chen@acmecorp.com. Last contacted Apr 28.</div>
+                </div>
+                <div class="event-time">+6s</div>
+              </div>
+
+              <!-- Event 5: LLM_CALL (second) -->
+              <div class="event-row" onclick="selectEvent(5)">
+                <div class="event-seq">5</div>
+                <div class="event-type-dot dot-llm"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-llm_call">llm_call</div>
+                  <div class="event-content">Drafting email body using retrieved contact data and memory blocks (brand voice, key stakeholders, competitor context)</div>
+                </div>
+                <div class="event-time">+9s</div>
+              </div>
+
+              <!-- Event 6: TOOL_CALL (send_email) -->
+              <div class="event-row" onclick="selectEvent(6)">
+                <div class="event-seq">6</div>
+                <div class="event-type-dot dot-tool"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-tool_call">tool_call: send_email</div>
+                  <div class="event-content">Preparing email to sarah.chen@acmecorp.com, subject "Following up on our Q2 proposal"</div>
+                </div>
+                <div class="event-time">+18s</div>
+              </div>
+
+              <!-- Event 7: HITL_GATE -->
+              <div class="event-row" onclick="selectEvent(7)" style="border-left:3px solid var(--amber-400);">
+                <div class="event-seq">7</div>
+                <div class="event-type-dot dot-meta" style="background:var(--amber-400);"></div>
+                <div class="event-body">
+                  <div class="event-type-label" style="color:var(--amber-600);">hitl_gate: send_email</div>
+                  <div class="event-content">Awaiting operator approval before sending. Email queued in review.</div>
+                </div>
+                <div class="event-time">+19s</div>
+              </div>
+
+              <!-- Event 8: DELEGATION -->
+              <div class="event-row" onclick="selectEvent(8)" style="border-left:3px solid var(--violet-400);">
+                <div class="event-seq">8</div>
+                <div class="event-type-dot dot-deleg"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-delegation">delegation: crm-enrichment-agent</div>
+                  <div class="event-content">Delegating contact enrichment to CRM sub-agent. Awaiting completion.</div>
+                </div>
+                <div class="event-time">+28s</div>
+              </div>
+
+              <!-- Events 9-47 placeholder rows -->
+              <div style="padding:10px 16px;font-size:11.5px;color:var(--slate-400);font-style:italic;border-bottom:1px solid var(--slate-100);">
+                Events 9 through 46 (38 additional events) ...
+              </div>
+
+              <div class="event-row" id="streaming-event" onclick="selectEvent(47)" style="opacity:0.6;">
+                <div class="event-seq">47</div>
+                <div class="event-type-dot dot-llm" style="animation:pulse-dot 1s infinite;"></div>
+                <div class="event-body">
+                  <div class="event-type-label etype-llm_call">llm_call</div>
+                  <div class="event-content" style="color:var(--slate-400);">Streaming...</div>
+                </div>
+                <div class="event-time">+5m 32s</div>
+              </div>
+
+            </div>
+
+            <!-- Event detail panel -->
+            <div class="event-detail" id="event-detail-panel">
+              <div class="event-detail-header">
+                <div class="event-detail-title" id="detail-title">Select an event</div>
+                <div class="event-detail-sub" id="detail-sub">Click any row in the timeline to inspect it</div>
+              </div>
+              <div class="event-detail-body" id="detail-body">
+                <div class="detail-placeholder">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.25;margin-bottom:10px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <div style="font-size:13px;font-weight:600;color:var(--slate-500);margin-bottom:4px;">No event selected</div>
+                  <div style="font-size:12px;color:var(--slate-400);">Click any event row to see its details here.</div>
+                </div>
+              </div>
+              <div class="detail-footer" id="detail-footer" style="display:none;">
+                <a class="raw-json-link" onclick="openRawJson()" href="#">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                  View raw event JSON
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Delegation graph tab -->
+          <div id="tab-graph" style="display:none;flex:1;align-items:center;justify-content:center;flex-direction:column;background:var(--slate-50);">
+            <div style="text-align:center;color:var(--slate-400);">
+              <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="opacity:0.3;margin:0 auto 12px;display:block;"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+              <div style="font-size:14px;font-weight:600;color:var(--slate-600);margin-bottom:6px;">Delegation graph</div>
+              <div style="font-size:13px;max-width:280px;margin:0 auto;">Visual representation of agent delegation chain. This run has 1 sub-agent invocation.</div>
+            </div>
+          </div>
+
+        </div><!-- /run-content -->
+
+      </div><!-- /run-main -->
+    </div><!-- /run-layout -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- Raw JSON modal -->
+<div class="modal-backdrop" id="raw-json-modal" style="display:none;" onclick="closeRawJson(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <span class="modal-head-title" id="raw-modal-title">Raw event JSON</span>
+      <button class="modal-close" onclick="closeRawJson()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre class="modal-json" id="raw-json-content"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Mock event data (8 representative events covering all 6 types) ──────────
+const EVENTS = {
+  1: {
+    type: 'RUN_START',
+    label: 'run_start',
+    seq: 1, total: 47,
+    timeIntoRun: '+0s',
+    iso: '2026-05-06T09:00:00.000Z',
+    fields: {
+      trigger_source: 'manual',
+      started_by: 'sarah@agency.io',
+      agent_version: 'outreach-agent@v2.4.1',
+      parent_run: null,
+      input_payload: '{\n  "task": "Draft follow-up email to Sarah Chen at Acme Corp",\n  "context": "Last meeting was Apr 28, discussed Q2 renewal proposal",\n  "tone": "warm-professional"\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ123",\n  "type": "run_start",\n  "seq": 1,\n  "run_id": "run_01HXYZ000",\n  "agent_id": "agt_outreach_v2",\n  "triggered_by": "manual",\n  "started_by_user_id": "usr_sarah",\n  "agent_version": "outreach-agent@v2.4.1",\n  "parent_run_id": null,\n  "input": {\n    "task": "Draft follow-up email to Sarah Chen at Acme Corp",\n    "context": "Last meeting was Apr 28, discussed Q2 renewal proposal",\n    "tone": "warm-professional"\n  },\n  "timestamp": "2026-05-06T09:00:00.000Z"\n}'
+  },
+  2: {
+    type: 'LLM_CALL',
+    label: 'llm_call',
+    seq: 2, total: 47,
+    timeIntoRun: '+3s',
+    iso: '2026-05-06T09:00:03.421Z',
+    fields: {
+      model: 'claude-sonnet-4-6',
+      prompt_tokens: 1843,
+      completion_tokens: 312,
+      latency_ms: 1840,
+      cost_usd: 0.0038,
+      temperature: 1.0,
+      prompt_preview: 'System: You are Outreach Agent. You help draft and send follow-up emails...\n\nUser: Draft follow-up email to Sarah Chen at Acme Corp. Last meeting was Apr 28...',
+      response_preview: 'I\'ll help you draft a follow-up email to Sarah Chen. Let me first retrieve her contact details and any relevant notes from the CRM before drafting.\n\nPlanned steps:\n1. Search CRM for Sarah Chen at Acme Corp\n2. Review meeting notes from Apr 28\n3. Draft personalised email\n4. Await your approval before sending'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ124",\n  "type": "llm_call",\n  "seq": 2,\n  "model": "claude-sonnet-4-6",\n  "prompt_tokens": 1843,\n  "completion_tokens": 312,\n  "total_tokens": 2155,\n  "latency_ms": 1840,\n  "cost_usd": 0.0038,\n  "temperature": 1.0,\n  "stop_reason": "end_turn",\n  "timestamp": "2026-05-06T09:00:03.421Z"\n}'
+  },
+  3: {
+    type: 'TOOL_CALL',
+    label: 'tool_call',
+    seq: 3, total: 47,
+    timeIntoRun: '+4s',
+    iso: '2026-05-06T09:00:04.109Z',
+    fields: {
+      tool_name: 'search_crm',
+      called_by_step: 2,
+      expected_result_type: 'contact_list',
+      input_args: '{\n  "query": "Sarah Chen Acme Corp",\n  "limit": 5,\n  "fields": [\n    "email",\n    "title",\n    "last_contact",\n    "deal_stage"\n  ]\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ125",\n  "type": "tool_call",\n  "seq": 3,\n  "tool_name": "search_crm",\n  "called_by_step": 2,\n  "expected_result_type": "contact_list",\n  "input": {\n    "query": "Sarah Chen Acme Corp",\n    "limit": 5,\n    "fields": ["email","title","last_contact","deal_stage"]\n  },\n  "timestamp": "2026-05-06T09:00:04.109Z"\n}'
+  },
+  4: {
+    type: 'TOOL_RESULT',
+    label: 'tool_result',
+    seq: 4, total: 47,
+    timeIntoRun: '+6s',
+    iso: '2026-05-06T09:00:06.884Z',
+    fields: {
+      tool_name: 'search_crm',
+      status: 'success',
+      latency_ms: 775,
+      result_payload: '{\n  "total": 1,\n  "contacts": [\n    {\n      "id": "hs_contact_4821",\n      "name": "Sarah Chen",\n      "title": "VP Operations",\n      "email": "sarah.chen@acmecorp.com",\n      "last_contact": "2026-04-28",\n      "deal_stage": "proposal_sent"\n    }\n  ]\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ126",\n  "type": "tool_result",\n  "seq": 4,\n  "tool_name": "search_crm",\n  "status": "success",\n  "latency_ms": 775,\n  "result": {\n    "total": 1,\n    "contacts": [{\n      "id": "hs_contact_4821",\n      "name": "Sarah Chen",\n      "title": "VP Operations",\n      "email": "sarah.chen@acmecorp.com",\n      "last_contact": "2026-04-28",\n      "deal_stage": "proposal_sent"\n    }]\n  },\n  "timestamp": "2026-05-06T09:00:06.884Z"\n}'
+  },
+  5: {
+    type: 'LLM_CALL',
+    label: 'llm_call',
+    seq: 5, total: 47,
+    timeIntoRun: '+9s',
+    iso: '2026-05-06T09:00:09.002Z',
+    fields: {
+      model: 'claude-sonnet-4-6',
+      prompt_tokens: 3102,
+      completion_tokens: 618,
+      latency_ms: 3140,
+      cost_usd: 0.0087,
+      temperature: 0.7,
+      prompt_preview: 'System: You are Outreach Agent...\n\n[CRM Result]: Sarah Chen, VP Operations, email sarah.chen@acmecorp.com...\n[Memory Block "brand-voice"]: We use warm, direct language...\n[Memory Block "key-stakeholders"]: Sarah is the renewal decision-maker...',
+      response_preview: 'Subject: Following up on our Q2 proposal\n\nHi Sarah,\n\nI hope this note finds you well. I wanted to follow up on the proposal we shared last week...'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ127",\n  "type": "llm_call",\n  "seq": 5,\n  "model": "claude-sonnet-4-6",\n  "prompt_tokens": 3102,\n  "completion_tokens": 618,\n  "total_tokens": 3720,\n  "latency_ms": 3140,\n  "cost_usd": 0.0087,\n  "temperature": 0.7,\n  "stop_reason": "end_turn",\n  "timestamp": "2026-05-06T09:00:09.002Z"\n}'
+  },
+  6: {
+    type: 'TOOL_CALL',
+    label: 'tool_call',
+    seq: 6, total: 47,
+    timeIntoRun: '+18s',
+    iso: '2026-05-06T09:00:18.451Z',
+    fields: {
+      tool_name: 'send_email',
+      called_by_step: 5,
+      expected_result_type: 'email_send_receipt',
+      input_args: '{\n  "to": "sarah.chen@acmecorp.com",\n  "subject": "Following up on our Q2 proposal",\n  "body": "Hi Sarah,\\n\\nI hope this note finds you well...",\n  "from_alias": "Alex at Agency",\n  "track_opens": true\n}'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ128",\n  "type": "tool_call",\n  "seq": 6,\n  "tool_name": "send_email",\n  "called_by_step": 5,\n  "expected_result_type": "email_send_receipt",\n  "input": {\n    "to": "sarah.chen@acmecorp.com",\n    "subject": "Following up on our Q2 proposal",\n    "body": "Hi Sarah, I hope this note...",\n    "from_alias": "Alex at Agency",\n    "track_opens": true\n  },\n  "timestamp": "2026-05-06T09:00:18.451Z"\n}'
+  },
+  7: {
+    type: 'HITL_GATE',
+    label: 'hitl_gate',
+    seq: 7, total: 47,
+    timeIntoRun: '+19s',
+    iso: '2026-05-06T09:00:19.210Z',
+    fields: {
+      gate_type: 'approval',
+      awaiting: 'send_email tool execution',
+      who_can_approve: 'Role: operator / admin (this org)',
+      queued_at: '2026-05-06T09:00:19Z',
+      inbox_link: '#'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ129",\n  "type": "hitl_gate",\n  "seq": 7,\n  "gate_type": "approval",\n  "blocked_tool": "send_email",\n  "queued_at": "2026-05-06T09:00:19.210Z",\n  "allowed_roles": ["operator","admin"],\n  "inbox_item_id": "inbox_01HXYZ_gate",\n  "timestamp": "2026-05-06T09:00:19.210Z"\n}'
+  },
+  8: {
+    type: 'DELEGATION',
+    label: 'delegation',
+    seq: 8, total: 47,
+    timeIntoRun: '+28s',
+    iso: '2026-05-06T09:00:28.003Z',
+    fields: {
+      sub_agent_name: 'CRM Enrichment Agent',
+      sub_run_link: '#',
+      delegation_reason: 'Contact enrichment required: phone, LinkedIn, and latest interaction history. Delegating to specialist sub-agent.',
+      status: 'completed'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ130",\n  "type": "delegation",\n  "seq": 8,\n  "sub_agent_id": "agt_crm_enrichment",\n  "sub_agent_name": "CRM Enrichment Agent",\n  "sub_run_id": "run_01HXYZ_sub",\n  "delegation_reason": "Contact enrichment required",\n  "status": "completed",\n  "timestamp": "2026-05-06T09:00:28.003Z"\n}'
+  },
+  47: {
+    type: 'LLM_CALL',
+    label: 'llm_call',
+    seq: 47, total: 47,
+    timeIntoRun: '+5m 32s',
+    iso: '2026-05-06T09:00:42.000Z',
+    fields: {
+      model: 'claude-sonnet-4-6',
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      latency_ms: null,
+      cost_usd: null,
+      temperature: 1.0,
+      prompt_preview: '...',
+      response_preview: 'Streaming...'
+    },
+    raw: '{\n  "event_id": "evt_01HXYZ_streaming",\n  "type": "llm_call",\n  "seq": 47,\n  "status": "streaming",\n  "timestamp": "2026-05-06T09:00:42.000Z"\n}'
+  }
+};
+
+// ── Build detail panel HTML per event type ───────────────────────────────────
+function buildDetailHtml(evt) {
+  const f = evt.fields;
+  let html = '';
+
+  if (evt.type === 'RUN_START') {
+    html += field('Trigger source', badge(f.trigger_source, f.trigger_source === 'manual' ? 'slate' : 'indigo'));
+    html += field('Started by', f.started_by);
+    html += field('Agent version', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.agent_version}</code>`);
+    html += field('Parent run', f.parent_run ? `<a href="#" style="color:var(--indigo-600);font-size:12.5px;">View parent run</a>` : '<span style="color:var(--slate-400);">None (root run)</span>');
+    html += fieldPre('Input payload', f.input_payload);
+  }
+
+  if (evt.type === 'LLM_CALL') {
+    const isStreaming = f.latency_ms === null;
+    html += field('Model', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.model}</code>`);
+    if (!isStreaming) {
+      html += field('Tokens', `<span style="color:var(--slate-700);">${f.prompt_tokens.toLocaleString()} prompt + ${f.completion_tokens.toLocaleString()} completion = ${(f.prompt_tokens + f.completion_tokens).toLocaleString()} total</span>`);
+      html += field('Latency', `${f.latency_ms.toLocaleString()} ms`);
+      html += field('Cost', `$${f.cost_usd.toFixed(4)}`);
+      if (f.temperature !== 1.0) {
+        html += field('Temperature', f.temperature.toString());
+      }
+      html += fieldPreExpandable('Prompt preview', f.prompt_preview);
+      html += fieldPreExpandable('Response preview', f.response_preview);
+    } else {
+      html += field('Status', badge('streaming', 'indigo'));
+    }
+  }
+
+  if (evt.type === 'TOOL_CALL') {
+    html += field('Tool name', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.tool_name}</code>`);
+    html += field('Called by step', `Step #${f.called_by_step}`);
+    html += field('Expected result type', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.expected_result_type}</code>`);
+    html += fieldPre('Input args', f.input_args);
+  }
+
+  if (evt.type === 'TOOL_RESULT') {
+    html += field('Tool name', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.tool_name}</code>`);
+    html += field('Status', badge(f.status, f.status === 'success' ? 'green' : 'red'));
+    html += field('Latency', `${f.latency_ms.toLocaleString()} ms`);
+    if (f.error_stack) {
+      html += fieldPre('Error stack', f.error_stack);
+    } else {
+      html += fieldPreExpandable('Result payload', f.result_payload);
+    }
+  }
+
+  if (evt.type === 'HITL_GATE') {
+    html += field('Gate type', badge(f.gate_type, 'amber'));
+    html += field('Awaiting', f.awaiting);
+    html += field('Who can approve', f.who_can_approve);
+    html += field('Queued at', f.queued_at);
+    html += field('Inbox item', `<a href="${f.inbox_link}" style="color:var(--indigo-600);font-size:12.5px;">Open in Inbox</a>`);
+  }
+
+  if (evt.type === 'DELEGATION') {
+    html += field('Sub-agent', f.sub_agent_name);
+    html += field('Status', badge(f.status, f.status === 'completed' ? 'green' : 'amber'));
+    html += field('Sub-run', `<a href="${f.sub_run_link}" style="color:var(--indigo-600);font-size:12.5px;">View sub-run trace</a>`);
+    html += fieldPre('Delegation reason', f.delegation_reason);
+  }
+
+  return html;
+}
+
+function field(label, valueHtml) {
+  return `<div class="detail-field"><div class="detail-field-label">${label}</div><div class="detail-field-value">${valueHtml}</div></div>`;
+}
+
+function fieldPre(label, text) {
+  return `<div class="detail-field"><div class="detail-field-label">${label}</div><div class="detail-field-pre">${escHtml(text)}</div></div>`;
+}
+
+function fieldPreExpandable(label, text) {
+  const id = 'expand_' + Math.random().toString(36).slice(2);
+  return `<div class="detail-field">
+    <div class="detail-field-label">${label}</div>
+    <div class="detail-field-pre expandable" id="${id}">${escHtml(text)}</div>
+    <a class="expand-link" onclick="toggleExpand('${id}',this);return false;" href="#">Show more</a>
+  </div>`;
+}
+
+function badge(text, color) {
+  return `<span class="badge badge-${color}" style="font-size:10.5px;">${text}</span>`;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+function toggleExpand(id, link) {
+  const el = document.getElementById(id);
+  if (el.style.maxHeight === 'none' || el.style.maxHeight === '') {
+    el.style.maxHeight = '80px';
+    link.textContent = 'Show more';
+  } else {
+    el.style.maxHeight = 'none';
+    link.textContent = 'Show less';
+  }
+}
+
+// ── Timestamp formatting helpers ─────────────────────────────────────────────
+function formatAbsTimestamp(iso) {
+  // Format ISO to "2:15:14 PM, May 6 2026"
+  const d = new Date(iso);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  return `${h}:${mm}:${ss} ${ampm}, ${months[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
+}
+
+function timeAgoFromIso(iso) {
+  // Prototype anchor: run started at 2:14:32 PM May 6 2026, viewed "now" ~5 min 32s later
+  const runStartMs = new Date('2026-05-06T14:14:32.000Z').getTime();
+  const viewNowMs = runStartMs + (5 * 60 + 32) * 1000;
+  const diff = Math.round((viewNowMs - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff} seconds ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)} minutes ago`;
+  return `${Math.floor(diff/3600)} hours ago`;
+}
+
+// ── selectEvent: updates the right panel ────────────────────────────────────
+let currentEventIdx = null;
+
+function selectEvent(n) {
+  // Highlight selected row
+  document.querySelectorAll('.event-row').forEach(r => r.classList.remove('selected'));
+  const rows = document.querySelectorAll('.event-row');
+  // Map event number to DOM row index
+  const rowMap = { 1:0, 2:1, 3:2, 4:3, 5:4, 6:5, 7:6, 8:7, 47:9 };
+  if (rowMap[n] !== undefined) {
+    rows[rowMap[n]].classList.add('selected');
+  }
+
+  const evt = EVENTS[n];
+  if (!evt) return;
+  currentEventIdx = n;
+
+  const typeLabels = {
+    RUN_START: 'run_start',
+    LLM_CALL: 'llm_call',
+    TOOL_CALL: 'tool_call',
+    TOOL_RESULT: 'tool_result',
+    HITL_GATE: 'hitl_gate',
+    DELEGATION: 'delegation'
+  };
+
+  // Three-line timestamp in header
+  const absTime = formatAbsTimestamp(evt.iso);
+  const agoTime = timeAgoFromIso(evt.iso);
+
+  document.getElementById('detail-title').textContent = `Event #${evt.seq} of ${evt.total} · ${typeLabels[evt.type] || evt.label}`;
+  document.getElementById('detail-sub').innerHTML =
+    `<div style="font-size:13px;font-weight:600;color:var(--slate-900);margin:4px 0 2px;">${absTime}</div>` +
+    `<div style="font-size:11px;color:var(--slate-500);">${evt.timeIntoRun} into run &middot; ${agoTime}</div>`;
+  document.getElementById('detail-body').innerHTML = buildDetailHtml(evt);
+  document.getElementById('detail-footer').style.display = '';
+}
+
+// ── Raw JSON modal ────────────────────────────────────────────────────────────
+function openRawJson() {
+  if (currentEventIdx === null) return;
+  const evt = EVENTS[currentEventIdx];
+  document.getElementById('raw-modal-title').textContent = `Raw event JSON (event #${evt.seq})`;
+  document.getElementById('raw-json-content').textContent = evt.raw;
+  document.getElementById('raw-json-modal').style.display = 'flex';
+}
+
+function closeRawJson(e) {
+  if (!e || e.target === document.getElementById('raw-json-modal')) {
+    document.getElementById('raw-json-modal').style.display = 'none';
+  }
+}
+
+// ── Mode switcher ─────────────────────────────────────────────────────────────
+function setMode(mode, btn) {
+  document.querySelectorAll('.state-toggle-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  if (mode === 'live') {
+    document.getElementById('live-badge').style.display = 'inline-flex';
+    document.getElementById('hist-badge').style.display = 'none';
+    document.getElementById('cancel-btn').style.display = '';
+    document.getElementById('streaming-event').style.display = 'flex';
+    document.getElementById('duration-label').textContent = 'Duration: 5 min 32 sec';
+    document.getElementById('status-text').textContent = 'Running';
+    document.getElementById('status-text').style.color = 'var(--indigo-600)';
+    document.getElementById('event-count-label').textContent = '47 events';
+  } else {
+    document.getElementById('live-badge').style.display = 'none';
+    document.getElementById('hist-badge').style.display = 'inline-flex';
+    document.getElementById('cancel-btn').style.display = 'none';
+    document.getElementById('streaming-event').style.display = 'none';
+    document.getElementById('duration-label').textContent = 'Duration: 1m 14s';
+    document.getElementById('status-text').textContent = 'Completed';
+    document.getElementById('status-text').style.color = 'var(--emerald-600)';
+    document.getElementById('event-count-label').textContent = '52 events';
+  }
+}
+
+// Init: set status-text for live mode on load
+(function() {
+  document.getElementById('status-text').textContent = 'Running';
+  document.getElementById('status-text').style.color = 'var(--indigo-600)';
+})();
+
+function switchRunTab(id, btn) {
+  document.querySelectorAll('.tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-trace').style.display = id === 'trace' ? 'flex' : 'none';
+  document.getElementById('tab-graph').style.display = id === 'graph' ? 'flex' : 'none';
+}
+
+/* ── Embedded mode ─────────────────────────────────── */
+(function applyEmbeddedMode() {
+  var params = new URLSearchParams(window.location.search);
+  var isEmbedded = params.get('embedded') === '1';
+  if (!isEmbedded) return;
+
+  /* Hide sidebar */
+  var sidebar = document.getElementById('sidebar-mount');
+  if (sidebar) sidebar.style.display = 'none';
+
+  /* Hide replaces strip */
+  var strip = document.getElementById('replaces-strip');
+  if (strip) strip.style.display = 'none';
+
+  /* Hide topbar */
+  var topbar = document.getElementById('run-trace-topbar');
+  if (topbar) topbar.style.display = 'none';
+
+  /* Adjust run-layout height since topbar is gone */
+  var runLayout = document.querySelector('.run-layout');
+  if (runLayout) runLayout.style.height = '100vh';
+})();
+</script>
+</body>
+</html>

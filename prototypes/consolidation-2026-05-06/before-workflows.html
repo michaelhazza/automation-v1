@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before | Workflows (Current State)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.before-header {
+  background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px;
+  padding: 12px 18px; margin-bottom: 24px;
+}
+.before-header h2 { font-size: 14px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
+.before-header p { font-size: 12.5px; color: #78350f; line-height: 1.55; }
+
+.page-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.page-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.page-card-head {
+  background: var(--slate-800); color: white;
+  padding: 10px 16px;
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.page-card-route { font-family: monospace; font-size: 10.5px; color: rgba(255,255,255,0.5); }
+.page-card-body { padding: 16px; }
+
+.sim-h1 { font-size: 17px; font-weight: 800; color: var(--slate-800); margin-bottom: 4px; }
+.sim-sub { font-size: 11.5px; color: var(--slate-500); margin-bottom: 12px; }
+
+.sim-template-card {
+  background: var(--slate-50); border: 1px solid var(--slate-200);
+  border-radius: 8px; padding: 10px; margin-bottom: 8px;
+}
+.sim-template-name { font-size: 12.5px; font-weight: 700; color: var(--slate-800); margin-bottom: 3px; }
+.sim-template-desc { font-size: 11px; color: var(--slate-500); line-height: 1.4; margin-bottom: 8px; }
+.sim-btn { display: inline-block; padding: 4px 10px; font-size: 10.5px; font-weight: 600; border-radius: 5px; cursor: default; }
+.sim-btn-primary { background: var(--indigo-600); color: white; }
+
+.studio-layout {
+  display: grid; grid-template-columns: 120px 1fr 140px; gap: 6px; height: 160px;
+}
+.studio-pane {
+  background: var(--slate-50); border: 1px solid var(--slate-200);
+  border-radius: 6px; padding: 8px;
+  font-size: 10.5px; color: var(--slate-500);
+  overflow: hidden;
+}
+.studio-pane-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 6px; }
+.studio-session { padding: 4px 6px; border-radius: 4px; background: var(--indigo-50); font-size: 10.5px; color: var(--indigo-700); margin-bottom: 4px; }
+
+.run-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-600); }
+.run-row:last-child { border-bottom: none; }
+
+.note-box {
+  background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 6px;
+  padding: 10px 12px; margin-top: 10px; font-size: 11.5px; color: var(--slate-500); line-height: 1.55;
+}
+
+.disposition-note {
+  background: var(--emerald-50); border: 1px solid #a7f3d0; border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 12.5px; color: var(--emerald-700); line-height: 1.55;
+}
+.disposition-note strong { font-weight: 700; }
+</style>
+</head>
+<body>
+<div style="padding: 32px 40px; max-width: 1280px; margin: 0 auto;">
+
+  <div style="margin-bottom: 20px;">
+    <a href="workflows.html" style="font-size:12px;font-weight:600;color:#4f46e5;text-decoration:none;">&rarr; View after (workflows.html)</a>
+  </div>
+
+  <div class="before-header">
+    <h2>Current state, Workflows (2 pages, one access-controlled)</h2>
+    <p>Workflows is a separate primitive from Automations. WorkflowsLibraryPage is the operator-facing template browser and run-launcher. WorkflowStudioPage is a system-admin authoring tool. WorkflowRunDetailPage (subaccount sub-directory) shows individual run status. All three are currently navigable by any authenticated user if they know the URL.</p>
+  </div>
+
+  <div class="page-grid">
+
+    <!-- WorkflowsLibraryPage -->
+    <div class="page-card">
+      <div class="page-card-head">
+        WorkflowsLibraryPage
+        <span class="page-card-route">/workflows</span>
+      </div>
+      <div class="page-card-body">
+        <div class="sim-h1">Workflows</div>
+        <div class="sim-sub">Browse and start workflow templates</div>
+
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:6px;">System templates</div>
+        <div class="sim-template-card">
+          <div class="sim-template-name">Lead Nurture Flow</div>
+          <div class="sim-template-desc">Research prospect, draft outreach, schedule follow-up</div>
+          <span class="sim-btn sim-btn-primary">Start run</span>
+        </div>
+        <div class="sim-template-card">
+          <div class="sim-template-name">Client Onboarding</div>
+          <div class="sim-template-desc">Intake, provision workspace, send welcome sequence</div>
+          <span class="sim-btn sim-btn-primary">Start run</span>
+        </div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin:8px 0 6px;">Org templates</div>
+        <div class="sim-template-card" style="opacity:0.6;">
+          <div class="sim-template-name">No org templates yet</div>
+          <div class="sim-template-desc">Fork a system template to create your own</div>
+        </div>
+
+        <div class="note-box">Launch modal: select subaccount + provide JSON input. Phase 1 -- no visual stepper, no live WebSocket updates in list view.</div>
+      </div>
+    </div>
+
+    <!-- WorkflowStudioPage (system admin) -->
+    <div class="page-card">
+      <div class="page-card-head" style="background:var(--red-700);">
+        WorkflowStudioPage
+        <span class="page-card-route">/system/workflows/studio</span>
+      </div>
+      <div class="page-card-body">
+        <div class="sim-h1">Workflow Studio</div>
+        <div class="sim-sub" style="color:var(--red-600);font-weight:600;">System admin only</div>
+
+        <div class="studio-layout">
+          <div class="studio-pane">
+            <div class="studio-pane-title">Sessions</div>
+            <div class="studio-session">Session 1 - LeadNurture</div>
+            <div class="studio-session" style="background:transparent;color:var(--slate-500);">Session 2</div>
+          </div>
+          <div class="studio-pane">
+            <div class="studio-pane-title">Chat + tool output</div>
+            <div style="font-size:10px;color:var(--slate-400);font-style:italic;">Author workflow YAML by chat or paste...</div>
+            <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap;">
+              <span style="padding:2px 6px;background:var(--indigo-50);color:var(--indigo-600);border-radius:3px;font-size:9.5px;font-weight:600;">Validate</span>
+              <span style="padding:2px 6px;background:var(--emerald-50);color:var(--emerald-600);border-radius:3px;font-size:9.5px;font-weight:600;">Simulate</span>
+              <span style="padding:2px 6px;background:var(--amber-50);color:var(--amber-600);border-radius:3px;font-size:9.5px;font-weight:600;">Estimate</span>
+              <span style="padding:2px 6px;background:var(--slate-100);color:var(--slate-600);border-radius:3px;font-size:9.5px;font-weight:600;">Save + PR</span>
+            </div>
+          </div>
+          <div class="studio-pane">
+            <div class="studio-pane-title">Candidate file</div>
+            <div style="font-size:9px;color:var(--slate-400);font-family:monospace;line-height:1.4;">name: LeadNurture<br>version: 1<br>steps:<br>  - id: research<br>    type: agent_run<br>    ...</div>
+          </div>
+        </div>
+
+        <div class="note-box">Three-pane editor: sessions sidebar, chat + tool results center, candidate YAML file right. Validate / Simulate / Estimate / Save+PR tool buttons. Chat agent integration deferred to Phase 1.5.</div>
+      </div>
+    </div>
+
+    <!-- WorkflowRunDetailPage -->
+    <div class="page-card">
+      <div class="page-card-head">
+        WorkflowRunDetailPage
+        <span class="page-card-route">/workflows/runs/:runId</span>
+      </div>
+      <div class="page-card-body">
+        <div class="sim-h1">Run detail</div>
+        <div class="sim-sub">Lead Nurture Flow - Acme Corp</div>
+
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <span class="badge badge-green">Completed</span>
+          <span style="font-size:11px;color:var(--slate-500);">Started 2h ago</span>
+        </div>
+
+        <div class="run-row">
+          <span class="status-dot dot-green"></span>
+          <span style="flex:1;">research</span>
+          <span style="font-size:10.5px;color:var(--slate-400);">done · 4m</span>
+        </div>
+        <div class="run-row">
+          <span class="status-dot dot-green"></span>
+          <span style="flex:1;">draft_outreach</span>
+          <span style="font-size:10.5px;color:var(--slate-400);">done · 2m</span>
+        </div>
+        <div class="run-row">
+          <span class="status-dot dot-green"></span>
+          <span style="flex:1;">send_email</span>
+          <span style="font-size:10.5px;color:var(--slate-400);">done · 30s</span>
+        </div>
+
+        <div class="note-box">Phase 1 run detail -- step list with status. No visual stepper. Phase 1.5 will add timeline visualization.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="disposition-note">
+    <strong>Disposition for consolidation:</strong> Workflows remain a SEPARATE primitive from Automations. WorkflowsLibraryPage stays as a nav item. WorkflowRunDetailPage stays as a sub-screen. WorkflowStudioPage moves to system-admin only (server enforces this already; just needs nav item removed for non-system users). No merging into automations.html.
+  </div>
+
+</div>
+</body>
+</html>

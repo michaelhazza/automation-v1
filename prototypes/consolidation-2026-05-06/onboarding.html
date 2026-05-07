@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onboarding | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Full-screen onboarding (no sidebar) */
+body { margin: 0; padding: 0; background: #f4f6fb; }
+.onb-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.onb-topbar {
+  width: 100%;
+  height: 52px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.onb-logo-mark {
+  display: flex; align-items: center; gap: 8px;
+}
+.onb-logo-icon {
+  width: 26px; height: 26px;
+  background: linear-gradient(135deg, var(--indigo-500), var(--violet-500));
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+}
+.onb-logo-text { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+
+.onb-body {
+  flex: 1;
+  width: 100%;
+  max-width: 640px;
+  padding: 48px 20px;
+}
+
+/* Step indicator */
+.step-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 40px;
+  gap: 0;
+}
+.step-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  flex: 1;
+}
+.step-circle {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  transition: all 0.2s;
+}
+.step-done     { background: var(--indigo-600); color: white; }
+.step-active   { background: var(--indigo-600); color: white; box-shadow: 0 0 0 3px #c7d2fe; }
+.step-pending  { background: var(--slate-200); color: var(--slate-500); }
+.step-label    { font-size: 10.5px; font-weight: 500; color: var(--slate-500); white-space: nowrap; }
+.step-label.active { color: var(--indigo-600); font-weight: 700; }
+.step-connector {
+  flex: 1; height: 2px; background: var(--slate-200);
+  margin-bottom: 18px; /* aligns with circles */
+  max-width: 60px;
+}
+.step-connector.done { background: var(--indigo-500); }
+
+/* Card */
+.onb-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px 36px;
+  box-shadow: var(--shadow-md);
+}
+.onb-step-eyebrow {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--indigo-500); margin-bottom: 8px;
+}
+.onb-heading {
+  font-size: 24px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.onb-sub {
+  font-size: 14px; color: var(--slate-500); line-height: 1.6; margin-bottom: 24px;
+}
+
+.onb-divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+/* State outcome boxes */
+.state-outcome {
+  background: var(--emerald-50); border: 1px solid #a7f3d0;
+  border-radius: 8px; padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 16px;
+}
+.state-outcome-icon {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: var(--emerald-500);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.state-outcome-text { font-size: 12.5px; color: var(--emerald-700); line-height: 1.5; }
+.state-outcome-text strong { font-weight: 700; }
+
+/* Integration option cards */
+.integration-option {
+  border: 2px solid var(--slate-200); border-radius: 10px; padding: 14px 16px;
+  cursor: pointer; transition: all 0.12s;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 10px;
+}
+.integration-option:hover { border-color: var(--indigo-300); background: var(--indigo-50); }
+.integration-option.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+.int-icon {
+  width: 40px; height: 40px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+}
+.int-body { flex: 1; }
+.int-name { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+.int-desc { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+.int-check {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--indigo-600);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Agent picker */
+.agent-template-card {
+  border: 2px solid var(--slate-200); border-radius: 10px; padding: 14px 16px;
+  cursor: pointer; transition: all 0.12s; margin-bottom: 10px;
+}
+.agent-template-card:hover { border-color: var(--indigo-300); }
+.agent-template-card.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+.at-name { font-size: 13.5px; font-weight: 700; color: var(--slate-900); margin-bottom: 4px; }
+.at-desc { font-size: 12px; color: var(--slate-500); line-height: 1.45; }
+.at-skills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.at-skill { font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--slate-100); color: var(--slate-500); }
+
+/* Footer */
+.onb-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 28px;
+}
+.onb-skip { font-size: 12.5px; color: var(--slate-400); cursor: pointer; text-decoration: underline; }
+.onb-skip:hover { color: var(--slate-600); }
+
+/* Step tabs to switch between step views */
+.step-nav {
+  display: flex; gap: 6px; margin-bottom: 24px; flex-wrap: wrap;
+  background: var(--slate-50); padding: 6px; border-radius: 8px;
+}
+.step-nav-btn {
+  padding: 5px 12px; font-size: 12px; font-weight: 600;
+  border-radius: 5px; border: none; cursor: pointer;
+  background: transparent; color: var(--slate-500); transition: all 0.1s;
+}
+.step-nav-btn.active { background: white; color: var(--indigo-600); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.step-nav-btn:hover:not(.active) { color: var(--slate-700); }
+.step-panel { display: none; }
+.step-panel.active { display: block; }
+
+/* Multi-select checkbox cards */
+.mcheck-card {
+  border: 2px solid var(--slate-200); border-radius: 10px; padding: 14px 16px;
+  cursor: pointer; transition: all 0.12s;
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-bottom: 10px; position: relative;
+}
+.mcheck-card:hover { border-color: var(--indigo-300); background: var(--indigo-50); }
+.mcheck-card.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+.mcheck-card input[type=checkbox] {
+  position: absolute; top: 14px; right: 14px;
+  width: 17px; height: 17px; accent-color: var(--indigo-600); cursor: pointer;
+}
+.mcheck-icon {
+  width: 40px; height: 40px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; color: white; flex-shrink: 0;
+}
+.mcheck-body { flex: 1; min-width: 0; padding-right: 24px; }
+.mcheck-name { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+.mcheck-desc { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+
+/* Live summary panel */
+.live-summary {
+  background: var(--emerald-50); border: 1px solid #a7f3d0;
+  border-radius: 10px; padding: 14px 16px; margin-top: 16px;
+}
+.live-summary-title { font-size: 12px; font-weight: 700; color: var(--emerald-700); margin-bottom: 8px; }
+.live-summary-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--emerald-800); margin-bottom: 4px;
+}
+.live-summary-row:last-child { margin-bottom: 0; }
+
+/* Connection mini-flow */
+.connect-flow {
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-top: 16px;
+}
+.connect-flow-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px; border-bottom: 1px solid var(--slate-100); font-size: 13px;
+}
+.connect-flow-row:last-child { border-bottom: none; }
+.flow-status-icon {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px;
+}
+.flow-done { background: var(--emerald-100); color: var(--emerald-700); }
+.flow-spinning { background: var(--indigo-100); color: var(--indigo-600); }
+.flow-waiting { background: var(--slate-100); color: var(--slate-400); }
+.flow-name { font-weight: 600; flex: 1; }
+.flow-status-text { font-size: 12px; color: var(--slate-500); }
+.flow-skip-btn {
+  font-size: 11px; color: var(--slate-400); cursor: pointer; text-decoration: underline; flex-shrink: 0;
+}
+
+/* Agent hierarchy preview */
+.agent-hierarchy {
+  background: var(--slate-50); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px; margin-top: 16px;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--slate-700); line-height: 1.8;
+}
+.agent-hierarchy-title { font-size: 12px; font-weight: 700; color: var(--slate-600); margin-bottom: 8px; font-family: inherit; }
+.h-auto { color: var(--slate-400); font-weight: 400; }
+.h-selected { color: var(--indigo-700); font-weight: 600; }
+
+/* Background sync footer banner */
+.bg-sync-banner {
+  margin-top: 12px; padding: 9px 14px;
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+  font-size: 12px; color: #92400e; display: flex; align-items: center; gap: 8px;
+}
+.bg-sync-progress {
+  display: inline-block; width: 120px; height: 5px; background: var(--slate-200);
+  border-radius: 3px; vertical-align: middle; margin: 0 4px; overflow: hidden;
+}
+.bg-sync-bar {
+  height: 100%; background: var(--amber-500); border-radius: 3px;
+  width: 47%; transition: width 0.3s;
+}
+</style>
+</head>
+<body>
+
+<div class="onb-shell">
+
+  <!-- Top bar -->
+  <div class="onb-topbar">
+    <div class="onb-logo-mark">
+      <div class="onb-logo-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      </div>
+      <span class="onb-logo-text">Automation OS</span>
+    </div>
+    <span style="font-size:12px;color:var(--slate-400);">New account setup</span>
+  </div>
+
+  <div class="onb-body">
+
+    <!-- Step navigation (demo only) -->
+    <div class="step-nav">
+      <button class="step-nav-btn active" onclick="showStep(this,'s1')">Step 1: Welcome</button>
+      <button class="step-nav-btn" onclick="showStep(this,'s2')">Step 2: Pick integrations</button>
+      <button class="step-nav-btn" onclick="showStep(this,'s2b')">Step 2b: Connecting...</button>
+      <button class="step-nav-btn" onclick="showStep(this,'s3')">Step 3: Choose agents</button>
+      <button class="step-nav-btn" onclick="showStep(this,'s4')">Step 4: Pick automations</button>
+      <button class="step-nav-btn" onclick="showStep(this,'s5')">Step 5: Done</button>
+    </div>
+
+    <!-- Step 1: Welcome -->
+    <div class="step-panel active" id="s1">
+      <!-- Step bar: step 1 active -->
+      <div class="step-bar">
+        <div class="step-item">
+          <div class="step-circle step-active">1</div>
+          <div class="step-label active">Welcome</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-item">
+          <div class="step-circle step-pending">2</div>
+          <div class="step-label">Integration</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-item">
+          <div class="step-circle step-pending">3</div>
+          <div class="step-label">First agent</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-item">
+          <div class="step-circle step-pending">4</div>
+          <div class="step-label">First automation</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-item">
+          <div class="step-circle step-pending">5</div>
+          <div class="step-label">Done</div>
+        </div>
+      </div>
+
+      <div class="onb-card">
+        <div class="onb-step-eyebrow">Step 1 of 4</div>
+        <div class="onb-heading">Welcome to Automation OS</div>
+        <div class="onb-sub">We'll set you up in 4 quick steps. Each step leaves you in a working state -- you can stop any time and come back.</div>
+
+        <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:10px;padding:20px 24px;">
+          <div style="font-size:13px;font-weight:700;color:var(--slate-700);margin-bottom:14px;">What you'll set up:</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:24px;height:24px;border-radius:50%;background:var(--indigo-600);color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">1</div>
+              <div style="font-size:13.5px;color:var(--slate-700);">Connect your first integration (email, CRM, or other)</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:24px;height:24px;border-radius:50%;background:var(--slate-200);color:var(--slate-500);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">2</div>
+              <div style="font-size:13.5px;color:var(--slate-500);">Create your first agent from a template</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:24px;height:24px;border-radius:50%;background:var(--slate-200);color:var(--slate-500);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">3</div>
+              <div style="font-size:13.5px;color:var(--slate-500);">Set up your first automation (optional)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="onb-footer">
+          <span></span>
+          <button class="btn btn-primary" onclick="document.querySelector('.step-nav-btn:nth-child(2)').click()">
+            Get started
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Pick integrations (multi-select) -->
+    <div class="step-panel" id="s2">
+      <div class="step-bar">
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Welcome</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-active">2</div><div class="step-label active">Integrations</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">3</div><div class="step-label">Agents</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">4</div><div class="step-label">Automations</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">5</div><div class="step-label">Done</div></div>
+      </div>
+
+      <div class="onb-card">
+        <div class="onb-step-eyebrow">Step 2 of 4</div>
+        <div class="onb-heading">Pick the integrations you'll use</div>
+        <div class="onb-sub">Tick the ones you need. We'll set them up one at a time after this step.</div>
+
+        <!-- Checkbox cards -->
+        <div id="s2-cards">
+          <label class="mcheck-card selected" id="s2-card-gmail" onclick="updateS2Summary()">
+            <div class="mcheck-icon" style="background:#ea4335;">G</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Gmail / Google Workspace</div>
+              <div class="mcheck-desc">Read, send, and organise email. Used by most outreach and reporting agents.</div>
+            </div>
+            <input type="checkbox" checked onchange="updateS2Summary()">
+          </label>
+
+          <label class="mcheck-card selected" id="s2-card-hubspot" onclick="updateS2Summary()">
+            <div class="mcheck-icon" style="background:#ff7a59;">H</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">HubSpot CRM</div>
+              <div class="mcheck-desc">Read and update contacts, deals, and pipeline data.</div>
+            </div>
+            <input type="checkbox" checked onchange="updateS2Summary()">
+          </label>
+
+          <label class="mcheck-card" id="s2-card-slack" onclick="updateS2Summary()">
+            <div class="mcheck-icon" style="background:#4a154b;">S</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Slack</div>
+              <div class="mcheck-desc">Post updates, receive notifications, and get approvals in your team channels.</div>
+            </div>
+            <input type="checkbox" onchange="updateS2Summary()">
+          </label>
+
+          <label class="mcheck-card" id="s2-card-stripe" onclick="updateS2Summary()">
+            <div class="mcheck-icon" style="background:#635bff;">St</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Stripe</div>
+              <div class="mcheck-desc">Read payment and customer data from Stripe.</div>
+            </div>
+            <input type="checkbox" onchange="updateS2Summary()">
+          </label>
+
+          <label class="mcheck-card" id="s2-card-gdrive" onclick="updateS2Summary()">
+            <div class="mcheck-icon" style="background:#0f9d58;">D</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Google Drive</div>
+              <div class="mcheck-desc">Read and write files and documents in Drive.</div>
+            </div>
+            <input type="checkbox" onchange="updateS2Summary()">
+          </label>
+        </div>
+
+        <!-- Live summary panel -->
+        <div class="live-summary" id="s2-summary">
+          <div class="live-summary-title">After connecting these 2 integrations, your org will have:</div>
+          <div class="live-summary-row">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            <span id="s2-sum-connections">2 active connections</span>
+          </div>
+          <div class="live-summary-row">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            <span id="s2-sum-skills">Agents with Email and CRM skills enabled</span>
+          </div>
+          <div class="live-summary-row">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            <span id="s2-sum-pulls">Background data pull from 2 sources</span>
+          </div>
+        </div>
+
+        <div class="onb-footer">
+          <span class="onb-skip" onclick="document.querySelector('.step-nav-btn:nth-child(3)').click()">Skip for now</span>
+          <button class="btn btn-primary" id="s2-continue-btn" onclick="document.querySelector('.step-nav-btn:nth-child(3)').click()">
+            Connect (2) integrations
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2b: Connecting flow -->
+    <div class="step-panel" id="s2b">
+      <div class="step-bar">
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Welcome</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-active">2</div><div class="step-label active">Integrations</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">3</div><div class="step-label">Agents</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">4</div><div class="step-label">Automations</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">5</div><div class="step-label">Done</div></div>
+      </div>
+
+      <div class="onb-card">
+        <div class="onb-step-eyebrow">Step 2 of 4 -- Connecting</div>
+        <div class="onb-heading" style="font-size:20px;">Setting up your integrations</div>
+        <div class="onb-sub">Sign in to each service below. Skip any you want to do later.</div>
+
+        <div class="connect-flow">
+          <div class="connect-flow-row">
+            <div class="flow-status-icon flow-done">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="mcheck-icon" style="width:28px;height:28px;font-size:11px;background:#ea4335;">G</div>
+            <div class="flow-name">Gmail / Google Workspace</div>
+            <div class="flow-status-text" style="color:var(--emerald-600);font-weight:500;">Connected -- pulling 30 days of email</div>
+          </div>
+          <div class="connect-flow-row">
+            <div class="flow-status-icon flow-spinning" style="animation:spin 0.9s linear infinite;">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+            </div>
+            <div class="mcheck-icon" style="width:28px;height:28px;font-size:11px;background:#ff7a59;">H</div>
+            <div class="flow-name">HubSpot CRM</div>
+            <div class="flow-status-text">Connecting...</div>
+            <span class="flow-skip-btn">Skip</span>
+          </div>
+          <div class="connect-flow-row" style="opacity:0.45;">
+            <div class="flow-status-icon flow-waiting">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div class="mcheck-icon" style="width:28px;height:28px;font-size:11px;background:#4a154b;">S</div>
+            <div class="flow-name">Slack</div>
+            <div class="flow-status-text">Waiting</div>
+            <span class="flow-skip-btn">Skip</span>
+          </div>
+        </div>
+
+        <!-- Background pull banner -->
+        <div class="bg-sync-banner" style="margin-top:16px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+          Background sync: HubSpot CRM
+          <span class="bg-sync-progress"><span class="bg-sync-bar"></span></span>
+          47% -- 1,234 of 2,640 contacts
+        </div>
+
+        <div class="onb-footer">
+          <span></span>
+          <button class="btn btn-primary" onclick="document.querySelector('.step-nav-btn:nth-child(4)').click()">
+            Continue
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Choose worker agents (multi-select) -->
+    <div class="step-panel" id="s3">
+      <div class="step-bar">
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Welcome</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Integrations</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-active">3</div><div class="step-label active">Agents</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">4</div><div class="step-label">Automations</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">5</div><div class="step-label">Done</div></div>
+      </div>
+
+      <div class="onb-card">
+        <div class="onb-step-eyebrow">Step 3 of 4</div>
+        <div class="onb-heading">Choose your worker agents</div>
+        <div class="onb-sub">Pick the agents that'll do customer-facing work. Manager and orchestrator agents will be set up automatically based on your picks.</div>
+
+        <!-- Worker agent checkbox cards -->
+        <div id="s3-cards">
+          <label class="mcheck-card selected" onclick="updateS3Hierarchy()">
+            <div class="mcheck-icon" style="width:36px;height:36px;background:var(--emerald-500);font-size:12px;">OA</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Outreach Agent</div>
+              <div class="mcheck-desc">Composes personalised outreach emails and manages follow-up sequences.</div>
+              <div class="at-skills" style="margin-top:5px;"><span class="at-skill">Send email</span><span class="at-skill">Read email</span><span class="at-skill">Update CRM</span></div>
+            </div>
+            <input type="checkbox" checked onchange="updateS3Hierarchy()">
+          </label>
+
+          <label class="mcheck-card selected" onclick="updateS3Hierarchy()">
+            <div class="mcheck-icon" style="width:36px;height:36px;background:var(--indigo-500);font-size:12px;">LQ</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Lead Qualifier</div>
+              <div class="mcheck-desc">Qualifies inbound leads against your ICP and routes to the right pipeline stage.</div>
+              <div class="at-skills" style="margin-top:5px;"><span class="at-skill">Read CRM</span><span class="at-skill">Score lead</span><span class="at-skill">Update tasks</span></div>
+            </div>
+            <input type="checkbox" checked onchange="updateS3Hierarchy()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS3Hierarchy()">
+            <div class="mcheck-icon" style="width:36px;height:36px;background:var(--sky-500);font-size:11px;">AHA</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Account Health Agent</div>
+              <div class="mcheck-desc">Monitors customer accounts and flags churn risk signals.</div>
+              <div class="at-skills" style="margin-top:5px;"><span class="at-skill">Read CRM</span><span class="at-skill">Analyse data</span><span class="at-skill">Alert</span></div>
+            </div>
+            <input type="checkbox" onchange="updateS3Hierarchy()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS3Hierarchy()">
+            <div class="mcheck-icon" style="width:36px;height:36px;background:var(--violet-500);font-size:11px;">DS</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Demo Scheduler</div>
+              <div class="mcheck-desc">Schedules demos and sends calendar invites based on availability.</div>
+              <div class="at-skills" style="margin-top:5px;"><span class="at-skill">Calendar</span><span class="at-skill">Send email</span></div>
+            </div>
+            <input type="checkbox" onchange="updateS3Hierarchy()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS3Hierarchy()">
+            <div class="mcheck-icon" style="width:36px;height:36px;background:#f59e0b;font-size:11px;">ST</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">Support Triage</div>
+              <div class="mcheck-desc">Classifies incoming support requests and routes them to the right queue.</div>
+              <div class="at-skills" style="margin-top:5px;"><span class="at-skill">Read inbox</span><span class="at-skill">Classify</span><span class="at-skill">Create ticket</span></div>
+            </div>
+            <input type="checkbox" onchange="updateS3Hierarchy()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS3Hierarchy()">
+            <div class="mcheck-icon" style="width:36px;height:36px;background:#14b8a6;font-size:11px;">CS</div>
+            <div class="mcheck-body">
+              <div class="mcheck-name">CRM Sync Agent</div>
+              <div class="mcheck-desc">Keeps CRM records up to date from email, calls, and other activity.</div>
+              <div class="at-skills" style="margin-top:5px;"><span class="at-skill">Read email</span><span class="at-skill">Update CRM</span></div>
+            </div>
+            <input type="checkbox" onchange="updateS3Hierarchy()">
+          </label>
+        </div>
+
+        <!-- Live hierarchy preview -->
+        <div class="agent-hierarchy" id="s3-hierarchy">
+          <div class="agent-hierarchy-title">Your team will be:</div>
+          <div id="s3-hierarchy-content">
+            Orchestrator <span class="h-auto">(auto-included)</span><br>
+            &nbsp;&nbsp;&nbsp;Outreach Manager <span class="h-auto">(auto-included)</span><br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Outreach Agent <span class="h-selected">selected</span><br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Lead Qualifier <span class="h-selected">selected</span>
+          </div>
+        </div>
+
+        <!-- Background sync banner (shows from step 3 on) -->
+        <div class="bg-sync-banner">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+          Background sync: HubSpot CRM
+          <span class="bg-sync-progress"><span class="bg-sync-bar"></span></span>
+          47% -- 1,234 of 2,640 contacts
+        </div>
+
+        <div class="onb-footer">
+          <span class="onb-skip" onclick="document.querySelector('.step-nav-btn:nth-child(5)').click()">Skip for now</span>
+          <button class="btn btn-primary" id="s3-continue-btn" onclick="document.querySelector('.step-nav-btn:nth-child(5)').click()">
+            Set up (2) agents
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Pick automations (multi-select) -->
+    <div class="step-panel" id="s4">
+      <div class="step-bar">
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Welcome</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Integrations</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Agents</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-active">4</div><div class="step-label active">Automations</div></div>
+        <div class="step-connector"></div>
+        <div class="step-item"><div class="step-circle step-pending">5</div><div class="step-label">Done</div></div>
+      </div>
+
+      <div class="onb-card">
+        <div class="onb-step-eyebrow">Step 4 of 4 (optional)</div>
+        <div class="onb-heading">Pick the automations to enable</div>
+        <div class="onb-sub">Tick all that apply. We'll set them up after onboarding.</div>
+
+        <div id="s4-cards">
+          <label class="mcheck-card selected" onclick="updateS4Count()">
+            <div class="mcheck-body">
+              <div class="mcheck-name">Lead notification</div>
+              <div class="mcheck-desc">Alert the team in Slack when a new high-priority lead is qualified.</div>
+              <span class="badge badge-indigo" style="font-size:10px;margin-top:5px;display:inline-block;">Webhook trigger</span>
+            </div>
+            <input type="checkbox" checked onchange="updateS4Count()">
+          </label>
+
+          <label class="mcheck-card selected" onclick="updateS4Count()">
+            <div class="mcheck-body">
+              <div class="mcheck-name">Daily report</div>
+              <div class="mcheck-desc">Send a pipeline summary email every morning at 8am.</div>
+              <span class="badge badge-violet" style="font-size:10px;margin-top:5px;display:inline-block;">Schedule trigger</span>
+            </div>
+            <input type="checkbox" checked onchange="updateS4Count()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS4Count()">
+            <div class="mcheck-body">
+              <div class="mcheck-name">Weekly digest</div>
+              <div class="mcheck-desc">Weekly summary of activity and performance delivered every Monday.</div>
+              <span class="badge badge-violet" style="font-size:10px;margin-top:5px;display:inline-block;">Schedule trigger</span>
+            </div>
+            <input type="checkbox" onchange="updateS4Count()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS4Count()">
+            <div class="mcheck-body">
+              <div class="mcheck-name">Approval reminder</div>
+              <div class="mcheck-desc">Nudge the approver when a task has been waiting more than 24 hours.</div>
+              <span class="badge badge-amber" style="font-size:10px;margin-top:5px;display:inline-block;">HITL trigger</span>
+            </div>
+            <input type="checkbox" onchange="updateS4Count()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS4Count()">
+            <div class="mcheck-body">
+              <div class="mcheck-name">Failed run alert</div>
+              <div class="mcheck-desc">Notify you immediately if any agent run fails with an error.</div>
+              <span class="badge badge-red" style="font-size:10px;margin-top:5px;display:inline-block;">Error trigger</span>
+            </div>
+            <input type="checkbox" onchange="updateS4Count()">
+          </label>
+
+          <label class="mcheck-card" onclick="updateS4Count()">
+            <div class="mcheck-body">
+              <div class="mcheck-name">New customer welcome</div>
+              <div class="mcheck-desc">Send a personalised welcome sequence when a new customer is added to CRM.</div>
+              <span class="badge badge-indigo" style="font-size:10px;margin-top:5px;display:inline-block;">Webhook trigger</span>
+            </div>
+            <input type="checkbox" onchange="updateS4Count()">
+          </label>
+        </div>
+
+        <!-- Background sync banner -->
+        <div class="bg-sync-banner" style="margin-top:16px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+          Background sync: Gmail (247 emails pulled), HubSpot CRM
+          <span class="bg-sync-progress"><span class="bg-sync-bar" style="width:91%;"></span></span>
+          91% complete
+        </div>
+
+        <div class="onb-footer">
+          <span class="onb-skip" onclick="document.querySelector('.step-nav-btn:nth-child(6)').click()">Skip for now</span>
+          <button class="btn btn-primary" id="s4-continue-btn" onclick="document.querySelector('.step-nav-btn:nth-child(6)').click()">
+            Set up (2) automations
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5: Done (multi-select summary) -->
+    <div class="step-panel" id="s5">
+      <div class="step-bar">
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Welcome</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Integrations</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Agents</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Automations</div></div>
+        <div class="step-connector done"></div>
+        <div class="step-item"><div class="step-circle step-done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div class="step-label">Done</div></div>
+      </div>
+
+      <div class="onb-card" style="text-align:center;">
+        <div style="width:56px;height:56px;background:linear-gradient(135deg,var(--indigo-500),var(--violet-500));border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div style="font-size:24px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;margin-bottom:8px;">You're set up</div>
+        <div style="font-size:14px;color:var(--slate-500);line-height:1.6;max-width:420px;margin:0 auto 24px;">Your org is set up with 3 integrations, 2 agents, and 2 automations. Head to your Home screen to see today's activity.</div>
+
+        <!-- State summary -->
+        <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:16px;text-align:left;">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--slate-400);margin-bottom:12px;">Your org is now in this state</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate-700);">
+              <span class="status-dot dot-green"></span>
+              <strong>3 connections:</strong> Gmail, HubSpot CRM, Slack (all verified)
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate-700);">
+              <span class="status-dot dot-green"></span>
+              <strong>2 agents:</strong> Outreach Agent, Lead Qualifier (with Outreach Manager auto-included)
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate-700);">
+              <span class="status-dot dot-green"></span>
+              <strong>2 automations:</strong> Lead notification, Daily report
+            </div>
+          </div>
+        </div>
+
+        <!-- Background pull status -->
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:20px;text-align:left;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#92400e;margin-bottom:8px;">Background syncs in progress</div>
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#78350f;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              3 connections established
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+              2 background pulls in progress (Gmail 100%, HubSpot CRM 91%)
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              1 complete: Slack (247 messages pulled)
+            </div>
+          </div>
+        </div>
+
+        <a href="home.html" class="btn btn-primary" style="display:inline-flex;margin:0 auto;">
+          Go to dashboard
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function showStep(btn, stepId) {
+  document.querySelectorAll('.step-nav-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(stepId).classList.add('active');
+}
+
+/* Step 2: multi-select integration summary */
+const s2SkillMap = {
+  's2-card-gmail': { skills: ['Email'], sources: 1 },
+  's2-card-hubspot': { skills: ['CRM'], sources: 1 },
+  's2-card-slack': { skills: ['Messaging'], sources: 0 },
+  's2-card-stripe': { skills: ['Payments'], sources: 0 },
+  's2-card-gdrive': { skills: ['Drive'], sources: 1 }
+};
+function updateS2Summary() {
+  setTimeout(() => {
+    const cards = document.querySelectorAll('#s2-cards .mcheck-card');
+    let count = 0; let allSkills = []; let pulls = 0;
+    cards.forEach(card => {
+      const cb = card.querySelector('input[type=checkbox]');
+      if (cb && cb.checked) {
+        card.classList.add('selected');
+        count++;
+        const key = card.id;
+        if (s2SkillMap[key]) { allSkills.push(...s2SkillMap[key].skills); pulls += s2SkillMap[key].sources; }
+      } else if (cb) {
+        card.classList.remove('selected');
+      }
+    });
+    const btn = document.getElementById('s2-continue-btn');
+    if (count === 0) {
+      btn.textContent = 'Continue';
+      document.getElementById('s2-summary').style.display = 'none';
+    } else {
+      btn.innerHTML = 'Connect (' + count + ') integration' + (count === 1 ? '' : 's') + ' <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+      document.getElementById('s2-summary').style.display = 'block';
+      document.querySelector('.live-summary-title').textContent = 'After connecting these ' + count + ' integration' + (count === 1 ? '' : 's') + ', your org will have:';
+      document.getElementById('s2-sum-connections').textContent = count + ' active connection' + (count === 1 ? '' : 's');
+      const uniqueSkills = [...new Set(allSkills)];
+      document.getElementById('s2-sum-skills').textContent = 'Agents with ' + (uniqueSkills.length ? uniqueSkills.join(', ') + ' skill' + (uniqueSkills.length === 1 ? '' : 's') : 'skills') + ' enabled';
+      document.getElementById('s2-sum-pulls').textContent = 'Background data pull from ' + pulls + ' source' + (pulls === 1 ? '' : 's');
+    }
+  }, 10);
+}
+
+/* Step 3: agent hierarchy preview */
+function updateS3Hierarchy() {
+  setTimeout(() => {
+    const cards = document.querySelectorAll('#s3-cards .mcheck-card');
+    let selected = [];
+    cards.forEach(card => {
+      const cb = card.querySelector('input[type=checkbox]');
+      if (cb && cb.checked) {
+        card.classList.add('selected');
+        selected.push(card.querySelector('.mcheck-name').textContent);
+      } else if (cb) {
+        card.classList.remove('selected');
+      }
+    });
+    const btn = document.getElementById('s3-continue-btn');
+    const n = selected.length;
+    btn.innerHTML = 'Set up (' + n + ') agent' + (n === 1 ? '' : 's') + ' <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+
+    const outreachWorkers = selected.filter(s => ['Outreach Agent','Lead Qualifier','Demo Scheduler'].includes(s));
+    const csmWorkers = selected.filter(s => ['Account Health Agent','CRM Sync Agent'].includes(s));
+    const supportWorkers = selected.filter(s => ['Support Triage'].includes(s));
+
+    let lines = ['Orchestrator <span class="h-auto">(auto-included)</span>'];
+    if (outreachWorkers.length) {
+      lines.push('&nbsp;&nbsp;&nbsp;Outreach Manager <span class="h-auto">(auto-included)</span>');
+      outreachWorkers.forEach(w => lines.push('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + w + ' <span class="h-selected">selected</span>'));
+    }
+    if (csmWorkers.length) {
+      lines.push('&nbsp;&nbsp;&nbsp;CSM Manager <span class="h-auto">(auto-included)</span>');
+      csmWorkers.forEach(w => lines.push('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + w + ' <span class="h-selected">selected</span>'));
+    }
+    if (supportWorkers.length) {
+      lines.push('&nbsp;&nbsp;&nbsp;Support Manager <span class="h-auto">(auto-included)</span>');
+      supportWorkers.forEach(w => lines.push('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + w + ' <span class="h-selected">selected</span>'));
+    }
+    if (!n) lines = ['Orchestrator <span class="h-auto">(auto-included)</span>', '<span style="color:var(--slate-400);font-size:11px;">No workers selected yet</span>'];
+    document.getElementById('s3-hierarchy-content').innerHTML = lines.join('<br>');
+  }, 10);
+}
+
+/* Step 4: automation count update */
+function updateS4Count() {
+  setTimeout(() => {
+    const cards = document.querySelectorAll('#s4-cards .mcheck-card');
+    let count = 0;
+    cards.forEach(card => {
+      const cb = card.querySelector('input[type=checkbox]');
+      if (cb && cb.checked) { card.classList.add('selected'); count++; }
+      else if (cb) { card.classList.remove('selected'); }
+    });
+    const btn = document.getElementById('s4-continue-btn');
+    if (count === 0) {
+      btn.innerHTML = 'Continue <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+    } else {
+      btn.innerHTML = 'Set up (' + count + ') automation' + (count === 1 ? '' : 's') + ' <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+    }
+  }, 10);
+}
+</script>
+</body>
+</html>

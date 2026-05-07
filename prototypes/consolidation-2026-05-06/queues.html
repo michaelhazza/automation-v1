@@ -1,0 +1,1761 @@
+<!DOCTYPE html>
+<!--
+  Queues — consolidated system admin surface
+  Replaces: JobQueueDashboardPage (system/job-queues) + SystemTaskQueuePage (system/task-queue)
+
+  JobQueueDashboardPage: aggregate live queue health per tier
+    Fields: active, pending, completed, failed, dlqDepth, avgDurationMs, retryRate, oldestPendingAge
+    Tiers: agent_execution / financial / maintenance / memory
+
+  SystemTaskQueuePage: per-execution forensic log
+    Fields: status, engineType, retryCount, errorDetail, queuedAt, startedAt, completedAt, payloads
+
+  Consolidated design:
+    Header: Queues / system operations / auto-refresh / manual refresh + timestamp
+    Tab 1 - Queue health: KPI strip + tier cards + per-queue table rows + queue drawer
+    Tab 2 - Execution log: filter bar + execution table + execution drawer
+
+  Round 7b-3 — 2026-05-06
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Queues | Automation OS System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Page-level overrides ── */
+  .page-body { padding: 24px 28px; }
+
+  /* ── KPI strip ── */
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .kpi-tile {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .kpi-tile-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--slate-400);
+    margin-bottom: 6px;
+  }
+  .kpi-tile-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--slate-900);
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .kpi-tile-value.red { color: var(--red-600); }
+  .kpi-tile-sub {
+    font-size: 11px;
+    color: var(--slate-400);
+    margin-top: 4px;
+  }
+
+  /* ── Tier cards ── */
+  .tier-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .tier-header {
+    padding: 11px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tier-swatch {
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .tier-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--slate-800);
+    flex: 1;
+  }
+  .tier-summary {
+    font-size: 11.5px;
+    color: var(--slate-400);
+  }
+
+  /* Per-tier table overrides -- tighter than data-table */
+  .tier-table { width: 100%; border-collapse: collapse; }
+  .tier-table thead tr { background: var(--slate-50); }
+  .tier-table th {
+    text-align: left;
+    padding: 7px 14px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--slate-400);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .tier-table tbody tr {
+    border-bottom: 1px solid var(--slate-100);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .tier-table tbody tr:last-child { border-bottom: none; }
+  .tier-table tbody tr:hover { background: var(--indigo-50); }
+  .tier-table td {
+    padding: 9px 14px;
+    font-size: 12.5px;
+    color: var(--slate-700);
+    vertical-align: middle;
+  }
+  .tier-table td.queue-name {
+    font-weight: 500;
+    color: var(--slate-800);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .tier-table td.num { font-variant-numeric: tabular-nums; }
+  .tier-table td.elevated { color: var(--amber-600); font-weight: 600; }
+  .tier-table td.critical { color: var(--red-600); font-weight: 600; }
+
+  /* ── Header row with refresh controls ── */
+  .page-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    gap: 16px;
+  }
+  .refresh-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .refresh-ts {
+    font-size: 12px;
+    color: var(--slate-400);
+    white-space: nowrap;
+  }
+
+  /* ── Execution log filter bar ── */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-sm);
+  }
+  .filter-bar .search-wrap {
+    flex: 1;
+    min-width: 200px;
+  }
+  .filter-bar .search-box { padding: 6px 10px 6px 32px; font-size: 12.5px; }
+  .filter-select {
+    padding: 6px 10px;
+    border: 1px solid var(--slate-200);
+    border-radius: 7px;
+    font-size: 12.5px;
+    color: var(--slate-700);
+    background: var(--slate-50);
+    cursor: pointer;
+    outline: none;
+    font-family: inherit;
+  }
+  .filter-select:focus { border-color: var(--indigo-400); }
+  .live-tail-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 7px;
+    font-size: 12.5px;
+    font-weight: 500;
+    border: 1px solid var(--slate-200);
+    background: white;
+    color: var(--slate-600);
+    cursor: pointer;
+    transition: all 0.12s;
+    font-family: inherit;
+  }
+  .live-tail-btn.active {
+    background: var(--emerald-50);
+    border-color: #6ee7b7;
+    color: var(--emerald-600);
+  }
+  .live-pulse {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--emerald-500);
+  }
+  .live-pulse.pulse { animation: pulse-dot 1.2s ease-in-out infinite; }
+
+  /* ── Execution table ── */
+  .exec-table { width: 100%; border-collapse: collapse; }
+  .exec-table thead tr {
+    background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-200);
+  }
+  .exec-table th {
+    text-align: left;
+    padding: 9px 12px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--slate-400);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .exec-table tbody tr {
+    border-bottom: 1px solid var(--slate-100);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .exec-table tbody tr:last-child { border-bottom: none; }
+  .exec-table tbody tr:hover { background: var(--indigo-50); }
+  .exec-table td {
+    padding: 9px 12px;
+    font-size: 12.5px;
+    color: var(--slate-700);
+    vertical-align: middle;
+  }
+  .exec-table td.process-name {
+    font-weight: 500;
+    color: var(--slate-800);
+    max-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .exec-table td.error-preview {
+    font-size: 11.5px;
+    color: var(--red-500);
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── Pagination ── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-top: 1px solid var(--slate-100);
+    background: var(--slate-50);
+    border-radius: 0 0 10px 10px;
+  }
+  .pagination-info {
+    font-size: 12.5px;
+    color: var(--slate-500);
+  }
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .page-size-select {
+    padding: 4px 8px;
+    border: 1px solid var(--slate-200);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--slate-600);
+    background: white;
+    font-family: inherit;
+  }
+
+  /* ── Drawer: 520px wide ── */
+  .drawer-lg { width: 520px; }
+
+  /* ── Drawer sub-sections ── */
+  .drawer-section {
+    margin-bottom: 18px;
+  }
+  .drawer-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--slate-400);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .drawer-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .drawer-stat {
+    background: var(--slate-50);
+    border: 1px solid var(--slate-100);
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .drawer-stat-val {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--slate-900);
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .drawer-stat-val.red { color: var(--red-600); }
+  .drawer-stat-label {
+    font-size: 10.5px;
+    color: var(--slate-400);
+    margin-top: 3px;
+  }
+
+  /* Sparkline area (SVG-based) */
+  .sparkline-area {
+    background: var(--slate-50);
+    border: 1px solid var(--slate-100);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+  }
+  .sparkline-label {
+    font-size: 11px;
+    color: var(--slate-400);
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+
+  /* Error row in drawer */
+  .error-item {
+    border: 1px solid var(--slate-100);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .error-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    background: var(--slate-50);
+    cursor: pointer;
+    gap: 8px;
+  }
+  .error-item-msg {
+    font-size: 12px;
+    color: var(--slate-700);
+    font-family: 'JetBrains Mono', monospace;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .error-item-ts {
+    font-size: 11px;
+    color: var(--slate-400);
+    white-space: nowrap;
+  }
+  .error-item-stack {
+    display: none;
+    padding: 10px 12px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--red-600);
+    background: var(--red-50);
+    border-top: 1px solid #fecaca;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+  .error-item-stack.open { display: block; }
+
+  /* DLQ job rows in drawer */
+  .dlq-row {
+    border: 1px solid var(--slate-100);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .dlq-payload-preview {
+    flex: 1;
+    font-size: 11.5px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--slate-600);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dlq-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  /* Queue config panel in drawer */
+  .config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .config-item {
+    background: var(--slate-50);
+    border: 1px solid var(--slate-100);
+    border-radius: 7px;
+    padding: 8px 10px;
+  }
+  .config-item-key {
+    font-size: 10.5px;
+    color: var(--slate-400);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .config-item-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--slate-800);
+    margin-top: 2px;
+  }
+
+  /* ── Exec drawer payloads ── */
+  .payload-accordion {
+    border: 1px solid var(--slate-100);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .payload-acc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    background: var(--slate-50);
+    cursor: pointer;
+    border: none;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+  }
+  .payload-acc-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--slate-700);
+  }
+  .payload-acc-caret {
+    font-size: 10px;
+    color: var(--slate-400);
+    transition: transform 0.15s;
+  }
+  .payload-acc-caret.open { transform: rotate(180deg); }
+  .payload-acc-body {
+    display: none;
+    padding: 10px 12px;
+    background: #0f172a;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #a5f3fc;
+    white-space: pre;
+    overflow-x: auto;
+    border-top: 1px solid var(--slate-200);
+  }
+  .payload-acc-body.open { display: block; }
+
+  /* Retry history table in exec drawer */
+  .retry-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .retry-table th {
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--slate-400);
+    background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .retry-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--slate-100);
+    color: var(--slate-700);
+    vertical-align: middle;
+  }
+  .retry-table tr:last-child td { border-bottom: none; }
+
+  /* Confirmation overlay within drawer */
+  .confirm-banner {
+    display: none;
+    background: var(--amber-50);
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .confirm-banner.open { display: block; }
+  .confirm-banner p { font-size: 12.5px; color: var(--amber-700); margin-bottom: 10px; }
+  .confirm-banner-actions { display: flex; gap: 8px; }
+
+  /* Topbar meta slot */
+  .topbar-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--slate-400);
+  }
+  .topbar-meta-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--emerald-500);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <div id="sidebar-mount"></div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>System</span>
+        <span style="color:var(--slate-300)">›</span>
+        <span class="topbar-breadcrumb-current">Queues</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-meta">
+        <div class="topbar-meta-dot"></div>
+        <span>Auto-refresh every 60s</span>
+      </div>
+    </div>
+
+    <!-- Page body -->
+    <div class="page-body">
+
+      <!-- Page header -->
+      <div class="page-header-row">
+        <div class="page-header" style="margin-bottom:0">
+          <h1>Queues</h1>
+          <p>System operations · auto-refreshes every 60s</p>
+        </div>
+        <div class="refresh-controls">
+          <span class="refresh-ts" id="refresh-ts">Last updated 12s ago</span>
+          <button class="btn btn-secondary btn-sm" onclick="triggerRefresh()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" id="tab-health-btn" onclick="switchQueueTab('health')">Queue health</button>
+        <button class="tab-btn" id="tab-execlog-btn" onclick="switchQueueTab('execlog')">Execution log</button>
+      </div>
+
+      <!-- ════════════════════ QUEUE HEALTH TAB ════════════════════ -->
+      <div id="tab-health" class="tab-panel active">
+
+        <!-- KPI strip -->
+        <div class="kpi-strip">
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Total active</div>
+            <div class="kpi-tile-value">14</div>
+            <div class="kpi-tile-sub">jobs running now</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Total pending</div>
+            <div class="kpi-tile-value">127</div>
+            <div class="kpi-tile-sub">across all queues</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">DLQ depth</div>
+            <div class="kpi-tile-value red">8</div>
+            <div class="kpi-tile-sub" style="color:var(--red-400)">jobs in dead-letter queue</div>
+          </div>
+          <div class="kpi-tile">
+            <div class="kpi-tile-label">Avg duration</div>
+            <div class="kpi-tile-value">4.2s</div>
+            <div class="kpi-tile-sub">last hour, all queues</div>
+          </div>
+        </div>
+
+        <!-- Tier: Agent execution -->
+        <div class="tier-card">
+          <div class="tier-header">
+            <div class="tier-swatch" style="background:#6366f1"></div>
+            <span class="tier-name">Agent execution</span>
+            <span class="tier-summary">3 queues · 8 active · 94 pending</span>
+          </div>
+          <table class="tier-table">
+            <thead>
+              <tr>
+                <th>Queue</th>
+                <th>Active</th>
+                <th>Pending</th>
+                <th>Completed</th>
+                <th>Failed</th>
+                <th>DLQ</th>
+                <th>Avg dur</th>
+                <th>Retry rate</th>
+                <th>Oldest pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr onclick="openQueueDrawer('agent.run')">
+                <td class="queue-name">agent.run</td>
+                <td class="num">5</td>
+                <td class="num elevated">80</td>
+                <td class="num">4,821</td>
+                <td class="num">23</td>
+                <td class="num critical">5</td>
+                <td class="num">6.1s</td>
+                <td class="num elevated">12%</td>
+                <td class="num elevated">4m 22s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('agent.delegate')">
+                <td class="queue-name">agent.delegate</td>
+                <td class="num">2</td>
+                <td class="num">11</td>
+                <td class="num">1,203</td>
+                <td class="num">4</td>
+                <td class="num">0</td>
+                <td class="num">2.4s</td>
+                <td class="num">2%</td>
+                <td class="num">18s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('agent.dispatch')">
+                <td class="queue-name">agent.dispatch</td>
+                <td class="num">1</td>
+                <td class="num">3</td>
+                <td class="num">892</td>
+                <td class="num">1</td>
+                <td class="num">0</td>
+                <td class="num">1.8s</td>
+                <td class="num">1%</td>
+                <td class="num">7s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Tier: Financial / Billing -->
+        <div class="tier-card">
+          <div class="tier-header">
+            <div class="tier-swatch" style="background:#3b82f6"></div>
+            <span class="tier-name">Financial / Billing</span>
+            <span class="tier-summary">3 queues · 3 active · 19 pending</span>
+          </div>
+          <table class="tier-table">
+            <thead>
+              <tr>
+                <th>Queue</th>
+                <th>Active</th>
+                <th>Pending</th>
+                <th>Completed</th>
+                <th>Failed</th>
+                <th>DLQ</th>
+                <th>Avg dur</th>
+                <th>Retry rate</th>
+                <th>Oldest pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr onclick="openQueueDrawer('spend.aggregate')">
+                <td class="queue-name">spend.aggregate</td>
+                <td class="num">2</td>
+                <td class="num">14</td>
+                <td class="num">2,110</td>
+                <td class="num">7</td>
+                <td class="num critical">3</td>
+                <td class="num">3.2s</td>
+                <td class="num elevated">8%</td>
+                <td class="num">52s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('spend.report')">
+                <td class="queue-name">spend.report</td>
+                <td class="num">1</td>
+                <td class="num">5</td>
+                <td class="num">634</td>
+                <td class="num">2</td>
+                <td class="num">0</td>
+                <td class="num">7.8s</td>
+                <td class="num">3%</td>
+                <td class="num">33s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('billing.invoice')">
+                <td class="queue-name">billing.invoice</td>
+                <td class="num">0</td>
+                <td class="num">0</td>
+                <td class="num">418</td>
+                <td class="num">0</td>
+                <td class="num">0</td>
+                <td class="num">12.4s</td>
+                <td class="num">0%</td>
+                <td class="num">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Tier: Maintenance -->
+        <div class="tier-card">
+          <div class="tier-header">
+            <div class="tier-swatch" style="background:#64748b"></div>
+            <span class="tier-name">Maintenance</span>
+            <span class="tier-summary">3 queues · 2 active · 7 pending</span>
+          </div>
+          <table class="tier-table">
+            <thead>
+              <tr>
+                <th>Queue</th>
+                <th>Active</th>
+                <th>Pending</th>
+                <th>Completed</th>
+                <th>Failed</th>
+                <th>DLQ</th>
+                <th>Avg dur</th>
+                <th>Retry rate</th>
+                <th>Oldest pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr onclick="openQueueDrawer('db.cleanup')">
+                <td class="queue-name">db.cleanup</td>
+                <td class="num">1</td>
+                <td class="num">4</td>
+                <td class="num">2,904</td>
+                <td class="num">1</td>
+                <td class="num">0</td>
+                <td class="num">8.9s</td>
+                <td class="num">1%</td>
+                <td class="num">2m 1s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('log.rotate')">
+                <td class="queue-name">log.rotate</td>
+                <td class="num">1</td>
+                <td class="num">2</td>
+                <td class="num">1,402</td>
+                <td class="num">0</td>
+                <td class="num">0</td>
+                <td class="num">1.2s</td>
+                <td class="num">0%</td>
+                <td class="num">44s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('audit.compact')">
+                <td class="queue-name">audit.compact</td>
+                <td class="num">0</td>
+                <td class="num">1</td>
+                <td class="num">688</td>
+                <td class="num">0</td>
+                <td class="num">0</td>
+                <td class="num">4.4s</td>
+                <td class="num">0%</td>
+                <td class="num">6m 17s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Tier: Memory enrichment -->
+        <div class="tier-card">
+          <div class="tier-header">
+            <div class="tier-swatch" style="background:#10b981"></div>
+            <span class="tier-name">Memory enrichment</span>
+            <span class="tier-summary">3 queues · 1 active · 7 pending</span>
+          </div>
+          <table class="tier-table">
+            <thead>
+              <tr>
+                <th>Queue</th>
+                <th>Active</th>
+                <th>Pending</th>
+                <th>Completed</th>
+                <th>Failed</th>
+                <th>DLQ</th>
+                <th>Avg dur</th>
+                <th>Retry rate</th>
+                <th>Oldest pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr onclick="openQueueDrawer('memory.enrich')">
+                <td class="queue-name">memory.enrich</td>
+                <td class="num">1</td>
+                <td class="num">5</td>
+                <td class="num">3,112</td>
+                <td class="num">3</td>
+                <td class="num">0</td>
+                <td class="num">2.7s</td>
+                <td class="num">2%</td>
+                <td class="num">28s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('memory.consolidate')">
+                <td class="queue-name">memory.consolidate</td>
+                <td class="num">0</td>
+                <td class="num">2</td>
+                <td class="num">1,047</td>
+                <td class="num">1</td>
+                <td class="num">0</td>
+                <td class="num">5.1s</td>
+                <td class="num">1%</td>
+                <td class="num">1m 13s</td>
+              </tr>
+              <tr onclick="openQueueDrawer('embeddings.generate')">
+                <td class="queue-name">embeddings.generate</td>
+                <td class="num">0</td>
+                <td class="num">0</td>
+                <td class="num">8,401</td>
+                <td class="num">0</td>
+                <td class="num">0</td>
+                <td class="num">0.9s</td>
+                <td class="num">0%</td>
+                <td class="num">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div><!-- /tab-health -->
+
+      <!-- ════════════════════ EXECUTION LOG TAB ════════════════════ -->
+      <div id="tab-execlog" class="tab-panel">
+
+        <!-- Filter bar -->
+        <div class="filter-bar">
+          <div class="search-wrap" style="position:relative;min-width:220px;flex:1;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="text" placeholder="Search by execution ID, error, agent name...">
+          </div>
+          <select class="filter-select" onchange="applyExecFilter()">
+            <option>All statuses</option>
+            <option>queued</option>
+            <option>running</option>
+            <option>completed</option>
+            <option selected>failed</option>
+            <option>cancelled</option>
+            <option>dlq</option>
+          </select>
+          <select class="filter-select" onchange="applyExecFilter()">
+            <option>All engines</option>
+            <option>agent</option>
+            <option>workflow</option>
+            <option>automation</option>
+            <option>scheduled</option>
+            <option>webhook</option>
+          </select>
+          <select class="filter-select" onchange="applyExecFilter()">
+            <option selected>Last 1h</option>
+            <option>Last 24h</option>
+            <option>Last 7d</option>
+          </select>
+          <button class="live-tail-btn" id="live-tail-btn" onclick="toggleLiveTail()">
+            <div class="live-pulse" id="live-pulse"></div>
+            Live tail
+          </button>
+        </div>
+
+        <!-- Table card -->
+        <div class="card">
+          <table class="exec-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Engine</th>
+                <th>Process / Agent</th>
+                <th>Organisation</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Retries</th>
+                <th>Error preview</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Row 1 -->
+              <tr onclick="openExecDrawer('exec-1')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">HubSpot sync agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">Acme Corp</td>
+                <td style="font-size:12px;color:var(--slate-500)">2m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">1.2s</td>
+                <td style="text-align:center;font-size:12px;">3</td>
+                <td class="error-preview">HubSpot API rate limit exceeded</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 2 -->
+              <tr onclick="openExecDrawer('exec-2')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-blue">automation</span></td>
+                <td class="process-name">Onboarding sequence</td>
+                <td style="font-size:12px;color:var(--slate-500)">BrightEdge Ltd</td>
+                <td style="font-size:12px;color:var(--slate-500)">4m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">0.4s</td>
+                <td style="text-align:center;font-size:12px;">1</td>
+                <td class="error-preview">OAuth token expired for google_workspace</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 3 -->
+              <tr onclick="openExecDrawer('exec-3')">
+                <td><span class="badge badge-amber"><span class="status-dot dot-amber"></span>dlq</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Invoice classifier</td>
+                <td style="font-size:12px;color:var(--slate-500)">Nexus Partners</td>
+                <td style="font-size:12px;color:var(--slate-500)">6m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">8.8s</td>
+                <td style="text-align:center;font-size:12px;">5</td>
+                <td class="error-preview">Database connection timeout after 30s</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 4 -->
+              <tr onclick="openExecDrawer('exec-4')">
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>completed</span></td>
+                <td><span class="badge badge-slate">scheduled</span></td>
+                <td class="process-name">Daily spend rollup</td>
+                <td style="font-size:12px;color:var(--slate-500)">Acme Corp</td>
+                <td style="font-size:12px;color:var(--slate-500)">9m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">3.1s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 5 -->
+              <tr onclick="openExecDrawer('exec-5')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-violet">workflow</span></td>
+                <td class="process-name">Contract approval flow</td>
+                <td style="font-size:12px;color:var(--slate-500)">Peak Ventures</td>
+                <td style="font-size:12px;color:var(--slate-500)">11m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">2.0s</td>
+                <td style="text-align:center;font-size:12px;">2</td>
+                <td class="error-preview">LLM call: max tokens exceeded (4096)</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 6 -->
+              <tr onclick="openExecDrawer('exec-6')">
+                <td><span class="badge badge-sky"><span class="status-dot dot-blue"></span>running</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Lead enrichment agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">Acme Corp</td>
+                <td style="font-size:12px;color:var(--slate-500)">13m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">-</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 7 -->
+              <tr onclick="openExecDrawer('exec-7')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-sky">webhook</span></td>
+                <td class="process-name">Stripe webhook handler</td>
+                <td style="font-size:12px;color:var(--slate-500)">BrightEdge Ltd</td>
+                <td style="font-size:12px;color:var(--slate-500)">15m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">0.1s</td>
+                <td style="text-align:center;font-size:12px;">1</td>
+                <td class="error-preview">OAuth token expired for stripe_production</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 8 -->
+              <tr onclick="openExecDrawer('exec-8')">
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>completed</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Email triage agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">Nexus Partners</td>
+                <td style="font-size:12px;color:var(--slate-500)">17m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">5.4s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 9 -->
+              <tr onclick="openExecDrawer('exec-9')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-blue">automation</span></td>
+                <td class="process-name">CRM sync automation</td>
+                <td style="font-size:12px;color:var(--slate-500)">Peak Ventures</td>
+                <td style="font-size:12px;color:var(--slate-500)">21m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">0.3s</td>
+                <td style="text-align:center;font-size:12px;">3</td>
+                <td class="error-preview">HubSpot API rate limit exceeded</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 10 -->
+              <tr onclick="openExecDrawer('exec-10')">
+                <td><span class="badge badge-slate"><span class="status-dot dot-slate"></span>cancelled</span></td>
+                <td><span class="badge badge-violet">workflow</span></td>
+                <td class="process-name">Document review workflow</td>
+                <td style="font-size:12px;color:var(--slate-500)">Acme Corp</td>
+                <td style="font-size:12px;color:var(--slate-500)">24m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">42s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 11 -->
+              <tr onclick="openExecDrawer('exec-11')">
+                <td><span class="badge badge-amber"><span class="status-dot dot-amber"></span>dlq</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Spend aggregation agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">Nexus Partners</td>
+                <td style="font-size:12px;color:var(--slate-500)">28m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">30.0s</td>
+                <td style="text-align:center;font-size:12px;">5</td>
+                <td class="error-preview">Database connection timeout after 30s</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 12 -->
+              <tr onclick="openExecDrawer('exec-12')">
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>completed</span></td>
+                <td><span class="badge badge-slate">scheduled</span></td>
+                <td class="process-name">Memory consolidation job</td>
+                <td style="font-size:12px;color:var(--slate-500)">BrightEdge Ltd</td>
+                <td style="font-size:12px;color:var(--slate-500)">31m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">11.2s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 13 -->
+              <tr onclick="openExecDrawer('exec-13')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Proposal drafter agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">Peak Ventures</td>
+                <td style="font-size:12px;color:var(--slate-500)">35m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">4.6s</td>
+                <td style="text-align:center;font-size:12px;">2</td>
+                <td class="error-preview">LLM call: max tokens exceeded (4096)</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 14 -->
+              <tr onclick="openExecDrawer('exec-14')">
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>completed</span></td>
+                <td><span class="badge badge-blue">automation</span></td>
+                <td class="process-name">Weekly report automation</td>
+                <td style="font-size:12px;color:var(--slate-500)">Acme Corp</td>
+                <td style="font-size:12px;color:var(--slate-500)">38m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">2.3s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 15 -->
+              <tr onclick="openExecDrawer('exec-15')">
+                <td><span class="badge badge-sky"><span class="status-dot dot-blue"></span>running</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Support triage agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">BrightEdge Ltd</td>
+                <td style="font-size:12px;color:var(--slate-500)">41m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">-</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 16 -->
+              <tr onclick="openExecDrawer('exec-16')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-sky">webhook</span></td>
+                <td class="process-name">Slack event handler</td>
+                <td style="font-size:12px;color:var(--slate-500)">Nexus Partners</td>
+                <td style="font-size:12px;color:var(--slate-500)">43m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">0.2s</td>
+                <td style="text-align:center;font-size:12px;">1</td>
+                <td class="error-preview">Signature verification failed: slack_signing_secret</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 17 -->
+              <tr onclick="openExecDrawer('exec-17')">
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>completed</span></td>
+                <td><span class="badge badge-slate">scheduled</span></td>
+                <td class="process-name">Audit log compaction</td>
+                <td style="font-size:12px;color:var(--slate-500)">system</td>
+                <td style="font-size:12px;color:var(--slate-500)">47m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">4.4s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 18 -->
+              <tr onclick="openExecDrawer('exec-18')">
+                <td><span class="badge badge-red"><span class="status-dot dot-red"></span>failed</span></td>
+                <td><span class="badge badge-violet">workflow</span></td>
+                <td class="process-name">Renewal alert workflow</td>
+                <td style="font-size:12px;color:var(--slate-500)">Peak Ventures</td>
+                <td style="font-size:12px;color:var(--slate-500)">51m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">1.8s</td>
+                <td style="text-align:center;font-size:12px;">2</td>
+                <td class="error-preview">OAuth token expired for salesforce_prod</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 19 -->
+              <tr onclick="openExecDrawer('exec-19')">
+                <td><span class="badge badge-green"><span class="status-dot dot-green"></span>completed</span></td>
+                <td><span class="badge badge-indigo">agent</span></td>
+                <td class="process-name">Calendar sync agent</td>
+                <td style="font-size:12px;color:var(--slate-500)">Acme Corp</td>
+                <td style="font-size:12px;color:var(--slate-500)">55m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">3.3s</td>
+                <td style="text-align:center;font-size:12px;">0</td>
+                <td class="error-preview" style="color:var(--slate-300)">-</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+              <!-- Row 20 -->
+              <tr onclick="openExecDrawer('exec-20')">
+                <td><span class="badge badge-amber"><span class="status-dot dot-amber"></span>dlq</span></td>
+                <td><span class="badge badge-blue">automation</span></td>
+                <td class="process-name">Billing sync automation</td>
+                <td style="font-size:12px;color:var(--slate-500)">BrightEdge Ltd</td>
+                <td style="font-size:12px;color:var(--slate-500)">58m ago</td>
+                <td style="font-size:12px;color:var(--slate-500)">30.0s</td>
+                <td style="text-align:center;font-size:12px;">5</td>
+                <td class="error-preview">Database connection timeout after 30s</td>
+                <td><button class="btn btn-ghost btn-xs">View detail</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pagination">
+            <span class="pagination-info">Showing 25 of 1,847 executions</span>
+            <div class="pagination-controls">
+              <select class="page-size-select">
+                <option selected>25 per page</option>
+                <option>50 per page</option>
+                <option>100 per page</option>
+              </select>
+              <button class="btn btn-secondary btn-xs">Prev</button>
+              <button class="btn btn-secondary btn-xs">Next</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tab-execlog -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+
+<!-- ══════════════════════════════════════════════════
+     QUEUE HEALTH DRAWER
+══════════════════════════════════════════════════ -->
+<div id="queue-drawer-overlay" class="drawer-overlay" style="display:none" onclick="closeQueueDrawer(event)">
+  <div class="drawer drawer-lg" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <div>
+        <h2 id="qd-title">agent.run</h2>
+        <div style="font-size:12px;color:var(--slate-400);margin-top:3px;">Agent execution tier</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="qd-pause-btn" class="btn btn-secondary btn-sm" onclick="toggleQueuePause()">Pause queue</button>
+        <button class="drawer-close" onclick="closeQueueDrawer()">&#x2715;</button>
+      </div>
+    </div>
+    <div class="drawer-body">
+
+      <!-- Stats grid -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Queue stats</div>
+        <div class="drawer-stats-grid">
+          <div class="drawer-stat">
+            <div class="drawer-stat-val" id="qd-active">5</div>
+            <div class="drawer-stat-label">Active</div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-val elevated" id="qd-pending">80</div>
+            <div class="drawer-stat-label">Pending</div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-val red" id="qd-dlq">5</div>
+            <div class="drawer-stat-label">DLQ</div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-val" id="qd-completed">4,821</div>
+            <div class="drawer-stat-label">Completed</div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-val" id="qd-failed">23</div>
+            <div class="drawer-stat-label">Failed</div>
+          </div>
+          <div class="drawer-stat">
+            <div class="drawer-stat-val" id="qd-retry">12%</div>
+            <div class="drawer-stat-label">Retry rate</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sparkline -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Pending depth — last hour</div>
+        <div class="sparkline-area">
+          <div class="sparkline-label">Pending jobs over time (last 60 min)</div>
+          <svg width="100%" height="60" viewBox="0 0 460 60" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#6366f1" stop-opacity="0.25"/>
+                <stop offset="100%" stop-color="#6366f1" stop-opacity="0.02"/>
+              </linearGradient>
+            </defs>
+            <!-- Filled area -->
+            <path d="M0,55 L20,52 L60,48 L100,40 L140,35 L180,42 L220,50 L260,58 L300,45 L320,30 L360,18 L400,10 L440,5 L460,4 L460,60 L0,60 Z" fill="url(#spark-fill)"/>
+            <!-- Line -->
+            <polyline points="0,55 20,52 60,48 100,40 140,35 180,42 220,50 260,58 300,45 320,30 360,18 400,10 440,5 460,4" fill="none" stroke="#6366f1" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--slate-400);margin-top:4px;">
+            <span>60m ago</span><span>now</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Last 5 errors -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Last 5 errors</div>
+
+        <div class="error-item">
+          <div class="error-item-header" onclick="toggleStack(this)">
+            <span class="error-item-msg">HubSpot API rate limit exceeded (429): Retry-After: 60</span>
+            <span class="error-item-ts">2m ago</span>
+            <button class="btn btn-ghost btn-xs" style="flex-shrink:0;" onclick="event.stopPropagation();toggleStack(this.closest('.error-item').querySelector('.error-item-header'))">Show stack</button>
+          </div>
+          <div class="error-item-stack">Error: HubSpot API rate limit exceeded
+    at HubSpotClient.request (hubspot.js:142)
+    at AgentTool.invoke (tools/hubspot.ts:88)
+    at AgentRunner.executeStep (runner.ts:234)
+    at AgentRunner.run (runner.ts:188)</div>
+        </div>
+
+        <div class="error-item">
+          <div class="error-item-header" onclick="toggleStack(this)">
+            <span class="error-item-msg">HubSpot API rate limit exceeded (429): Retry-After: 60</span>
+            <span class="error-item-ts">4m ago</span>
+            <button class="btn btn-ghost btn-xs" style="flex-shrink:0;" onclick="event.stopPropagation();toggleStack(this.closest('.error-item').querySelector('.error-item-header'))">Show stack</button>
+          </div>
+          <div class="error-item-stack">Error: HubSpot API rate limit exceeded
+    at HubSpotClient.request (hubspot.js:142)
+    at AgentTool.invoke (tools/hubspot.ts:88)
+    at AgentRunner.executeStep (runner.ts:234)</div>
+        </div>
+
+        <div class="error-item">
+          <div class="error-item-header" onclick="toggleStack(this)">
+            <span class="error-item-msg">OAuth token expired: access_token invalid or revoked</span>
+            <span class="error-item-ts">11m ago</span>
+            <button class="btn btn-ghost btn-xs" style="flex-shrink:0;" onclick="event.stopPropagation();toggleStack(this.closest('.error-item').querySelector('.error-item-header'))">Show stack</button>
+          </div>
+          <div class="error-item-stack">Error: OAuth token expired
+    at OAuthProvider.refreshToken (oauth.ts:201)
+    at CredentialStore.getToken (credentials.ts:67)
+    at AgentTool.invoke (tools/base.ts:55)</div>
+        </div>
+
+        <div class="error-item">
+          <div class="error-item-header" onclick="toggleStack(this)">
+            <span class="error-item-msg">LLM call failed: max_tokens exceeded (requested 4096, limit 4096)</span>
+            <span class="error-item-ts">18m ago</span>
+            <button class="btn btn-ghost btn-xs" style="flex-shrink:0;" onclick="event.stopPropagation();toggleStack(this.closest('.error-item').querySelector('.error-item-header'))">Show stack</button>
+          </div>
+          <div class="error-item-stack">Error: max_tokens exceeded
+    at LLMProvider.complete (llm/anthropic.ts:98)
+    at AgentRunner.callLLM (runner.ts:312)
+    at AgentRunner.executeStep (runner.ts:218)</div>
+        </div>
+
+        <div class="error-item">
+          <div class="error-item-header" onclick="toggleStack(this)">
+            <span class="error-item-msg">Database connection timeout after 30000ms</span>
+            <span class="error-item-ts">25m ago</span>
+            <button class="btn btn-ghost btn-xs" style="flex-shrink:0;" onclick="event.stopPropagation();toggleStack(this.closest('.error-item').querySelector('.error-item-header'))">Show stack</button>
+          </div>
+          <div class="error-item-stack">Error: Connection timeout
+    at Pool.acquire (db/pool.ts:77)
+    at Repository.query (db/repo.ts:44)
+    at AgentRunner.persistEvent (runner.ts:401)</div>
+        </div>
+      </div>
+
+      <!-- DLQ jobs -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">
+          <span class="status-dot dot-red"></span>
+          Dead-letter queue (5 jobs)
+        </div>
+
+        <div class="dlq-row">
+          <div style="flex:1;overflow:hidden;">
+            <div class="dlq-payload-preview">{"agentId":"agt_92x","runId":"run_1ab2c","action":"sync_contacts","orgId":"org_acme"}</div>
+            <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Failed 5x · last attempt 2m ago · agent.run</div>
+          </div>
+          <div class="dlq-actions">
+            <button class="btn btn-secondary btn-xs" onclick="confirmDlq('retry')">Retry</button>
+            <button class="btn btn-danger btn-xs" onclick="confirmDlq('discard')">Discard</button>
+          </div>
+        </div>
+
+        <div class="dlq-row">
+          <div style="flex:1;overflow:hidden;">
+            <div class="dlq-payload-preview">{"agentId":"agt_17y","runId":"run_3de4f","action":"classify_invoice","orgId":"org_nexus"}</div>
+            <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Failed 5x · last attempt 6m ago · agent.run</div>
+          </div>
+          <div class="dlq-actions">
+            <button class="btn btn-secondary btn-xs" onclick="confirmDlq('retry')">Retry</button>
+            <button class="btn btn-danger btn-xs" onclick="confirmDlq('discard')">Discard</button>
+          </div>
+        </div>
+
+        <div class="dlq-row">
+          <div style="flex:1;overflow:hidden;">
+            <div class="dlq-payload-preview">{"agentId":"agt_44z","runId":"run_5gh6i","action":"draft_proposal","orgId":"org_peak"}</div>
+            <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Failed 5x · last attempt 13m ago · agent.run</div>
+          </div>
+          <div class="dlq-actions">
+            <button class="btn btn-secondary btn-xs" onclick="confirmDlq('retry')">Retry</button>
+            <button class="btn btn-danger btn-xs" onclick="confirmDlq('discard')">Discard</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Queue config -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Queue config (read-only)</div>
+        <div class="config-grid">
+          <div class="config-item">
+            <div class="config-item-key">Concurrency</div>
+            <div class="config-item-val">10 workers</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">Max retries</div>
+            <div class="config-item-val">5 attempts</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">Backoff strategy</div>
+            <div class="config-item-val">Exponential</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">Job timeout</div>
+            <div class="config-item-val">30s</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">DLQ threshold</div>
+            <div class="config-item-val">5 failures</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">Priority</div>
+            <div class="config-item-val">High</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /drawer-body -->
+    <div class="drawer-footer">
+      <button class="btn btn-ghost btn-sm" onclick="closeQueueDrawer()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     EXECUTION DETAIL DRAWER
+══════════════════════════════════════════════════ -->
+<div id="exec-drawer-overlay" class="drawer-overlay" style="display:none" onclick="closeExecDrawer(event)">
+  <div class="drawer drawer-lg" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span class="badge badge-red" id="ed-status-badge"><span class="status-dot dot-red"></span>failed</span>
+          <span class="badge badge-indigo" id="ed-engine-badge">agent</span>
+        </div>
+        <h2 id="ed-process-name">HubSpot sync agent</h2>
+        <div style="font-size:12px;color:var(--slate-400);margin-top:2px;" id="ed-org">Acme Corp</div>
+      </div>
+      <button class="drawer-close" onclick="closeExecDrawer()">&#x2715;</button>
+    </div>
+    <div class="drawer-body">
+
+      <!-- Timestamps -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Timestamps</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div class="config-item">
+            <div class="config-item-key">Queued at</div>
+            <div class="config-item-val" style="font-size:11.5px;" id="ed-queued">05/06 14:02:11</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">Started at</div>
+            <div class="config-item-val" style="font-size:11.5px;" id="ed-started">05/06 14:02:13</div>
+          </div>
+          <div class="config-item">
+            <div class="config-item-key">Completed</div>
+            <div class="config-item-val" style="font-size:11.5px;" id="ed-completed">05/06 14:02:14</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confirmation banner -->
+      <div class="confirm-banner" id="ed-confirm-banner">
+        <p id="ed-confirm-msg">Are you sure? This action cannot be undone.</p>
+        <div class="confirm-banner-actions">
+          <button class="btn btn-danger btn-sm" id="ed-confirm-ok" onclick="confirmExecAction()">Confirm</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelConfirm()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Error detail -->
+      <div class="drawer-section" id="ed-error-section">
+        <div class="drawer-section-title" style="color:var(--red-500);">Error</div>
+        <div style="background:var(--red-50);border:1px solid #fecaca;border-radius:8px;padding:12px 14px;">
+          <div style="font-size:12.5px;font-weight:600;color:var(--red-700);margin-bottom:8px;" id="ed-error-msg">HubSpot API rate limit exceeded (429): Retry-After: 60</div>
+          <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--red-600);white-space:pre-wrap;line-height:1.5;" id="ed-error-stack">Error: HubSpot API rate limit exceeded
+    at HubSpotClient.request (hubspot.js:142)
+    at AgentTool.invoke (tools/hubspot.ts:88)
+    at AgentRunner.executeStep (runner.ts:234)
+    at AgentRunner.run (runner.ts:188)</div>
+        </div>
+      </div>
+
+      <!-- Payload accordions -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Payloads</div>
+
+        <div class="payload-accordion">
+          <button class="payload-acc-header" onclick="togglePayload(this)">
+            <span class="payload-acc-title">Outbound payload</span>
+            <span class="payload-acc-caret">&#9660;</span>
+          </button>
+          <div class="payload-acc-body">{
+  "agentId": "agt_92x_hubspot_sync",
+  "runId": "run_1ab2c3d4",
+  "action": "sync_contacts",
+  "orgId": "org_acme_corp",
+  "parameters": {
+    "limit": 250,
+    "lastSyncedAt": "2026-05-06T13:00:00Z",
+    "includeDeleted": false
+  }
+}</div>
+        </div>
+
+        <div class="payload-accordion">
+          <button class="payload-acc-header" onclick="togglePayload(this)">
+            <span class="payload-acc-title">Callback payload</span>
+            <span class="payload-acc-caret">&#9660;</span>
+          </button>
+          <div class="payload-acc-body">{
+  "status": "failed",
+  "error": "HubSpot API rate limit exceeded",
+  "errorCode": 429,
+  "retriesLeft": 2,
+  "nextRetryAt": "2026-05-06T14:03:14Z"
+}</div>
+        </div>
+
+        <div class="payload-accordion">
+          <button class="payload-acc-header" onclick="togglePayload(this)">
+            <span class="payload-acc-title">Process snapshot</span>
+            <span class="payload-acc-caret">&#9660;</span>
+          </button>
+          <div class="payload-acc-body">{
+  "stepIndex": 2,
+  "stepName": "fetch_contacts",
+  "completedSteps": ["authenticate", "validate_org"],
+  "pendingSteps": ["sync_contacts", "emit_events"],
+  "context": {
+    "orgId": "org_acme_corp",
+    "credentialId": "cred_hubspot_production",
+    "tokenValid": false
+  }
+}</div>
+        </div>
+      </div>
+
+      <!-- Return webhook -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Return webhook</div>
+        <div style="background:var(--slate-50);border:1px solid var(--slate-100);border-radius:8px;padding:10px 12px;font-size:11.5px;font-family:'JetBrains Mono',monospace;color:var(--slate-600);word-break:break-all;">
+          https://hooks.automationos.io/v1/callbacks/run_1ab2c3d4?sig=sha256_abc123
+        </div>
+      </div>
+
+      <!-- Retry history -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Retry history</div>
+        <table class="retry-table">
+          <thead>
+            <tr>
+              <th>Attempt</th>
+              <th>Started</th>
+              <th>Duration</th>
+              <th>Outcome</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>#1</td>
+              <td style="color:var(--slate-400);font-size:11px;">14:00:42</td>
+              <td>1.1s</td>
+              <td><span class="badge badge-red" style="font-size:10px;">failed</span></td>
+            </tr>
+            <tr>
+              <td>#2</td>
+              <td style="color:var(--slate-400);font-size:11px;">14:01:04</td>
+              <td>0.9s</td>
+              <td><span class="badge badge-red" style="font-size:10px;">failed</span></td>
+            </tr>
+            <tr>
+              <td>#3 (current)</td>
+              <td style="color:var(--slate-400);font-size:11px;">14:02:13</td>
+              <td>1.2s</td>
+              <td><span class="badge badge-red" style="font-size:10px;">failed</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div><!-- /drawer-body -->
+    <div class="drawer-footer">
+      <button class="btn btn-ghost btn-sm" onclick="closeExecDrawer()">Close</button>
+      <button class="btn btn-secondary btn-sm" onclick="execAction('cancel')">Mark cancelled</button>
+      <button class="btn btn-danger btn-sm" onclick="execAction('discard')">Discard</button>
+      <button class="btn btn-primary btn-sm" onclick="execAction('retry')">Retry now</button>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="_sidebar.js"></script>
+<script>
+  // Init sidebar in system mode, queues active
+  renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'system', 'queues.html');
+
+  /* ── Tab switching ── */
+  function switchQueueTab(tab) {
+    // Deactivate all
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    // Activate selected
+    document.getElementById('tab-' + tab).classList.add('active');
+    document.getElementById('tab-' + tab + '-btn').classList.add('active');
+  }
+
+  /* ── Refresh simulation ── */
+  let refreshSeconds = 12;
+  function triggerRefresh() {
+    refreshSeconds = 0;
+    document.getElementById('refresh-ts').textContent = 'Last updated just now';
+  }
+  setInterval(() => {
+    refreshSeconds++;
+    const el = document.getElementById('refresh-ts');
+    if (el) {
+      el.textContent = 'Last updated ' + refreshSeconds + 's ago';
+    }
+  }, 1000);
+
+  /* ── Queue drawer ── */
+  const QUEUE_DATA = {
+    'agent.run':            { tier: 'Agent execution tier', active: 5, pending: 80, dlq: 5, completed: '4,821', failed: 23, retry: '12%', paused: false },
+    'agent.delegate':       { tier: 'Agent execution tier', active: 2, pending: 11, dlq: 0, completed: '1,203', failed: 4,  retry: '2%',  paused: false },
+    'agent.dispatch':       { tier: 'Agent execution tier', active: 1, pending: 3,  dlq: 0, completed: '892',   failed: 1,  retry: '1%',  paused: false },
+    'spend.aggregate':      { tier: 'Financial / Billing tier', active: 2, pending: 14, dlq: 3, completed: '2,110', failed: 7, retry: '8%', paused: false },
+    'spend.report':         { tier: 'Financial / Billing tier', active: 1, pending: 5,  dlq: 0, completed: '634',   failed: 2, retry: '3%', paused: false },
+    'billing.invoice':      { tier: 'Financial / Billing tier', active: 0, pending: 0,  dlq: 0, completed: '418',   failed: 0, retry: '0%', paused: false },
+    'db.cleanup':           { tier: 'Maintenance tier', active: 1, pending: 4, dlq: 0, completed: '2,904', failed: 1, retry: '1%', paused: false },
+    'log.rotate':           { tier: 'Maintenance tier', active: 1, pending: 2, dlq: 0, completed: '1,402', failed: 0, retry: '0%', paused: false },
+    'audit.compact':        { tier: 'Maintenance tier', active: 0, pending: 1, dlq: 0, completed: '688',   failed: 0, retry: '0%', paused: false },
+    'memory.enrich':        { tier: 'Memory enrichment tier', active: 1, pending: 5, dlq: 0, completed: '3,112', failed: 3, retry: '2%', paused: false },
+    'memory.consolidate':   { tier: 'Memory enrichment tier', active: 0, pending: 2, dlq: 0, completed: '1,047', failed: 1, retry: '1%', paused: false },
+    'embeddings.generate':  { tier: 'Memory enrichment tier', active: 0, pending: 0, dlq: 0, completed: '8,401', failed: 0, retry: '0%', paused: false },
+  };
+
+  let activeQueue = null;
+
+  function openQueueDrawer(queueName) {
+    activeQueue = queueName;
+    const d = QUEUE_DATA[queueName] || {};
+    document.getElementById('qd-title').textContent = queueName;
+    document.querySelector('#queue-drawer-overlay .drawer-header > div > div').textContent = d.tier || '';
+    document.getElementById('qd-active').textContent = d.active ?? '—';
+    document.getElementById('qd-pending').textContent = d.pending ?? '—';
+    document.getElementById('qd-dlq').textContent = d.dlq ?? '—';
+    document.getElementById('qd-completed').textContent = d.completed ?? '—';
+    document.getElementById('qd-failed').textContent = d.failed ?? '—';
+    document.getElementById('qd-retry').textContent = d.retry ?? '—';
+    const pauseBtn = document.getElementById('qd-pause-btn');
+    pauseBtn.textContent = d.paused ? 'Resume queue' : 'Pause queue';
+    pauseBtn.className = d.paused ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+    document.getElementById('queue-drawer-overlay').style.display = 'flex';
+  }
+
+  function closeQueueDrawer(event) {
+    if (!event || event.target === document.getElementById('queue-drawer-overlay')) {
+      document.getElementById('queue-drawer-overlay').style.display = 'none';
+    }
+  }
+
+  function toggleQueuePause() {
+    if (!activeQueue) return;
+    const d = QUEUE_DATA[activeQueue];
+    d.paused = !d.paused;
+    const btn = document.getElementById('qd-pause-btn');
+    btn.textContent = d.paused ? 'Resume queue' : 'Pause queue';
+    btn.className = d.paused ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+    showToast(d.paused ? activeQueue + ' paused' : activeQueue + ' resumed');
+  }
+
+  function confirmDlq(action) {
+    showToast('DLQ job ' + action + ' confirmed');
+  }
+
+  /* ── Execution drawer ── */
+  const EXEC_DATA = {
+    'exec-1':  { status: 'failed',    statusClass: 'badge-red',    dotClass: 'dot-red',    engine: 'agent',      engineClass: 'badge-indigo', name: 'HubSpot sync agent',       org: 'Acme Corp',      queued: '05/06 14:00:09', started: '05/06 14:00:11', completed: '05/06 14:00:12', error: 'HubSpot API rate limit exceeded (429): Retry-After: 60', stack: 'Error: HubSpot API rate limit exceeded\n    at HubSpotClient.request (hubspot.js:142)\n    at AgentTool.invoke (tools/hubspot.ts:88)\n    at AgentRunner.run (runner.ts:188)', hasError: true },
+    'exec-2':  { status: 'failed',    statusClass: 'badge-red',    dotClass: 'dot-red',    engine: 'automation', engineClass: 'badge-blue',   name: 'Onboarding sequence',       org: 'BrightEdge Ltd', queued: '05/06 13:58:41', started: '05/06 13:58:43', completed: '05/06 13:58:43', error: 'OAuth token expired: access_token invalid or revoked',         stack: 'Error: OAuth token expired\n    at OAuthProvider.refreshToken (oauth.ts:201)\n    at CredentialStore.getToken (credentials.ts:67)', hasError: true },
+    'exec-3':  { status: 'dlq',       statusClass: 'badge-amber',  dotClass: 'dot-amber',  engine: 'agent',      engineClass: 'badge-indigo', name: 'Invoice classifier',        org: 'Nexus Partners', queued: '05/06 13:53:22', started: '05/06 13:53:24', completed: '05/06 13:54:12', error: 'Database connection timeout after 30000ms',                    stack: 'Error: Connection timeout\n    at Pool.acquire (db/pool.ts:77)\n    at Repository.query (db/repo.ts:44)', hasError: true },
+    'exec-4':  { status: 'completed', statusClass: 'badge-green',  dotClass: 'dot-green',  engine: 'scheduled',  engineClass: 'badge-slate',  name: 'Daily spend rollup',        org: 'Acme Corp',      queued: '05/06 13:53:00', started: '05/06 13:53:01', completed: '05/06 13:53:04', error: null, stack: null, hasError: false },
+    'exec-5':  { status: 'failed',    statusClass: 'badge-red',    dotClass: 'dot-red',    engine: 'workflow',   engineClass: 'badge-violet', name: 'Contract approval flow',    org: 'Peak Ventures',  queued: '05/06 13:51:08', started: '05/06 13:51:09', completed: '05/06 13:51:11', error: 'LLM call: max tokens exceeded (requested 4096, limit 4096)',   stack: 'Error: max_tokens exceeded\n    at LLMProvider.complete (llm/anthropic.ts:98)\n    at AgentRunner.callLLM (runner.ts:312)', hasError: true },
+    'exec-6':  { status: 'running',   statusClass: 'badge-sky',    dotClass: 'dot-blue',   engine: 'agent',      engineClass: 'badge-indigo', name: 'Lead enrichment agent',     org: 'Acme Corp',      queued: '05/06 13:49:30', started: '05/06 13:49:32', completed: null, error: null, stack: null, hasError: false },
+    'exec-20': { status: 'dlq',       statusClass: 'badge-amber',  dotClass: 'dot-amber',  engine: 'automation', engineClass: 'badge-blue',   name: 'Billing sync automation',   org: 'BrightEdge Ltd', queued: '05/06 13:04:02', started: '05/06 13:04:04', completed: '05/06 13:04:34', error: 'Database connection timeout after 30000ms',                    stack: 'Error: Connection timeout\n    at Pool.acquire (db/pool.ts:77)', hasError: true },
+  };
+
+  function openExecDrawer(execId) {
+    const d = EXEC_DATA[execId] || {
+      status: 'completed', statusClass: 'badge-green', dotClass: 'dot-green',
+      engine: 'agent', engineClass: 'badge-indigo', name: 'Process execution',
+      org: 'Acme Corp', queued: '05/06 14:00:00', started: '05/06 14:00:01', completed: '05/06 14:00:05',
+      error: null, stack: null, hasError: false
+    };
+
+    // Status badge
+    const sb = document.getElementById('ed-status-badge');
+    sb.className = 'badge ' + d.statusClass;
+    sb.innerHTML = '<span class="status-dot ' + d.dotClass + '"></span>' + d.status;
+
+    // Engine badge
+    const eb = document.getElementById('ed-engine-badge');
+    eb.className = 'badge ' + d.engineClass;
+    eb.textContent = d.engine;
+
+    document.getElementById('ed-process-name').textContent = d.name;
+    document.getElementById('ed-org').textContent = d.org;
+    document.getElementById('ed-queued').textContent = d.queued;
+    document.getElementById('ed-started').textContent = d.started;
+    document.getElementById('ed-completed').textContent = d.completed || '—';
+
+    // Error section
+    const errSection = document.getElementById('ed-error-section');
+    if (d.hasError) {
+      errSection.style.display = 'block';
+      document.getElementById('ed-error-msg').textContent = d.error;
+      document.getElementById('ed-error-stack').textContent = d.stack;
+    } else {
+      errSection.style.display = 'none';
+    }
+
+    // Reset confirm banner
+    document.getElementById('ed-confirm-banner').classList.remove('open');
+
+    document.getElementById('exec-drawer-overlay').style.display = 'flex';
+  }
+
+  function closeExecDrawer(event) {
+    if (!event || event.target === document.getElementById('exec-drawer-overlay')) {
+      document.getElementById('exec-drawer-overlay').style.display = 'none';
+    }
+  }
+
+  let pendingExecAction = null;
+  function execAction(action) {
+    pendingExecAction = action;
+    const msgs = {
+      retry: 'Retry this execution? A new attempt will be queued immediately.',
+      discard: 'Discard this execution? It will be permanently removed from the queue.',
+      cancel: 'Mark this execution as cancelled? This cannot be undone.',
+    };
+    document.getElementById('ed-confirm-msg').textContent = msgs[action] || 'Confirm action?';
+    document.getElementById('ed-confirm-banner').classList.add('open');
+  }
+
+  function confirmExecAction() {
+    showToast('Action confirmed: ' + (pendingExecAction || 'unknown'));
+    document.getElementById('ed-confirm-banner').classList.remove('open');
+    pendingExecAction = null;
+  }
+
+  function cancelConfirm() {
+    document.getElementById('ed-confirm-banner').classList.remove('open');
+    pendingExecAction = null;
+  }
+
+  /* ── Error stack toggle ── */
+  function toggleStack(headerEl) {
+    const item = headerEl.closest('.error-item');
+    const stack = item.querySelector('.error-item-stack');
+    const btn = item.querySelector('.btn');
+    if (!stack) return;
+    const isOpen = stack.classList.toggle('open');
+    if (btn) btn.textContent = isOpen ? 'Hide stack' : 'Show stack';
+  }
+
+  /* ── Payload accordion ── */
+  function togglePayload(headerBtn) {
+    const body = headerBtn.nextElementSibling;
+    const caret = headerBtn.querySelector('.payload-acc-caret');
+    const isOpen = body.classList.toggle('open');
+    if (caret) caret.classList.toggle('open', isOpen);
+  }
+
+  /* ── Live tail toggle ── */
+  let liveTailOn = false;
+  function toggleLiveTail() {
+    liveTailOn = !liveTailOn;
+    const btn = document.getElementById('live-tail-btn');
+    const pulse = document.getElementById('live-pulse');
+    btn.classList.toggle('active', liveTailOn);
+    pulse.classList.toggle('pulse', liveTailOn);
+    showToast(liveTailOn ? 'Live tail enabled — updating every 5s' : 'Live tail disabled');
+  }
+
+  /* ── Filter change (stub) ── */
+  function applyExecFilter() {
+    showToast('Filter applied (prototype — table not refiltered)');
+  }
+
+  /* ── Toast ── */
+  function showToast(msg) {
+    const existing = document.getElementById('q-toast');
+    if (existing) existing.remove();
+    const t = document.createElement('div');
+    t.id = 'q-toast';
+    t.style.cssText = 'position:fixed;top:16px;right:20px;z-index:9999;background:#1e293b;color:#f1f5f9;font-size:12.5px;font-family:Inter,ui-sans-serif,system-ui,sans-serif;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.22);pointer-events:none;opacity:1;transition:opacity 0.3s;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, 2200);
+  }
+</script>
+</body>
+</html>

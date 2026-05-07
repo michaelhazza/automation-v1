@@ -116,6 +116,11 @@ export const memoryBlocks = pgTable(
     tier: smallint('tier').$type<1 | 2>(),
     appliesToDomains: text('applies_to_domains').array(),
 
+    // Consolidation C — Govern (migration 0286, spec §4.1, §6) — Edit-and-override
+    // marker. Auto-extraction pipeline skips BOTH the UPDATE and the version INSERT
+    // when true. Set by the manual override path; never touched by auto-extraction.
+    autoUpdateDisabled: boolean('auto_update_disabled').notNull().default(false),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

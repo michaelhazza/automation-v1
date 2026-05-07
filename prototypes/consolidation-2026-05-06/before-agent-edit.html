@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Agent Edit (5 pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  padding: 24px; max-width: 1600px; margin: 0 auto;
+}
+.page-grid.two-col { grid-template-columns: repeat(2, 1fr); }
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; }
+.mini-topbar .badge { font-size: 10px; }
+.mini-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.mini-tab {
+  padding: 5px 10px; font-size: 11px; color: var(--slate-500); cursor: default;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mini-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 12px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 11px; min-width: 90px; }
+.mini-field {
+  background: white; border: 1px solid var(--border); border-radius: 4px;
+  padding: 4px 8px; font-size: 11px; color: var(--slate-700); width: 100%;
+}
+.mini-textarea {
+  background: white; border: 1px solid var(--border); border-radius: 4px;
+  padding: 4px 8px; font-size: 10px; color: var(--slate-600); width: 100%;
+  height: 52px; resize: none; font-family: 'JetBrains Mono', monospace;
+}
+.mini-kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+.mini-kpi {
+  background: var(--slate-50); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px; text-align: center;
+}
+.mini-kpi .val { font-size: 18px; font-weight: 700; color: var(--indigo-600); }
+.mini-kpi .lbl { font-size: 9px; color: var(--slate-500); margin-top: 2px; }
+.mini-skill-row {
+  display: flex; align-items: center; gap: 6px; padding: 5px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px;
+}
+.mini-skill-row:last-child { border-bottom: none; }
+.mini-skill-icon {
+  width: 20px; height: 20px; background: var(--indigo-100); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--indigo-600);
+}
+.mini-breadcrumb {
+  font-size: 10px; color: var(--slate-500); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 4px;
+}
+.mini-breadcrumb span { color: var(--indigo-600); }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.mini-code-editor {
+  background: #1e293b; border-radius: 4px; padding: 8px; font-size: 9px;
+  font-family: 'JetBrains Mono', monospace; color: #94a3b8; height: 80px; overflow: hidden;
+}
+.mini-code-editor .kw { color: #7c3aed; }
+.mini-code-editor .str { color: #10b981; }
+.mini-code-editor .fn { color: #3b82f6; }
+.page-label {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.page-source-tag {
+  font-size: 10px; background: var(--amber-50); border: 1px solid var(--amber-200);
+  color: var(--amber-700); padding: 2px 6px; border-radius: 4px; font-weight: 600;
+}
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.impact-item { text-align: center; }
+.impact-item .big { font-size: 28px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 20px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 24px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>CURRENT STATE</span>
+  <span style="font-weight:400;">BEFORE: AdminAgentEditPage and SubaccountAgentEditPage both used a single "Capabilities" tab that lumped skills and data sources together. Skills shown as a flat 14-row toggle list — does not scale beyond ~20 skills before the operator has to scroll endlessly. Data sources cramped at the bottom of the same tab, often invisible without scrolling. Tier inheritance (System / Org / This client) was implicit, not surfaced via badges or filtering.</span>
+  <a href="agent-edit.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- AdminAgentEditPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminAgentEditPage
+      <span class="route">/admin/agents/:id/edit</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Outreach Agent</h3>
+        <span class="badge badge-green">Active</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">Configure</div>
+        <div class="mini-tab">Behaviour</div>
+        <div class="mini-tab">Capabilities</div>
+        <div class="mini-tab">Schedule</div>
+        <div class="mini-tab">Budget</div>
+        <div class="mini-tab">Runs</div>
+      </div>
+      <div class="mini-row"><span class="label">Name</span><input class="mini-field" value="Outreach Agent" readonly></div>
+      <div class="mini-row"><span class="label">Description</span><input class="mini-field" value="Handles all prospect outreach" readonly></div>
+      <div class="mini-row"><span class="label">Model</span><input class="mini-field" value="gpt-4o" readonly></div>
+      <div class="mini-row"><span class="label">Role title</span><input class="mini-field" value="Sales Development Rep" readonly></div>
+      <div class="mini-row"><span class="label">Parent agent</span><input class="mini-field" value="Account Manager Agent" readonly></div>
+      <div style="margin-top:10px; display:flex; gap:6px; justify-content:flex-end;">
+        <span class="mini-btn mini-btn-secondary">Cancel</span>
+        <span class="mini-btn mini-btn-primary">Save agent</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Capabilities tab detail — flat 14-row toggle list, data sources buried below -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminAgentEditPage: Capabilities tab (flat toggle list)
+      <span class="route">/admin/agents/:id/edit#capabilities</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Outreach Agent</h3>
+        <span class="badge badge-green">Active</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab">Configure</div>
+        <div class="mini-tab">Behaviour</div>
+        <div class="mini-tab active">Capabilities</div>
+        <div class="mini-tab">Schedule</div>
+        <div class="mini-tab">Budget</div>
+        <div class="mini-tab">Runs</div>
+      </div>
+      <!-- No tier chips, no search, flat toggle list -->
+      <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">14 skills — no search, no tier filter, no grouping</div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SE</div><span style="flex:1;font-size:10px;">Send email</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">RI</div><span style="flex:1;font-size:10px;">Read email inbox</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">LI</div><span style="flex:1;font-size:10px;">LinkedIn: post message</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SM</div><span style="flex:1;font-size:10px;">SMS: send message</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">HR</div><span style="flex:1;font-size:10px;">HubSpot: read contacts</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">HC</div><span style="flex:1;font-size:10px;">HubSpot: create contact</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SF</div><span style="flex:1;font-size:10px;">Salesforce: read records</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SP</div><span style="flex:1;font-size:10px;">Stripe: read payments</span><span class="badge badge-amber" style="font-size:8px">Rate limited</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SU</div><span style="flex:1;font-size:10px;">Summarise content</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">EE</div><span style="flex:1;font-size:10px;">Extract entities</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">SA</div><span style="flex:1;font-size:10px;">Sentiment analysis</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">OS</div><span style="flex:1;font-size:10px;">Acme: Outreach scoring</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">LQ</div><span style="flex:1;font-size:10px;">Acme: Lead qualification</span><span class="badge badge-green" style="font-size:8px">On</span></div>
+      <div class="mini-skill-row"><div class="mini-skill-icon">DM</div><span style="flex:1;font-size:10px;">Acme: Deal stage mapping</span><span class="badge badge-slate" style="font-size:8px">Off</span></div>
+      <!-- Data sources section cramped below skill list — often invisible without scrolling -->
+      <div class="mini-section-hdr" style="margin-top:8px;color:var(--amber-600);">Data Sources (scroll to see)</div>
+      <div style="font-size:9px;color:var(--slate-400);margin-bottom:4px;">Operators often miss this section — it requires scrolling past all 14 skill rows above</div>
+      <div class="mini-row" style="font-size:10px;"><span style="flex:1">Acme Brand Guide (doc)</span><span class="badge badge-green" style="font-size:8px">OK</span></div>
+      <div class="mini-row" style="font-size:10px;"><span style="flex:1">Acme HubSpot CRM (live)</span><span class="badge badge-green" style="font-size:8px">Synced</span></div>
+    </div>
+  </div>
+
+  <!-- AdminSkillsPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminSkillsPage
+      <span class="route">/admin/skills</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Skills library</h3>
+        <span class="mini-btn mini-btn-primary">New skill</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input class="mini-field" style="width:auto;flex:1" placeholder="Search skills..." readonly>
+        <span class="mini-btn mini-btn-secondary">Category</span>
+        <span class="mini-btn mini-btn-secondary">Source</span>
+      </div>
+      <div class="mini-skill-row">
+        <div class="mini-skill-icon">SE</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">Send Email</div>
+          <div style="font-size:9px;color:var(--slate-500)">communication</div>
+        </div>
+        <span class="badge badge-indigo" style="font-size:9px">Native</span>
+        <a href="#" style="font-size:10px;color:var(--indigo-600)">Edit</a>
+      </div>
+      <div class="mini-skill-row">
+        <div class="mini-skill-icon">CL</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">CRM Lookup</div>
+          <div style="font-size:9px;color:var(--slate-500)">integration</div>
+        </div>
+        <span class="badge badge-violet" style="font-size:9px">MCP</span>
+        <a href="#" style="font-size:10px;color:var(--indigo-600)">Edit</a>
+      </div>
+      <div class="mini-skill-row">
+        <div class="mini-skill-icon">CA</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">Calendar Access</div>
+          <div style="font-size:9px;color:var(--slate-500)">scheduling</div>
+        </div>
+        <span class="badge badge-indigo" style="font-size:9px">Native</span>
+        <a href="#" style="font-size:10px;color:var(--indigo-600)">Edit</a>
+      </div>
+      <div class="mini-skill-row">
+        <div class="mini-skill-icon">WS</div>
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:600">Web Search</div>
+          <div style="font-size:9px;color:var(--slate-500)">research</div>
+        </div>
+        <span class="badge badge-sky" style="font-size:9px">OpenAPI</span>
+        <a href="#" style="font-size:10px;color:var(--indigo-600)">Edit</a>
+      </div>
+      <div style="font-size:10px;color:var(--slate-400);text-align:center;margin-top:8px;">+176 more skills</div>
+    </div>
+  </div>
+
+  <!-- AdminSkillEditPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminSkillEditPage
+      <span class="route">/admin/skills/:id/edit</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-breadcrumb">
+        <span>Skills</span> / <span>Send Email</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">Details</div>
+        <div class="mini-tab">Tool definition</div>
+        <div class="mini-tab">Parameters</div>
+        <div class="mini-tab">Test</div>
+      </div>
+      <div class="mini-row"><span class="label">Skill name</span><input class="mini-field" value="Send Email" readonly></div>
+      <div class="mini-row"><span class="label">Slug</span><input class="mini-field" value="send-email" style="font-family:monospace;font-size:10px" readonly></div>
+      <div class="mini-row"><span class="label">Category</span><input class="mini-field" value="communication" readonly></div>
+      <div class="mini-row"><span class="label">Source type</span><input class="mini-field" value="Native" readonly></div>
+      <div class="mini-row"><span class="label">Credential</span><input class="mini-field" value="SMTP / Gmail OAuth" readonly></div>
+      <div class="mini-section-hdr">Tool definition (JSON schema)</div>
+      <div class="mini-code-editor">
+        <span class="kw">{"type":</span> <span class="str">"function"</span>,<br>
+        &nbsp;<span class="kw">"function":</span> {<br>
+        &nbsp;&nbsp;<span class="fn">"name":</span> <span class="str">"send_email"</span>,<br>
+        &nbsp;&nbsp;<span class="fn">"description":</span> <span class="str">"Send..."</span><br>
+        }}
+      </div>
+    </div>
+  </div>
+
+  <!-- SkillStudioPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      SkillStudioPage
+      <span class="route">/admin/skill-studio</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Skill Studio</h3>
+        <span class="badge badge-amber">Advanced</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <div class="mini-section-hdr">Skill config</div>
+          <div class="mini-row"><span class="label">Name</span><input class="mini-field" value="Custom Webhook" readonly></div>
+          <div class="mini-row"><span class="label">Method</span><input class="mini-field" value="POST" readonly></div>
+          <div class="mini-row"><span class="label">Endpoint</span><input class="mini-field" value="https://api.acme..." readonly></div>
+          <div class="mini-section-hdr">Auth</div>
+          <div class="mini-row"><span class="label">Type</span><input class="mini-field" value="Bearer token" readonly></div>
+        </div>
+        <div>
+          <div class="mini-section-hdr">Live tester</div>
+          <textarea class="mini-textarea" readonly>{"name": "Test Corp","email": "test@example.com"}</textarea>
+          <div style="margin-top:4px;display:flex;gap:4px;">
+            <span class="mini-btn mini-btn-primary" style="font-size:9px">Run test</span>
+          </div>
+          <div class="mini-section-hdr">Response</div>
+          <div class="mini-code-editor" style="height:40px;font-size:9px;color:#86efac;">
+            200 OK, {"sent": true}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SkillAnalyzerPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      SkillAnalyzerPage
+      <span class="route">/admin/skill-analyzer</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Skill Analyzer</h3>
+        <span class="badge badge-amber">Admin only</span>
+      </div>
+      <div class="mini-kpi-row">
+        <div class="mini-kpi"><div class="val">180</div><div class="lbl">Total skills</div></div>
+        <div class="mini-kpi"><div class="val" style="color:var(--emerald-600)">142</div><div class="lbl">Active</div></div>
+        <div class="mini-kpi"><div class="val" style="color:var(--red-600)">8</div><div class="lbl">Errors</div></div>
+      </div>
+      <div class="mini-section-hdr">Skill usage heatmap</div>
+      <div style="background:var(--slate-100);border-radius:4px;height:48px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--slate-400);">[Heatmap grid, usage by agent x skill]</div>
+      <div class="mini-section-hdr" style="margin-top:8px;">Error log</div>
+      <div class="mini-row" style="font-size:10px;">
+        <span class="badge badge-red" style="font-size:9px">ERR</span>
+        <span style="flex:1">send-email: SMTP auth failed</span>
+        <span style="color:var(--slate-400)">2h ago</span>
+      </div>
+      <div class="mini-row" style="font-size:10px;">
+        <span class="badge badge-amber" style="font-size:9px">WARN</span>
+        <span style="flex:1">crm-lookup: rate limit 80%</span>
+        <span style="color:var(--slate-400)">5h ago</span>
+      </div>
+      <div class="mini-row" style="font-size:10px;">
+        <span class="badge badge-red" style="font-size:9px">ERR</span>
+        <span style="flex:1">web-search: API key expired</span>
+        <span style="color:var(--slate-400)">1d ago</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Navigation impact -->
+<div class="nav-impact">
+  <h3>Navigation impact before consolidation</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">5</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Pages (5 routes)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">6</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">3</div>
+      <div class="lbl">Nav items (admin sidebar)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">3+</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Context switches to edit a skill</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">2</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">0</div>
+      <div class="lbl">Standalone admin-only tools (Studio, Analyzer)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">4</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Scroll/click depth to reach skill config</div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
+    SkillStudioPage and SkillAnalyzerPage are admin-only tools accessible separately from agent management. Operators configuring an agent must navigate: AdminAgentEditPage &gt; Capabilities tab &gt; edit link &gt; AdminSkillEditPage. SkillStudio adds a third context-switch for custom skill creation. In the consolidated view, all skill management lives inside the agent's Skills tab with search-driven discovery scaling to 200+ skills.
+  </p>
+</div>
+
+<!-- Problems with current state -->
+<div style="margin:0 24px 32px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px 20px;">
+  <h3 style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    Problems with the current state (Capabilities tab IA)
+  </h3>
+  <ul style="list-style:none;display:flex;flex-direction:column;gap:7px;">
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      Single Capabilities tab cannot scale beyond ~20 skills before the operator must scroll endlessly to find a specific skill.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      Data sources cramped at the bottom of the skill list — operators must scroll past all skill rows to reach them, and they are often missed entirely.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      No search across the skill library. With 200+ skills available, finding a specific one requires manual scrolling through an unsorted flat list.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      Tier inheritance (System / Org / This client) not visible per-row. Operators cannot tell which skills are platform-built, org-defined, or workspace-specific.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      "Capabilities" is jargon. Operators do not know what the tab groups until they have already opened it. "Skills" and "Data sources" are self-describing.
+    </li>
+    <li style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:#7f1d1d;line-height:1.5;">
+      <span style="width:4px;height:4px;border-radius:50%;background:#ef4444;margin-top:7px;flex-shrink:0;display:block;"></span>
+      No live filter. If 200+ skills are available, finding one is a scroll-marathon with no way to narrow by tier, category, or enabled state.
+    </li>
+  </ul>
+</div>
+
+</body>
+</html>

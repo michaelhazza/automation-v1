@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Page-specific styles ─────────────────────────────────────────── */
+.replaces-banner {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+  padding: 10px 16px; margin-bottom: 20px;
+  font-size: 12px; color: #92400e;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.replaces-banner strong { font-weight: 700; }
+
+/* Avatar circles */
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 700; color: white; flex-shrink: 0;
+}
+.avatar-lg {
+  width: 48px; height: 48px; font-size: 16px;
+}
+.av-indigo  { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+.av-emerald { background: linear-gradient(135deg, #10b981, #059669); }
+.av-amber   { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.av-sky     { background: linear-gradient(135deg, #0ea5e9, #0284c7); }
+.av-rose    { background: linear-gradient(135deg, #f43f5e, #e11d48); }
+.av-violet  { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+.av-teal    { background: linear-gradient(135deg, #14b8a6, #0f766e); }
+.av-orange  { background: linear-gradient(135deg, #f97316, #ea580c); }
+
+/* Role badges */
+.role-badge {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600;
+  border-radius: 5px; padding: 2px 8px;
+}
+.role-admin    { background: #fef9c3; color: #a16207; border: 1px solid #fde68a; }
+.role-manager  { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+.role-user     { background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200); }
+.role-client   { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
+/* Permission set badge */
+.perm-badge {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 500;
+  border-radius: 4px; padding: 2px 7px;
+  background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200);
+}
+
+/* Status dots — member status */
+.member-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
+.ms-active  { color: var(--emerald-600); }
+.ms-pending { color: var(--amber-600); }
+.ms-suspended { color: var(--slate-400); }
+
+/* Member table toolbar */
+.member-toolbar {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+}
+
+/* Overflow menu button */
+.overflow-btn {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--slate-400); font-size: 17px; font-weight: 700;
+  padding: 3px 7px; border-radius: 5px; transition: all 0.1s;
+  line-height: 1;
+}
+.overflow-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+
+/* Overflow dropdown */
+.overflow-dropdown {
+  position: fixed; background: white; border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: var(--shadow-md); min-width: 160px;
+  z-index: 50; display: none; padding: 4px 0;
+}
+.overflow-dropdown.open { display: block; }
+.overflow-item {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 14px; font-size: 13px; color: var(--slate-700);
+  background: transparent; border: none; cursor: pointer; transition: background 0.1s;
+}
+.overflow-item:hover { background: var(--slate-50); }
+.overflow-item.danger { color: var(--red-600); }
+.overflow-item.danger:hover { background: var(--red-50); }
+
+/* Pending row style */
+tr.pending-row { background: #fffbeb; }
+tr.pending-row:hover { background: #fef9c3; }
+
+/* ── Drawer styles ────────────────────────────────────────────────── */
+.member-drawer {
+  width: 440px !important;
+}
+.drawer-avatar-row {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 20px;
+}
+.drawer-member-name { font-size: 17px; font-weight: 700; color: var(--slate-900); }
+.drawer-member-email { font-size: 13px; color: var(--slate-500); margin-top: 2px; }
+.drawer-field { margin-bottom: 16px; }
+.drawer-field-label {
+  font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--slate-400); margin-bottom: 6px;
+}
+.drawer-field-value { font-size: 13px; color: var(--slate-700); }
+.drawer-field-select {
+  width: 100%; padding: 7px 10px; border: 1px solid var(--slate-300);
+  border-radius: 7px; font-size: 13px; color: var(--slate-800);
+  background: white; cursor: pointer;
+}
+
+/* Activity list in drawer */
+.activity-list { display: flex; flex-direction: column; gap: 8px; }
+.activity-item { display: flex; align-items: flex-start; gap: 8px; }
+.activity-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--indigo-400);
+  margin-top: 5px; flex-shrink: 0;
+}
+.activity-text { font-size: 12.5px; color: var(--slate-600); line-height: 1.4; }
+.activity-time { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
+
+/* Toggle switch */
+.toggle-wrap { display: flex; align-items: center; gap: 8px; }
+.toggle-input { display: none; }
+.toggle-track {
+  position: relative; width: 36px; height: 20px; border-radius: 10px;
+  background: var(--slate-300); cursor: pointer; transition: background 0.15s;
+}
+.toggle-input:checked + .toggle-track { background: var(--indigo-500); }
+.toggle-track::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%; background: white;
+  transition: transform 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-input:checked + .toggle-track::after { transform: translateX(16px); }
+.toggle-label { font-size: 13px; color: var(--slate-700); }
+
+/* Drawer danger zone */
+.drawer-danger-row {
+  display: flex; gap: 8px; padding-top: 16px;
+  border-top: 1px solid var(--slate-200); margin-top: 20px;
+}
+
+/* ── Org chart styles ─────────────────────────────────────────────── */
+.org-chart-wrap {
+  overflow-x: auto; padding: 20px 0 40px;
+}
+
+/* Tree using flex columns */
+.org-tree { display: flex; flex-direction: column; align-items: center; }
+.org-level { display: flex; justify-content: center; gap: 0; position: relative; }
+
+/* Org card */
+.org-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+  min-width: 160px; max-width: 180px;
+  text-align: center; cursor: pointer;
+  transition: all 0.15s; position: relative;
+  box-shadow: var(--shadow-sm);
+  margin: 0 10px;
+}
+.org-card:hover {
+  border-color: var(--indigo-400);
+  box-shadow: 0 4px 16px rgba(99,102,241,0.15);
+  transform: translateY(-2px);
+}
+.org-card .avatar { margin: 0 auto 8px; }
+.org-card-name { font-size: 13px; font-weight: 700; color: var(--slate-900); }
+.org-card-title { font-size: 11.5px; color: var(--slate-500); margin-top: 2px; }
+.org-card-email { font-size: 11px; color: var(--slate-400); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 156px; }
+
+/* Connector lines using borders */
+.org-connector-down {
+  width: 2px; height: 20px; background: var(--slate-200);
+  margin: 0 auto;
+}
+.org-connector-row {
+  display: flex; position: relative;
+}
+/* Vertical line from parent to horizontal bar */
+.org-vline-wrap { display: flex; flex-direction: column; align-items: center; }
+.org-vline { width: 2px; height: 16px; background: var(--slate-200); margin: 0 auto; }
+/* Horizontal bar across children */
+.org-hbar-wrap { position: relative; display: flex; justify-content: center; }
+.org-hbar { height: 2px; background: var(--slate-200); position: absolute; top: 0; }
+
+/* Per-child vertical line down to card */
+.org-child-col {
+  display: flex; flex-direction: column; align-items: center;
+}
+.org-child-vline { width: 2px; height: 16px; background: var(--slate-200); }
+
+/* Sub-group for nested children */
+.org-subgroup { display: flex; flex-direction: column; align-items: center; margin: 0 8px; }
+
+/* Note below chart */
+.org-chart-note {
+  margin-top: 28px; padding: 12px 16px;
+  background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 7px;
+  font-size: 12px; color: var(--slate-500); display: flex; align-items: flex-start; gap: 8px;
+}
+
+/* Add to chart button */
+.add-chart-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 20px; padding: 7px 14px; border-radius: 7px;
+  background: white; border: 1px dashed var(--slate-300);
+  font-size: 12.5px; font-weight: 500; color: var(--slate-500);
+  cursor: pointer; transition: all 0.1s;
+}
+.add-chart-btn:hover { background: var(--slate-50); border-color: var(--slate-400); color: var(--slate-700); }
+
+/* ── Invite modal ─────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+  z-index: 60; display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+  background: white; border-radius: 14px; width: 480px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  overflow: hidden;
+}
+.modal-header {
+  padding: 18px 22px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-header h2 { font-size: 16px; font-weight: 700; color: var(--slate-900); }
+.modal-close {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: none; background: transparent;
+  color: var(--slate-400); font-size: 18px; cursor: pointer; transition: all 0.1s;
+}
+.modal-close:hover { background: var(--slate-100); color: var(--slate-700); }
+.modal-body { padding: 20px 22px; }
+.modal-footer {
+  padding: 14px 22px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+}
+
+/* Toast */
+.toast-bar {
+  position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+  background: var(--slate-900); color: #f1f5f9;
+  font-size: 13px; padding: 10px 18px; border-radius: 9px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.22); display: none;
+  align-items: center; gap: 8px;
+}
+.toast-bar.visible { display: flex; }
+
+/* Search + filter toolbar */
+.search-wrap { position: relative; }
+.search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--slate-400); }
+.search-box { padding: 7px 12px 7px 32px; border: 1px solid var(--slate-300); border-radius: 8px; font-size: 13px; color: var(--slate-800); background: white; outline: none; width: 100%; transition: border-color 0.12s; }
+.search-box:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'team.html');</script>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Team</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="btn btn-primary" onclick="openInviteModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Invite member
+      </button>
+    </div>
+
+    <div class="page-body">
+
+      <div class="replaces-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span><strong>Replaces:</strong> SubaccountTeamPage (/admin/subaccounts/:id/team) and OrgChartPage (/org-chart) merged into one page with two tabs.</span>
+      </div>
+
+      <!-- Page header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;">
+        <div>
+          <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;">Team</h1>
+          <p style="font-size:13.5px;color:var(--slate-500);margin-top:4px;">Acme Corp &middot; 8 members</p>
+        </div>
+        <button class="btn btn-primary" onclick="openInviteModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Invite member
+        </button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="team-tabs">
+        <button class="tab-btn active" id="tab-members" onclick="switchTeamTab('members')">
+          Members <span class="tab-count" id="tab-members-count">8</span>
+        </button>
+        <button class="tab-btn" id="tab-orgchart" onclick="switchTeamTab('orgchart')">
+          Org Chart
+        </button>
+      </div>
+
+      <!-- MEMBERS TAB -->
+      <div id="panel-members">
+
+        <!-- Toolbar -->
+        <div class="member-toolbar">
+          <div class="search-wrap" style="flex:1;max-width:280px;">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-box" type="text" placeholder="Search members...">
+          </div>
+          <select class="form-select" style="font-size:12.5px;padding:6px 10px;">
+            <option>All roles</option>
+            <option>Org admin</option>
+            <option>Manager</option>
+            <option>User</option>
+            <option>Client user</option>
+          </select>
+          <div style="flex:1;"></div>
+          <button class="btn btn-primary btn-sm" onclick="openInviteModal()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Invite member
+          </button>
+        </div>
+
+        <!-- Members table -->
+        <div class="card">
+          <table class="data-table" id="members-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Role</th>
+                <th>Permission set</th>
+                <th>Last active</th>
+                <th>Status</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <!-- Row 1: Sarah Chen — Org admin, active -->
+              <tr onclick="openMemberDrawer('sarah')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-indigo">SC</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Sarah Chen</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">sarah.chen@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-admin">Org admin</span></td>
+                <td><span class="perm-badge">Full access</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">Just now</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-sarah', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-sarah">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('sarah')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 2: Mike Liu — Manager, active -->
+              <tr onclick="openMemberDrawer('mike')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-sky">ML</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Mike Liu</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">mike.liu@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-manager">Manager</span></td>
+                <td><span class="perm-badge">Agent manager</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">12 minutes ago</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-mike', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-mike">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('mike')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 3: Emma Park — User, active -->
+              <tr onclick="openMemberDrawer('emma')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-emerald">EP</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Emma Park</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">emma.park@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-user">User</span></td>
+                <td><span class="perm-badge">Standard</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">2 hours ago</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-emma', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-emma">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('emma')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 4: Tom Reed — User, active -->
+              <tr onclick="openMemberDrawer('tom')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-amber">TR</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Tom Reed</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">tom.reed@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-user">User</span></td>
+                <td><span class="perm-badge">Standard</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">Yesterday</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-tom', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-tom">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('tom')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 5: Lisa Wong — Manager, active -->
+              <tr onclick="openMemberDrawer('lisa')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-violet">LW</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Lisa Wong</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">lisa.wong@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-manager">Manager</span></td>
+                <td><span class="perm-badge">Agent manager</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">3 days ago</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-lisa', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-lisa">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('lisa')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 6: Carlos Diaz — Manager, active -->
+              <tr onclick="openMemberDrawer('carlos')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-teal">CD</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Carlos Diaz</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">carlos.diaz@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-manager">Manager</span></td>
+                <td><span class="perm-badge">Agent manager</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">1 week ago</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-carlos', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-carlos">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('carlos')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 7: Priya Patel — User, active -->
+              <tr onclick="openMemberDrawer('priya')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-rose">PP</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">Priya Patel</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">priya.patel@acmecorp.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-user">User</span></td>
+                <td><span class="perm-badge">Standard</span></td>
+                <td style="font-size:12.5px;color:var(--slate-500);">2 weeks ago</td>
+                <td>
+                  <div class="member-status ms-active">
+                    <div class="status-dot dot-green"></div> Active
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-priya', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-priya">
+                    <button class="overflow-item" onclick="closeOverflow();openMemberDrawer('priya')">Edit</button>
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Password reset sent')">Send password reset</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member suspended')">Suspend</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Member removed')">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Row 8: James Kim — pending invite -->
+              <tr class="pending-row" onclick="openMemberDrawer('james')" style="cursor:pointer;">
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="avatar av-orange" style="opacity:0.55;border:1.5px dashed #f97316;">JK</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">james.kim@acmecorp.com</div>
+                      <div style="font-size:11.5px;color:var(--slate-400);">Invite sent May 5, 2026</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="role-badge role-user">User</span></td>
+                <td><span class="perm-badge">Standard</span></td>
+                <td style="font-size:12.5px;color:var(--slate-400);">Never</td>
+                <td>
+                  <div class="member-status ms-pending">
+                    <div class="status-dot dot-amber"></div> Pending
+                  </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleOverflow('menu-james', event)">&#x2026;</button>
+                  <div class="overflow-dropdown" id="menu-james">
+                    <button class="overflow-item" onclick="closeOverflow();showToast('Invite resent to james.kim@acmecorp.com')">Resend invite</button>
+                    <button class="overflow-item danger" onclick="closeOverflow();showToast('Invite cancelled')">Cancel invite</button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div><!-- /card -->
+
+      </div><!-- /panel-members -->
+
+      <!-- ORG CHART TAB -->
+      <div id="panel-orgchart" style="display:none;">
+
+        <div class="org-chart-wrap">
+
+          <!-- Level 0: CEO -->
+          <div class="org-tree">
+            <div class="org-level">
+              <div class="org-subgroup">
+                <div class="org-card" onclick="openMemberDrawer('sarah')">
+                  <div class="avatar avatar-lg av-indigo" style="width:40px;height:40px;font-size:14px;">SC</div>
+                  <div class="org-card-name">Sarah Chen</div>
+                  <div class="org-card-title">CEO</div>
+                  <div class="org-card-email">sarah.chen@acmecorp.com</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Connector: CEO down to VP row -->
+            <div class="org-connector-down"></div>
+
+            <!-- Horizontal bar for 2 VPs -->
+            <div style="position:relative;display:flex;justify-content:center;width:100%;">
+              <!-- Line spanning from left VP to right VP midpoints -->
+              <div style="position:absolute;top:0;left:calc(50% - 120px);width:240px;height:2px;background:var(--slate-200);"></div>
+            </div>
+
+            <!-- Level 1: VP Sales + VP Marketing -->
+            <div class="org-level" style="margin-top:0;">
+
+              <!-- VP Sales branch -->
+              <div class="org-subgroup">
+                <div style="display:flex;justify-content:center;">
+                  <div class="org-child-vline" style="margin-top:0;"></div>
+                </div>
+                <div class="org-card" onclick="openMemberDrawer('mike')">
+                  <div class="avatar avatar-lg av-sky" style="width:40px;height:40px;font-size:14px;">ML</div>
+                  <div class="org-card-name">Mike Liu</div>
+                  <div class="org-card-title">VP Sales</div>
+                  <div class="org-card-email">mike.liu@acmecorp.com</div>
+                </div>
+
+                <!-- VP Sales connector down -->
+                <div class="org-connector-down"></div>
+
+                <!-- Horizontal bar for 3 reports of VP Sales -->
+                <div style="position:relative;display:flex;justify-content:center;width:100%;">
+                  <div style="position:absolute;top:0;left:calc(50% - 170px);width:340px;height:2px;background:var(--slate-200);"></div>
+                </div>
+
+                <!-- VP Sales 3 reports -->
+                <div class="org-level" style="margin-top:0;gap:0;">
+
+                  <!-- Emma Park -->
+                  <div class="org-subgroup" style="margin:0 8px;">
+                    <div class="org-child-vline"></div>
+                    <div class="org-card" onclick="openMemberDrawer('emma')" style="min-width:148px;max-width:162px;">
+                      <div class="avatar av-emerald" style="width:36px;height:36px;font-size:12px;margin:0 auto 7px;">EP</div>
+                      <div class="org-card-name" style="font-size:12px;">Emma Park</div>
+                      <div class="org-card-title">Account Executive</div>
+                      <div class="org-card-email">emma.park@acmecorp.com</div>
+                    </div>
+                  </div>
+
+                  <!-- Tom Reed -->
+                  <div class="org-subgroup" style="margin:0 8px;">
+                    <div class="org-child-vline"></div>
+                    <div class="org-card" onclick="openMemberDrawer('tom')" style="min-width:148px;max-width:162px;">
+                      <div class="avatar av-amber" style="width:36px;height:36px;font-size:12px;margin:0 auto 7px;">TR</div>
+                      <div class="org-card-name" style="font-size:12px;">Tom Reed</div>
+                      <div class="org-card-title">Account Executive</div>
+                      <div class="org-card-email">tom.reed@acmecorp.com</div>
+                    </div>
+                  </div>
+
+                  <!-- Lisa Wong (SDR Manager) with 2 sub-reports -->
+                  <div class="org-subgroup" style="margin:0 8px;">
+                    <div class="org-child-vline"></div>
+                    <div class="org-card" onclick="openMemberDrawer('lisa')" style="min-width:148px;max-width:162px;">
+                      <div class="avatar av-violet" style="width:36px;height:36px;font-size:12px;margin:0 auto 7px;">LW</div>
+                      <div class="org-card-name" style="font-size:12px;">Lisa Wong</div>
+                      <div class="org-card-title">SDR Manager</div>
+                      <div class="org-card-email">lisa.wong@acmecorp.com</div>
+                    </div>
+
+                    <!-- Lisa's 2 reports -->
+                    <div class="org-connector-down" style="height:14px;"></div>
+                    <div style="position:relative;display:flex;justify-content:center;width:100%;">
+                      <div style="position:absolute;top:0;left:calc(50% - 82px);width:164px;height:2px;background:var(--slate-200);"></div>
+                    </div>
+                    <div class="org-level" style="margin-top:0;gap:0;">
+                      <!-- James Kim (pending) -->
+                      <div class="org-subgroup" style="margin:0 4px;">
+                        <div class="org-child-vline"></div>
+                        <div class="org-card" onclick="openMemberDrawer('james')" style="min-width:130px;max-width:145px;opacity:0.8;border-style:dashed;">
+                          <div class="avatar" style="width:32px;height:32px;font-size:11px;margin:0 auto 6px;background:linear-gradient(135deg,#f97316,#ea580c);opacity:0.7;">JK</div>
+                          <div class="org-card-name" style="font-size:11.5px;">James Kim</div>
+                          <div class="org-card-title">SDR</div>
+                          <div class="org-card-email" style="font-size:10px;">Invite pending</div>
+                        </div>
+                      </div>
+                      <!-- Anna Brown (not in main members list) -->
+                      <div class="org-subgroup" style="margin:0 4px;">
+                        <div class="org-child-vline"></div>
+                        <div class="org-card" style="min-width:130px;max-width:145px;cursor:default;" title="Not yet onboarded">
+                          <div class="avatar" style="width:32px;height:32px;font-size:11px;margin:0 auto 6px;background:var(--slate-300);">AB</div>
+                          <div class="org-card-name" style="font-size:11.5px;">Anna Brown</div>
+                          <div class="org-card-title">SDR</div>
+                          <div class="org-card-email" style="font-size:10px;">Not yet invited</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div><!-- /VP Sales 3 reports -->
+              </div><!-- /VP Sales branch -->
+
+              <!-- Spacer between branches -->
+              <div style="width:80px;"></div>
+
+              <!-- VP Marketing branch -->
+              <div class="org-subgroup">
+                <div style="display:flex;justify-content:center;">
+                  <div class="org-child-vline" style="margin-top:0;"></div>
+                </div>
+                <div class="org-card" onclick="openMemberDrawer('carlos')">
+                  <div class="avatar avatar-lg av-teal" style="width:40px;height:40px;font-size:14px;">CD</div>
+                  <div class="org-card-name">Carlos Diaz</div>
+                  <div class="org-card-title">VP Marketing</div>
+                  <div class="org-card-email">carlos.diaz@acmecorp.com</div>
+                </div>
+
+                <!-- VP Marketing connector down -->
+                <div class="org-connector-down"></div>
+
+                <!-- Priya Patel -->
+                <div class="org-level" style="margin-top:0;">
+                  <div class="org-subgroup">
+                    <div class="org-child-vline"></div>
+                    <div class="org-card" onclick="openMemberDrawer('priya')" style="min-width:148px;max-width:162px;">
+                      <div class="avatar av-rose" style="width:36px;height:36px;font-size:12px;margin:0 auto 7px;">PP</div>
+                      <div class="org-card-name" style="font-size:12px;">Priya Patel</div>
+                      <div class="org-card-title">Marketing Manager</div>
+                      <div class="org-card-email">priya.patel@acmecorp.com</div>
+                    </div>
+                  </div>
+                </div>
+              </div><!-- /VP Marketing branch -->
+
+            </div><!-- /Level 1 -->
+
+          </div><!-- /org-tree -->
+        </div><!-- /org-chart-wrap -->
+
+        <!-- Add to chart button -->
+        <div style="text-align:center;margin-top:8px;">
+          <button class="add-chart-btn" onclick="showToast('Drag-and-drop chart editing coming in production')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add unassigned member to chart
+          </button>
+        </div>
+
+        <!-- Note -->
+        <div class="org-chart-note" style="max-width:600px;margin-left:auto;margin-right:auto;margin-top:20px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--slate-400);margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Reporting structure is editable via drag-and-drop in production. This prototype shows the read view only. Click any card to open the member detail drawer.</span>
+        </div>
+
+      </div><!-- /panel-orgchart -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+
+</div><!-- /app-shell -->
+
+
+<!-- ── Member detail drawer ────────────────────────────────────────── -->
+<div class="drawer-overlay" id="member-drawer-overlay" style="display:none;" onclick="closeMemberDrawer(event)">
+  <div class="drawer member-drawer" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <h2 id="drawer-title">Member details</h2>
+      <button class="drawer-close" onclick="closeMemberDrawer(null)">&times;</button>
+    </div>
+    <div class="drawer-body" id="drawer-body">
+      <!-- Populated by JS -->
+    </div>
+    <div class="drawer-footer" style="padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn btn-secondary btn-sm" onclick="closeMemberDrawer(null)">Close</button>
+      <button class="btn btn-primary btn-sm" onclick="showToast('Changes saved');closeMemberDrawer(null)">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Invite member modal ─────────────────────────────────────────── -->
+<div class="modal-backdrop" id="invite-modal" style="display:none;" onclick="closeInviteModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>Invite a member</h2>
+      <button class="modal-close" onclick="closeInviteModal(null)">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-field">
+        <label class="form-label">Email address</label>
+        <input class="form-input" type="email" id="invite-email" placeholder="name@company.com">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-field">
+          <label class="form-label">First name</label>
+          <input class="form-input" type="text" id="invite-first" placeholder="First">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Last name</label>
+          <input class="form-input" type="text" id="invite-last" placeholder="Last">
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Role</label>
+        <select class="form-select" style="width:100%;" id="invite-role">
+          <option>User</option>
+          <option>Manager</option>
+          <option>Org admin</option>
+          <option>Client user</option>
+        </select>
+      </div>
+      <div class="form-field" style="margin-bottom:0;">
+        <label class="form-label">Permission set</label>
+        <select class="form-select" style="width:100%;" id="invite-perm">
+          <option>Standard</option>
+          <option>Agent manager</option>
+          <option>Full access</option>
+          <option>Read only</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeInviteModal(null)">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="submitInvite()">Send invite</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Overflow dropdown ─────────────────────────────────────────────── -->
+<!-- Toast bar -->
+<div class="toast-bar" id="toast-bar"></div>
+
+<script>
+/* ── Tab switching ─────────────────────────────────────────────────── */
+function switchTeamTab(tab) {
+  const tabs = ['members', 'orgchart'];
+  tabs.forEach(function(t) {
+    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+    document.getElementById('panel-' + t).style.display = t === tab ? '' : 'none';
+  });
+}
+
+/* ── Overflow menus ─────────────────────────────────────────────────── */
+let openOverflowId = null;
+function toggleOverflow(id, event) {
+  event.stopPropagation();
+  if (openOverflowId && openOverflowId !== id) {
+    closeOverflow();
+  }
+  const menu = document.getElementById(id);
+  const isOpen = menu.classList.contains('open');
+  closeOverflow();
+  if (!isOpen) {
+    const btn = event.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.left = (rect.right - 160) + 'px';
+    menu.classList.add('open');
+    openOverflowId = id;
+  }
+}
+function closeOverflow() {
+  if (openOverflowId) {
+    const menu = document.getElementById(openOverflowId);
+    if (menu) menu.classList.remove('open');
+    openOverflowId = null;
+  }
+}
+document.addEventListener('click', closeOverflow);
+
+/* ── Member data ────────────────────────────────────────────────────── */
+var MEMBERS = {
+  sarah: {
+    name: 'Sarah Chen',
+    email: 'sarah.chen@acmecorp.com',
+    initials: 'SC',
+    color: 'av-indigo',
+    role: 'Org admin',
+    roleBadge: 'role-admin',
+    perm: 'Full access',
+    joined: 'March 12, 2024',
+    lastActive: 'Just now',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Updated Research Agent prompt configuration', time: '10 minutes ago' },
+      { text: 'Approved 2 HITL items in Inbox', time: '1 hour ago' },
+      { text: 'Connected Salesforce integration', time: 'Yesterday' },
+      { text: 'Invited james.kim@acmecorp.com', time: '2 days ago' },
+      { text: 'Created new automation "Weekly Report"', time: '3 days ago' },
+    ]
+  },
+  mike: {
+    name: 'Mike Liu',
+    email: 'mike.liu@acmecorp.com',
+    initials: 'ML',
+    color: 'av-sky',
+    role: 'Manager',
+    roleBadge: 'role-manager',
+    perm: 'Agent manager',
+    joined: 'June 3, 2024',
+    lastActive: '12 minutes ago',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Ran Email Outreach Agent for Acme deal list', time: '12 minutes ago' },
+      { text: 'Reviewed 4 agent run traces', time: '3 hours ago' },
+      { text: 'Updated team budget cap to $1,500/month', time: '2 days ago' },
+    ]
+  },
+  emma: {
+    name: 'Emma Park',
+    email: 'emma.park@acmecorp.com',
+    initials: 'EP',
+    color: 'av-emerald',
+    role: 'User',
+    roleBadge: 'role-user',
+    perm: 'Standard',
+    joined: 'August 19, 2024',
+    lastActive: '2 hours ago',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Approved outreach draft via Inbox', time: '2 hours ago' },
+      { text: 'Added 3 contacts to Research Agent queue', time: 'Yesterday' },
+      { text: 'Viewed run trace for Contact Enrichment', time: '3 days ago' },
+    ]
+  },
+  tom: {
+    name: 'Tom Reed',
+    email: 'tom.reed@acmecorp.com',
+    initials: 'TR',
+    color: 'av-amber',
+    role: 'User',
+    roleBadge: 'role-user',
+    perm: 'Standard',
+    joined: 'September 4, 2024',
+    lastActive: 'Yesterday',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Ran Proposal Generator for 2 accounts', time: 'Yesterday' },
+      { text: 'Approved HITL gate in Follow-up Agent', time: '2 days ago' },
+    ]
+  },
+  lisa: {
+    name: 'Lisa Wong',
+    email: 'lisa.wong@acmecorp.com',
+    initials: 'LW',
+    color: 'av-violet',
+    role: 'Manager',
+    roleBadge: 'role-manager',
+    perm: 'Agent manager',
+    joined: 'October 22, 2024',
+    lastActive: '3 days ago',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Configured SDR Outreach Agent for new territory', time: '3 days ago' },
+      { text: 'Reviewed 6 draft emails in Inbox', time: '4 days ago' },
+      { text: 'Onboarded James Kim to SDR team', time: '4 days ago' },
+    ]
+  },
+  carlos: {
+    name: 'Carlos Diaz',
+    email: 'carlos.diaz@acmecorp.com',
+    initials: 'CD',
+    color: 'av-teal',
+    role: 'Manager',
+    roleBadge: 'role-manager',
+    perm: 'Agent manager',
+    joined: 'January 8, 2025',
+    lastActive: '1 week ago',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Published 2 blog drafts via Content Agent', time: '1 week ago' },
+      { text: 'Set budget cap for marketing agents', time: '10 days ago' },
+    ]
+  },
+  priya: {
+    name: 'Priya Patel',
+    email: 'priya.patel@acmecorp.com',
+    initials: 'PP',
+    color: 'av-rose',
+    role: 'User',
+    roleBadge: 'role-user',
+    perm: 'Standard',
+    joined: 'February 14, 2025',
+    lastActive: '2 weeks ago',
+    status: 'Active',
+    statusClass: 'ms-active',
+    dotClass: 'dot-green',
+    active: true,
+    activities: [
+      { text: 'Generated Q2 content calendar via Content Agent', time: '2 weeks ago' },
+      { text: 'Approved 3 social media drafts in Inbox', time: '2 weeks ago' },
+    ]
+  },
+  james: {
+    name: 'james.kim@acmecorp.com',
+    email: 'james.kim@acmecorp.com',
+    initials: 'JK',
+    color: 'av-orange',
+    role: 'User',
+    roleBadge: 'role-user',
+    perm: 'Standard',
+    joined: 'Invited May 5, 2026',
+    lastActive: 'Never',
+    status: 'Pending invite',
+    statusClass: 'ms-pending',
+    dotClass: 'dot-amber',
+    active: false,
+    activities: []
+  },
+};
+
+/* ── Open/close member drawer ───────────────────────────────────────── */
+function openMemberDrawer(key) {
+  closeOverflow();
+  var m = MEMBERS[key];
+  if (!m) return;
+
+  document.getElementById('drawer-title').textContent = m.name === m.email ? 'Pending invite' : m.name;
+
+  var roleOptions = ['User', 'Manager', 'Org admin', 'Client user'].map(function(r) {
+    return '<option' + (r === m.role ? ' selected' : '') + '>' + r + '</option>';
+  }).join('');
+
+  var permOptions = ['Standard', 'Agent manager', 'Full access', 'Read only'].map(function(p) {
+    return '<option' + (p === m.perm ? ' selected' : '') + '>' + p + '</option>';
+  }).join('');
+
+  var activityHtml = '';
+  if (m.activities.length > 0) {
+    activityHtml = '<div class="activity-list">' + m.activities.map(function(a) {
+      return '<div class="activity-item"><div class="activity-dot"></div><div><div class="activity-text">' + a.text + '</div><div class="activity-time">' + a.time + '</div></div></div>';
+    }).join('') + '</div>';
+  } else {
+    activityHtml = '<div style="font-size:12.5px;color:var(--slate-400);">No activity yet.</div>';
+  }
+
+  var pendingActions = !m.active ? '<div style="display:flex;gap:8px;padding:12px 0 4px;">' +
+    '<button class="btn btn-secondary btn-sm" onclick="showToast(\'Invite resent to ' + m.email + '\')">Resend invite</button>' +
+    '<button class="btn btn-ghost btn-sm" style="color:var(--red-600);" onclick="showToast(\'Invite cancelled\')">Cancel invite</button>' +
+    '</div>' : '';
+
+  var statusToggleHtml = m.active ? '<div class="toggle-wrap">' +
+    '<input type="checkbox" class="toggle-input" id="status-toggle" checked>' +
+    '<label class="toggle-track" for="status-toggle"></label>' +
+    '<span class="toggle-label">Active</span></div>' : '';
+
+  var html = [
+    '<div class="drawer-avatar-row">',
+      '<div class="avatar avatar-lg ' + m.color + '" style="width:48px;height:48px;font-size:16px;flex-shrink:0;">' + m.initials + '</div>',
+      '<div>',
+        '<div class="drawer-member-name">' + m.name + '</div>',
+        '<div class="drawer-member-email">' + m.email + '</div>',
+      '</div>',
+    '</div>',
+    pendingActions,
+    '<div class="drawer-field">',
+      '<div class="drawer-field-label">Role</div>',
+      '<select class="drawer-field-select">' + roleOptions + '</select>',
+    '</div>',
+    '<div class="drawer-field">',
+      '<div class="drawer-field-label">Permission set</div>',
+      '<select class="drawer-field-select">' + permOptions + '</select>',
+    '</div>',
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">',
+      '<div class="drawer-field">',
+        '<div class="drawer-field-label">Joined</div>',
+        '<div class="drawer-field-value">' + m.joined + '</div>',
+      '</div>',
+      '<div class="drawer-field">',
+        '<div class="drawer-field-label">Last active</div>',
+        '<div class="drawer-field-value">' + m.lastActive + '</div>',
+      '</div>',
+    '</div>',
+    m.active ? '<div class="drawer-field">' +
+      '<div class="drawer-field-label">Status</div>' +
+      statusToggleHtml +
+    '</div>' : '',
+    '<div class="drawer-field">',
+      '<div class="drawer-field-label">Recent activity</div>',
+      activityHtml,
+    '</div>',
+    m.active ? '<div class="drawer-danger-row">' +
+      '<button class="btn btn-secondary btn-sm" onclick="showToast(\'Password reset sent to ' + m.email + '\')" style="flex:1;">Send password reset</button>' +
+      '<button class="btn btn-ghost btn-sm" style="color:var(--red-600);" onclick="showToast(\'Member suspended\')">Suspend</button>' +
+      '<button class="btn btn-ghost btn-sm" style="color:var(--red-700);" onclick="showToast(\'Member removed\')">Remove</button>' +
+    '</div>' : '',
+  ].join('');
+
+  document.getElementById('drawer-body').innerHTML = html;
+  document.getElementById('member-drawer-overlay').style.display = 'flex';
+}
+
+function closeMemberDrawer(event) {
+  if (event && event.target !== document.getElementById('member-drawer-overlay')) return;
+  document.getElementById('member-drawer-overlay').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('member-drawer-overlay').style.display = 'none';
+    closeInviteModal(null);
+  }
+});
+
+/* ── Invite modal ───────────────────────────────────────────────────── */
+function openInviteModal() {
+  document.getElementById('invite-modal').style.display = 'flex';
+}
+function closeInviteModal(event) {
+  if (event && event.target !== document.getElementById('invite-modal')) return;
+  document.getElementById('invite-modal').style.display = 'none';
+}
+function submitInvite() {
+  var email = document.getElementById('invite-email').value.trim() || 'new.user@example.com';
+  document.getElementById('invite-modal').style.display = 'none';
+  showToast('Invite sent to ' + email);
+  // Add pending row to table
+  var tbody = document.querySelector('#members-table tbody');
+  var tr = document.createElement('tr');
+  tr.className = 'pending-row';
+  tr.style.cursor = 'pointer';
+  tr.innerHTML = [
+    '<td><div style="display:flex;align-items:center;gap:10px;">',
+      '<div class="avatar" style="width:32px;height:32px;border-radius:50%;opacity:0.55;border:1.5px dashed #94a3b8;background:var(--slate-300);font-size:11.5px;font-weight:700;color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0;">?</div>',
+      '<div>',
+        '<div style="font-size:13.5px;font-weight:600;color:var(--slate-900);">' + email + '</div>',
+        '<div style="font-size:11.5px;color:var(--slate-400);">Invite sent just now</div>',
+      '</div>',
+    '</div></td>',
+    '<td><span class="role-badge role-user">' + (document.getElementById('invite-role').value) + '</span></td>',
+    '<td><span class="perm-badge">' + (document.getElementById('invite-perm').value) + '</span></td>',
+    '<td style="font-size:12.5px;color:var(--slate-400);">Never</td>',
+    '<td><div class="member-status ms-pending"><div class="status-dot dot-amber"></div> Pending</div></td>',
+    '<td><button class="overflow-btn" onclick="showToast(\'Invite resent\')">&#x2026;</button></td>',
+  ].join('');
+  tbody.appendChild(tr);
+  // Update count
+  var countEl = document.getElementById('tab-members-count');
+  if (countEl) countEl.textContent = (parseInt(countEl.textContent) + 1) + '';
+}
+
+/* ── Toast ──────────────────────────────────────────────────────────── */
+var toastTimer = null;
+function showToast(msg) {
+  var bar = document.getElementById('toast-bar');
+  bar.textContent = msg;
+  bar.classList.add('visible');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() {
+    bar.classList.remove('visible');
+  }, 2500);
+}
+</script>
+
+</body>
+</html>

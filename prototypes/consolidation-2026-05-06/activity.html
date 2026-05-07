@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<!--
+  activity.html — Activity feed page for the consolidation-2026-05-06 prototype.
+  Mirrors client/src/pages/ActivityPage.tsx + components/activity/ActivityFeedTable.tsx.
+  Three scopes: subaccount (workspace) / org / system.
+  Scope defaults from sidebar mode or ?scope= query param.
+  Filter bar: type, status, severity, sort, search, date range.
+  Table: type, subject, status, actor, severity, subaccount (org/system), created, duration.
+  Row click: slide-in drawer with type-specific detail fields.
+  Empty state: "No activities match these filters" with Clear filters button.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Scope toggle ───────────────────────────────────────── */
+.scope-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--slate-100);
+  border-radius: 8px;
+  padding: 3px;
+}
+.scope-btn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--slate-500);
+  transition: all 0.12s;
+  font-family: inherit;
+}
+.scope-btn.active {
+  background: white;
+  color: var(--indigo-600);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Filter bar ─────────────────────────────────────────── */
+.filter-bar {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 140px;
+}
+.filter-group.search { flex: 1; min-width: 200px; }
+.filter-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--slate-400);
+}
+.filter-select, .filter-input {
+  padding: 7px 10px;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--slate-700);
+  background: white;
+  outline: none;
+  transition: border-color 0.12s;
+  width: 100%;
+}
+.filter-select:focus, .filter-input:focus {
+  border-color: var(--indigo-400);
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.1);
+}
+
+/* ── Active filter pills ────────────────────────────────── */
+.filter-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  background: var(--indigo-50);
+  border: 1px solid var(--indigo-200);
+  border-radius: 20px;
+  font-size: 11.5px;
+  color: var(--indigo-700);
+  font-weight: 500;
+}
+.filter-pill-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--indigo-400);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+.filter-pill-remove:hover { color: var(--indigo-700); }
+
+/* ── Table ──────────────────────────────────────────────── */
+.act-table-wrap {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.act-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.act-table thead tr {
+  background: var(--slate-50);
+  border-bottom: 1px solid var(--slate-200);
+}
+.act-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--slate-400);
+  white-space: nowrap;
+}
+.act-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--slate-100);
+  vertical-align: middle;
+}
+.act-table tbody tr:last-child td { border-bottom: none; }
+.act-table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.act-table tbody tr:hover { background: var(--slate-50); }
+
+/* ── Type badge ─────────────────────────────────────────── */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--slate-100);
+  color: var(--slate-600);
+  white-space: nowrap;
+}
+.type-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Status badge ───────────────────────────────────────── */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.status-active      { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.status-attention   { background: var(--amber-50); border-color: #fcd34d; color: var(--amber-700); }
+.status-completed   { background: var(--emerald-50); border-color: #6ee7b7; color: var(--emerald-600); }
+.status-failed      { background: var(--red-50); border-color: #fca5a5; color: var(--red-600); }
+.status-cancelled   { background: var(--slate-50); border-color: var(--slate-200); color: var(--slate-500); }
+
+/* ── Severity dot ───────────────────────────────────────── */
+.sev-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.sev-critical { background: var(--red-500); }
+.sev-warning  { background: var(--amber-500); }
+.sev-info     { background: var(--sky-400); }
+.sev-none     { background: var(--slate-200); }
+
+/* ── Subject link ───────────────────────────────────────── */
+.subject-link {
+  color: var(--slate-800);
+  font-weight: 500;
+  text-decoration: none;
+  display: block;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subject-link:hover { color: var(--indigo-600); text-decoration: underline; }
+
+/* ── Actor cell ─────────────────────────────────────────── */
+.actor-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.actor-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--indigo-400);
+  flex-shrink: 0;
+}
+.actor-dot.system { background: var(--slate-400); }
+
+/* ── Time cell ──────────────────────────────────────────── */
+.time-cell {
+  color: var(--slate-500);
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+/* ── Duration cell ──────────────────────────────────────── */
+.dur-cell {
+  color: var(--slate-400);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Workspace column ───────────────────────────────────── */
+.ws-pill {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--slate-500);
+  background: var(--slate-100);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* ── Empty state ────────────────────────────────────────── */
+.act-empty {
+  padding: 56px 20px;
+  text-align: center;
+}
+.act-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--slate-700);
+  margin-bottom: 6px;
+}
+.act-empty-sub {
+  font-size: 13px;
+  color: var(--slate-400);
+  margin-bottom: 16px;
+}
+
+/* ── Drawer ─────────────────────────────────────────────── */
+.act-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,0.32);
+  z-index: 200;
+  display: none;
+}
+.act-drawer-overlay.open { display: block; }
+.act-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 440px;
+  background: white;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+}
+.act-drawer.open { transform: translateX(0); }
+.act-drawer-head {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.act-drawer-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--slate-900);
+  line-height: 1.3;
+}
+.act-drawer-close {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-200);
+  background: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--slate-500);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.act-drawer-close:hover { background: var(--slate-50); }
+.act-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+.act-drawer-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+}
+.drawer-field {
+  margin-bottom: 14px;
+}
+.drawer-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--slate-400);
+  margin-bottom: 4px;
+}
+.drawer-field-value {
+  font-size: 13.5px;
+  color: var(--slate-700);
+}
+.drawer-field-value.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--slate-50);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-200);
+  overflow-x: auto;
+  white-space: pre;
+}
+.drawer-divider {
+  border: none;
+  border-top: 1px solid var(--slate-100);
+  margin: 14px 0;
+}
+
+/* ── SORT/FILTER PATTERN — Activity table (matches spending/recurring/agents/integrations) ── */
+.sf-th {
+  position: relative;
+  white-space: nowrap;
+  user-select: none;
+}
+.sf-th-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.sf-sort-indicator {
+  font-size: 10px;
+  color: var(--slate-400);
+  transition: color 0.1s;
+}
+.sf-th-inner:hover .sf-sort-indicator { color: var(--slate-600); }
+.sf-sort-indicator.active { color: var(--indigo-500); }
+.sf-caret-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 4px;
+  border: none; background: none; cursor: pointer;
+  color: var(--slate-400); font-size: 10px; padding: 0; margin-left: 2px;
+  transition: background 0.1s, color 0.1s;
+}
+.sf-caret-btn:hover { background: var(--slate-200); color: var(--slate-700); }
+.sf-caret-btn.filtered { color: var(--indigo-500); background: var(--indigo-50); }
+.sf-dropdown {
+  position: absolute; top: 100%; left: 0; z-index: 30;
+  background: white; border: 1px solid var(--slate-200);
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  min-width: 200px; padding: 8px 0 0; display: none;
+}
+.sf-dropdown.open { display: block; }
+.sf-dropdown-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px 6px; border-bottom: 1px solid var(--slate-100);
+  font-size: 11.5px;
+}
+.sf-dropdown-head a { color: var(--indigo-500); cursor: pointer; text-decoration: none; }
+.sf-dropdown-head a:hover { text-decoration: underline; }
+.sf-dropdown-list { max-height: 240px; overflow-y: auto; padding: 4px 0; }
+.sf-dropdown-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  font-size: 12.5px; color: var(--slate-700); cursor: pointer;
+  transition: background 0.1s;
+}
+.sf-dropdown-item:hover { background: var(--slate-50); }
+.sf-dropdown-item input[type="checkbox"] { cursor: pointer; }
+.sf-dropdown-footer { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--slate-100); }
+.sf-cancel-btn {
+  flex: 1; padding: 6px 0; background: white; color: var(--slate-600);
+  border: 1px solid var(--slate-300); border-radius: 6px;
+  font-size: 12.5px; cursor: pointer; transition: background 0.1s;
+}
+.sf-cancel-btn:hover { background: var(--slate-50); }
+.sf-apply-btn {
+  flex: 1; padding: 6px 0; background: var(--indigo-600); color: white;
+  border: none; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; transition: background 0.1s;
+}
+.sf-apply-btn:hover { background: var(--indigo-700); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (three-mode shared) -->
+  <div id="sidebar-mount"></div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Activity</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span id="item-count" style="font-size:12px;color:var(--slate-400);margin-right:4px;"></span>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Page header -->
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <h1 id="page-title">Activity</h1>
+          <p id="page-subtitle" style="margin-top:4px;font-size:13.5px;color:var(--slate-500);"></p>
+        </div>
+        <div class="scope-toggle">
+          <button class="scope-btn" data-scope="subaccount" onclick="setScope('subaccount',this)">Subaccount</button>
+          <button class="scope-btn" data-scope="org" onclick="setScope('org',this)">Org</button>
+          <button class="scope-btn" data-scope="system" onclick="setScope('system',this)">System</button>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <div class="filter-group search">
+          <div class="filter-label">Search</div>
+          <input class="filter-input" type="text" id="filter-search" placeholder="Search subjects..." oninput="applyFilters()">
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">Type</div>
+          <select class="filter-select" id="filter-type" onchange="applyFilters()">
+            <option value="">All types</option>
+            <optgroup label="Core">
+              <option value="agent_run">Agent Run</option>
+              <option value="review_item">Review Item</option>
+              <option value="health_finding">Health Finding</option>
+              <option value="inbox_item">Inbox Item</option>
+              <option value="workflow_run">Workflow Run</option>
+              <option value="workflow_execution">Workflow Execution</option>
+            </optgroup>
+            <optgroup label="Workspace">
+              <option value="email.sent">Email Sent</option>
+              <option value="email.received">Email Received</option>
+              <option value="calendar.event_created">Calendar Event Created</option>
+              <option value="calendar.event_accepted">Calendar Event Accepted</option>
+              <option value="calendar.event_declined">Calendar Event Declined</option>
+              <option value="identity.provisioned">Identity Provisioned</option>
+              <option value="identity.activated">Identity Activated</option>
+              <option value="identity.suspended">Identity Suspended</option>
+              <option value="identity.resumed">Identity Resumed</option>
+              <option value="identity.revoked">Identity Revoked</option>
+              <option value="identity.archived">Identity Archived</option>
+              <option value="identity.email_sending_enabled">Identity Email Sending Enabled</option>
+              <option value="identity.email_sending_disabled">Identity Email Sending Disabled</option>
+              <option value="identity.migrated">Identity Migrated</option>
+              <option value="identity.migration_failed">Identity Migration Failed</option>
+              <option value="identity.provisioning_failed">Identity Provisioning Failed</option>
+              <option value="actor.onboarded">Actor Onboarded</option>
+              <option value="subaccount.migration_completed">Subaccount Migration Completed</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">Status</div>
+          <select class="filter-select" id="filter-status" onchange="applyFilters()">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="attention_needed">Attention needed</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">Severity</div>
+          <select class="filter-select" id="filter-severity" onchange="applyFilters()">
+            <option value="">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">Sort</div>
+          <select class="filter-select" id="filter-sort" onchange="actSortKey=null;applyFilters()">
+            <option value="attention_first">Attention first</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="severity">Severity</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px;">
+          <button class="btn btn-ghost" onclick="clearFilters()" id="clear-btn" style="display:none;">Clear</button>
+        </div>
+      </div>
+
+      <!-- Active filter pills -->
+      <div id="filter-pills" class="filter-pills"></div>
+
+      <!-- Table -->
+      <div class="act-table-wrap">
+        <table class="act-table" id="act-table">
+          <thead>
+            <tr>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('type')">Type<span class="sf-sort-indicator" id="act-sort-type">&#9660;</span></span><button class="sf-caret-btn" id="act-fcaret-type" onclick="actToggleFilter(event,'type')" title="Filter"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button><div class="sf-dropdown" id="act-fdrop-type"></div></th>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('subject')">Subject<span class="sf-sort-indicator" id="act-sort-subject">&#9660;</span></span></th>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('status')">Status<span class="sf-sort-indicator" id="act-sort-status">&#9660;</span></span><button class="sf-caret-btn" id="act-fcaret-status" onclick="actToggleFilter(event,'status')" title="Filter"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button><div class="sf-dropdown" id="act-fdrop-status"></div></th>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('actor')">Actor<span class="sf-sort-indicator" id="act-sort-actor">&#9660;</span></span><button class="sf-caret-btn" id="act-fcaret-actor" onclick="actToggleFilter(event,'actor')" title="Filter"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button><div class="sf-dropdown" id="act-fdrop-actor"></div></th>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('severity')">Sev<span class="sf-sort-indicator" id="act-sort-severity">&#9660;</span></span></th>
+              <th id="ws-col-header" class="sf-th" style="display:none;"><span class="sf-th-inner" onclick="actSortBy('subaccount')">Workspace<span class="sf-sort-indicator" id="act-sort-subaccount">&#9660;</span></span><button class="sf-caret-btn" id="act-fcaret-subaccount" onclick="actToggleFilter(event,'subaccount')" title="Filter"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/></svg></button><div class="sf-dropdown" id="act-fdrop-subaccount"></div></th>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('createdAt')">Created<span class="sf-sort-indicator active" id="act-sort-createdAt">&#9660;</span></span></th>
+              <th class="sf-th"><span class="sf-th-inner" onclick="actSortBy('duration')">Duration<span class="sf-sort-indicator" id="act-sort-duration">&#9660;</span></span></th>
+            </tr>
+          </thead>
+          <tbody id="act-tbody"></tbody>
+        </table>
+        <div id="act-empty" class="act-empty" style="display:none;">
+          <div class="act-empty-title">No activities match these filters</div>
+          <div class="act-empty-sub">Try adjusting or clearing the filters above.</div>
+          <button class="btn btn-secondary" onclick="clearFilters()">Clear filters</button>
+        </div>
+      </div>
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+
+</div><!-- /app-shell -->
+
+<!-- Drawer overlay -->
+<div class="act-drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+<div class="act-drawer" id="act-drawer">
+  <div class="act-drawer-head">
+    <div>
+      <div id="drawer-type-badge" style="margin-bottom:6px;"></div>
+      <div class="act-drawer-title" id="drawer-title"></div>
+    </div>
+    <button class="act-drawer-close" onclick="closeDrawer()">&#215;</button>
+  </div>
+  <div class="act-drawer-body" id="drawer-body"></div>
+  <div class="act-drawer-footer" id="drawer-footer"></div>
+</div>
+
+<script src="_sidebar.js"></script>
+<script>
+/* ── Mock data (28 rows, full type coverage) ─────────────────────────── */
+const MOCK_ROWS = [
+  {
+    id: 'r1',
+    type: 'agent_run',
+    subject: 'Outreach Agent: Prospect outreach sequence for Q2 list',
+    status: 'attention_needed',
+    actor: 'Outreach Agent',
+    actorType: 'agent',
+    severity: 'warning',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T10:42:00Z',
+    duration: '4m 31s',
+    detail: {
+      agentName: 'Outreach Agent',
+      runId: 'run_7xK9mP',
+      trigger: 'Scheduled',
+      step: '7 of 14',
+      gateType: 'approval_required',
+      awaitingApproval: 'Sarah Chen',
+    },
+  },
+  {
+    id: 'r2',
+    type: 'review_item',
+    subject: 'Memory conflict: contact.email vs. CRM record, Acme Corp',
+    status: 'attention_needed',
+    actor: 'CRM Sync Agent',
+    actorType: 'agent',
+    severity: 'warning',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T10:38:00Z',
+    duration: null,
+    detail: {
+      reviewType: 'belief_conflict',
+      conflictField: 'contact.email',
+      currentValue: 'james.h@acmecorp.com',
+      newEvidence: 'james.harris@acmecorp.co.uk',
+      confidence: '92%',
+    },
+  },
+  {
+    id: 'r3',
+    type: 'email.sent',
+    subject: 'Proposal follow-up sent to James Harris (Acme Corp)',
+    status: 'completed',
+    actor: 'Outreach Agent',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T10:30:00Z',
+    duration: null,
+    detail: {
+      to: 'james.harris@acmecorp.co.uk',
+      from: 'sarah@agency.com',
+      subject: 'Re: Q2 partnership proposal',
+      templateUsed: 'Follow-up v3',
+    },
+  },
+  {
+    id: 'r4',
+    type: 'agent_run',
+    subject: 'Research Agent: Competitive landscape analysis for Beta Inc',
+    status: 'active',
+    actor: 'Research Agent',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T10:28:00Z',
+    duration: '0m 52s',
+    detail: {
+      agentName: 'Research Agent',
+      runId: 'run_3tN8wQ',
+      trigger: 'Manual',
+      step: '3 of 8',
+      gateType: null,
+      awaitingApproval: null,
+    },
+  },
+  {
+    id: 'r5',
+    type: 'health_finding',
+    subject: 'Gmail credential expiring in 2 days (Acme Corp)',
+    status: 'attention_needed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'warning',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T10:15:00Z',
+    duration: null,
+    detail: {
+      findingType: 'credential_expiry',
+      integration: 'Gmail',
+      expiresAt: '2026-05-08T09:00:00Z',
+      affectedAgents: 'Outreach Agent, CRM Sync Agent',
+    },
+  },
+  {
+    id: 'r6',
+    type: 'workflow_run',
+    subject: 'Onboarding workflow: Gamma Solutions new client intake',
+    status: 'completed',
+    actor: 'Workflow Engine',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Gamma Solutions',
+    createdAt: '2026-05-06T09:55:00Z',
+    duration: '12m 04s',
+    detail: {
+      workflowName: 'Client Onboarding v2',
+      runId: 'wrun_4Lm2jR',
+      steps: '8 of 8',
+      completedAt: '2026-05-06T10:07:04Z',
+    },
+  },
+  {
+    id: 'r7',
+    type: 'calendar.event_created',
+    subject: 'Discovery call created: Nova Digital x Acme Corp, 12 May 10:00',
+    status: 'completed',
+    actor: 'Calendar Agent',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T09:48:00Z',
+    duration: null,
+    detail: {
+      eventTitle: 'Discovery call: Nova Digital x Acme Corp',
+      startAt: '2026-05-12T10:00:00Z',
+      endAt: '2026-05-12T11:00:00Z',
+      organiser: 'Calendar Agent',
+      attendees: 'james.harris@acmecorp.co.uk, ceo@novadigital.com',
+    },
+  },
+  {
+    id: 'r8',
+    type: 'inbox_item',
+    subject: 'HITL gate awaiting approval: proposal draft for Acme Corp',
+    status: 'attention_needed',
+    actor: 'Outreach Agent',
+    actorType: 'agent',
+    severity: 'warning',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T09:40:00Z',
+    duration: null,
+    detail: {
+      itemType: 'approval_required',
+      proposedContent: 'Proposal draft v2: Q2 Partnership',
+      requestedBy: 'Outreach Agent',
+      approvalUrl: 'inbox.html',
+    },
+  },
+  {
+    id: 'r9',
+    type: 'identity.provisioned',
+    subject: 'Identity provisioned: james.harris@acmecorp.co.uk',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T09:30:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'james.harris@acmecorp.co.uk',
+      provisionedBy: 'Workspace Sync Agent',
+      workspaceId: 'ws_acme_001',
+      status: 'active',
+    },
+  },
+  {
+    id: 'r10',
+    type: 'agent_run',
+    subject: 'CRM Hygiene Agent: data deduplication pass on Beta Inc records',
+    status: 'failed',
+    actor: 'CRM Hygiene Agent',
+    actorType: 'agent',
+    severity: 'critical',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T09:20:00Z',
+    duration: '2m 18s',
+    detail: {
+      agentName: 'CRM Hygiene Agent',
+      runId: 'run_9wB2kL',
+      trigger: 'Scheduled',
+      step: '4 of 12',
+      errorCode: 'CRM_API_TIMEOUT',
+      errorMessage: 'Upstream CRM API returned 504 after 3 retries.',
+    },
+  },
+  {
+    id: 'r11',
+    type: 'email.received',
+    subject: 'Reply received from ceo@novadigital.com, re: partnership',
+    status: 'completed',
+    actor: 'Inbox Monitor',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Nova Digital',
+    createdAt: '2026-05-06T09:10:00Z',
+    duration: null,
+    detail: {
+      from: 'ceo@novadigital.com',
+      to: 'sarah@agency.com',
+      subject: 'Re: Q2 partnership, yes let\'s talk',
+      triggeredAction: 'Discovery call booking workflow',
+    },
+  },
+  {
+    id: 'r12',
+    type: 'identity.activated',
+    subject: 'Identity activated: ceo@novadigital.com',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Nova Digital',
+    createdAt: '2026-05-06T09:05:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'ceo@novadigital.com',
+      activatedBy: 'Workspace Sync Agent',
+      previousStatus: 'provisioned',
+    },
+  },
+  {
+    id: 'r13',
+    type: 'workflow_execution',
+    subject: 'Email sequence step 3 executed for Acme Corp prospect list',
+    status: 'completed',
+    actor: 'Workflow Engine',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T08:55:00Z',
+    duration: '0m 04s',
+    detail: {
+      workflowName: 'Outreach Email Sequence v4',
+      executionId: 'exec_2Qp7nX',
+      step: 'Step 3: send follow-up',
+      outcome: 'sent to 14 contacts',
+    },
+  },
+  {
+    id: 'r14',
+    type: 'calendar.event_accepted',
+    subject: 'Discovery call accepted by james.harris@acmecorp.co.uk',
+    status: 'completed',
+    actor: 'Calendar Agent',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T08:44:00Z',
+    duration: null,
+    detail: {
+      eventTitle: 'Discovery call: Acme Corp review',
+      acceptedBy: 'james.harris@acmecorp.co.uk',
+      scheduledAt: '2026-05-09T14:00:00Z',
+    },
+  },
+  {
+    id: 'r15',
+    type: 'identity.suspended',
+    subject: 'Identity suspended: legacy@beta-inc.com (inactive 90d)',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T08:30:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'legacy@beta-inc.com',
+      reason: 'No activity in 90 days',
+      suspendedBy: 'Identity Lifecycle Policy',
+    },
+  },
+  {
+    id: 'r16',
+    type: 'agent_run',
+    subject: 'Proposal Writer Agent: Q2 deck generation for Gamma Solutions',
+    status: 'completed',
+    actor: 'Proposal Writer Agent',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Gamma Solutions',
+    createdAt: '2026-05-06T08:15:00Z',
+    duration: '6m 42s',
+    detail: {
+      agentName: 'Proposal Writer Agent',
+      runId: 'run_1Yd5wK',
+      trigger: 'Manual',
+      step: '12 of 12',
+    },
+  },
+  {
+    id: 'r17',
+    type: 'health_finding',
+    subject: 'CRM API rate limit approaching 85% (Beta Inc)',
+    status: 'attention_needed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'critical',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T08:10:00Z',
+    duration: null,
+    detail: {
+      findingType: 'rate_limit_warning',
+      integration: 'Salesforce CRM',
+      usagePct: '85%',
+      resetAt: '2026-05-06T12:00:00Z',
+    },
+  },
+  {
+    id: 'r18',
+    type: 'actor.onboarded',
+    subject: 'New actor onboarded: Sarah Chen (Acme Corp workspace)',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T07:55:00Z',
+    duration: null,
+    detail: {
+      actorName: 'Sarah Chen',
+      email: 'sarah.chen@acmecorp.co.uk',
+      role: 'workspace_admin',
+      onboardedBy: 'Workspace Sync Agent',
+    },
+  },
+  {
+    id: 'r19',
+    type: 'identity.resumed',
+    subject: 'Identity resumed: ops@gamma-solutions.com (returned from leave)',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Gamma Solutions',
+    createdAt: '2026-05-06T07:40:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'ops@gamma-solutions.com',
+      resumedBy: 'Identity Lifecycle Policy',
+      previousStatus: 'suspended',
+    },
+  },
+  {
+    id: 'r20',
+    type: 'calendar.event_declined',
+    subject: 'Onboarding call declined by ops@beta-inc.com, rescheduling needed',
+    status: 'completed',
+    actor: 'Calendar Agent',
+    actorType: 'agent',
+    severity: 'info',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T07:20:00Z',
+    duration: null,
+    detail: {
+      eventTitle: 'Beta Inc: onboarding kickoff',
+      declinedBy: 'ops@beta-inc.com',
+      scheduledAt: '2026-05-08T09:00:00Z',
+      message: 'Conflict: proposing May 10 instead',
+    },
+  },
+  {
+    id: 'r21',
+    type: 'identity.migration_failed',
+    subject: 'Identity migration failed: legacy2@beta-inc.com (CRM lookup timeout)',
+    status: 'failed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'critical',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T07:05:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'legacy2@beta-inc.com',
+      failureReason: 'CRM lookup timed out after 30s',
+      retries: '3',
+      nextRetryAt: '2026-05-06T08:05:00Z',
+    },
+  },
+  {
+    id: 'r22',
+    type: 'subaccount.migration_completed',
+    subject: 'Subaccount migration completed: Nova Digital (from Legacy Org)',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Nova Digital',
+    createdAt: '2026-05-06T06:45:00Z',
+    duration: '8m 12s',
+    detail: {
+      subaccountName: 'Nova Digital',
+      fromOrg: 'Legacy Org (archive)',
+      migratedAt: '2026-05-06T06:45:00Z',
+      recordsMigrated: '1,247',
+    },
+  },
+  {
+    id: 'r23',
+    type: 'identity.revoked',
+    subject: 'Identity revoked: former.cto@gamma-solutions.com',
+    status: 'completed',
+    actor: 'Sarah Chen',
+    actorType: 'user',
+    severity: 'info',
+    subaccount: 'Gamma Solutions',
+    createdAt: '2026-05-06T06:30:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'former.cto@gamma-solutions.com',
+      revokedBy: 'Sarah Chen (workspace_admin)',
+      reason: 'Staff departure',
+    },
+  },
+  {
+    id: 'r24',
+    type: 'identity.email_sending_enabled',
+    subject: 'Email sending enabled: outreach@acmecorp.co.uk',
+    status: 'completed',
+    actor: 'Sarah Chen',
+    actorType: 'user',
+    severity: 'info',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T06:10:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'outreach@acmecorp.co.uk',
+      enabledBy: 'Sarah Chen',
+      sendingLimit: '500/day',
+    },
+  },
+  {
+    id: 'r25',
+    type: 'identity.email_sending_disabled',
+    subject: 'Email sending disabled: legacy@beta-inc.com (account suspended)',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Beta Inc',
+    createdAt: '2026-05-06T05:55:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'legacy@beta-inc.com',
+      disabledBy: 'Identity Lifecycle Policy',
+      reason: 'Account suspended',
+    },
+  },
+  {
+    id: 'r26',
+    type: 'identity.archived',
+    subject: 'Identity archived: archived.user@gamma-solutions.com',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Gamma Solutions',
+    createdAt: '2026-05-06T05:40:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'archived.user@gamma-solutions.com',
+      archivedBy: 'Identity Lifecycle Policy',
+      retentionPeriod: '7 years',
+    },
+  },
+  {
+    id: 'r27',
+    type: 'identity.migrated',
+    subject: 'Identity migrated: ops@nova-digital.com (workspace merge)',
+    status: 'completed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'info',
+    subaccount: 'Nova Digital',
+    createdAt: '2026-05-06T05:20:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'ops@nova-digital.com',
+      fromWorkspace: 'Legacy Org workspace',
+      toWorkspace: 'Nova Digital',
+      migratedAt: '2026-05-06T05:20:00Z',
+    },
+  },
+  {
+    id: 'r28',
+    type: 'identity.provisioning_failed',
+    subject: 'Identity provisioning failed: newcontact@acmecorp.co.uk (duplicate)',
+    status: 'failed',
+    actor: 'System',
+    actorType: 'system',
+    severity: 'warning',
+    subaccount: 'Acme Corp',
+    createdAt: '2026-05-06T05:05:00Z',
+    duration: null,
+    detail: {
+      identityEmail: 'newcontact@acmecorp.co.uk',
+      failureReason: 'Email already exists in another workspace',
+      conflictingWorkspace: 'Acme Corp (archive)',
+    },
+  },
+];
+
+/* ── State ───────────────────────────────────────────────────────────── */
+let currentScope = 'subaccount';
+let openDrawerRow = null;
+
+/* Column-level sort + filter state (per patterns.md § 5 site-wide default).
+   actSortKey null means "use legacy sort dropdown"; clicking a column header
+   sets actSortKey and overrides the dropdown for all subsequent applyFilters
+   passes until the dropdown sort is changed (which clears actSortKey). */
+let actSortKey = 'createdAt';
+let actSortDir = 'desc';
+let actColFilters = { type: null, status: null, actor: null, subaccount: null }; // colFilters: null = no filter (Set when active)
+let _actFilterSnapshot = {};
+
+/* ── Helpers ─────────────────────────────────────────────────────────── */
+function typeLabel(type) {
+  if (type.includes('.')) {
+    return type.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+  }
+  return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function typeColor(type) {
+  if (type.startsWith('agent_run')) return '#6366f1';
+  if (type.startsWith('workflow')) return '#8b5cf6';
+  if (type.startsWith('email')) return '#0ea5e9';
+  if (type.startsWith('calendar')) return '#10b981';
+  if (type.startsWith('identity')) return '#f59e0b';
+  if (type === 'health_finding') return '#ef4444';
+  if (type === 'inbox_item') return '#f59e0b';
+  if (type === 'review_item') return '#f59e0b';
+  if (type === 'actor.onboarded') return '#6366f1';
+  if (type.startsWith('subaccount')) return '#8b5cf6';
+  return '#64748b';
+}
+
+function relativeTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return sec + 's ago';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + 'm ago';
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + 'h ago';
+  return Math.floor(hr / 24) + 'd ago';
+}
+
+function statusClass(status) {
+  const map = {
+    active: 'status-active',
+    attention_needed: 'status-attention',
+    completed: 'status-completed',
+    failed: 'status-failed',
+    cancelled: 'status-cancelled',
+  };
+  return map[status] || 'status-cancelled';
+}
+
+function statusLabel(status) {
+  return status.replace(/_/g, ' ');
+}
+
+function sevClass(sev) {
+  if (sev === 'critical') return 'sev-critical';
+  if (sev === 'warning') return 'sev-warning';
+  if (sev === 'info') return 'sev-info';
+  return 'sev-none';
+}
+
+function sevTitle(sev) {
+  return sev ? (sev.charAt(0).toUpperCase() + sev.slice(1)) : 'None';
+}
+
+/* ── Scope ───────────────────────────────────────────────────────────── */
+function setScope(scope, btn) {
+  currentScope = scope;
+
+  // Update button states
+  document.querySelectorAll('.scope-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Update subtitle
+  const subtitles = {
+    subaccount: 'Workspace activity for Acme Corp',
+    org: 'Organisation-wide activity',
+    system: 'System activity',
+  };
+  document.getElementById('page-subtitle').textContent = subtitles[scope];
+
+  // Show/hide workspace column
+  const show = scope !== 'subaccount';
+  document.getElementById('ws-col-header').style.display = show ? '' : 'none';
+  document.querySelectorAll('.ws-col-cell').forEach(el => {
+    el.style.display = show ? '' : 'none';
+  });
+
+  applyFilters();
+}
+
+/* ── Filters ─────────────────────────────────────────────────────────── */
+function getFilters() {
+  return {
+    search: document.getElementById('filter-search').value.trim().toLowerCase(),
+    type: document.getElementById('filter-type').value,
+    status: document.getElementById('filter-status').value,
+    severity: document.getElementById('filter-severity').value,
+    sort: document.getElementById('filter-sort').value,
+  };
+}
+
+function clearFilters() {
+  document.getElementById('filter-search').value = '';
+  document.getElementById('filter-type').value = '';
+  document.getElementById('filter-status').value = '';
+  document.getElementById('filter-severity').value = '';
+  document.getElementById('filter-sort').value = 'attention_first';
+  applyFilters();
+}
+
+/* ── Column sort + filter helpers (sortByColumn pattern) ─────────────── */
+function actSortBy(col) {
+  if (actSortKey === col) {
+    actSortDir = (actSortDir === 'asc') ? 'desc' : 'asc';
+  } else {
+    actSortKey = col;
+    actSortDir = (col === 'createdAt') ? 'desc' : 'asc';
+  }
+  applyFilters();
+}
+
+function actToggleFilter(e, col) {
+  e.stopPropagation();
+  const drop = document.getElementById('act-fdrop-' + col);
+  const isOpen = drop.classList.contains('open');
+  closeAllActDropdowns();
+  if (!isOpen) {
+    buildActDropdown(col, drop);
+    snapshotActFilter(col, drop);
+    drop.classList.add('open');
+  }
+}
+
+function buildActDropdown(col, drop) {
+  let rows = MOCK_ROWS;
+  if (currentScope === 'subaccount') rows = rows.filter(r => r.subaccount === 'Acme Corp');
+  const valSet = new Set();
+  rows.forEach(r => {
+    let v = r[col];
+    if (col === 'type') v = typeLabel(r.type);
+    if (v != null) valSet.add(v);
+  });
+  const vals = Array.from(valSet).sort();
+  const active = actColFilters[col];
+  drop.innerHTML =
+    '<div class="sf-dropdown-head">' +
+      '<a onclick="actSelectAllToggle(\'' + col + '\')">Select all</a>' +
+      '<a onclick="actClearFilter(\'' + col + '\')">Clear</a>' +
+    '</div>' +
+    '<div class="sf-dropdown-list">' +
+      vals.map(v => {
+        const checked = (!active || active.has(v)) ? 'checked' : '';
+        const safe = String(v).replace(/"/g, '&quot;');
+        return '<label class="sf-dropdown-item"><input type="checkbox" value="' + safe + '" ' + checked + '> ' + safe + '</label>';
+      }).join('') +
+    '</div>' +
+    '<div class="sf-dropdown-footer">' +
+      '<button class="sf-cancel-btn" onclick="actCancelFilter(\'' + col + '\')">Cancel</button>' +
+      '<button class="sf-apply-btn" onclick="actApplyFilter(\'' + col + '\')">Apply</button>' +
+    '</div>';
+}
+
+function snapshotActFilter(col, drop) {
+  _actFilterSnapshot[col] = {};
+  drop.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    _actFilterSnapshot[col][cb.value] = cb.checked;
+  });
+}
+
+function actSelectAllToggle(col) {
+  const drop = document.getElementById('act-fdrop-' + col);
+  const boxes = drop.querySelectorAll('input[type="checkbox"]');
+  const anyUnchecked = Array.from(boxes).some(b => !b.checked);
+  boxes.forEach(b => { b.checked = anyUnchecked; });
+}
+
+function actClearFilter(col) {
+  const drop = document.getElementById('act-fdrop-' + col);
+  drop.querySelectorAll('input[type="checkbox"]').forEach(b => { b.checked = false; });
+}
+
+function actApplyFilter(col) {
+  const drop = document.getElementById('act-fdrop-' + col);
+  const boxes = drop.querySelectorAll('input[type="checkbox"]');
+  const checked = [];
+  boxes.forEach(b => { if (b.checked) checked.push(b.value); });
+  if (checked.length === boxes.length) {
+    actColFilters[col] = null;
+  } else {
+    actColFilters[col] = new Set(checked);
+  }
+  const btn = document.getElementById('act-fcaret-' + col);
+  if (btn) btn.classList.toggle('filtered', !!actColFilters[col]);
+  closeAllActDropdowns();
+  applyFilters();
+}
+
+function actCancelFilter(col) {
+  const drop = document.getElementById('act-fdrop-' + col);
+  const snap = _actFilterSnapshot[col] || {};
+  drop.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    if (snap.hasOwnProperty(cb.value)) cb.checked = snap[cb.value];
+  });
+  closeAllActDropdowns();
+}
+
+function closeAllActDropdowns() {
+  document.querySelectorAll('#act-table .sf-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#act-table .sf-dropdown') && !e.target.closest('#act-table .sf-caret-btn')) {
+    closeAllActDropdowns();
+  }
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeAllActDropdowns();
+});
+
+function applyFilters() {
+  const f = getFilters();
+
+  // Determine which rows to show based on scope
+  // For subaccount: show rows where subaccount=Acme Corp
+  // For org: show all rows
+  // For system: show all rows
+  let rows = MOCK_ROWS;
+  if (currentScope === 'subaccount') {
+    rows = rows.filter(r => r.subaccount === 'Acme Corp');
+  }
+
+  // Apply search
+  if (f.search) {
+    rows = rows.filter(r =>
+      r.subject.toLowerCase().includes(f.search) ||
+      r.actor.toLowerCase().includes(f.search) ||
+      typeLabel(r.type).toLowerCase().includes(f.search)
+    );
+  }
+
+  // Apply type
+  if (f.type) {
+    rows = rows.filter(r => r.type === f.type);
+  }
+
+  // Apply status
+  if (f.status) {
+    rows = rows.filter(r => r.status === f.status);
+  }
+
+  // Apply severity
+  if (f.severity) {
+    rows = rows.filter(r => r.severity === f.severity);
+  }
+
+  // Apply column filters (sortByColumn pattern, multi-column AND)
+  rows = rows.filter(r => {
+    if (actColFilters.type     && !actColFilters.type.has(typeLabel(r.type))) return false;
+    if (actColFilters.status   && !actColFilters.status.has(r.status)) return false;
+    if (actColFilters.actor    && !actColFilters.actor.has(r.actor)) return false;
+    if (actColFilters.subaccount && !actColFilters.subaccount.has(r.subaccount)) return false;
+    return true;
+  });
+
+  // Sort: column-header sort wins when set; otherwise legacy dropdown sort
+  const SEVERITY_ORDER = { critical: 0, warning: 1, info: 2, null: 3 };
+  const STATUS_ATTN_FIRST = { attention_needed: 0, active: 1, failed: 2, completed: 3, cancelled: 4 };
+  const DURATION_PARSE = (s) => {
+    if (!s) return 0;
+    let total = 0;
+    const m = s.match(/(\d+)m/); if (m) total += parseInt(m[1]) * 60;
+    const sec = s.match(/(\d+)s/); if (sec) total += parseInt(sec[1]);
+    return total;
+  };
+
+  if (actSortKey) {
+    const key = actSortKey;
+    rows = [...rows].sort((a, b) => {
+      let av, bv;
+      switch (key) {
+        case 'severity': av = SEVERITY_ORDER[a.severity] ?? 3; bv = SEVERITY_ORDER[b.severity] ?? 3; break;
+        case 'status':   av = STATUS_ATTN_FIRST[a.status] ?? 9; bv = STATUS_ATTN_FIRST[b.status] ?? 9; break;
+        case 'createdAt': av = new Date(a.createdAt).getTime(); bv = new Date(b.createdAt).getTime(); break;
+        case 'duration': av = DURATION_PARSE(a.duration); bv = DURATION_PARSE(b.duration); break;
+        case 'type':     av = typeLabel(a.type); bv = typeLabel(b.type); break;
+        default:         av = a[key] ?? ''; bv = b[key] ?? '';
+      }
+      const cmp = (typeof av === 'string') ? av.localeCompare(bv) : (av - bv);
+      return actSortDir === 'asc' ? cmp : -cmp;
+    });
+  } else if (f.sort === 'attention_first') {
+    rows = [...rows].sort((a, b) =>
+      (STATUS_ATTN_FIRST[a.status] ?? 9) - (STATUS_ATTN_FIRST[b.status] ?? 9)
+    );
+  } else if (f.sort === 'newest') {
+    rows = [...rows].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } else if (f.sort === 'oldest') {
+    rows = [...rows].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  } else if (f.sort === 'severity') {
+    rows = [...rows].sort((a, b) =>
+      (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3)
+    );
+  }
+
+  // Update column sort indicators
+  ['type','subject','status','actor','severity','subaccount','createdAt','duration'].forEach(c => {
+    const el = document.getElementById('act-sort-' + c);
+    if (!el) return;
+    el.classList.toggle('active', actSortKey === c);
+    el.innerHTML = (actSortKey === c && actSortDir === 'asc') ? '&#9650;' : '&#9660;';
+  });
+
+  renderTable(rows);
+  renderPills(f);
+
+  // Show/hide clear button
+  const hasFilter = f.search || f.type || f.status || f.severity || f.sort !== 'attention_first';
+  document.getElementById('clear-btn').style.display = hasFilter ? '' : 'none';
+
+  // Item count
+  document.getElementById('item-count').textContent = rows.length + ' items';
+}
+
+/* ── Render table rows ───────────────────────────────────────────────── */
+function renderTable(rows) {
+  const tbody = document.getElementById('act-tbody');
+  const empty = document.getElementById('act-empty');
+  const showWs = currentScope !== 'subaccount';
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(row => {
+    const color = typeColor(row.type);
+    const sevCls = sevClass(row.severity);
+    const stCls = statusClass(row.status);
+
+    const wsCellHtml = showWs
+      ? `<td class="ws-col-cell"><span class="ws-pill">${row.subaccount}</span></td>`
+      : '<td class="ws-col-cell" style="display:none;"></td>';
+
+    return `
+      <tr data-id="${row.id}" onclick="openDrawer('${row.id}')">
+        <td>
+          <span class="type-badge">
+            <span class="type-icon" style="background:${color}20;color:${color};">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="${color}" stroke="none"><circle cx="12" cy="12" r="7"/></svg>
+            </span>
+            ${typeLabel(row.type)}
+          </span>
+        </td>
+        <td>
+          <a class="subject-link" href="#" onclick="event.preventDefault();openDrawer('${row.id}')">
+            ${row.subject}
+          </a>
+        </td>
+        <td>
+          <span class="status-badge ${stCls}">${statusLabel(row.status)}</span>
+        </td>
+        <td>
+          <div class="actor-cell">
+            <div class="actor-dot${row.actorType === 'system' ? ' system' : ''}"></div>
+            <span style="font-size:13px;color:var(--slate-600);">${row.actor}</span>
+          </div>
+        </td>
+        <td>
+          <span title="${sevTitle(row.severity)}" style="display:inline-flex;align-items:center;gap:4px;">
+            <span class="sev-dot ${sevCls}"></span>
+            <span style="font-size:11px;color:var(--slate-400);">${row.severity || ''}</span>
+          </span>
+        </td>
+        ${wsCellHtml}
+        <td>
+          <span class="time-cell" title="${row.createdAt}">${relativeTime(row.createdAt)}</span>
+        </td>
+        <td>
+          <span class="dur-cell">${row.duration || ''}</span>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/* ── Render active filter pills ──────────────────────────────────────── */
+function renderPills(f) {
+  const container = document.getElementById('filter-pills');
+  const pills = [];
+
+  if (f.type) pills.push({ label: 'Type: ' + typeLabel(f.type), clear: () => { document.getElementById('filter-type').value = ''; applyFilters(); } });
+  if (f.status) pills.push({ label: 'Status: ' + statusLabel(f.status), clear: () => { document.getElementById('filter-status').value = ''; applyFilters(); } });
+  if (f.severity) pills.push({ label: 'Severity: ' + f.severity, clear: () => { document.getElementById('filter-severity').value = ''; applyFilters(); } });
+  if (f.search) pills.push({ label: 'Search: "' + f.search + '"', clear: () => { document.getElementById('filter-search').value = ''; applyFilters(); } });
+
+  container.innerHTML = pills.map((p, i) =>
+    `<span class="filter-pill">
+      ${p.label}
+      <button class="filter-pill-remove" onclick="clearPill(${i})">&#215;</button>
+    </span>`
+  ).join('');
+
+  container._pills = pills;
+}
+
+function clearPill(i) {
+  const container = document.getElementById('filter-pills');
+  if (container._pills && container._pills[i]) {
+    container._pills[i].clear();
+  }
+}
+
+/* ── Drawer ──────────────────────────────────────────────────────────── */
+function openDrawer(id) {
+  const row = MOCK_ROWS.find(r => r.id === id);
+  if (!row) return;
+  openDrawerRow = row;
+
+  // Type badge
+  const color = typeColor(row.type);
+  document.getElementById('drawer-type-badge').innerHTML =
+    `<span class="type-badge" style="background:${color}15;color:${color};border:1px solid ${color}30;">
+      ${typeLabel(row.type)}
+    </span>`;
+
+  document.getElementById('drawer-title').textContent = row.subject;
+
+  // Build body
+  const body = document.getElementById('drawer-body');
+  body.innerHTML = buildDrawerBody(row);
+
+  // Build footer
+  const footer = document.getElementById('drawer-footer');
+  footer.innerHTML = buildDrawerFooter(row);
+
+  // Open
+  document.getElementById('drawer-overlay').classList.add('open');
+  document.getElementById('act-drawer').classList.add('open');
+}
+
+function closeDrawer() {
+  document.getElementById('drawer-overlay').classList.remove('open');
+  document.getElementById('act-drawer').classList.remove('open');
+  openDrawerRow = null;
+}
+
+function field(label, value) {
+  return `<div class="drawer-field">
+    <div class="drawer-field-label">${label}</div>
+    <div class="drawer-field-value">${value}</div>
+  </div>`;
+}
+
+function fieldMono(label, value) {
+  return `<div class="drawer-field">
+    <div class="drawer-field-label">${label}</div>
+    <div class="drawer-field-value mono">${value}</div>
+  </div>`;
+}
+
+function buildDrawerBody(row) {
+  const d = row.detail || {};
+  let html = '';
+
+  // Common fields
+  html += field('Status', `<span class="status-badge ${statusClass(row.status)}">${statusLabel(row.status)}</span>`);
+  html += field('Actor', row.actor);
+  if (row.severity) html += field('Severity', `<span class="sev-dot ${sevClass(row.severity)}" style="display:inline-block;margin-right:5px;"></span>${row.severity}`);
+  if (row.subaccount) {
+    const wsClickable = (window.getActiveProfile && window.getActiveProfile() === 'org_admin')
+      ? `style="cursor:pointer;" title="Click to switch to ${row.subaccount}" onclick="event.stopPropagation();if(window.setActiveSubaccount)window.setActiveSubaccount('${row.subaccount}');location.reload();"` : '';
+    html += field('Workspace', `<span class="ws-pill" ${wsClickable}>${row.subaccount}</span>`);
+  }
+  html += field('Created', new Date(row.createdAt).toLocaleString());
+  if (row.duration) html += field('Duration', row.duration);
+
+  html += '<hr class="drawer-divider">';
+
+  // Type-specific fields
+  if (row.type === 'agent_run') {
+    html += field('Agent', d.agentName || '');
+    if (d.runId) {
+      html += field('Run', `<a href="#" style="color:var(--indigo-600);font-weight:500;" onclick="event.preventDefault();event.stopPropagation();openRunTraceModal('${d.runId}','Run ${d.runId}')">View run trace (${d.runId})</a>`);
+    }
+    html += field('Trigger', d.trigger || '');
+    html += field('Progress', d.step || '');
+    if (d.errorCode) {
+      html += field('Error code', `<span style="color:var(--red-600);font-weight:600;">${d.errorCode}</span>`);
+      html += field('Error message', d.errorMessage || '');
+    }
+    if (d.gateType) {
+      html += field('HITL gate', d.gateType);
+      html += field('Awaiting approval from', d.awaitingApproval || '');
+    }
+  } else if (row.type === 'review_item') {
+    html += field('Review type', d.reviewType || '');
+    html += field('Conflict field', d.conflictField || '');
+    html += field('Current value', `<code style="font-size:12px;color:var(--slate-700);">${d.currentValue || ''}</code>`);
+    html += field('New evidence', `<code style="font-size:12px;color:var(--indigo-600);font-weight:600;">${d.newEvidence || ''}</code>`);
+    html += field('Confidence', d.confidence || '');
+  } else if (row.type === 'health_finding') {
+    html += field('Finding type', d.findingType || '');
+    html += field('Integration', d.integration || '');
+    if (d.expiresAt) html += field('Expires at', new Date(d.expiresAt).toLocaleString());
+    if (d.affectedAgents) html += field('Affected agents', d.affectedAgents);
+    if (d.usagePct) html += field('Current usage', d.usagePct);
+    if (d.resetAt) html += field('Rate limit resets', new Date(d.resetAt).toLocaleString());
+  } else if (row.type === 'inbox_item') {
+    html += field('Item type', d.itemType || '');
+    html += field('Proposed content', d.proposedContent || '');
+    html += field('Requested by', d.requestedBy || '');
+  } else if (row.type === 'workflow_run') {
+    html += field('Workflow', d.workflowName || '');
+    html += field('Run ID', d.runId || '');
+    html += field('Steps completed', d.steps || '');
+    if (d.completedAt) html += field('Completed at', new Date(d.completedAt).toLocaleString());
+  } else if (row.type === 'workflow_execution') {
+    html += field('Workflow', d.workflowName || '');
+    html += field('Execution ID', d.executionId || '');
+    html += field('Step', d.step || '');
+    html += field('Outcome', d.outcome || '');
+  } else if (row.type === 'email.sent') {
+    html += field('To', d.to || '');
+    html += field('From', d.from || '');
+    html += field('Subject', d.subject || '');
+    html += field('Template', d.templateUsed || '');
+  } else if (row.type === 'email.received') {
+    html += field('From', d.from || '');
+    html += field('To', d.to || '');
+    html += field('Subject', d.subject || '');
+    html += field('Triggered', d.triggeredAction || '');
+  } else if (row.type === 'calendar.event_created') {
+    html += field('Event title', d.eventTitle || '');
+    html += field('Start', d.startAt ? new Date(d.startAt).toLocaleString() : '');
+    html += field('End', d.endAt ? new Date(d.endAt).toLocaleString() : '');
+    html += field('Organiser', d.organiser || '');
+    html += field('Attendees', d.attendees || '');
+  } else if (row.type === 'calendar.event_accepted') {
+    html += field('Event title', d.eventTitle || '');
+    html += field('Accepted by', d.acceptedBy || '');
+    html += field('Scheduled for', d.scheduledAt ? new Date(d.scheduledAt).toLocaleString() : '');
+  } else if (row.type === 'calendar.event_declined') {
+    html += field('Event title', d.eventTitle || '');
+    html += field('Declined by', d.declinedBy || '');
+    html += field('Was scheduled for', d.scheduledAt ? new Date(d.scheduledAt).toLocaleString() : '');
+    html += field('Message', d.message || '');
+  } else if (row.type.startsWith('identity.')) {
+    const email = d.identityEmail;
+    if (email) html += field('Identity email', email);
+    if (d.provisionedBy) html += field('Provisioned by', d.provisionedBy);
+    if (d.activatedBy) html += field('Activated by', d.activatedBy);
+    if (d.suspendedBy || d.reason) { html += field('Suspended by', d.suspendedBy || ''); html += field('Reason', d.reason || ''); }
+    if (d.revokedBy) { html += field('Revoked by', d.revokedBy); html += field('Reason', d.reason || ''); }
+    if (d.archivedBy) { html += field('Archived by', d.archivedBy); html += field('Retention', d.retentionPeriod || ''); }
+    if (d.enabledBy) { html += field('Enabled by', d.enabledBy); html += field('Sending limit', d.sendingLimit || ''); }
+    if (d.disabledBy) { html += field('Disabled by', d.disabledBy); html += field('Reason', d.reason || ''); }
+    if (d.resumedBy) { html += field('Resumed by', d.resumedBy); html += field('Previous status', d.previousStatus || ''); }
+    if (d.failureReason) { html += field('Failure reason', `<span style="color:var(--red-600);">${d.failureReason}</span>`); }
+    if (d.retries) html += field('Retries', d.retries);
+    if (d.nextRetryAt) html += field('Next retry', new Date(d.nextRetryAt).toLocaleString());
+    if (d.fromWorkspace) { html += field('From workspace', d.fromWorkspace); html += field('To workspace', d.toWorkspace || ''); }
+    if (d.conflictingWorkspace) html += field('Conflicting workspace', d.conflictingWorkspace);
+    if (d.previousStatus) html += field('Previous status', d.previousStatus);
+  } else if (row.type === 'actor.onboarded') {
+    html += field('Actor name', d.actorName || '');
+    html += field('Email', d.email || '');
+    html += field('Role', d.role || '');
+    html += field('Onboarded by', d.onboardedBy || '');
+  } else if (row.type === 'subaccount.migration_completed') {
+    html += field('Subaccount', d.subaccountName || '');
+    html += field('From org', d.fromOrg || '');
+    html += field('Migrated at', d.migratedAt ? new Date(d.migratedAt).toLocaleString() : '');
+    html += field('Records migrated', d.recordsMigrated || '');
+  }
+
+  return html;
+}
+
+function openRunTraceModal(runId, runLabel) {
+  const modal = document.getElementById('run-trace-modal');
+  if (!modal) return;
+  document.getElementById('run-trace-modal-title').textContent = runLabel || ('Run ' + runId);
+  document.getElementById('run-trace-iframe').src = 'run-trace.html?embedded=1&run=' + encodeURIComponent(runId);
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function buildDrawerFooter(row) {
+  const btns = [];
+  const d = row.detail || {};
+
+  if (row.type === 'agent_run' && d.runId) {
+    btns.push(`<button class="btn btn-primary" style="font-size:12.5px;padding:7px 14px;" onclick="openRunTraceModal('${d.runId}','Run ${d.runId}')">View run trace</button>`);
+  }
+  if (row.type === 'inbox_item' || row.type === 'review_item') {
+    btns.push(`<a href="inbox.html" class="btn btn-primary" style="font-size:12.5px;padding:7px 14px;">View in Inbox</a>`);
+  }
+  if (row.type === 'health_finding') {
+    btns.push(`<button class="btn btn-secondary" style="font-size:12.5px;padding:7px 14px;" onclick="showToast('Opening finding detail...')">View finding</button>`);
+  }
+
+  btns.push(`<button class="btn btn-ghost" style="font-size:12.5px;padding:7px 14px;" onclick="closeDrawer()">Close</button>`);
+
+  return btns.join('');
+}
+
+/* ── Init ────────────────────────────────────────────────────────────── */
+(function init() {
+  // Determine scope from query param or sidebar mode
+  const params = new URLSearchParams(window.location.search);
+  const scopeParam = params.get('scope');
+  const sidebarMode = localStorage.getItem('prototype.sidebar.mode') || 'workspace';
+
+  if (scopeParam === 'org' || sidebarMode === 'org') {
+    currentScope = 'org';
+  } else if (scopeParam === 'system' || sidebarMode === 'system') {
+    currentScope = 'system';
+  } else {
+    currentScope = 'subaccount';
+  }
+
+  // Mark active scope button
+  document.querySelectorAll('.scope-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.scope === currentScope);
+  });
+
+  // Set subtitle
+  const subtitles = {
+    subaccount: 'Workspace activity for Acme Corp',
+    org: 'Organisation-wide activity',
+    system: 'System activity',
+  };
+  document.getElementById('page-subtitle').textContent = subtitles[currentScope];
+
+  // Show/hide workspace column header based on scope
+  const showWs = currentScope !== 'subaccount';
+  document.getElementById('ws-col-header').style.display = showWs ? '' : 'none';
+
+  // Render sidebar
+  renderSidebar(sidebarMode, 'activity.html');
+
+  // Render table
+  applyFilters();
+
+  // Keyboard: Escape closes drawer or run-trace modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const rtModal = document.getElementById('run-trace-modal');
+      if (rtModal && !rtModal.hidden) {
+        rtModal.hidden = true;
+        document.body.style.overflow = '';
+      } else if (openDrawerRow) {
+        closeDrawer();
+      }
+    }
+  });
+
+  // Wire workspace badges in table for org admin
+  function makeWsBadgeClickable(el, subaccountName) {
+    if (window.getActiveProfile && window.getActiveProfile() === 'org_admin') {
+      el.style.cursor = 'pointer';
+      el.title = 'Switch to ' + subaccountName + ' workspace';
+      el.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (window.setActiveSubaccount) window.setActiveSubaccount(subaccountName);
+        location.reload();
+      });
+    }
+  }
+  document.querySelectorAll('.ws-pill').forEach(function(el) {
+    makeWsBadgeClickable(el, el.textContent.trim());
+  });
+})();
+</script>
+
+<!-- Run trace modal -->
+<div id="run-trace-modal" class="modal-overlay" hidden style="z-index:210;" onclick="if(event.target===this){this.hidden=true;document.body.style.overflow='';}">
+  <div class="modal-card modal-card-xl" style="height:calc(100vh - 48px);">
+    <div class="modal-header">
+      <span class="modal-title" id="run-trace-modal-title">Run trace</span>
+      <button class="modal-close" onclick="document.getElementById('run-trace-modal').hidden=true;document.body.style.overflow='';">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:0;overflow:hidden;">
+      <iframe id="run-trace-iframe" src="" style="width:100%;height:100%;border:none;" title="Run trace"></iframe>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -18,7 +18,7 @@ export const projects = pgTable(
       .references(() => subaccounts.id),
     name: text('name').notNull(),
     description: text('description'),
-    status: text('status').notNull().default('active').$type<'active' | 'completed' | 'archived'>(),
+    status: text('status').notNull().default('active').$type<'active' | 'paused' | 'completed' | 'archived'>(),
     color: text('color').notNull().default('#6366f1'),
 
     // ── Project management ─────────────────────────────────────────────
@@ -36,6 +36,10 @@ export const projects = pgTable(
     goalId: uuid('goal_id')
       .references(() => goals.id),
     createdBy: uuid('created_by').references(() => users.id),
+    // Consolidation Build C1 — new columns (migration 0286)
+    objective: text('objective'),
+    linkedAgentIds: uuid('linked_agent_ids').array().notNull().default(sql`'{}'`),
+    migratedFromGoalsAt: timestamp('migrated_from_goals_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

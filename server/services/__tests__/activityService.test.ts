@@ -192,10 +192,10 @@ test('non-run types produce null for all 5 additive fields', () => {
   assertNull(fields.runId, 'runId');
 });
 
-test('addNullAdditiveFields returns exactly 5 keys', () => {
+test('addNullAdditiveFields returns exactly 6 keys', () => {
   const fields = addNullAdditiveFields();
   const keys = Object.keys(fields);
-  expect(keys.length, 'number of additive fields').toBe(5);
+  expect(keys.length, 'number of additive fields').toBe(6);
 });
 
 test('deleted user → triggeredByUserName = null, does not throw', () => {

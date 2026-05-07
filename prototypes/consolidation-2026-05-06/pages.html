@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<!--
+  Pages — consolidated view of PageProjectsPage + PageProjectDetailPage
+  Route: /admin/subaccounts/:id/page-projects (renamed from "Sites" to "Pages")
+  Round 7b-5
+
+  Production sources:
+    PageProjectsPage.tsx  — list page, links to detail
+    PageProjectDetailPage.tsx — separate detail route
+
+  Design decision: light redesign only. Card grid replaces flat table.
+  Detail opens in a 600px slide-in drawer (master-detail pattern) instead
+  of navigating to a separate route.
+
+  Mock data (6 pages):
+    1. "Welcome to Acme"   Published  custom domain acme.com    indigo   2h ago
+    2. "Pricing"           Published  acme.synthetos.ai/pricing  emerald  yesterday
+    3. "Free trial signup" Published  acme.synthetos.ai/trial    indigo   3 days ago
+    4. "About us"          Draft      acme.synthetos.ai/about    slate    5 days ago
+    5. "Holiday promo 2025" Archived  acme.synthetos.ai/holiday-2025 amber 2 months ago
+    6. "Beta program"      Draft      acme.synthetos.ai/beta     purple   last week
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pages | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Card grid ──────────────────────────────────────────── */
+  .pages-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 1100px) { .pages-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 720px)  { .pages-grid { grid-template-columns: 1fr; } }
+
+  .page-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    display: flex;
+    flex-direction: column;
+  }
+  .page-card:hover {
+    border-color: var(--indigo-400);
+    box-shadow: 0 4px 16px rgba(99,102,241,0.12);
+    transform: translateY(-1px);
+  }
+  .page-card.archived {
+    opacity: 0.65;
+  }
+  .page-card.archived:hover {
+    opacity: 1;
+  }
+
+  /* Browser-frame thumbnail */
+  .page-thumb {
+    height: 88px;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+    background: var(--slate-50);
+    flex-shrink: 0;
+  }
+  .page-thumb-bar {
+    height: 22px;
+    background: var(--slate-100);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .page-thumb-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+  }
+  .page-thumb-url {
+    flex: 1;
+    background: white;
+    border: 1px solid var(--slate-200);
+    border-radius: 3px;
+    height: 13px;
+    font-size: 8px;
+    color: var(--slate-400);
+    display: flex;
+    align-items: center;
+    padding: 0 5px;
+    margin: 0 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .page-thumb-body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .page-thumb-hero {
+    width: calc(100% - 24px);
+    height: 32px;
+    border-radius: 4px;
+    opacity: 0.25;
+  }
+
+  /* Card content */
+  .page-card-body {
+    padding: 12px 14px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .page-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .page-card-name {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--slate-900);
+    line-height: 1.3;
+  }
+  .page-card-url {
+    font-size: 11px;
+    color: var(--slate-400);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .page-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .page-card-updated {
+    font-size: 11px;
+    color: var(--slate-400);
+  }
+  .page-color-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+
+  /* Status badges */
+  .badge-published {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+    background: #dcfce7; color: #166534;
+  }
+  .badge-draft {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+    background: #fef9c3; color: #92400e;
+  }
+  .badge-archived {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+    background: var(--slate-100); color: var(--slate-500);
+  }
+
+  /* ── Filter bar ─────────────────────────────────────────── */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .filter-pill {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--slate-600);
+    background: white;
+    cursor: pointer;
+    transition: all 0.1s;
+    white-space: nowrap;
+  }
+  .filter-pill:hover { border-color: var(--indigo-400); color: var(--indigo-700); }
+  .filter-pill.active {
+    background: var(--indigo-600);
+    border-color: var(--indigo-600);
+    color: white;
+    font-weight: 600;
+  }
+  .filter-search {
+    flex: 1;
+    min-width: 180px;
+    max-width: 280px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px 6px 34px;
+    font-size: 13px;
+    color: var(--slate-700);
+    background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") no-repeat 10px center;
+    outline: none;
+    transition: border-color 0.12s;
+  }
+  .filter-search:focus { border-color: var(--indigo-400); }
+  .filter-search::placeholder { color: var(--slate-400); }
+
+  /* ── Drawer ─────────────────────────────────────────────── */
+  .drawer-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(15,23,42,0.35);
+    z-index: 100;
+    backdrop-filter: blur(1px);
+  }
+  .drawer-overlay.open { display: block; }
+
+  .drawer {
+    position: fixed;
+    top: 0; right: 0;
+    width: 600px;
+    max-width: 100vw;
+    height: 100vh;
+    background: white;
+    box-shadow: -4px 0 32px rgba(0,0,0,0.14);
+    z-index: 101;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+  }
+  .drawer.open { transform: translateX(0); }
+
+  .drawer-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .drawer-header-info { flex: 1; min-width: 0; }
+  .drawer-header-name {
+    font-size: 16px; font-weight: 700; color: var(--slate-900);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .drawer-header-url {
+    font-size: 11.5px; color: var(--slate-400);
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 2px;
+  }
+  .drawer-close {
+    width: 28px; height: 28px;
+    border: none; background: var(--slate-100);
+    border-radius: 6px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--slate-500);
+    flex-shrink: 0;
+    font-size: 16px;
+    transition: background 0.1s;
+  }
+  .drawer-close:hover { background: var(--slate-200); }
+
+  .drawer-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--slate-200);
+    padding: 0 20px;
+    flex-shrink: 0;
+    gap: 0;
+  }
+  .drawer-tab {
+    padding: 9px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--slate-500);
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    background: none;
+    border-top: none; border-left: none; border-right: none;
+    white-space: nowrap;
+    transition: color 0.12s;
+  }
+  .drawer-tab:hover { color: var(--slate-700); }
+  .drawer-tab.active {
+    color: var(--indigo-600);
+    border-bottom-color: var(--indigo-600);
+    font-weight: 600;
+  }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .drawer-footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    background: var(--slate-50);
+  }
+  .drawer-footer-spacer { flex: 1; }
+
+  /* Form elements in drawer */
+  .form-group { margin-bottom: 16px; }
+  .form-label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--slate-700);
+    margin-bottom: 5px;
+  }
+  .form-input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    font-size: 13px;
+    color: var(--slate-800);
+    outline: none;
+    transition: border-color 0.12s;
+    font-family: inherit;
+  }
+  .form-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(99,102,241,0.08); }
+  .form-hint { font-size: 11.5px; color: var(--slate-400); margin-top: 4px; }
+  .form-select {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    font-size: 13px;
+    color: var(--slate-800);
+    outline: none;
+    background: white;
+    transition: border-color 0.12s;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .form-select:focus { border-color: var(--indigo-400); }
+
+  /* Color picker chips */
+  .color-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .color-chip {
+    width: 28px; height: 28px; border-radius: 6px;
+    cursor: pointer; border: 2px solid transparent;
+    transition: transform 0.1s, border-color 0.1s;
+  }
+  .color-chip:hover { transform: scale(1.1); }
+  .color-chip.selected { border-color: var(--slate-800); }
+
+  /* Analytics mini panel */
+  .analytics-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .analytics-tile {
+    background: var(--slate-50);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .analytics-tile-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--slate-400);
+    margin-bottom: 4px;
+  }
+  .analytics-tile-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--slate-900);
+    letter-spacing: -0.02em;
+  }
+  .analytics-tile-sub {
+    font-size: 11px;
+    color: var(--slate-400);
+    margin-top: 2px;
+  }
+
+  /* Content blocks stub */
+  .content-block {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: default;
+    background: var(--slate-50);
+  }
+  .content-block-icon {
+    width: 28px; height: 28px;
+    border-radius: 5px;
+    background: var(--slate-200);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    color: var(--slate-500);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .content-block-name { font-size: 13px; font-weight: 600; color: var(--slate-700); }
+  .content-block-type { font-size: 11px; color: var(--slate-400); }
+
+  /* ── New page modal ──────────────────────────────────────── */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(15,23,42,0.45);
+    z-index: 200;
+    backdrop-filter: blur(2px);
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.18);
+    width: 480px;
+    max-width: 95vw;
+    overflow: hidden;
+    animation: modal-in 0.18s ease-out;
+  }
+  @keyframes modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .modal-header h2 { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+  .modal-body { padding: 20px; }
+  .modal-footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    background: var(--slate-50);
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--slate-900);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    z-index: 9999;
+    display: none;
+    animation: toast-in 0.2s ease-out;
+  }
+  .toast.show { display: block; }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* SEO section */
+  .seo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .og-image-placeholder {
+    border: 2px dashed var(--slate-200);
+    border-radius: 8px;
+    height: 88px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    color: var(--slate-400);
+    font-size: 12px;
+    transition: border-color 0.12s;
+  }
+  .og-image-placeholder:hover { border-color: var(--indigo-400); color: var(--indigo-600); }
+
+  /* Inline new card (toast-created) */
+  .new-page-notice {
+    border: 2px dashed var(--indigo-300);
+    background: var(--indigo-50);
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'pages.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Pages</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary" style="margin-right:8px;">&#8592; All prototypes</a>
+      <button class="btn btn-primary" id="new-page-btn" onclick="openNewPageModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        New page
+      </button>
+    </div>
+
+    <!-- Replaces banner -->
+    <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+      Redesigned:
+      <a href="before-pages.html" style="color:var(--indigo-600);font-weight:600;">PageProjectsPage + PageProjectDetailPage (before)</a>
+      <span style="color:var(--slate-400);font-size:11px;margin-left:8px;">Renamed "Sites" to "Pages". Card grid replaces flat table. Detail opens in a side drawer (no separate route).</span>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;">
+        <div>
+          <h1>Pages</h1>
+          <p style="margin-top:3px;font-size:13px;color:var(--slate-500);">Acme Corp &middot; <span id="page-count">6 pages</span></p>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <button class="filter-pill active" onclick="setFilter(this,'all')">All</button>
+        <button class="filter-pill" onclick="setFilter(this,'published')">Published</button>
+        <button class="filter-pill" onclick="setFilter(this,'draft')">Draft</button>
+        <button class="filter-pill" onclick="setFilter(this,'archived')">Archived</button>
+        <input class="filter-search" type="text" placeholder="Search by name or slug..." id="search-input" oninput="applySearch(this.value)">
+      </div>
+
+      <!-- Page card grid -->
+      <div class="pages-grid" id="pages-grid">
+
+        <!-- Card 1: Welcome to Acme — Published, custom domain, indigo -->
+        <div class="page-card" data-status="published" data-page="welcome" onclick="openDrawer('welcome')">
+          <div class="page-thumb">
+            <div class="page-thumb-bar">
+              <div class="page-thumb-dot" style="background:#f87171;"></div>
+              <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+              <div class="page-thumb-dot" style="background:#4ade80;"></div>
+              <div class="page-thumb-url">acme.com</div>
+            </div>
+            <div class="page-thumb-body">
+              <div class="page-thumb-hero" style="background:#4f46e5;opacity:0.18;"></div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="page-card-top">
+              <div class="page-card-name">Welcome to Acme</div>
+              <span class="badge-published">
+                <svg width="6" height="6" viewBox="0 0 8 8" fill="#16a34a"><circle cx="4" cy="4" r="4"/></svg>
+                Published
+              </span>
+            </div>
+            <div class="page-card-url">acme.com</div>
+            <div class="page-card-meta">
+              <div class="page-color-dot" style="background:#4f46e5;" title="Theme: indigo"></div>
+              <span class="page-card-updated">Updated 2h ago</span>
+              <span style="font-size:10px;color:var(--indigo-600);background:var(--indigo-50);border:1px solid var(--indigo-100);border-radius:4px;padding:1px 5px;font-weight:600;">Custom domain</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Pricing — Published, emerald -->
+        <div class="page-card" data-status="published" data-page="pricing" onclick="openDrawer('pricing')">
+          <div class="page-thumb">
+            <div class="page-thumb-bar">
+              <div class="page-thumb-dot" style="background:#f87171;"></div>
+              <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+              <div class="page-thumb-dot" style="background:#4ade80;"></div>
+              <div class="page-thumb-url">acme.synthetos.ai/pricing</div>
+            </div>
+            <div class="page-thumb-body">
+              <div class="page-thumb-hero" style="background:#059669;opacity:0.18;"></div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="page-card-top">
+              <div class="page-card-name">Pricing</div>
+              <span class="badge-published">
+                <svg width="6" height="6" viewBox="0 0 8 8" fill="#16a34a"><circle cx="4" cy="4" r="4"/></svg>
+                Published
+              </span>
+            </div>
+            <div class="page-card-url">acme.synthetos.ai/pricing</div>
+            <div class="page-card-meta">
+              <div class="page-color-dot" style="background:#059669;" title="Theme: emerald"></div>
+              <span class="page-card-updated">Updated yesterday</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Free trial signup — Published, indigo -->
+        <div class="page-card" data-status="published" data-page="trial" onclick="openDrawer('trial')">
+          <div class="page-thumb">
+            <div class="page-thumb-bar">
+              <div class="page-thumb-dot" style="background:#f87171;"></div>
+              <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+              <div class="page-thumb-dot" style="background:#4ade80;"></div>
+              <div class="page-thumb-url">acme.synthetos.ai/trial</div>
+            </div>
+            <div class="page-thumb-body">
+              <div class="page-thumb-hero" style="background:#4f46e5;opacity:0.18;"></div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="page-card-top">
+              <div class="page-card-name">Free trial signup</div>
+              <span class="badge-published">
+                <svg width="6" height="6" viewBox="0 0 8 8" fill="#16a34a"><circle cx="4" cy="4" r="4"/></svg>
+                Published
+              </span>
+            </div>
+            <div class="page-card-url">acme.synthetos.ai/trial</div>
+            <div class="page-card-meta">
+              <div class="page-color-dot" style="background:#4f46e5;" title="Theme: indigo"></div>
+              <span class="page-card-updated">Updated 3 days ago</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: About us — Draft, slate -->
+        <div class="page-card" data-status="draft" data-page="about" onclick="openDrawer('about')">
+          <div class="page-thumb">
+            <div class="page-thumb-bar">
+              <div class="page-thumb-dot" style="background:#f87171;"></div>
+              <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+              <div class="page-thumb-dot" style="background:#4ade80;"></div>
+              <div class="page-thumb-url">acme.synthetos.ai/about</div>
+            </div>
+            <div class="page-thumb-body">
+              <div class="page-thumb-hero" style="background:#475569;opacity:0.14;"></div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="page-card-top">
+              <div class="page-card-name">About us</div>
+              <span class="badge-draft">Draft</span>
+            </div>
+            <div class="page-card-url">acme.synthetos.ai/about</div>
+            <div class="page-card-meta">
+              <div class="page-color-dot" style="background:#475569;" title="Theme: slate"></div>
+              <span class="page-card-updated">Updated 5 days ago</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5: Holiday promo 2025 — Archived, amber -->
+        <div class="page-card archived" data-status="archived" data-page="holiday" onclick="openDrawer('holiday')">
+          <div class="page-thumb">
+            <div class="page-thumb-bar">
+              <div class="page-thumb-dot" style="background:#f87171;"></div>
+              <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+              <div class="page-thumb-dot" style="background:#4ade80;"></div>
+              <div class="page-thumb-url">acme.synthetos.ai/holiday-2025</div>
+            </div>
+            <div class="page-thumb-body">
+              <div class="page-thumb-hero" style="background:#d97706;opacity:0.16;"></div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="page-card-top">
+              <div class="page-card-name">Holiday promo 2025</div>
+              <span class="badge-archived">Archived</span>
+            </div>
+            <div class="page-card-url">acme.synthetos.ai/holiday-2025</div>
+            <div class="page-card-meta">
+              <div class="page-color-dot" style="background:#d97706;" title="Theme: amber"></div>
+              <span class="page-card-updated">Updated 2 months ago</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 6: Beta program — Draft, purple -->
+        <div class="page-card" data-status="draft" data-page="beta" onclick="openDrawer('beta')">
+          <div class="page-thumb">
+            <div class="page-thumb-bar">
+              <div class="page-thumb-dot" style="background:#f87171;"></div>
+              <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+              <div class="page-thumb-dot" style="background:#4ade80;"></div>
+              <div class="page-thumb-url">acme.synthetos.ai/beta</div>
+            </div>
+            <div class="page-thumb-body">
+              <div class="page-thumb-hero" style="background:#7c3aed;opacity:0.16;"></div>
+            </div>
+          </div>
+          <div class="page-card-body">
+            <div class="page-card-top">
+              <div class="page-card-name">Beta program</div>
+              <span class="badge-draft">Draft</span>
+            </div>
+            <div class="page-card-url">acme.synthetos.ai/beta</div>
+            <div class="page-card-meta">
+              <div class="page-color-dot" style="background:#7c3aed;" title="Theme: purple"></div>
+              <span class="page-card-updated">Updated last week</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /pages-grid -->
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── Drawer overlay ────────────────────────────────────────── -->
+<div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+
+<!-- ── Page detail drawer ───────────────────────────────────── -->
+<div class="drawer" id="page-drawer">
+  <div class="drawer-header">
+    <div class="drawer-header-info">
+      <div class="drawer-header-name" id="drawer-name">Welcome to Acme</div>
+      <div class="drawer-header-url" id="drawer-url">acme.com</div>
+    </div>
+    <span id="drawer-badge"></span>
+    <button class="drawer-close" onclick="closeDrawer()">&#215;</button>
+  </div>
+  <div class="drawer-tabs">
+    <button class="drawer-tab active" onclick="switchDrawerTab(this,'settings')">Settings</button>
+    <button class="drawer-tab" onclick="switchDrawerTab(this,'content')">Content</button>
+    <button class="drawer-tab" onclick="switchDrawerTab(this,'seo')">SEO</button>
+    <button class="drawer-tab" onclick="switchDrawerTab(this,'analytics')">Analytics</button>
+  </div>
+  <div class="drawer-body" id="drawer-body">
+    <!-- Filled by JS based on active page -->
+  </div>
+  <div class="drawer-footer">
+    <a id="drawer-live-link" href="#" target="_blank" onclick="return false;" class="btn btn-secondary" style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      View live page
+    </a>
+    <button class="btn btn-secondary" onclick="showToast('Page duplicated');" style="font-size:12.5px;">Duplicate</button>
+    <button class="btn btn-secondary" style="color:var(--slate-500);font-size:12.5px;" onclick="showToast('Page archived');">Archive</button>
+    <div class="drawer-footer-spacer"></div>
+    <button class="btn btn-primary" onclick="showToast('Changes saved');" style="font-size:12.5px;">Save changes</button>
+  </div>
+</div>
+
+<!-- ── New page modal ───────────────────────────────────────── -->
+<div class="modal-overlay" id="new-modal" onclick="handleModalClick(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>New page</h2>
+      <button class="drawer-close" onclick="closeNewModal()">&#215;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Page name</label>
+        <input class="form-input" id="modal-name" type="text" placeholder="e.g. Product tour" oninput="autoSlug(this.value)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Slug</label>
+        <div style="display:flex;align-items:center;gap:0;">
+          <span style="background:var(--slate-100);border:1px solid var(--border);border-right:none;border-radius:7px 0 0 7px;padding:8px 10px;font-size:12px;color:var(--slate-500);font-family:'JetBrains Mono',monospace;white-space:nowrap;">acme.synthetos.ai/</span>
+          <input class="form-input" id="modal-slug" type="text" placeholder="product-tour" style="border-radius:0 7px 7px 0;">
+        </div>
+        <div class="form-hint">Auto-generated from name. Lowercase letters, numbers and hyphens only.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Theme color</label>
+        <div class="color-chips">
+          <div class="color-chip selected" style="background:#4f46e5;" data-color="#4f46e5" onclick="selectColor(this)" title="Indigo"></div>
+          <div class="color-chip" style="background:#059669;" data-color="#059669" onclick="selectColor(this)" title="Emerald"></div>
+          <div class="color-chip" style="background:#7c3aed;" data-color="#7c3aed" onclick="selectColor(this)" title="Purple"></div>
+          <div class="color-chip" style="background:#d97706;" data-color="#d97706" onclick="selectColor(this)" title="Amber"></div>
+          <div class="color-chip" style="background:#475569;" data-color="#475569" onclick="selectColor(this)" title="Slate"></div>
+          <div style="display:flex;align-items:center;gap:5px;margin-left:4px;">
+            <input type="color" id="custom-color" value="#4f46e5" style="width:28px;height:28px;border:none;border-radius:6px;cursor:pointer;padding:0;" title="Custom color">
+            <span style="font-size:11px;color:var(--slate-400);">Custom</span>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="modal-status">
+          <option value="draft">Draft</option>
+          <option value="published">Published</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeNewModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createPage()">Create page</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── Page data ──────────────────────────────────────────────── */
+const PAGES = {
+  welcome: {
+    name: 'Welcome to Acme',
+    url: 'acme.com',
+    slug: '',
+    customDomain: 'acme.com',
+    status: 'published',
+    color: '#4f46e5',
+    updated: '2h ago',
+  },
+  pricing: {
+    name: 'Pricing',
+    url: 'acme.synthetos.ai/pricing',
+    slug: 'pricing',
+    customDomain: '',
+    status: 'published',
+    color: '#059669',
+    updated: 'yesterday',
+  },
+  trial: {
+    name: 'Free trial signup',
+    url: 'acme.synthetos.ai/trial',
+    slug: 'trial',
+    customDomain: '',
+    status: 'published',
+    color: '#4f46e5',
+    updated: '3 days ago',
+  },
+  about: {
+    name: 'About us',
+    url: 'acme.synthetos.ai/about',
+    slug: 'about',
+    customDomain: '',
+    status: 'draft',
+    color: '#475569',
+    updated: '5 days ago',
+  },
+  holiday: {
+    name: 'Holiday promo 2025',
+    url: 'acme.synthetos.ai/holiday-2025',
+    slug: 'holiday-2025',
+    customDomain: '',
+    status: 'archived',
+    color: '#d97706',
+    updated: '2 months ago',
+  },
+  beta: {
+    name: 'Beta program',
+    url: 'acme.synthetos.ai/beta',
+    slug: 'beta',
+    customDomain: '',
+    status: 'draft',
+    color: '#7c3aed',
+    updated: 'last week',
+  },
+};
+
+/* ── Filter / search ────────────────────────────────────────── */
+let activeFilter = 'all';
+
+function setFilter(btn, status) {
+  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  activeFilter = status;
+  applySearch(document.getElementById('search-input').value);
+}
+
+function applySearch(query) {
+  const q = query.toLowerCase().trim();
+  let visible = 0;
+  document.querySelectorAll('.page-card[data-page]').forEach(card => {
+    const status = card.dataset.status;
+    const pageKey = card.dataset.page;
+    const page = PAGES[pageKey];
+    const matchesFilter = activeFilter === 'all' || status === activeFilter;
+    const matchesSearch = !q || page.name.toLowerCase().includes(q) || page.url.toLowerCase().includes(q) || (page.slug && page.slug.toLowerCase().includes(q));
+    const show = matchesFilter && matchesSearch;
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  // Also show any dynamically created cards
+  document.querySelectorAll('.page-card[data-new]').forEach(card => {
+    const status = card.dataset.status;
+    const name = card.dataset.name || '';
+    const matchesFilter = activeFilter === 'all' || status === activeFilter;
+    const matchesSearch = !q || name.toLowerCase().includes(q);
+    const show = matchesFilter && matchesSearch;
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('page-count').textContent = visible + (visible === 1 ? ' page' : ' pages');
+}
+
+/* ── Drawer ─────────────────────────────────────────────────── */
+let currentPage = null;
+let currentDrawerTab = 'settings';
+
+function openDrawer(pageKey) {
+  currentPage = pageKey;
+  currentDrawerTab = 'settings';
+  const page = PAGES[pageKey];
+  document.getElementById('drawer-name').textContent = page.name;
+  document.getElementById('drawer-url').textContent = page.url;
+
+  // Status badge
+  const badge = document.getElementById('drawer-badge');
+  if (page.status === 'published') {
+    badge.className = 'badge-published';
+    badge.innerHTML = '<svg width="6" height="6" viewBox="0 0 8 8" fill="#16a34a"><circle cx="4" cy="4" r="4"/></svg> Published';
+  } else if (page.status === 'draft') {
+    badge.className = 'badge-draft';
+    badge.textContent = 'Draft';
+  } else {
+    badge.className = 'badge-archived';
+    badge.textContent = 'Archived';
+  }
+
+  // Reset tabs
+  document.querySelectorAll('.drawer-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.drawer-tab')[0].classList.add('active');
+  renderDrawerTab('settings', page);
+
+  document.getElementById('drawer-overlay').classList.add('open');
+  document.getElementById('page-drawer').classList.add('open');
+}
+
+function closeDrawer() {
+  document.getElementById('drawer-overlay').classList.remove('open');
+  document.getElementById('page-drawer').classList.remove('open');
+  currentPage = null;
+}
+
+function switchDrawerTab(btn, tab) {
+  document.querySelectorAll('.drawer-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  currentDrawerTab = tab;
+  renderDrawerTab(tab, currentPage ? PAGES[currentPage] : {});
+}
+
+function renderDrawerTab(tab, page) {
+  const body = document.getElementById('drawer-body');
+  if (tab === 'settings') {
+    body.innerHTML = `
+      <div class="form-group">
+        <label class="form-label">Page name</label>
+        <input class="form-input" type="text" value="${page.name || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Slug</label>
+        <div style="display:flex;align-items:center;gap:0;">
+          <span style="background:var(--slate-100);border:1px solid var(--border);border-right:none;border-radius:7px 0 0 7px;padding:8px 10px;font-size:12px;color:var(--slate-500);font-family:'JetBrains Mono',monospace;white-space:nowrap;">acme.synthetos.ai/</span>
+          <input class="form-input" type="text" value="${page.slug || ''}" style="border-radius:0 7px 7px 0;">
+        </div>
+        <div class="form-hint">Changing the slug will update the live URL immediately.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Custom domain</label>
+        <input class="form-input" type="text" value="${page.customDomain || ''}" placeholder="e.g. yoursite.com">
+        <div class="form-hint">Point your DNS CNAME to pages.synthetos.ai before enabling.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Theme color</label>
+        <div class="color-chips">
+          <div class="color-chip${page.color === '#4f46e5' ? ' selected' : ''}" style="background:#4f46e5;" title="Indigo"></div>
+          <div class="color-chip${page.color === '#059669' ? ' selected' : ''}" style="background:#059669;" title="Emerald"></div>
+          <div class="color-chip${page.color === '#7c3aed' ? ' selected' : ''}" style="background:#7c3aed;" title="Purple"></div>
+          <div class="color-chip${page.color === '#d97706' ? ' selected' : ''}" style="background:#d97706;" title="Amber"></div>
+          <div class="color-chip${page.color === '#475569' ? ' selected' : ''}" style="background:#475569;" title="Slate"></div>
+          <div style="display:flex;align-items:center;gap:5px;margin-left:4px;">
+            <input type="color" value="${page.color || '#4f46e5'}" style="width:28px;height:28px;border:none;border-radius:6px;cursor:pointer;padding:0;" title="Custom color">
+            <span style="font-size:11px;color:var(--slate-400);">Custom</span>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select">
+          <option${page.status === 'draft' ? ' selected' : ''}>Draft</option>
+          <option${page.status === 'published' ? ' selected' : ''}>Published</option>
+          <option${page.status === 'archived' ? ' selected' : ''}>Archived</option>
+        </select>
+      </div>
+    `;
+  } else if (tab === 'content') {
+    body.innerHTML = `
+      <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:var(--slate-500);">
+        Visual content editor is available in production. The blocks below represent the current page structure.
+      </div>
+      <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:12.5px;font-weight:600;color:var(--slate-700);">Content blocks</span>
+        <button class="btn btn-sm btn-secondary" onclick="showToast('Content editor would open here');" style="font-size:12px;">Edit content</button>
+      </div>
+      <div class="content-block">
+        <div class="content-block-icon" style="background:#eef2ff;color:#4f46e5;">H</div>
+        <div>
+          <div class="content-block-name">Hero</div>
+          <div class="content-block-type">Full-width header with headline and CTA</div>
+        </div>
+      </div>
+      <div class="content-block">
+        <div class="content-block-icon" style="background:var(--slate-100);">B</div>
+        <div>
+          <div class="content-block-name">Body</div>
+          <div class="content-block-type">Rich text content area</div>
+        </div>
+      </div>
+      <div class="content-block">
+        <div class="content-block-icon" style="background:#ecfdf5;color:#059669;">C</div>
+        <div>
+          <div class="content-block-name">Call to action</div>
+          <div class="content-block-type">Button group with primary and secondary actions</div>
+        </div>
+      </div>
+      <div class="content-block">
+        <div class="content-block-icon" style="background:var(--slate-100);">F</div>
+        <div>
+          <div class="content-block-name">Footer</div>
+          <div class="content-block-type">Links, copyright, and social icons</div>
+        </div>
+      </div>
+    `;
+  } else if (tab === 'seo') {
+    body.innerHTML = `
+      <div class="form-group">
+        <label class="form-label">Meta title</label>
+        <input class="form-input" type="text" value="${page.name || ''} | Acme Corp" placeholder="Page title for search engines">
+        <div class="form-hint">Recommended: 50-60 characters. Keep your brand name at the end.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Meta description</label>
+        <textarea class="form-input" rows="3" placeholder="Brief description of this page for search engines and social previews..." style="resize:vertical;">Learn more about Acme Corp. We help teams automate their work with intelligent AI agents.</textarea>
+        <div class="form-hint">Recommended: 120-160 characters.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">OG image</label>
+        <div class="og-image-placeholder" onclick="showToast('Image upload would open here');">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span>Click to upload (1200 x 630 px recommended)</span>
+        </div>
+        <div class="form-hint">Used when the page is shared on social media.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Canonical URL</label>
+        <input class="form-input" type="text" value="${page.url ? 'https://' + page.url : ''}" placeholder="https://acme.com/...">
+        <div class="form-hint">Leave blank to use the default page URL.</div>
+      </div>
+    `;
+  } else if (tab === 'analytics') {
+    body.innerHTML = `
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;color:var(--slate-500);margin-bottom:10px;">Last 7 days</div>
+        <div class="analytics-strip">
+          <div class="analytics-tile">
+            <div class="analytics-tile-label">Page visits</div>
+            <div class="analytics-tile-value">1,248</div>
+            <div class="analytics-tile-sub">+12% vs prior week</div>
+          </div>
+          <div class="analytics-tile">
+            <div class="analytics-tile-label">Conversion rate</div>
+            <div class="analytics-tile-value">4.3%</div>
+            <div class="analytics-tile-sub">54 conversions</div>
+          </div>
+          <div class="analytics-tile">
+            <div class="analytics-tile-label">Avg. time on page</div>
+            <div class="analytics-tile-value">1:42</div>
+            <div class="analytics-tile-sub">min:sec</div>
+          </div>
+          <div class="analytics-tile">
+            <div class="analytics-tile-label">Bounce rate</div>
+            <div class="analytics-tile-value">38%</div>
+            <div class="analytics-tile-sub">-5pp vs prior week</div>
+          </div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;">
+        <a href="#" onclick="showToast('Full analytics would open here');return false;" style="color:var(--indigo-600);font-size:13px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:5px;">
+          View detailed analytics
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </a>
+      </div>
+    `;
+  }
+}
+
+/* ── New page modal ─────────────────────────────────────────── */
+function openNewPageModal() {
+  document.getElementById('new-modal').classList.add('open');
+}
+function closeNewModal() {
+  document.getElementById('new-modal').classList.remove('open');
+}
+function handleModalClick(e) {
+  if (e.target === document.getElementById('new-modal')) closeNewModal();
+}
+function autoSlug(name) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('modal-slug').value = slug;
+}
+function selectColor(chip) {
+  document.querySelectorAll('#new-modal .color-chip').forEach(c => c.classList.remove('selected'));
+  chip.classList.add('selected');
+}
+function createPage() {
+  const name = document.getElementById('modal-name').value.trim() || 'New page';
+  const slug = document.getElementById('modal-slug').value.trim() || 'new-page';
+  const status = document.getElementById('modal-status').value;
+  const selectedChip = document.querySelector('#new-modal .color-chip.selected');
+  const color = selectedChip ? selectedChip.dataset.color : '#4f46e5';
+
+  // Build a new card and append
+  const grid = document.getElementById('pages-grid');
+  const card = document.createElement('div');
+  card.className = 'page-card new-page-notice';
+  card.dataset.status = status;
+  card.dataset.new = '1';
+  card.dataset.name = name;
+
+  const statusBadge = status === 'published'
+    ? `<span class="badge-published"><svg width="6" height="6" viewBox="0 0 8 8" fill="#16a34a"><circle cx="4" cy="4" r="4"/></svg> Published</span>`
+    : `<span class="badge-draft">Draft</span>`;
+
+  card.innerHTML = `
+    <div class="page-thumb">
+      <div class="page-thumb-bar">
+        <div class="page-thumb-dot" style="background:#f87171;"></div>
+        <div class="page-thumb-dot" style="background:#fbbf24;"></div>
+        <div class="page-thumb-dot" style="background:#4ade80;"></div>
+        <div class="page-thumb-url">acme.synthetos.ai/${slug}</div>
+      </div>
+      <div class="page-thumb-body">
+        <div class="page-thumb-hero" style="background:${color};opacity:0.18;"></div>
+      </div>
+    </div>
+    <div class="page-card-body">
+      <div class="page-card-top">
+        <div class="page-card-name">${name}</div>
+        ${statusBadge}
+      </div>
+      <div class="page-card-url">acme.synthetos.ai/${slug}</div>
+      <div class="page-card-meta">
+        <div class="page-color-dot" style="background:${color};"></div>
+        <span class="page-card-updated">Just now</span>
+        <span style="font-size:10px;color:var(--emerald-600);background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:4px;padding:1px 5px;font-weight:600;">New</span>
+      </div>
+    </div>
+  `;
+  grid.appendChild(card);
+
+  closeNewModal();
+  // Reset modal
+  document.getElementById('modal-name').value = '';
+  document.getElementById('modal-slug').value = '';
+  document.querySelectorAll('#new-modal .color-chip').forEach((c,i) => c.classList.toggle('selected', i===0));
+
+  showToast('Page created');
+  applySearch(document.getElementById('search-input').value);
+}
+
+/* ── Toast ──────────────────────────────────────────────────── */
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* ── Keyboard: Escape closes drawer/modal ───────────────────── */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('new-modal').classList.contains('open')) closeNewModal();
+    else if (document.getElementById('page-drawer').classList.contains('open')) closeDrawer();
+  }
+});
+</script>
+</body>
+</html>

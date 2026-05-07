@@ -166,7 +166,7 @@ These are non-negotiable. Every plan must respect them:
 **What every chunk's "Verification commands" section IS allowed to contain:**
 - `npm run lint` and `npm run typecheck` (or `npx tsc --noEmit`).
 - `npm run build:server` / `npm run build:client` when the chunk touches the build surface.
-- **Targeted execution of unit tests authored in THIS chunk** — a single file via `npx tsx <path-to-test>`. Authoring new tests and new gate scripts is encouraged; running the rest of the suite is not.
+- **Targeted execution of unit tests authored in THIS chunk** — a single file via `npx vitest run <path-to-test>`. Tests must use Vitest (`import { test, expect } from 'vitest'`); never `node:test`, `node:assert`, or `npx tsx`-runnable harnesses. See `docs/testing-conventions.md`. Authoring new tests and new gate scripts is encouraged; running the rest of the suite is not.
 
 **If a chunk's correctness depends on a gate-level invariant**, write a targeted unit test for that invariant inside the chunk. The test runs locally on its own (single file). The chunk is responsible for the test passing; CI is responsible for proving nothing else regressed.
 

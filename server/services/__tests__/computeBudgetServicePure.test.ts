@@ -106,3 +106,69 @@ test('isComputeBudgetExceededError: false for null', () => {
 test('isComputeBudgetExceededError: false for undefined', () => {
   expect(isComputeBudgetExceededError(undefined)).toBe(false);
 });
+
+// ── Govern pace helpers (spec §4.11) ─────────────────────────────────────────
+
+import { describe, it } from 'vitest';
+import {
+  projectPaceCents,
+  computePeriodResetAt,
+  daysRemainingInPeriod,
+  classifyPace,
+} from '../computeBudgetServicePure.js';
+
+describe('Govern pace helpers (spec §4.11)', () => {
+  describe('projectPaceCents', () => {
+    it('projects spend: 1200¢ MTD, 2100¢ over 7 days, 18 remaining → 6600¢', () => {
+      // dailyRate = 2100/7 = 300. projection = 1200 + 300*18 = 6600
+      expect(projectPaceCents(1200, 2100, 7, 18)).toBe(6600);
+    });
+    it('daysElapsedInWindow <= 0 → returns currentMtdCents', () => {
+      expect(projectPaceCents(5000, 100, 0, 10)).toBe(5000);
+      expect(projectPaceCents(5000, 100, -1, 10)).toBe(5000);
+    });
+    it('daysRemaining <= 0 → returns currentMtdCents (period ends today)', () => {
+      expect(projectPaceCents(5000, 100, 7, 0)).toBe(5000);
+    });
+  });
+
+  describe('computePeriodResetAt', () => {
+    it('returns first instant of next UTC calendar month', () => {
+      const result = computePeriodResetAt(new Date('2026-05-15T10:00:00.000Z'));
+      expect(result.toISOString()).toBe('2026-06-01T00:00:00.000Z');
+    });
+    it('handles December → January roll', () => {
+      const result = computePeriodResetAt(new Date('2026-12-20T00:00:00.000Z'));
+      expect(result.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+    });
+  });
+
+  describe('daysRemainingInPeriod', () => {
+    it('returns positive days remaining mid-month', () => {
+      const days = daysRemainingInPeriod(new Date('2026-05-15T00:00:00.000Z'));
+      expect(days).toBeGreaterThan(0);
+      expect(days).toBeLessThan(31);
+    });
+    it('returns close to 0 at end of month — last millisecond of May returns 1', () => {
+      const days = daysRemainingInPeriod(new Date('2026-05-31T23:59:59.999Z'));
+      expect(days).toBe(1);
+    });
+  });
+
+  describe('classifyPace', () => {
+    it('cap <= 0 → on_track (unbounded)', () => {
+      expect(classifyPace(99999, 0)).toBe('on_track');
+      expect(classifyPace(99999, -1)).toBe('on_track');
+    });
+    it('projected <= 80% of cap → on_track', () => {
+      expect(classifyPace(800, 1000)).toBe('on_track');
+    });
+    it('80% < projected <= 100% of cap → warning', () => {
+      expect(classifyPace(900, 1000)).toBe('warning');
+      expect(classifyPace(1000, 1000)).toBe('warning');
+    });
+    it('projected > 100% of cap → over', () => {
+      expect(classifyPace(1001, 1000)).toBe('over');
+    });
+  });
+});

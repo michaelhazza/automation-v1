@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recurring tasks | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Page-specific styles ─────────────────────────────────────────── */
+.page-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.page-header {
+  padding: 24px 32px 20px;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+}
+.page-header-left { flex: 1; min-width: 0; }
+.page-title { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.02em; }
+.page-subtitle { font-size: 13px; color: var(--slate-500); margin-top: 3px; }
+.page-header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+/* Filter bar */
+.filter-bar {
+  padding: 14px 32px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.search-box {
+  position: relative;
+  flex: 1 1 320px;
+  min-width: 320px;
+  max-width: 640px;
+}
+@media (max-width: 768px) {
+  .search-box { flex: 1 1 100%; min-width: 0; width: 100%; max-width: none; }
+}
+.search-box input {
+  width: 100%;
+  padding: 7px 12px 7px 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--slate-700);
+  background: var(--slate-50);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.search-box input:focus { border-color: var(--indigo-400); background: white; }
+.search-box svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--slate-400); pointer-events: none;
+}
+.filter-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chip {
+  padding: 4px 11px;
+  border-radius: 20px;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer; border: 1px solid transparent;
+  transition: all 0.12s;
+  background: var(--slate-100); color: var(--slate-600);
+  border-color: var(--slate-200);
+  user-select: none;
+}
+.chip:hover { background: var(--slate-200); }
+.chip.active { background: var(--indigo-50); color: var(--indigo-700); border-color: var(--indigo-200); font-weight: 600; }
+.chip-divider { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
+
+/* Table */
+.table-container { flex: 1; overflow: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table thead th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500);
+  background: var(--slate-50);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  position: sticky; top: 0; z-index: 2;
+}
+.data-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+  cursor: pointer;
+}
+.data-table tbody tr:hover { background: var(--indigo-50); }
+.data-table tbody td { padding: 11px 14px; vertical-align: middle; }
+
+.task-name { font-weight: 600; color: var(--slate-900); }
+.task-name-link { color: var(--indigo-600); text-decoration: none; }
+.task-name-link:hover { text-decoration: underline; }
+
+/* Fire condition badge */
+.fire-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+}
+.fire-badge.schedule { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+.fire-badge.event    { background: var(--amber-50);  color: #92400e;            border: 1px solid #fde68a; }
+.fire-badge.manual   { background: var(--slate-100); color: var(--slate-600);   border: 1px solid var(--slate-200); }
+.fire-detail { font-size: 11px; color: var(--slate-500); margin-top: 2px; white-space: nowrap; }
+
+/* Action cell */
+.action-agent { font-weight: 500; color: var(--slate-800); }
+.workflow-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 4px;
+  font-size: 11px; background: var(--violet-50); color: #5b21b6;
+  border: 1px solid var(--violet-200); margin-top: 2px;
+}
+
+/* Status badge */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 20px;
+  font-size: 11.5px; font-weight: 600;
+}
+.status-badge::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.status-badge.active  { background: var(--emerald-50); color: var(--emerald-600); }
+.status-badge.active::before { background: var(--emerald-500); }
+.status-badge.paused  { background: var(--slate-100); color: var(--slate-500); }
+.status-badge.paused::before { background: var(--slate-400); }
+.status-badge.error   { background: var(--red-50); color: var(--red-600); }
+.status-badge.error::before  { background: var(--red-500); }
+
+/* Muted text */
+.muted { color: var(--slate-400); font-size: 12.5px; }
+.fire-count { font-weight: 600; color: var(--slate-700); }
+.next-fire { font-size: 12.5px; color: var(--slate-600); }
+
+/* Actions overflow */
+.actions-cell { text-align: right; }
+.overflow-btn {
+  padding: 4px 8px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; cursor: pointer; color: var(--slate-400);
+  font-size: 16px; line-height: 1; transition: all 0.12s;
+}
+.overflow-btn:hover { background: var(--slate-100); border-color: var(--border); color: var(--slate-700); }
+.overflow-menu {
+  position: absolute; right: 8px; top: calc(100% + 4px);
+  background: white; border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-md); z-index: 100; min-width: 140px; padding: 4px 0;
+  display: none;
+}
+.overflow-menu.open { display: block; }
+.overflow-item {
+  padding: 7px 14px; font-size: 13px; color: var(--slate-700);
+  cursor: pointer; transition: background 0.1s;
+}
+.overflow-item:hover { background: var(--slate-50); }
+.overflow-item.danger { color: var(--red-600); }
+
+/* ── Drawer ──────────────────────────────────────────────────────── */
+.drawer-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+  z-index: 200; opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 560px;
+  background: white; z-index: 201;
+  display: flex; flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: -8px 0 40px rgba(0,0,0,0.14);
+}
+.drawer.open { transform: translateX(0); }
+
+.drawer-header {
+  padding: 20px 24px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.drawer-title-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  margin-bottom: 14px;
+}
+.drawer-title { font-size: 17px; font-weight: 700; color: var(--slate-900); line-height: 1.3; }
+.drawer-close {
+  width: 30px; height: 30px; border: 1px solid var(--border);
+  border-radius: 6px; background: transparent; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--slate-500); flex-shrink: 0; font-size: 18px; line-height: 1;
+  transition: all 0.12s;
+}
+.drawer-close:hover { background: var(--slate-100); color: var(--slate-800); }
+
+.drawer-tabs { display: flex; gap: 0; }
+.drawer-tab {
+  padding: 9px 18px;
+  font-size: 13px; font-weight: 500;
+  color: var(--slate-500); border-bottom: 2px solid transparent;
+  cursor: pointer; transition: all 0.12s; white-space: nowrap;
+}
+.drawer-tab:hover { color: var(--slate-700); }
+.drawer-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); font-weight: 600; }
+
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+.drawer-footer {
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.drawer-footer-right { margin-left: auto; }
+
+/* Form elements */
+.form-section { margin-bottom: 22px; }
+.form-section-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--slate-400); margin-bottom: 12px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.form-field { margin-bottom: 14px; }
+.form-label {
+  display: block; font-size: 12.5px; font-weight: 600;
+  color: var(--slate-700); margin-bottom: 5px;
+}
+.form-label span { font-weight: 400; color: var(--slate-400); font-size: 11.5px; }
+.form-input, .form-select, .form-textarea {
+  width: 100%; padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: 7px;
+  font-size: 13px; font-family: inherit; color: var(--slate-800);
+  background: white; outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--indigo-400);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+}
+.form-textarea { resize: vertical; min-height: 80px; }
+.form-helper { font-size: 11.5px; color: var(--slate-400); margin-top: 4px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+/* Radio cards for fire condition */
+.radio-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.radio-card {
+  border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  cursor: pointer; transition: all 0.12s;
+}
+.radio-card:hover { border-color: var(--indigo-300); background: var(--indigo-50); }
+.radio-card.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+.radio-card-title { font-size: 13px; font-weight: 600; color: var(--slate-800); }
+.radio-card-desc  { font-size: 11px; color: var(--slate-500); margin-top: 2px; }
+
+/* History table */
+.history-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.history-table th {
+  padding: 8px 10px; text-align: left; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate-400);
+  border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--slate-50);
+}
+.history-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.history-table tr:last-child td { border-bottom: none; }
+.history-table a { color: var(--indigo-600); text-decoration: none; font-weight: 500; }
+.history-table a:hover { text-decoration: underline; }
+
+.run-status { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 12px; }
+.run-status.success { color: var(--emerald-600); }
+.run-status.failed  { color: var(--red-600); }
+.run-status.running { color: var(--indigo-600); }
+
+/* Test tab */
+.test-panel {
+  background: var(--slate-50); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px;
+}
+.test-result {
+  margin-top: 16px; padding: 14px; border-radius: 8px;
+  background: var(--emerald-50); border: 1px solid #bbf7d0;
+  font-size: 13px; color: #166534; display: none;
+}
+.test-result.show { display: block; }
+
+/* Toggle switch */
+.toggle-row { display: flex; align-items: center; gap: 10px; }
+.toggle-row label { font-size: 13px; color: var(--slate-700); font-weight: 500; }
+.toggle {
+  position: relative; width: 36px; height: 20px;
+  flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-track {
+  position: absolute; inset: 0;
+  background: var(--slate-300); border-radius: 20px;
+  cursor: pointer; transition: background 0.15s;
+}
+.toggle input:checked + .toggle-track { background: var(--indigo-500); }
+.toggle-track::after {
+  content: ''; position: absolute;
+  left: 2px; top: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: white; transition: transform 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle input:checked + .toggle-track::after { transform: translateX(16px); }
+
+/* Error inline */
+.error-inline {
+  font-size: 11.5px; color: var(--red-600); background: var(--red-50);
+  border: 1px solid #fecaca; border-radius: 5px; padding: 5px 9px; margin-top: 4px;
+}
+
+/* Modal */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.4);
+  z-index: 300; display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.18s;
+}
+.modal-backdrop.open { opacity: 1; pointer-events: auto; }
+.modal {
+  background: white; border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.18);
+  width: 480px; max-width: calc(100vw - 32px);
+  padding: 28px 28px 24px;
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+.modal-backdrop.open .modal { transform: scale(1) translateY(0); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-title { font-size: 17px; font-weight: 700; color: var(--slate-900); }
+.modal-close {
+  width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 6px;
+  background: transparent; cursor: pointer; color: var(--slate-500);
+  font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+}
+.modal-close:hover { background: var(--slate-100); color: var(--slate-800); }
+.modal-footer { margin-top: 24px; display: flex; gap: 10px; justify-content: flex-end; }
+
+/* Condition panel (conditionally shown) */
+.condition-panel { display: none; }
+.condition-panel.show { display: block; }
+
+/* JSON editor */
+.json-editor {
+  width: 100%; padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: 7px;
+  font-size: 12px; font-family: 'SFMono-Regular', 'Consolas', monospace;
+  color: var(--slate-700); background: var(--slate-900); color: #94a3b8;
+  outline: none; resize: vertical; min-height: 90px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all 0.12s; border: 1px solid transparent;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--indigo-600); color: white; }
+.btn-primary:hover { background: var(--indigo-700); }
+.btn-outline { background: white; color: var(--slate-700); border-color: var(--border); }
+.btn-outline:hover { background: var(--slate-50); border-color: var(--slate-300); }
+.btn-danger { background: white; color: var(--red-600); border-color: #fecaca; }
+.btn-danger:hover { background: var(--red-50); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+/* Overflow button cell */
+td.actions-cell { position: relative; }
+
+/* ── Column sort / filter header ─────────────────────────────── */
+.col-sortable { cursor: pointer; user-select: none; }
+.col-sortable:hover { color: var(--slate-700); }
+.col-sort-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.sort-arrow { font-size: 9px; color: var(--indigo-500); flex-shrink: 0; }
+.col-filter-wrap { display: inline-flex; align-items: center; gap: 3px; position: relative; }
+.col-filter-caret {
+  background: none; border: none; cursor: pointer; padding: 1px 3px;
+  color: var(--slate-400); font-size: 10px; line-height: 1;
+  border-radius: 3px; transition: all 0.1s;
+}
+.col-filter-caret:hover { background: var(--indigo-50); color: var(--indigo-500); }
+.col-filter-caret.active { color: var(--indigo-600); background: var(--indigo-50); }
+
+/* Checkbox filter dropdown */
+.col-filter-dropdown {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  background: white; border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12); z-index: 200;
+  min-width: 180px; padding: 6px 0;
+  display: none;
+}
+.col-filter-dropdown.open { display: block; }
+.col-filter-dropdown-footer { display: flex; gap: 6px; padding: 8px 10px 4px; border-top: 1px solid var(--border); }
+.col-filter-cancel { flex: 1; padding: 5px 10px; font-size: 12px; border: 1px solid var(--border); background: white; border-radius: 6px; cursor: pointer; color: var(--slate-600); }
+.col-filter-cancel:hover { background: var(--slate-50); }
+.col-filter-apply { flex: 1; padding: 5px 10px; background: var(--indigo-600); color: white; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.col-filter-apply:hover { background: var(--indigo-700); }
+.col-filter-dropdown-head {
+  padding: 6px 12px 4px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100); margin-bottom: 4px;
+}
+.col-filter-dropdown-head a {
+  font-size: 11px; color: var(--indigo-600); font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+.col-filter-dropdown-head a:hover { text-decoration: underline; }
+.col-filter-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px; font-size: 12.5px; color: var(--slate-700);
+  cursor: pointer; transition: background 0.08s;
+}
+.col-filter-option:hover { background: var(--slate-50); }
+.col-filter-option input[type="checkbox"] { accent-color: var(--indigo-500); cursor: pointer; }
+/* .col-filter-apply is defined above in .col-filter-dropdown-footer block */
+
+/* ── Run now button (inline on manual rows) ──────────────────── */
+.run-now-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; font-size: 11px; font-weight: 700;
+  border-radius: 5px; border: 1px solid var(--indigo-200);
+  background: var(--indigo-50); color: var(--indigo-700);
+  cursor: pointer; transition: all 0.1s; white-space: nowrap;
+}
+.run-now-btn:hover { background: var(--indigo-100); border-color: var(--indigo-400); }
+
+/* ── One-off modal ───────────────────────────────────────────── */
+.oneoff-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.4);
+  z-index: 500; display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.18s;
+}
+.oneoff-modal-backdrop.open { opacity: 1; pointer-events: auto; }
+.oneoff-modal {
+  background: white; border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.18);
+  width: 520px; max-width: calc(100vw - 32px);
+  padding: 28px 28px 24px;
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+.oneoff-modal-backdrop.open .oneoff-modal { transform: scale(1) translateY(0); }
+.oneoff-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.oneoff-modal-title { font-size: 16px; font-weight: 700; color: var(--slate-900); }
+.oneoff-close { width:28px;height:28px;border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;color:var(--slate-500);font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;transition:all 0.12s; }
+.oneoff-close:hover { background:var(--slate-100);color:var(--slate-800); }
+.oneoff-footer { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; }
+
+/* Toast */
+.toast-container {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+  background: var(--slate-900); color: white;
+  padding: 11px 18px; border-radius: 9px; font-size: 13px; font-weight: 500;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.22); opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: auto; max-width: 340px;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast a { color: #a5b4fc; text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div id="sidebar-mount"></div>
+
+  <!-- Main content -->
+  <main class="page-main">
+
+    <!-- Header: title left, actions right (search moved to filter bar) -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <h1 class="page-title">Recurring tasks</h1>
+        <p class="page-subtitle">Acme Corp &middot; 14 active tasks &middot; 3 paused</p>
+      </div>
+      <div class="page-header-actions">
+        <button class="btn btn-outline" onclick="openOneoffModal()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run a one-off task
+        </button>
+        <button class="btn btn-primary" onclick="openModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New recurring task
+        </button>
+      </div>
+    </div>
+
+    <!-- Filter bar: chips on left, search on right -->
+    <div class="filter-bar" style="justify-content:space-between;">
+      <div class="filter-chips" id="filter-chips">
+        <span class="chip active" data-filter="all">All (17)</span>
+        <span class="chip" data-filter="schedule">Schedule-fired (8)</span>
+        <span class="chip" data-filter="event">Event-fired (6)</span>
+        <span class="chip" data-filter="manual">Manual (3)</span>
+        <span class="chip-divider"></span>
+        <span class="chip" data-filter="active">Active (14)</span>
+        <span class="chip" data-filter="paused">Paused (3)</span>
+        <span class="chip" data-filter="error">Error (1)</span>
+      </div>
+      <!-- Search inline with filters; flexes to fill remaining width on desktop, wraps on mobile -->
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="search-input" placeholder="Search tasks..." oninput="applyAllFilters()">
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-container">
+      <table class="data-table" id="tasks-table">
+        <thead>
+          <tr>
+            <th onclick="sortByColumn('name')" class="col-sortable" id="col-name">
+              <span class="col-sort-wrap">Name <span class="sort-arrow" id="arr-name"></span></span>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('fire')" class="col-sort-wrap" style="cursor:pointer;">Fire condition <span class="sort-arrow" id="arr-fire"></span></span>
+                <button class="col-filter-caret" id="fc-btn-fire" onclick="toggleFilterDropdown('fire', event)" title="Filter by fire condition">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-fire">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('fire')">Select all</a>
+                    <a onclick="clearFilter('fire')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="schedule" checked> Schedule-fired</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="event" checked> Event-fired</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="manual" checked> Manual</label>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('fire')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('fire')">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('agent')" class="col-sort-wrap" style="cursor:pointer;">Action <span class="sort-arrow" id="arr-agent"></span></span>
+                <button class="col-filter-caret" id="fc-btn-agent" onclick="toggleFilterDropdown('agent', event)" title="Filter by agent">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-agent">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('agent')">Select all</a>
+                    <a onclick="clearFilter('agent')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Account Health Agent" checked> Account Health Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Reporting Agent" checked> Reporting Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Billing Agent" checked> Billing Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Survey Agent" checked> Survey Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="CRM Sync Agent" checked> CRM Sync Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Outreach Agent" checked> Outreach Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Maintenance Agent" checked> Maintenance Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Internal Escalation" checked> Internal Escalation</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Onboarding Agent" checked> Onboarding Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Compliance Prefilter" checked> Compliance Prefilter</label>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('agent')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('agent')">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('scope')" class="col-sort-wrap" style="cursor:pointer;">Scope <span class="sort-arrow" id="arr-scope"></span></span>
+                <button class="col-filter-caret" id="fc-btn-scope" onclick="toggleFilterDropdown('scope', event)" title="Filter by scope">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-scope">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('scope')">Select all</a>
+                    <a onclick="clearFilter('scope')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="scope" value="Acme Corp" checked> Acme Corp</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="scope" value="Organisation" checked> Organisation</label>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('scope')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('scope')">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('project')" class="col-sort-wrap" style="cursor:pointer;">Project <span class="sort-arrow" id="arr-project"></span></span>
+                <button class="col-filter-caret" id="fc-btn-project" onclick="toggleFilterDropdown('project', event)" title="Filter by project">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-project">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('project')">Select all</a>
+                    <a onclick="clearFilter('project')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Q1 Outreach Campaign" checked> Q1 Outreach Campaign</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Customer Health Q2" checked> Customer Health Q2</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Compliance Audit 2026" checked> Compliance Audit 2026</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="" checked> (None)</label>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('project')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('project')">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('status')" class="col-sort-wrap" style="cursor:pointer;">Status <span class="sort-arrow" id="arr-status"></span></span>
+                <button class="col-filter-caret" id="fc-btn-status" onclick="toggleFilterDropdown('status', event)" title="Filter by status">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-status">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('status')">Select all</a>
+                    <a onclick="clearFilter('status')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="status" value="active" checked> Active</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="status" value="paused" checked> Paused</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="status" value="error" checked> Error</label>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('status')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('status')">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </th>
+            <th onclick="sortByColumn('lastFired')" class="col-sortable" id="col-lastFired">
+              <span class="col-sort-wrap">Last fired <span class="sort-arrow" id="arr-lastFired"></span></span>
+            </th>
+            <th onclick="sortByColumn('fires30')" class="col-sortable" id="col-fires30">
+              <span class="col-sort-wrap">Fires / 30d <span class="sort-arrow" id="arr-fires30"></span></span>
+            </th>
+            <th onclick="sortByColumn('nextFire')" class="col-sortable" id="col-nextFire">
+              <span class="col-sort-wrap">Next fire <span class="sort-arrow" id="arr-nextFire"></span></span>
+            </th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tasks-tbody">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Drawer ──────────────────────────────────────────────────────── -->
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <div class="drawer-title-row">
+      <span class="drawer-title" id="drawer-task-name">Daily morning briefing</span>
+      <button class="drawer-close" onclick="closeDrawer()">&#215;</button>
+    </div>
+    <div class="drawer-tabs">
+      <div class="drawer-tab active" data-tab="configure" onclick="switchDrawerTab(this,'configure')">Configure</div>
+      <div class="drawer-tab" data-tab="history" onclick="switchDrawerTab(this,'history')">History</div>
+      <div class="drawer-tab" data-tab="test" onclick="switchDrawerTab(this,'test')">Test</div>
+    </div>
+  </div>
+
+  <div class="drawer-body">
+
+    <!-- ── Configure tab ──────────────────────────────────────── -->
+    <div id="tab-configure">
+
+      <div class="form-section">
+        <div class="form-field">
+          <label class="form-label">Name</label>
+          <input class="form-input" type="text" value="Daily morning briefing" id="drawer-name-input">
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Fire condition</div>
+        <div class="radio-cards">
+          <div class="radio-card selected" id="rc-schedule" onclick="selectFireCondition('schedule')">
+            <div class="radio-card-title">Schedule</div>
+            <div class="radio-card-desc">RRULE-based recurring time</div>
+          </div>
+          <div class="radio-card" id="rc-event" onclick="selectFireCondition('event')">
+            <div class="radio-card-title">Event</div>
+            <div class="radio-card-desc">Fires when an event occurs</div>
+          </div>
+          <div class="radio-card" id="rc-manual" onclick="selectFireCondition('manual')">
+            <div class="radio-card-title">Manual</div>
+            <div class="radio-card-desc">Invoked on demand only</div>
+          </div>
+        </div>
+
+        <!-- Schedule panel -->
+        <div class="condition-panel show" id="panel-schedule">
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label">Frequency</label>
+              <select class="form-select" id="sched-freq">
+                <option>Hourly</option>
+                <option selected>Daily</option>
+                <option>Weekly</option>
+                <option>Monthly</option>
+                <option>Custom RRULE</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label">Time</label>
+              <input class="form-input" type="time" value="09:00">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label">Timezone</label>
+              <select class="form-select">
+                <option>UTC</option>
+                <option>America/New_York</option>
+                <option>America/Los_Angeles</option>
+                <option>Europe/London</option>
+                <option>Asia/Tokyo</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label">Ends <span>(optional)</span></label>
+              <input class="form-input" type="date" placeholder="Never">
+            </div>
+          </div>
+          <div class="form-field" id="rrule-field" style="display:none">
+            <label class="form-label">RRULE <span>(RFC 5545)</span></label>
+            <input class="form-input" type="text" placeholder="e.g., FREQ=DAILY;BYHOUR=9;BYMINUTE=0" style="font-family:monospace;font-size:12px;">
+            <div class="form-helper">e.g., daily at 9am UTC: FREQ=DAILY;BYHOUR=9;BYMINUTE=0</div>
+          </div>
+        </div>
+
+        <!-- Event panel -->
+        <div class="condition-panel" id="panel-event">
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label">Event type</label>
+              <select class="form-select">
+                <option>task_created</option>
+                <option>task_moved</option>
+                <option>task_completed</option>
+                <option>agent_completed</option>
+                <option>agent_failed</option>
+                <option>contact_created</option>
+                <option>deal_updated</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label">Cooldown <span>(seconds)</span></label>
+              <input class="form-input" type="number" value="0" min="0">
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-label">Event filter <span>(key=value, one per line)</span></label>
+            <textarea class="json-editor" rows="4">source=hubspot
+type=lead</textarea>
+            <div class="form-helper">Only fire when all conditions match. Leave empty to fire on every event.</div>
+          </div>
+        </div>
+
+        <!-- Manual panel -->
+        <div class="condition-panel" id="panel-manual">
+          <div class="form-field" style="background:var(--slate-50);border:1px solid var(--border);border-radius:8px;padding:14px;">
+            <p style="font-size:13px;color:var(--slate-600);margin-bottom:10px;">This task fires only when manually triggered from this page or via the API.</p>
+            <button class="btn btn-outline btn-sm" onclick="alert('Run now: sent')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run now
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Action</div>
+        <div class="form-field">
+          <label class="form-label">Agent</label>
+          <select class="form-select">
+            <option>Account Health Agent</option>
+            <option selected>Account Health Agent</option>
+            <option>Reporting Agent</option>
+            <option>Billing Agent</option>
+            <option>Outreach Agent</option>
+            <option>CRM Sync Agent</option>
+            <option>Survey Agent</option>
+            <option>Onboarding Agent</option>
+            <option>Maintenance Agent</option>
+            <option>Compliance Prefilter</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Pinned workflow <span>(optional)</span></label>
+          <select class="form-select">
+            <option value="">Use agent default</option>
+            <option>Morning briefing workflow</option>
+            <option>Weekly digest workflow</option>
+            <option>Health check workflow</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Brief / parameters <span>(passed to the agent at runtime)</span></label>
+          <textarea class="form-textarea" rows="3">Run daily morning briefing for all open accounts. Include high-value deals over $10k. Summarise overnight activity.</textarea>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Retry policy</div>
+        <div class="form-row-3">
+          <div class="form-field">
+            <label class="form-label">Max retries</label>
+            <input class="form-input" type="number" value="3" min="0" max="10">
+          </div>
+          <div class="form-field">
+            <label class="form-label">Backoff <span>(minutes)</span></label>
+            <input class="form-input" type="number" value="5" min="1">
+          </div>
+          <div class="form-field">
+            <label class="form-label">Pause after <span>N failures</span></label>
+            <input class="form-input" type="number" value="5" min="1">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Budget</div>
+        <div class="form-field" style="max-width:200px;">
+          <label class="form-label">Token budget per run <span>(optional)</span></label>
+          <input class="form-input" type="number" value="8000" min="0" step="1000">
+          <div class="form-helper">Leave 0 for no per-run limit (org cap still applies)</div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">Status</div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" checked>
+            <span class="toggle-track"></span>
+          </label>
+          <label>Active</label>
+        </div>
+      </div>
+
+    </div><!-- /tab-configure -->
+
+    <!-- ── History tab ────────────────────────────────────────── -->
+    <div id="tab-history" style="display:none">
+      <p style="font-size:12.5px;color:var(--slate-500);margin-bottom:14px;">Last 30 fires</p>
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Fire #</th>
+            <th>Fired at</th>
+            <th>Run ID</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>#30</td><td>Today 9:00am</td><td><a href="run-trace.html">run_z9k2</a></td><td><span class="run-status success">Succeeded</span></td><td>14s</td><td>$0.018</td></tr>
+          <tr><td>#29</td><td>Yesterday 9:00am</td><td><a href="run-trace.html">run_x7p1</a></td><td><span class="run-status success">Succeeded</span></td><td>12s</td><td>$0.015</td></tr>
+          <tr><td>#28</td><td>May 4 9:00am</td><td><a href="run-trace.html">run_w6n3</a></td><td><span class="run-status success">Succeeded</span></td><td>18s</td><td>$0.021</td></tr>
+          <tr><td>#27</td><td>May 3 9:00am</td><td><a href="run-trace.html">run_v5m2</a></td><td><span class="run-status failed">Failed</span></td><td>3s</td><td>$0.002</td></tr>
+          <tr><td>#26</td><td>May 2 9:00am</td><td><a href="run-trace.html">run_u4l1</a></td><td><span class="run-status success">Succeeded</span></td><td>11s</td><td>$0.014</td></tr>
+          <tr><td>#25</td><td>May 1 9:00am</td><td><a href="run-trace.html">run_t3k0</a></td><td><span class="run-status success">Succeeded</span></td><td>16s</td><td>$0.019</td></tr>
+          <tr><td>#24</td><td>Apr 30 9:00am</td><td><a href="run-trace.html">run_s2j9</a></td><td><span class="run-status success">Succeeded</span></td><td>13s</td><td>$0.016</td></tr>
+          <tr><td>#23</td><td>Apr 29 9:00am</td><td><a href="run-trace.html">run_r1i8</a></td><td><span class="run-status success">Succeeded</span></td><td>15s</td><td>$0.018</td></tr>
+          <tr><td>#22</td><td>Apr 28 9:00am</td><td><a href="run-trace.html">run_q0h7</a></td><td><span class="run-status running">Running</span></td><td>---</td><td>---</td></tr>
+          <tr><td>#21</td><td>Apr 27 9:00am</td><td><a href="run-trace.html">run_p9g6</a></td><td><span class="run-status success">Succeeded</span></td><td>10s</td><td>$0.013</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:12px;color:var(--slate-400);">Showing 10 of 30 fires</span>
+        <button class="btn btn-outline btn-sm">Load more</button>
+      </div>
+    </div><!-- /tab-history -->
+
+    <!-- ── Test tab ───────────────────────────────────────────── -->
+    <div id="tab-test" style="display:none">
+      <div class="test-panel">
+        <p style="font-size:13px;color:var(--slate-700);font-weight:600;margin-bottom:6px;">Test this task</p>
+        <p style="font-size:12.5px;color:var(--slate-500);margin-bottom:14px;">Fires the task now and shows what would happen. Does not count against the fire log.</p>
+
+        <div class="form-field" id="test-event-field" style="display:none">
+          <label class="form-label">Sample event payload</label>
+          <textarea class="json-editor" rows="5">{
+  "type": "task_created",
+  "source": "hubspot",
+  "contact_id": "ct_demo_001",
+  "created_at": "2026-05-06T09:00:00Z"
+}</textarea>
+        </div>
+
+        <button class="btn btn-primary" onclick="runTest()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Test fire now
+        </button>
+
+        <div class="test-result" id="test-result">
+          Test fire sent. Agent "Account Health Agent" invoked with the morning briefing brief. No changes were persisted.
+          View the simulated run at <a href="run-trace.html" style="color:var(--indigo-600)">run-trace.html</a>.
+        </div>
+      </div>
+    </div><!-- /tab-test -->
+
+  </div><!-- /drawer-body -->
+
+  <div class="drawer-footer">
+    <button class="btn btn-primary" onclick="closeDrawer()">Save changes</button>
+    <button class="btn btn-outline" onclick="closeDrawer()">Cancel</button>
+    <button class="btn btn-outline">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Run now
+    </button>
+    <div class="drawer-footer-right">
+      <button class="btn btn-danger" onclick="if(confirm('Delete this recurring task?')) closeDrawer()">Delete</button>
+    </div>
+  </div>
+</div><!-- /drawer -->
+
+<!-- ── New task modal ──────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="modal-backdrop" onclick="if(event.target===this) closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">New recurring task</span>
+      <button class="modal-close" onclick="closeModal()">&#215;</button>
+    </div>
+
+    <div class="form-field">
+      <label class="form-label">Name</label>
+      <input class="form-input" type="text" placeholder="e.g., Daily deal review">
+    </div>
+
+    <div class="form-field">
+      <label class="form-label">Fire condition</label>
+      <div class="radio-cards">
+        <div class="radio-card selected" id="modal-rc-schedule" onclick="selectModalFireCondition('schedule')">
+          <div class="radio-card-title">Schedule</div>
+          <div class="radio-card-desc">Time-based</div>
+        </div>
+        <div class="radio-card" id="modal-rc-event" onclick="selectModalFireCondition('event')">
+          <div class="radio-card-title">Event</div>
+          <div class="radio-card-desc">Event-triggered</div>
+        </div>
+        <div class="radio-card" id="modal-rc-manual" onclick="selectModalFireCondition('manual')">
+          <div class="radio-card-title">Manual</div>
+          <div class="radio-card-desc">On demand only</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <label class="form-label">Agent</label>
+      <select class="form-select">
+        <option value="">Select an agent...</option>
+        <option>Account Health Agent</option>
+        <option>Reporting Agent</option>
+        <option>Billing Agent</option>
+        <option>Outreach Agent</option>
+        <option>CRM Sync Agent</option>
+        <option>Survey Agent</option>
+        <option>Onboarding Agent</option>
+        <option>Maintenance Agent</option>
+        <option>Compliance Prefilter</option>
+      </select>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createAndOpenDrawer()">
+        Create and configure
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="_sidebar.js"></script>
+<script>
+renderSidebar('workspace', 'recurring-tasks.html');
+
+/* ── Task data ─────────────────────────────────────────────────── */
+/* scope: subaccount name or 'Organisation' for org-wide tasks.
+   project: project label or null. */
+const TASKS = [
+  // Schedule-fired (8)
+  { id:1,  name:'Daily morning briefing',    type:'schedule', detail:'Daily 9am UTC',      agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'Today 9:00am',     fires30:30,  nextFire:'Tomorrow 9:00am',    scope:'Acme Corp',    project:'Customer Health Q2' },
+  { id:2,  name:'Weekly pipeline report',    type:'schedule', detail:'Weekly Mon 8am UTC', agent:'Reporting Agent',      workflow:'Weekly digest',    status:'active',  lastFired:'Last Monday',      fires30:4,   nextFire:'Next Monday 8:00am', scope:'Acme Corp',    project:null },
+  { id:3,  name:'Monthly invoice generation',type:'schedule', detail:'Monthly 1st 00:00',  agent:'Billing Agent',        workflow:null,               status:'active',  lastFired:'May 1',            fires30:1,   nextFire:'Jun 1 00:00',        scope:'Organisation', project:null },
+  { id:4,  name:'Quarterly customer survey', type:'schedule', detail:'Quarterly Apr 1',    agent:'Survey Agent',         workflow:null,               status:'active',  lastFired:'Apr 1',            fires30:1,   nextFire:'Jul 1',              scope:'Acme Corp',    project:'Customer Health Q2' },
+  { id:5,  name:'Hourly CRM sync',           type:'schedule', detail:'Every hour',         agent:'CRM Sync Agent',       workflow:null,               status:'active',  lastFired:'23 min ago',       fires30:720, nextFire:'37 min from now',    scope:'Acme Corp',    project:null },
+  { id:6,  name:'End-of-day summary',        type:'schedule', detail:'Daily 6pm UTC',      agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Yesterday 6:00pm', fires30:30,  nextFire:'Today 6:00pm',       scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:7,  name:'Sunday data cleanup',       type:'schedule', detail:'Weekly Sun 2am UTC', agent:'Maintenance Agent',    workflow:'Cleanup workflow', status:'active',  lastFired:'Last Sunday',      fires30:4,   nextFire:'Next Sunday 2:00am', scope:'Organisation', project:null },
+  { id:8,  name:'Old contact archive',       type:'schedule', detail:'Monthly 15th 03:00', agent:'CRM Sync Agent',       workflow:null,               status:'paused',  lastFired:'Apr 15',           fires30:1,   nextFire:'Paused',             scope:'Acme Corp',    project:null },
+  // Event-fired (6)
+  { id:9,  name:'Welcome new lead',          type:'event',    detail:'On task_created',    agent:'Outreach Agent',       workflow:'Welcome sequence', status:'active',  lastFired:'5 min ago',        fires30:47,  nextFire:null,                 scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:10, name:'Risky deal escalation',     type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'2 hours ago',      fires30:12,  nextFire:null,                 scope:'Acme Corp',    project:'Customer Health Q2' },
+  { id:11, name:'Failed sync notification',  type:'event',    detail:'On agent_completed', agent:'Internal Escalation',  workflow:null,               status:'active',  lastFired:'Yesterday',        fires30:8,   nextFire:null,                 scope:'Organisation', project:null },
+  { id:12, name:'New customer onboarding',   type:'event',    detail:'On task_moved',      agent:'Onboarding Agent',     workflow:'Onboarding flow',  status:'active',  lastFired:'3 days ago',       fires30:5,   nextFire:null,                 scope:'Acme Corp',    project:null },
+  { id:13, name:'Demo follow-up',            type:'event',    detail:'On task_completed',  agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Today 11:00am',    fires30:18,  nextFire:null,                 scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:14, name:'Churn risk monitor',        type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',      fires30:3,   nextFire:null,  error:'HubSpot connection expired', scope:'Acme Corp', project:'Customer Health Q2' },
+  // Manual (3)
+  { id:15, name:'Quarterly business review', type:'manual',   detail:'Manual only',        agent:'Reporting Agent',      workflow:'QBR workflow',     status:'active',  lastFired:'Apr 30',           fires30:1,   nextFire:null,                 scope:'Organisation', project:null },
+  { id:16, name:'Custom outreach blast',     type:'manual',   detail:'Manual only',        agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'2 weeks ago',      fires30:1,   nextFire:null,                 scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:17, name:'Compliance audit',          type:'manual',   detail:'Manual only',        agent:'Compliance Prefilter', workflow:null,               status:'paused',  lastFired:'Mar 1',            fires30:0,   nextFire:null,                 scope:'Acme Corp',    project:'Compliance Audit 2026' },
+];
+
+const TYPE_LABELS   = { schedule:'Schedule-fired', event:'Event-fired', manual:'Manual' };
+const STATUS_LABELS = { active:'Active', paused:'Paused', error:'Error' };
+
+/* ── Sort + filter state ──────────────────────────────────────── */
+let sortCol = null;      // current sort column key
+let sortDir = 1;         // 1 = asc, -1 = desc
+
+/* Active column filters: map of filterKey -> Set of allowed values */
+const colFilters = {
+  fire:    new Set(['schedule','event','manual']),
+  agent:   new Set(['Account Health Agent','Reporting Agent','Billing Agent','Survey Agent',
+                    'CRM Sync Agent','Outreach Agent','Maintenance Agent','Internal Escalation',
+                    'Onboarding Agent','Compliance Prefilter']),
+  scope:   new Set(['Acme Corp','Organisation']),
+  project: new Set(['Q1 Outreach Campaign','Customer Health Q2','Compliance Audit 2026','']),
+  status:  new Set(['active','paused','error']),
+};
+
+/* quick-access chip filter key */
+let chipFilter = 'all';
+
+function getTaskSortKey(t, col) {
+  switch(col) {
+    case 'name':      return t.name.toLowerCase();
+    case 'fire':      return t.type;
+    case 'agent':     return t.agent.toLowerCase();
+    case 'scope':     return t.scope.toLowerCase();
+    case 'project':   return (t.project || '').toLowerCase();
+    case 'status':    return t.status;
+    case 'lastFired': return t.lastFired.toLowerCase();
+    case 'fires30':   return t.fires30;
+    case 'nextFire':  return (t.nextFire || 'zzz').toLowerCase();
+    default:          return '';
+  }
+}
+
+function taskPassesFilters(t) {
+  /* chip filter */
+  if (chipFilter !== 'all') {
+    if (['schedule','event','manual'].includes(chipFilter) && t.type !== chipFilter) return false;
+    if (['active','paused','error'].includes(chipFilter) && t.status !== chipFilter) return false;
+  }
+  /* column filters */
+  if (!colFilters.fire.has(t.type)) return false;
+  if (!colFilters.agent.has(t.agent)) return false;
+  if (!colFilters.scope.has(t.scope)) return false;
+  if (!colFilters.project.has(t.project || '')) return false;
+  if (!colFilters.status.has(t.status)) return false;
+  /* search */
+  const q = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
+  if (q) {
+    const hay = `${t.name} ${t.agent} ${t.detail} ${t.scope} ${t.project || ''}`.toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function renderRows() {
+  let tasks = TASKS.filter(taskPassesFilters);
+
+  if (sortCol) {
+    tasks = tasks.slice().sort((a,b) => {
+      const ka = getTaskSortKey(a, sortCol);
+      const kb = getTaskSortKey(b, sortCol);
+      if (typeof ka === 'number' && typeof kb === 'number') return (ka - kb) * sortDir;
+      return ka < kb ? -sortDir : ka > kb ? sortDir : 0;
+    });
+  }
+
+  /* update sort arrows */
+  ['name','fire','agent','scope','project','status','lastFired','fires30','nextFire'].forEach(c => {
+    const el = document.getElementById('arr-' + c);
+    if (el) el.textContent = sortCol === c ? (sortDir === 1 ? ' ↑' : ' ↓') : '';
+  });
+
+  const tbody = document.getElementById('tasks-tbody');
+  tbody.innerHTML = tasks.map(t => {
+    const fireBadge = `<span class="fire-badge ${t.type}">${TYPE_LABELS[t.type]}</span>
+      <div class="fire-detail">${escHtml(t.detail)}</div>`;
+
+    const actionCell = `<div class="action-agent">${escHtml(t.agent)}</div>
+      ${t.workflow ? `<div><span class="workflow-chip"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${escHtml(t.workflow)}</span></div>` : ''}`;
+
+    const scopeColor = t.scope === 'Organisation'
+      ? 'background:#f5f3ff;color:#5b21b6;border-color:#ddd6fe;'
+      : 'background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;';
+    const scopeCell = `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;border:1px solid;${scopeColor}">${escHtml(t.scope)}</span>`;
+
+    const projColor = 'background:var(--slate-50);color:var(--slate-600);border:1px solid var(--slate-200);';
+    const projectCell = t.project
+      ? `<span style="font-size:11px;font-weight:500;padding:2px 7px;border-radius:4px;${projColor}">${escHtml(t.project)}</span>`
+      : `<span class="muted">-</span>`;
+
+    const statusBadge = `<span class="status-badge ${t.status}">${STATUS_LABELS[t.status]}</span>
+      ${t.error ? `<div class="error-inline" style="margin-top:4px;font-size:11px;">${escHtml(t.error)}</div>` : ''}`;
+
+    const nextCell = t.nextFire ? `<span class="next-fire">${escHtml(t.nextFire)}</span>` : '<span class="muted">-</span>';
+
+    const runNowBtn = t.type === 'manual'
+      ? `<button class="run-now-btn" onclick="event.stopPropagation();confirmRunNow(${t.id})">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run now
+        </button>`
+      : '';
+
+    return `<tr onclick="openDrawer(${t.id})" data-id="${t.id}" data-type="${t.type}" data-status="${t.status}">
+      <td><span class="task-name">${escHtml(t.name)}</span></td>
+      <td>${fireBadge}</td>
+      <td>${actionCell}</td>
+      <td>${scopeCell}</td>
+      <td>${projectCell}</td>
+      <td>${statusBadge}</td>
+      <td><span class="muted">${escHtml(t.lastFired)}</span></td>
+      <td><span class="fire-count">${t.fires30}</span></td>
+      <td>${nextCell}</td>
+      <td class="actions-cell" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:4px;">
+          ${runNowBtn}
+          <button class="overflow-btn" onclick="toggleMenu(this, event)" title="Actions">&#8942;</button>
+        </div>
+        <div class="overflow-menu">
+          <div class="overflow-item" onclick="openDrawer(${t.id})">Edit</div>
+          <div class="overflow-item">${t.status === 'active' ? 'Pause' : 'Resume'}</div>
+          <div class="overflow-item" onclick="confirmRunNow(${t.id})">Run now</div>
+          <div class="overflow-item danger">Delete</div>
+        </div>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--slate-400);font-size:13px;">No tasks match these filters.</td></tr>';
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── Sort ─────────────────────────────────────────────────────── */
+function sortByColumn(col) {
+  if (sortCol === col) sortDir = -sortDir;
+  else { sortCol = col; sortDir = 1; }
+  renderRows();
+}
+
+/* ── Column filter dropdown toggle ───────────────────────────── */
+
+// Snapshot of checkbox states when a dropdown opens, for Cancel to restore
+var _filterSnapshot = {};
+
+function _snapshotFilter(col) {
+  _filterSnapshot[col] = {};
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => {
+    _filterSnapshot[col][cb.value] = cb.checked;
+  });
+}
+
+function _restoreFilter(col) {
+  const snap = _filterSnapshot[col];
+  if (!snap) return;
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => {
+    if (cb.value in snap) cb.checked = snap[cb.value];
+  });
+}
+
+function toggleFilterDropdown(col, e) {
+  e.stopPropagation();
+  const drop = document.getElementById('fc-drop-' + col);
+  const isOpen = drop.classList.contains('open');
+  closeAllFilterDropdowns();
+  if (!isOpen) {
+    _snapshotFilter(col);
+    drop.classList.add('open');
+  }
+}
+
+function closeAllFilterDropdowns() {
+  document.querySelectorAll('.col-filter-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+// Close on outside click but NOT when clicking inside a dropdown
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.col-filter-dropdown') && !e.target.closest('.col-filter-caret')) {
+    closeAllFilterDropdowns();
+  }
+});
+
+// Esc closes open dropdown
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeAllFilterDropdowns();
+});
+
+// Smart toggle: if all checked → uncheck all; if any unchecked → check all
+function selectAllFilter(col) {
+  const cbs = Array.from(document.querySelectorAll(`input[data-filter="${col}"]`));
+  const allChecked = cbs.every(cb => cb.checked);
+  cbs.forEach(cb => cb.checked = !allChecked);
+}
+function clearFilter(col) {
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => cb.checked = false);
+}
+
+function cancelColumnFilter(col) {
+  _restoreFilter(col);
+  closeAllFilterDropdowns();
+}
+
+function applyColumnFilter(col) {
+  const checked = new Set();
+  document.querySelectorAll(`input[data-filter="${col}"]:checked`).forEach(cb => checked.add(cb.value));
+  colFilters[col] = checked;
+  /* highlight caret when filter is narrowed */
+  const allVals = Array.from(document.querySelectorAll(`input[data-filter="${col}"]`));
+  const isFiltered = checked.size < allVals.length;
+  const btn = document.getElementById('fc-btn-' + col);
+  if (btn) btn.classList.toggle('active', isFiltered);
+  closeAllFilterDropdowns();
+  renderRows();
+}
+
+function applyAllFilters() {
+  renderRows();
+}
+
+/* ── Quick-access chip filter ─────────────────────────────────── */
+document.querySelectorAll('#filter-chips .chip').forEach(chip => {
+  chip.addEventListener('click', function() {
+    document.querySelectorAll('#filter-chips .chip').forEach(c => c.classList.remove('active'));
+    this.classList.add('active');
+    chipFilter = this.dataset.filter;
+    renderRows();
+  });
+});
+
+/* ── Overflow menus ────────────────────────────────────────────── */
+function toggleMenu(btn, e) {
+  e.stopPropagation();
+  const menu = btn.nextElementSibling;
+  const isOpen = menu.classList.contains('open');
+  document.querySelectorAll('.overflow-menu.open').forEach(m => m.classList.remove('open'));
+  if (!isOpen) menu.classList.add('open');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.overflow-menu.open').forEach(m => m.classList.remove('open'));
+});
+
+/* ── Drawer ────────────────────────────────────────────────────── */
+let currentTask = null;
+
+function openDrawer(taskId) {
+  currentTask = TASKS.find(t => t.id === taskId);
+  if (!currentTask) return;
+  document.getElementById('drawer-task-name').textContent = currentTask.name;
+  document.getElementById('drawer-name-input').value = currentTask.name;
+
+  // Set fire condition UI
+  selectFireCondition(currentTask.type);
+
+  // Reset to configure tab
+  switchDrawerTab(document.querySelector('.drawer-tab[data-tab="configure"]'), 'configure');
+
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawer-backdrop').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawer-backdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function switchDrawerTab(el, tab) {
+  document.querySelectorAll('.drawer-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['configure','history','test'].forEach(id => {
+    document.getElementById('tab-' + id).style.display = id === tab ? '' : 'none';
+  });
+  // Show event payload in test tab for event-fired tasks
+  if (tab === 'test' && currentTask) {
+    document.getElementById('test-event-field').style.display = currentTask.type === 'event' ? '' : 'none';
+  }
+}
+
+function selectFireCondition(type) {
+  ['schedule','event','manual'].forEach(t => {
+    document.getElementById('rc-' + t).classList.toggle('selected', t === type);
+    document.getElementById('panel-' + t).classList.toggle('show', t === type);
+  });
+}
+
+/* ── Modal ─────────────────────────────────────────────────────── */
+function openModal() {
+  document.getElementById('modal-backdrop').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  document.getElementById('modal-backdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+function selectModalFireCondition(type) {
+  ['schedule','event','manual'].forEach(t => {
+    document.getElementById('modal-rc-' + t).classList.toggle('selected', t === type);
+  });
+}
+function createAndOpenDrawer() {
+  closeModal();
+  // Simulate opening drawer for a new task pre-filled as Schedule type
+  openDrawer(1); // open daily briefing as proxy
+}
+
+/* ── RRULE field toggle ─────────────────────────────────────────── */
+document.getElementById('sched-freq').addEventListener('change', function() {
+  document.getElementById('rrule-field').style.display = this.value === 'Custom RRULE' ? '' : 'none';
+});
+
+/* ── Test fire ─────────────────────────────────────────────────── */
+function runTest() {
+  const result = document.getElementById('test-result');
+  result.classList.add('show');
+}
+
+/* scope/project filters removed: now handled as sortable/filterable table columns */
+
+/* ── Run now confirmation ────────────────────────────────────────── */
+let runNowTarget = null;
+
+function confirmRunNow(taskId) {
+  runNowTarget = TASKS.find(t => t.id === taskId);
+  if (!runNowTarget) return;
+  document.getElementById('runnow-task-name').textContent = runNowTarget.name;
+  document.getElementById('runnow-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeRunNowModal() {
+  document.getElementById('runnow-modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function confirmAndRun() {
+  closeRunNowModal();
+  showToast('Run started · <a href="run-trace.html">view in run trace</a>');
+}
+
+/* ── One-off task modal ─────────────────────────────────────────── */
+function openOneoffModal() {
+  document.getElementById('oneoff-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeOneoffModal() {
+  document.getElementById('oneoff-modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+function fireOneoff() {
+  closeOneoffModal();
+  showToast('One-off run started · <a href="run-trace.html">view in run trace</a>');
+}
+
+/* ── Initial render ─────────────────────────────────────────────── */
+renderRows();
+
+/* ── Toast ─────────────────────────────────────────────────────── */
+function showToast(msg) {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = msg;
+  container.appendChild(t);
+  requestAnimationFrame(() => { t.classList.add('show'); });
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 250);
+  }, 3500);
+}
+</script>
+
+<!-- ── Run now confirmation modal ─────────────────────────────────── -->
+<div class="modal-backdrop" id="runnow-modal" onclick="if(event.target===this)closeRunNowModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Run task now?</span>
+      <button class="modal-close" onclick="closeRunNowModal()">&#215;</button>
+    </div>
+    <p style="font-size:13.5px;color:var(--slate-700);margin:0 0 18px;">Run <strong id="runnow-task-name"></strong> now? The agent will be invoked with the configured brief.</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeRunNowModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAndRun()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Confirm
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── One-off task modal ──────────────────────────────────────────── -->
+<div class="oneoff-modal-backdrop" id="oneoff-modal" onclick="if(event.target===this)closeOneoffModal()">
+  <div class="oneoff-modal">
+    <div class="oneoff-modal-header">
+      <span class="oneoff-modal-title">Run a one-off task</span>
+      <button class="oneoff-close" onclick="closeOneoffModal()">&#215;</button>
+    </div>
+    <p style="font-size:12.5px;color:var(--slate-500);margin:0 0 18px;">Fires once immediately. Does not create a recurring rule.</p>
+
+    <div class="form-field">
+      <label class="form-label">Brief</label>
+      <textarea class="form-textarea" rows="4" placeholder="Describe what you want the agent to do..."></textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="form-field">
+        <label class="form-label">Agent</label>
+        <select class="form-select">
+          <option value="">Select an agent...</option>
+          <option>Account Health Agent</option>
+          <option>Reporting Agent</option>
+          <option>Outreach Agent</option>
+          <option>CRM Sync Agent</option>
+          <option>Research Agent</option>
+          <option>Compliance Prefilter</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Project <span>(optional)</span></label>
+        <select class="form-select">
+          <option value="">No project</option>
+          <option value="q1-outreach">Q1 Outreach Campaign</option>
+          <option value="customer-health">Customer Health Q2</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="oneoff-footer">
+      <button class="btn btn-outline" onclick="closeOneoffModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="fireOneoff()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Run now
+      </button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
