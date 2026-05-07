@@ -201,6 +201,7 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       clearTimer();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
+  // refreshRun is a useCallback keyed on runId — stable while runId doesn't change mid-poll session.
   }, [ieeRunId, subaccountIdFromQuery, refreshRun]);
 
   // When IEE reports terminal but parent run hasn't caught up yet.
