@@ -662,6 +662,25 @@ export const agentService = {
         includeInactive ? undefined : eq(agents.status, 'active'),
       ));
 
+    // INVARIANT-C5b-A: batch-fetch revision stats — 2 queries total, no N+1
+    const revisionStats = await db
+      .select({
+        agentId: agentPromptRevisions.agentId,
+        count: drizzleSql<number>`COUNT(*)::int`,
+        lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
+        lastAuthorId: drizzleSql<string>`(ARRAY_AGG(${agentPromptRevisions.changedBy} ORDER BY ${agentPromptRevisions.createdAt} DESC))[1]`,
+      })
+      .from(agentPromptRevisions)
+      .where(eq(agentPromptRevisions.organisationId, organisationId))
+      .groupBy(agentPromptRevisions.agentId);
+
+    const authorIds = [...new Set(revisionStats.map(r => r.lastAuthorId).filter(Boolean))];
+    const authors = authorIds.length > 0
+      ? await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
+      : [];
+    const authorMap = new Map(authors.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    const revisionMap = new Map(revisionStats.map(r => [r.agentId, r]));
+
     return rows.map((a) => ({
       id: a.id,
       name: a.name,
@@ -680,6 +699,10 @@ export const agentService = {
       agentTitle: a.agentTitle,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
+      // INVARIANT-C5b-A: agents with zero revision rows return 1, never 0
+      agentRevisionCount: revisionMap.get(a.id)?.count ?? 1,
+      lastRevisionEditedAt: revisionMap.get(a.id)?.lastEditedAt ?? null,
+      lastRevisionAuthor: authorMap.get(revisionMap.get(a.id)?.lastAuthorId ?? '') ?? null,
     }));
   },
 
@@ -688,6 +711,26 @@ export const agentService = {
       .select()
       .from(agents)
       .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+
+    // INVARIANT-C5b-A: batch-fetch revision stats — 2 queries total, no N+1
+    const revisionStats = await db
+      .select({
+        agentId: agentPromptRevisions.agentId,
+        count: drizzleSql<number>`COUNT(*)::int`,
+        lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
+        lastAuthorId: drizzleSql<string>`(ARRAY_AGG(${agentPromptRevisions.changedBy} ORDER BY ${agentPromptRevisions.createdAt} DESC))[1]`,
+      })
+      .from(agentPromptRevisions)
+      .where(eq(agentPromptRevisions.organisationId, organisationId))
+      .groupBy(agentPromptRevisions.agentId);
+
+    const authorIds = [...new Set(revisionStats.map(r => r.lastAuthorId).filter(Boolean))];
+    const authors = authorIds.length > 0
+      ? await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
+      : [];
+    const authorMap = new Map(authors.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    const revisionMap = new Map(revisionStats.map(r => [r.agentId, r]));
+
     return rows.map((a) => ({
       id: a.id,
       name: a.name,
@@ -706,6 +749,10 @@ export const agentService = {
       agentTitle: a.agentTitle,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
+      // INVARIANT-C5b-A: agents with zero revision rows return 1, never 0
+      agentRevisionCount: revisionMap.get(a.id)?.count ?? 1,
+      lastRevisionEditedAt: revisionMap.get(a.id)?.lastEditedAt ?? null,
+      lastRevisionAuthor: authorMap.get(revisionMap.get(a.id)?.lastAuthorId ?? '') ?? null,
     }));
   },
 
