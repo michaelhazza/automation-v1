@@ -16,6 +16,10 @@ import {
   listInsights,
   listInsightFacets,
   promoteInsightToReference,
+  listEntries,
+  approveEntry,
+  rejectEntry,
+  overrideEntry,
 } from '../services/knowledgeService.js';
 import * as memoryBlockService from '../services/memoryBlockService.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
@@ -234,6 +238,128 @@ router.post(
       actorUserId: req.user?.id ?? null,
     });
     res.status(201).json(result);
+  }),
+);
+
+// ─── Govern: Knowledge list + approve/reject/override (spec §4, §6) ──────────
+
+const listEntriesQuerySchema = z.object({
+  scope: z.enum(['workspace', 'org']).default('org'),
+  subaccountId: z.string().uuid().optional(),
+  status: z.string().optional(), // comma-separated ContractStatus values
+  autoUpdateDisabled: z.enum(['true', 'false']).optional(),
+  q: z.string().trim().min(1).max(200).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(25),
+  sortKey: z.enum(['createdAt', 'updatedAt', 'confidence', 'sourceAgent', 'kind', 'status']).default('createdAt'),
+  sortDir: z.enum(['asc', 'desc']).default('desc'),
+});
+
+router.get(
+  '/api/knowledge',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const parsed = listEntriesQuerySchema.parse(req.query);
+    const statusFilter = parsed.status
+      ? (parsed.status.split(',').filter(Boolean) as Array<'pending_review' | 'in_use' | 'ignored'>)
+      : undefined;
+
+    const result = await listEntries({
+      organisationId: req.orgId!,
+      scope: parsed.scope,
+      subaccountId: parsed.subaccountId,
+      status: statusFilter,
+      autoUpdateDisabled: parsed.autoUpdateDisabled === 'true' ? true
+        : parsed.autoUpdateDisabled === 'false' ? false
+        : undefined,
+      q: parsed.q,
+      cursor: parsed.cursor ?? null,
+      limit: parsed.limit,
+      sortKey: parsed.sortKey,
+      sortDir: parsed.sortDir,
+    });
+
+    res.json(result);
+  }),
+);
+
+router.post(
+  '/api/knowledge/:id/approve',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const outcome = await approveEntry({
+      organisationId: req.orgId!,
+      blockId: id,
+      actorUserId: req.user?.id ?? null,
+    });
+    res.json({ ok: true, alreadyApplied: outcome.alreadyApplied });
+  }),
+);
+
+router.post(
+  '/api/knowledge/:id/reject',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const outcome = await rejectEntry({
+      organisationId: req.orgId!,
+      blockId: id,
+      actorUserId: req.user?.id ?? null,
+    });
+    res.json({ ok: true, alreadyApplied: outcome.alreadyApplied });
+  }),
+);
+
+const overrideBodySchema = z.object({
+  body: z.string().min(1).max(50000),
+  expectedEtag: z.string().min(1),
+});
+
+router.post(
+  '/api/knowledge/:id/override',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  validateBody(overrideBodySchema, 'warn'),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { body, expectedEtag } = req.body as z.infer<typeof overrideBodySchema>;
+
+    const result = await overrideEntry({
+      organisationId: req.orgId!,
+      blockId: id,
+      body,
+      expectedEtag,
+      actorUserId: req.user?.id ?? null,
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'not_found') {
+        res.status(404).json({ error: 'Knowledge entry not found', errorCode: 'not_found' });
+        return;
+      }
+      if (result.reason === 'state') {
+        res.status(409).json({
+          error: 'Invalid state transition: override requires in_use status',
+          errorCode: 'invalid_state_transition',
+          currentStatus: result.currentStatus,
+        });
+        return;
+      }
+      if (result.reason === 'etag_mismatch') {
+        res.status(412).json({
+          error: 'ETag mismatch: entry was modified since last read',
+          errorCode: 'etag_mismatch',
+          currentEtag: result.currentEtag,
+        });
+        return;
+      }
+    }
+
+    res.json(result);
   }),
 );
 
