@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
+import { mcpServerConfigs } from '../db/schema/mcpServerConfigs.js';
 import { env } from '../lib/env.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
@@ -382,6 +383,142 @@ export const connectionTokenService = {
 
       default:
         throw { statusCode: 400, message: `Token refresh not supported for provider: ${provider}` };
+    }
+  },
+
+  /**
+   * Test connectivity for a connection by id (integration_connections OR mcp_server_configs).
+   * Spec §4.9: always returns 200, monotonic 10s timeout, structured error.code.
+   */
+  async testConnection(
+    { id, organisationId }: { id: string; organisationId: string },
+  ): Promise<{
+    status: 'ok' | 'failed';
+    latencyMs: number;
+    testedAt: string;
+    error?: { code: string; message: string };
+    capabilities?: string[];
+  }> {
+    const TIMEOUT_MS = 10_000;
+    const testedAt = new Date().toISOString();
+    const start = process.hrtime.bigint();
+
+    const elapsed = (): number =>
+      Number(process.hrtime.bigint() - start) / 1_000_000;
+
+    try {
+      // Look up the connection — integration or MCP
+      const [icRow] = await db.select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, id))
+        .limit(1);
+
+      if (icRow && icRow.organisationId === organisationId) {
+        // Integration connection test
+        const testResult = await Promise.race<'ok' | 'timeout'>([
+          (async (): Promise<'ok'> => {
+            if (icRow.authType === 'api_key') {
+              // API key: check that secretsRef is set and non-empty
+              if (!icRow.secretsRef) {
+                throw { code: 'NO_CREDENTIALS', message: 'No API key configured.' };
+              }
+            } else if (icRow.authType === 'oauth2') {
+              // OAuth: check that accessToken or refreshToken exists and is not expired
+              const hasToken = !!(icRow.accessToken || icRow.refreshToken);
+              if (!hasToken) {
+                throw { code: 'NO_CREDENTIALS', message: 'No OAuth token stored.' };
+              }
+              if (icRow.tokenExpiresAt && new Date(icRow.tokenExpiresAt) < new Date()) {
+                if (!icRow.refreshToken) {
+                  throw { code: 'TOKEN_EXPIRED', message: 'Access token expired and no refresh token available.' };
+                }
+              }
+            }
+            return 'ok';
+          })(),
+          new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), TIMEOUT_MS)),
+        ]);
+
+        if (testResult === 'timeout') {
+          return {
+            status: 'failed',
+            latencyMs: Math.round(elapsed()),
+            testedAt,
+            error: { code: 'TIMEOUT', message: 'Provider did not respond within 10s.' },
+          };
+        }
+
+        return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt };
+      }
+
+      // Try MCP server config
+      const [mcpRow] = await db.select()
+        .from(mcpServerConfigs)
+        .where(eq(mcpServerConfigs.id, id))
+        .limit(1);
+
+      if (mcpRow && mcpRow.organisationId === organisationId) {
+        if (mcpRow.transport === 'http' && mcpRow.endpointUrl) {
+          const testResult = await Promise.race<'ok' | 'timeout'>([
+            (async (): Promise<'ok'> => {
+              const response = await fetch(mcpRow.endpointUrl!, {
+                method: 'HEAD',
+                signal: AbortSignal.timeout(9_000),
+              });
+              if (!response.ok && response.status >= 500) {
+                throw { code: 'SERVER_ERROR', message: `MCP server returned ${response.status}.` };
+              }
+              return 'ok';
+            })(),
+            new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), TIMEOUT_MS)),
+          ]);
+
+          if (testResult === 'timeout') {
+            return {
+              status: 'failed',
+              latencyMs: Math.round(elapsed()),
+              testedAt,
+              error: { code: 'TIMEOUT', message: 'Provider did not respond within 10s.' },
+            };
+          }
+
+          const capabilities = mcpRow.discoveredToolsJson
+            ? mcpRow.discoveredToolsJson.map(t => t.name)
+            : undefined;
+
+          return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt, capabilities };
+        }
+
+        // stdio or no endpoint URL — report status from last known state
+        if (mcpRow.status === 'error') {
+          return {
+            status: 'failed',
+            latencyMs: Math.round(elapsed()),
+            testedAt,
+            error: { code: 'SERVER_ERROR', message: mcpRow.lastError ?? 'MCP server is in error state.' },
+          };
+        }
+
+        return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt };
+      }
+
+      return {
+        status: 'failed',
+        latencyMs: Math.round(elapsed()),
+        testedAt,
+        error: { code: 'NOT_FOUND', message: 'Connection not found.' },
+      };
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      return {
+        status: 'failed',
+        latencyMs: Math.round(elapsed()),
+        testedAt,
+        error: {
+          code: e.code ?? 'UNKNOWN',
+          message: e.message ?? 'An unexpected error occurred.',
+        },
+      };
     }
   },
 };
