@@ -20,6 +20,7 @@ import {
   paginate,
   buildFilterOptions,
   applySearch,
+  formatFireCondition,
   CursorDecodeError,
   CursorMismatchError,
 } from '../recurringTasksServicePure.js';
@@ -467,6 +468,126 @@ describe('applyFilters', () => {
 
   it('no scope filter returns all rows', () => {
     expect(applyFilters(rows, {})).toHaveLength(2);
+  });
+});
+
+// ── 8. formatFireCondition ────────────────────────────────────────────────────
+
+describe('formatFireCondition', () => {
+  // ── spec-named examples (exact string match) ────────────────────────────────
+
+  it('FREQ=DAILY → "Daily 9am UTC"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=DAILY', timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe('Daily 9am UTC');
+  });
+
+  it('FREQ=WEEKLY;BYDAY=MO → "Weekly Mon 8am UTC"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=WEEKLY;BYDAY=MO', timezone: 'UTC', scheduleTime: '08:00' }))
+      .toBe('Weekly Mon 8am UTC');
+  });
+
+  it('FREQ=MONTHLY;BYMONTHDAY=1 → "Monthly 1st 00:00 UTC"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=MONTHLY;BYMONTHDAY=1', timezone: 'UTC', scheduleTime: '00:00' }))
+      .toBe('Monthly 1st 00:00 UTC');
+  });
+
+  it('FREQ=HOURLY → "Hourly"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=HOURLY', timezone: 'UTC', scheduleTime: '' }))
+      .toBe('Hourly');
+  });
+
+  it('FREQ=MINUTELY;INTERVAL=15 → "Every 15 minutes"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=MINUTELY;INTERVAL=15', timezone: 'UTC', scheduleTime: '' }))
+      .toBe('Every 15 minutes');
+  });
+
+  it('event task_created → "On task_created"', () => {
+    expect(formatFireCondition({ kind: 'event', eventType: 'task_created', eventFilter: {} }))
+      .toBe('On task_created');
+  });
+
+  it('event hubspot.contact.created → "On hubspot.contact.created"', () => {
+    expect(formatFireCondition({ kind: 'event', eventType: 'hubspot.contact.created', eventFilter: {} }))
+      .toBe('On hubspot.contact.created');
+  });
+
+  it('manual → "Manual run"', () => {
+    expect(formatFireCondition({ kind: 'manual' })).toBe('Manual run');
+  });
+
+  // ── additional cases ────────────────────────────────────────────────────────
+
+  it('BYDAY=MO,TU,WE → "Weekly Mon, Tue, Wed 8am UTC"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE', timezone: 'UTC', scheduleTime: '08:00' }))
+      .toBe('Weekly Mon, Tue, Wed 8am UTC');
+  });
+
+  it('INTERVAL=2 + FREQ=DAILY → "Every 2 days 9am UTC"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=DAILY;INTERVAL=2', timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe('Every 2 days 9am UTC');
+  });
+
+  it('unknown FREQ falls back to literal rrule string truncated at 80 chars', () => {
+    const rrule = 'FREQ=YEARLY;BYMONTH=3;BYDAY=SU';
+    expect(formatFireCondition({ kind: 'schedule', rrule, timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe(rrule);
+  });
+
+  it('string longer than 80 chars is truncated with "..."', () => {
+    // Construct a rrule with unknown FREQ that is > 80 chars so it hits truncation
+    const longRrule = 'FREQ=YEARLY;' + 'X='.padEnd(80, 'A');
+    const result = formatFireCondition({ kind: 'schedule', rrule: longRrule, timezone: 'UTC', scheduleTime: '' });
+    expect(result.length).toBeLessThanOrEqual(80);
+    expect(result.endsWith('...')).toBe(true);
+  });
+
+  it('empty eventType → "On unknown event"', () => {
+    expect(formatFireCondition({ kind: 'event', eventType: '', eventFilter: {} }))
+      .toBe('On unknown event');
+  });
+
+  it('eventFilter contents are ignored in the output string', () => {
+    expect(formatFireCondition({ kind: 'event', eventType: 'task_created', eventFilter: { foo: 'bar', baz: 42 } }))
+      .toBe('On task_created');
+  });
+
+  it('determinism: identical inputs produce identical output', () => {
+    const input = { kind: 'schedule' as const, rrule: 'FREQ=DAILY', timezone: 'UTC', scheduleTime: '09:00' };
+    expect(formatFireCondition(input)).toBe(formatFireCondition(input));
+  });
+
+  // ── time formatting edge cases ──────────────────────────────────────────────
+
+  it('scheduleTime "12:00" → "12pm"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=DAILY', timezone: 'UTC', scheduleTime: '12:00' }))
+      .toBe('Daily 12pm UTC');
+  });
+
+  it('scheduleTime "13:30" → "13:30"', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=DAILY', timezone: 'UTC', scheduleTime: '13:30' }))
+      .toBe('Daily 13:30 UTC');
+  });
+
+  // ── ordinal edge cases ──────────────────────────────────────────────────────
+
+  it('BYMONTHDAY=11 → 11th', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=MONTHLY;BYMONTHDAY=11', timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe('Monthly 11th 9am UTC');
+  });
+
+  it('BYMONTHDAY=21 → 21st', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=MONTHLY;BYMONTHDAY=21', timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe('Monthly 21st 9am UTC');
+  });
+
+  it('BYMONTHDAY=22 → 22nd', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=MONTHLY;BYMONTHDAY=22', timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe('Monthly 22nd 9am UTC');
+  });
+
+  it('BYMONTHDAY=13 → 13th', () => {
+    expect(formatFireCondition({ kind: 'schedule', rrule: 'FREQ=MONTHLY;BYMONTHDAY=13', timezone: 'UTC', scheduleTime: '09:00' }))
+      .toBe('Monthly 13th 9am UTC');
   });
 });
 

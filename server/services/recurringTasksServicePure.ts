@@ -109,16 +109,119 @@ export interface UnionInput {
 // ── TriggerOrSchedule input for formatFireCondition ───────────────────────────
 
 export type TriggerOrSchedule =
-  | { kind: 'event'; eventType?: string }
-  | { kind: 'schedule' }
+  | { kind: 'schedule'; rrule: string; timezone: string; scheduleTime: string }
+  | { kind: 'event'; eventType: string; eventFilter: Record<string, unknown> }
   | { kind: 'manual' };
 
-// ── formatFireCondition (STUB — full implementation in C3b) ───────────────────
+// ── formatFireCondition ───────────────────────────────────────────────────────
+
+function parseRrule(rrule: string): {
+  freq?: string;
+  byday?: string;
+  bymonthday?: string;
+  interval?: number;
+} {
+  const parts: Record<string, string> = {};
+  for (const part of rrule.split(';')) {
+    const [k, v] = part.split('=');
+    if (k && v !== undefined) parts[k] = v;
+  }
+  return {
+    freq: parts['FREQ'],
+    byday: parts['BYDAY'],
+    bymonthday: parts['BYMONTHDAY'],
+    interval: parts['INTERVAL'] ? parseInt(parts['INTERVAL'], 10) : undefined,
+  };
+}
+
+const DAY_NAME: Record<string, string> = {
+  MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat', SU: 'Sun',
+};
+
+function ordinal(n: number): string {
+  const abs = Math.abs(n);
+  const lastTwo = abs % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  const lastOne = abs % 10;
+  if (lastOne === 1) return `${n}st`;
+  if (lastOne === 2) return `${n}nd`;
+  if (lastOne === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+function formatTime(scheduleTime: string): string {
+  if (!scheduleTime) return '';
+  const [hStr, mStr] = scheduleTime.split(':');
+  const h = parseInt(hStr ?? '0', 10);
+  const m = parseInt(mStr ?? '0', 10);
+  // Midnight is always shown as '00:00'
+  if (h === 0 && m === 0) return '00:00';
+  // Noon shown as '12pm'
+  if (h === 12 && m === 0) return '12pm';
+  // Non-zero minutes shown in HH:MM 24h format
+  if (m !== 0) {
+    const hh = String(h).padStart(2, '0');
+    const mm = String(m).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  // AM hours without leading zero
+  if (h < 12) return `${h}am`;
+  // PM hours (h > 12 already handled above for noon)
+  return `${h - 12}pm`;
+}
+
+function truncate(s: string): string {
+  return s.length > 80 ? s.slice(0, 77) + '...' : s;
+}
 
 export function formatFireCondition(input: TriggerOrSchedule): string {
   if (input.kind === 'manual') return 'Manual run';
-  if (input.kind === 'event') return `On ${input.eventType ?? 'event'}`;
-  return 'Scheduled'; // C3b will expand this with RRULE parsing
+
+  if (input.kind === 'event') {
+    const et = input.eventType && input.eventType.trim() !== '' ? input.eventType : 'unknown event';
+    return truncate(`On ${et}`);
+  }
+
+  // kind === 'schedule'
+  const { rrule, scheduleTime } = input;
+  const parsed = parseRrule(rrule);
+  const { freq, byday, bymonthday, interval } = parsed;
+
+  if (!freq) return truncate(rrule);
+
+  const timeStr = formatTime(scheduleTime);
+  const timeSuffix = timeStr ? ` ${timeStr} UTC` : '';
+
+  if (freq === 'MINUTELY') {
+    const n = interval ?? 1;
+    return `Every ${n} minute${n === 1 ? '' : 's'}`;
+  }
+
+  if (freq === 'HOURLY') {
+    return 'Hourly';
+  }
+
+  if (freq === 'DAILY') {
+    if (interval && interval > 1) {
+      return truncate(`Every ${interval} days${timeSuffix}`);
+    }
+    return truncate(`Daily${timeSuffix}`);
+  }
+
+  if (freq === 'WEEKLY') {
+    const dayPart = byday
+      ? ' ' + byday.split(',').map((d) => DAY_NAME[d.trim()] ?? d).join(', ')
+      : '';
+    return truncate(`Weekly${dayPart}${timeSuffix}`);
+  }
+
+  if (freq === 'MONTHLY') {
+    const dayPart = bymonthday ? ` ${ordinal(parseInt(bymonthday, 10))}` : '';
+    return truncate(`Monthly${dayPart}${timeSuffix}`);
+  }
+
+  // Unknown FREQ — fall back to literal rrule string
+  return truncate(rrule);
 }
 
 // ── unionRecurringTasks ───────────────────────────────────────────────────────
@@ -150,7 +253,7 @@ export function unionRecurringTasks(input: UnionInput): RecurringTask[] {
       id: `trigger:${t.id}`,
       name: `${agentName}: ${t.eventType}`,
       fireKind: 'event',
-      fireCondition: formatFireCondition({ kind: 'event', eventType: t.eventType }),
+      fireCondition: formatFireCondition({ kind: 'event', eventType: t.eventType, eventFilter: {} }),
       action: agentName,
       scope: subaccount
         ? { kind: subaccount.isOrgSubaccount ? 'org' : 'workspace', id: subaccount.id, name: subaccount.name }
@@ -180,7 +283,7 @@ export function unionRecurringTasks(input: UnionInput): RecurringTask[] {
       id: `schedule:${s.id}`,
       name: s.title,
       fireKind: 'schedule',
-      fireCondition: formatFireCondition({ kind: 'schedule' }),
+      fireCondition: formatFireCondition({ kind: 'schedule', rrule: '', timezone: 'UTC', scheduleTime: '' }),
       action: agentName,
       scope: subaccount
         ? { kind: subaccount.isOrgSubaccount ? 'org' : 'workspace', id: subaccount.id, name: subaccount.name }
