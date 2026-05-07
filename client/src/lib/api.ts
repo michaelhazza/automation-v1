@@ -39,6 +39,7 @@ api.interceptors.response.use(
       localStorage.removeItem('activeOrgName');
       localStorage.removeItem('activeSubaccountId');
       localStorage.removeItem('activeSubaccountName');
+      localStorage.removeItem('systemAdminOrgOverride');
       window.location.href = '/login';
     }
     return Promise.reject(error);

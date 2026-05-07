@@ -52,7 +52,7 @@ export default function ViewModeSwitcher({
 
   return (
     <div
-      role="group"
+      role="radiogroup"
       aria-label="View mode"
       className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5 gap-0.5"
     >

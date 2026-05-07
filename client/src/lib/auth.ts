@@ -94,3 +94,7 @@ export function setSystemAdminOrgOverride(active: boolean): void {
     localStorage.removeItem('systemAdminOrgOverride');
   }
 }
+
+export function removeSystemAdminOrgOverride(): void {
+  localStorage.removeItem('systemAdminOrgOverride');
+}

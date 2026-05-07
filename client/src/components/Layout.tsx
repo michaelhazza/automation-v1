@@ -10,6 +10,7 @@ import {
   removeToken, removeUserRole,
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
   getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
+  removeSystemAdminOrgOverride,
 } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
@@ -582,7 +583,7 @@ export default function Layout({ user, children }: LayoutProps) {
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout'); } finally {
       disconnectSocket();
-      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient();
+      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient(); removeSystemAdminOrgOverride();
       navigate('/login');
     }
   };

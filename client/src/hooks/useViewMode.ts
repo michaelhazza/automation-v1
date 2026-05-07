@@ -15,7 +15,7 @@
  * consumers never touch identity state directly to change the mode.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   getUserRole,
   getActiveClientId,
@@ -76,6 +76,12 @@ export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn {
   const viewMode = deriveViewMode(ctx);
   const availableModes = deriveAvailableModes(ctx);
 
+  // Store options in a ref so setViewMode's useCallback dep list never includes
+  // the options object itself. Without this, callers that pass an inline object
+  // literal would cause a new setViewMode on every parent render.
+  const optionsRef = useRef(options);
+  useEffect(() => { optionsRef.current = options; });
+
   const setViewMode = useCallback(
     (next: ViewMode): boolean => {
       // Read a fresh context at call time (not the closure-captured one)
@@ -89,7 +95,7 @@ export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn {
         // Special case: setViewMode('workspace') with no active client triggers
         // the client-selection callback as the signalling channel to the consumer.
         if (next === 'workspace' && !currentCtx.hasActiveClient) {
-          options?.onRequireClientSelection?.();
+          optionsRef.current?.onRequireClientSelection?.();
         }
         return false;
       }
@@ -116,8 +122,7 @@ export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn {
       setTick((t) => t + 1);
       return true;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [options, tick],
+    [tick],
   );
 
   return { viewMode, availableModes, setViewMode };
