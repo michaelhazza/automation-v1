@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/consolidation-operate/spec.md
-active_plan: tasks/builds/consolidation-operate/plan.md
-build_slug: consolidation-operate
-branch: ui-consolidation-operate
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-08
+last_merge_ready_pr: #272
+last_merge_ready_slug: consolidation-operate
+last_merge_ready_branch: ui-consolidation-operate
 last_merged_pr: #270
 last_merged_slug: consolidation-foundation
 last_merged_branch: claude/consolidation-foundation
@@ -24,11 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/consolidation-operate/spec.md`
-**Active plan:** `tasks/builds/consolidation-operate/plan.md` (v1.3, 9 chunks C1–C9, all built)
-**Active build slug:** `consolidation-operate`
-**Branch:** `ui-consolidation-operate` (28 commits ahead of `main`, pushed to origin — finalisation-coordinator runs S2 sync + `gh pr create` next)
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-07. All chunks built, G2 PASS, spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer NO_HOLES_FOUND, pr-reviewer APPROVED, dual-reviewer APPROVED (2 iterations, Codex available, 1 fix applied + 2 directional gaps deferred to OPER-DEF-3/4), doc-sync gate PASS. 4 deferred items routed to `tasks/todo.md` (OPER-DEF-1..4). Phase 3 next: `launch finalisation` in a fresh session — that runs S2 sync, G4 regression guard, push, `gh pr create`, and `chatgpt-pr-review` manual rounds. Handoff: `tasks/builds/consolidation-operate/handoff.md`. Progress: `tasks/builds/consolidation-operate/progress.md`. Dual-reviewer log: `tasks/review-logs/dual-review-log-consolidation-operate-2026-05-07T20-58-57Z.md`.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — PR #272 (`ui-consolidation-operate`) ready-to-merge labelled at 2026-05-07T21:40:14Z. CI is running G5 pre-merge backstop. `finalisation-coordinator` does NOT auto-merge; operator drives the merge sequence (update `current-focus.md` → commit → push → `gh pr merge`). See PR #272 entry below for full Phase 3 summary.
+
+**Merge-ready:** PR #272 — `consolidation-operate`. Phase-2 stream A of the four-spec consolidation programme (Operate surface — Home / Inbox / Activity / Run-trace). Replaces 4 legacy pages with a consolidated set: `client/src/pages/operate/HomePage.tsx` (consolidated dashboard with KPIs, runs chart, recent activity), `client/src/pages/operate/InboxPage.tsx` (three priority bands with deriveBand-based JS classification over `tasks + review_items + agent_runs + inbox_read_states` union), `client/src/pages/operate/ActivityPage.tsx` (`<SortableTable>` with multi-select filters, server-resolved filterOptions, drawer + modal interactions, severity legend), `client/src/pages/operate/RunTracePage.tsx` (full-page mode + `?embedded=1` flag for iframe-embedded modal use; role-aware masking projection over LLM/tool events). Backend extensions (additive — no new tables, no migrations, no new permission keys): `/api/activity` cursor-paged with multi-select filters and faceted filterOptions; `/api/inbox?band=` band-derivation listing + `POST /:id/{approve,reject,archive}` action endpoints with state-based idempotency; `/api/agent-runs/:id/trace-events` role-aware masking projection. Locked C8 redirect grammar: `/admin/runs/:runId → /run-trace/:runId`, `/admin/subaccounts/:saId/runs/:runId → /run-trace/:runId?subaccountId=:saId`, `/admin/agent-inbox → /inbox`, `/subaccounts/:saId/agent-inbox → /inbox?subaccountId=:saId`, `/admin/subaccounts/:saId/activity → /activity?subaccountId=:saId`, `/admin/activity → /activity`. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES (29/31 PASS, 2 directional gaps deferred to OPER-DEF-3/4) → adversarial-reviewer NO_HOLES_FOUND (0 confirmed, 3 worth-confirming notes non-blocking) → pr-reviewer APPROVED (0 blocking, 4 strong + 6 non-blocking deferred or documented) → dual-reviewer APPROVED (2 iterations, Codex available; 1 fix applied — App.tsx scope-preserving redirect — + 2 directional gaps deferred) → finalisation S2 clean (branch 0 commits behind main, no merge needed) → G4 regression guard PASS → chatgpt-pr-review CLOSED after 1 round (2 [ACCEPT] auto-applied: F1 `/admin/activity` redirect target corrected to canonical `/activity`; F2 regression test added for hash + promoted param + duplicate inbound param composition; commit `af7cc6dc`) → doc-sync sweep complete (13 registered docs verified; 7 KNOWLEDGE.md entries added across C9 + finalisation; architecture.md Key files per domain confirmed clean; DEVELOPMENT_GUIDELINES.md §8.30 stable ref maps in React callbacks) → ready-to-merge labelled. 4 items deferred (OPER-DEF-1..4 in `tasks/todo.md`). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-operate-2026-05-07T21-29-18Z.md`. Phase 3 handoff: `tasks/builds/consolidation-operate/handoff.md § Phase 3 (FINALISATION) — complete`. Progress: `tasks/builds/consolidation-operate/progress.md`.
 
 **Just merged:** PR #270 — `consolidation-foundation` (squash-merged from `claude/consolidation-foundation` 2026-05-07). Phase 0 cross-cutting frontend primitives extracted from the broader consolidation prototype set. Ships shared `PageShell` / `Drawer` / `Modal` / `SortableTable` / `FormFooter` / `SearchBox` / `EmptyState` / `ErrorState` / `WorkspaceBadge` / `ViewModeSwitcher` primitives, route registry (`client/src/config/routes.ts` with branded `AppRoute` type, `APP_ROUTE_PATTERNS` literal-tuple, `buildRoute` helper using a negative-lookahead regex to prevent `:id` matching inside `:idFoo`), sidebar config (`client/src/config/sidebar.ts` with `buildNavItems` factory + `NavGroup` types), Layout refactor consuming the new config, helpers (`colorHash` deterministic FNV-1a, `workspace.switchWorkspace` as the only allowed reload call site, `useViewMode` + `useViewModePure`), reference-counted scroll-lock singleton (`overlayScrollLock.ts`) keyed via `Symbol.for(...)` for HMR-safe coordination across stacked overlays. ModuleGuard added for `/clientpulse/*` and `/reports/*` route trees (closed adversarial-reviewer confirmed hole). Late-build bundle: 5 vitest test files converted from custom `npx tsx` harness to vitest's `expect()` API; portable framework tests refactored to read `FRAMEWORK_VERSION` dynamically so future bumps don't break the suite; `finalisation-coordinator` agent updated to auto-resolve known-shape S2 merge conflicts (append-only artefact files take HEAD or union; code-area conflicts still pause). Pipeline: per-chunk pr-reviewer + dual-reviewer + adversarial-reviewer rounds → branch-level chatgpt-pr-review (2 rounds APPROVED) → S2 merge of origin/main with three resolved conflicts (spec.md / plan.md kept HEAD; tasks/todo.md union-merged) → G4 regression guard clean → doc-sync sweep complete → ready-to-merge labelled → all CI green. 6 items deferred (CONSOL-FND-DEF-1..6 in `tasks/todo.md`). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T08-15-18Z.md`. **Manual G2 still owed by operator:** visual diff of Layout sidebar across user shapes; ViewModeSwitcher transitions; SortableTable filter dropdown select-all; direct-URL nav to `/clientpulse` for a non-system-admin without that module.
 
@@ -74,7 +79,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-07T09:11:23Z
+**Last updated:** 2026-05-07T21:40:14Z
 
 ---
 

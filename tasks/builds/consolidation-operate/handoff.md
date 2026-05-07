@@ -105,3 +105,36 @@ Log: `tasks/review-logs/dual-review-log-consolidation-operate-2026-05-07T20-58-5
 ---
 
 **Phase 2 (BUILD) — complete.** Operator: open a fresh session and type `launch finalisation`.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #272
+**PR URL:** https://github.com/michaelhazza/automation-v1/pull/272
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-consolidation-operate-2026-05-07T21-29-18Z.md`
+**spec_deviations reviewed:** n/a (none recorded in Phase 2 handoff)
+**S2 sync:** clean — branch is 0 commits behind `origin/main`, `git merge-base --is-ancestor origin/main HEAD` returned UP_TO_DATE; no merge needed.
+**G4 regression guard:** PASS — `npm run lint` 0 errors / 865 pre-existing warnings (matches `main` baseline); `npm run typecheck` clean.
+**chatgpt-pr-review verdict:** CLOSED after 1 round. 2 findings, both technical [ACCEPT], both auto-applied: F1 (`/admin/activity` redirect target corrected from `/` to canonical `/activity` per locked C8 grammar); F2 (regression test added for hash + promoted param + duplicate inbound param highest-risk composition). 12 operateRedirects tests passing (was 11). Commit `af7cc6dc`.
+**Doc-sync sweep verdicts** (per `docs/doc-sync.md` registry — 13 docs):
+- architecture.md: yes (Key files per domain — operate paths confirmed clean post-C9)
+- capabilities.md: n/a
+- integration-reference.md: n/a
+- CLAUDE.md: no (no fleet change)
+- DEVELOPMENT_GUIDELINES.md: yes (§8.30 in C9)
+- CONTRIBUTING.md: n/a
+- frontend-design-principles.md: no (no new UI hard rule)
+- KNOWLEDGE.md: yes (7 entries — 5 from C9 + 2 from finalisation)
+- spec-context.md: n/a
+- decisions/: no (no durable choice locked)
+- context-packs/: no (no anchor renames)
+- test-gate-policy.md: n/a
+- spec-review-directional-signals.md: no
+- FRAMEWORK_VERSION + CHANGELOG: n/a
+
+**KNOWLEDGE.md entries added in finalisation:** 2 (redirect-grammar-drift pattern + high-risk-composition-test pattern; both citing PR #272 R1 F1/F2).
+**tasks/todo.md items removed:** 0 (this build only added 4 deferrals — OPER-DEF-1..4 — none of its work closed pre-existing items).
+**dual-reviewer status:** APPROVED in Phase 2 (no REVIEW_GAP; Codex available); `chatgpt-pr-review` was the third independent pass.
+**ready-to-merge label applied at:** 2026-05-07T21:40:14Z
+
