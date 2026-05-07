@@ -14,6 +14,8 @@ import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inbou
 import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
+import { logger } from '../lib/logger.js';
+import { requireOrgSubaccount } from '../services/orgSubaccountService.js';
 
 const router = Router();
 
@@ -185,16 +187,85 @@ router.delete('/api/agents/:id/conversations/:convId', authenticate, requireOrgP
   res.json(result);
 }));
 
-// ── Feature 2 — org-level agent test run ─────────────────────────────────────
+// ── C2 — async agent test endpoint ───────────────────────────────────────────
+// POST /api/agents/:id/test
+// Returns 202 immediately with { runId, status: 'running' }. Callers poll
+// GET /api/agent-runs/:id?shape=test for the result.
+
+router.post('/api/agents/:id/test',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
+    if (!limitResult.allowed) {
+      setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);
+      res.status(429).json({ error: `Too many test runs` });
+      return;
+    }
+    const { input, workspaceContextId: _wci, idempotencyKey } = req.body as {
+      input?: string;
+      workspaceContextId?: string;
+      idempotencyKey?: string;
+    };
+
+    const orgSa = await requireOrgSubaccount(req.orgId!);
+    const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, orgSa.id, id);
+    if (!saLink) {
+      res.status(404).json({ error: 'No agent config found' });
+      return;
+    }
+
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
+      userId: req.user!.id,
+      targetType: 'agent',
+      targetId: id,
+      input: { prompt: input ?? null, inputJson: null },
+      clientKeyHint: idempotencyKey,
+    });
+
+    const run = await agentExecutionService.startRunAsync({
+      agentId: id,
+      organisationId: req.orgId!,
+      subaccountId: orgSa.id,
+      subaccountAgentId: saLink.id,
+      executionScope: 'subaccount',
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
+      isTestRun: true,
+      userId: req.user!.id,
+      triggerContext: { triggeredBy: req.user!.id, source: 'test_panel', isTestRun: true, prompt: input },
+      idempotencyKey: currentKey,
+      idempotencyCandidateKeys: [currentKey, previousKey],
+    });
+
+    if (run.isExisting) {
+      res.status(200).json({ runId: run.runId, status: run.status });
+    } else {
+      res.status(202).json({ runId: run.runId, status: 'running' });
+    }
+  })
+);
+
+// ── Feature 2 — org-level agent test run (legacy shim) ───────────────────────
 // POST /api/agents/:id/test-run
-// Starts a flagged test run for an org-level agent. Rate-limited per user.
-// Runs via the org subaccount (isOrgSubaccount=true) to satisfy the
-// subaccountId + subaccountAgentId requirement in agentExecutionService.
+// Deprecated in favour of POST /api/agents/:id/test. Delegating to the same
+// startRunAsync logic. Do NOT redirect (POST body replay across 308 is not
+// universally honoured).
 
 router.post('/api/agents/:id/test-run',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Sunset', '2027-01-01');
+    logger.warn('deprecated_endpoint_called', {
+      path: req.path,
+      deprecated_test_run_path: true,
+      userId: req.user?.id,
+    });
+
     const { id } = req.params;
     const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
     if (!limitResult.allowed) {
@@ -209,14 +280,20 @@ router.post('/api/agents/:id/test-run',
       conversationId?: string;
     };
 
-    // Resolve the org subaccount and the agent link within it.
-    const { requireOrgSubaccount } = await import('../services/orgSubaccountService.js');
     const orgSa = await requireOrgSubaccount(req.orgId!);
     const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, orgSa.id, id);
     if (!saLink) {
       res.status(404).json({ error: 'No agent config found for this agent in the organisation workspace' });
       return;
     }
+
+    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
+      userId: req.user!.id,
+      targetType: 'agent',
+      targetId: id,
+      input: { prompt: prompt ?? null, inputJson: inputJson ?? null },
+      clientKeyHint: idempotencyKey,
+    });
 
     const triggerContext: Record<string, unknown> = {
       triggeredBy: req.user!.id,
@@ -225,14 +302,8 @@ router.post('/api/agents/:id/test-run',
     };
     if (prompt) triggerContext.prompt = prompt;
     if (inputJson) triggerContext.inputJson = inputJson;
-    const [currentKey, previousKey] = deriveTestRunIdempotencyCandidates({
-      userId: req.user!.id,
-      targetType: 'agent',
-      targetId: id,
-      input: { prompt: prompt ?? null, inputJson: inputJson ?? null },
-      clientKeyHint: idempotencyKey,
-    });
-    const result = await agentExecutionService.executeRun({
+
+    const run = await agentExecutionService.startRunAsync({
       agentId: id,
       organisationId: req.orgId!,
       subaccountId: orgSa.id,
@@ -246,9 +317,14 @@ router.post('/api/agents/:id/test-run',
       triggerContext,
       idempotencyKey: currentKey,
       idempotencyCandidateKeys: [currentKey, previousKey],
-      conversationId: fromConvId,  // optional; enables integration card messages in the conversation
+      conversationId: fromConvId,
     });
-    res.status(201).json(result);
+
+    if (run.isExisting) {
+      res.status(200).json({ runId: run.runId, status: run.status });
+    } else {
+      res.status(202).json({ runId: run.runId, status: 'running' });
+    }
   })
 );
 
