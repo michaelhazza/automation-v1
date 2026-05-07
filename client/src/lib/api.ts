@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { ActivityItem, ActivityQuery, FilterOptions, InboxItem, RunTraceEvent } from '../../../shared/types/operate';
 
 const api = axios.create({
   baseURL: '',
@@ -102,3 +103,74 @@ export const migrateWorkspace = (saId: string, body: {
 
 export const getMigrationStatus = (saId: string, batchId: string) =>
   api.get(`/api/subaccounts/${saId}/workspace/migrate/${batchId}`).then(r => r.data);
+
+// ─── Operate surface API wrappers (C3 — ui-consolidation-operate) ─────────────
+
+/**
+ * Fetch the org-level activity feed.
+ * The server wraps the payload in { data: { items, nextCursor, filterOptions }, serverTimestamp }
+ * so we unwrap to the inner data shape here.
+ */
+export const fetchActivity = (
+  query: ActivityQuery,
+): Promise<{ items: ActivityItem[]; nextCursor: string | null; filterOptions: FilterOptions }> => {
+  const params: Record<string, unknown> = { ...query };
+  // Collapse array-valued params to comma-separated strings (matches server parseFilters)
+  for (const key of ['type', 'status', 'actor', 'subaccount', 'severity'] as const) {
+    if (Array.isArray(params[key])) {
+      params[key] = (params[key] as string[]).join(',');
+    }
+  }
+  return api.get('/api/activity', { params }).then(r => r.data.data);
+};
+
+/**
+ * Fetch the band-filtered inbox list.
+ * Returns { band, items, nextCursor } directly.
+ */
+export const fetchInbox = ({
+  band,
+  q,
+}: {
+  band?: 'high' | 'needs_action' | 'previous';
+  q?: string;
+}): Promise<{ band: string | null; items: InboxItem[]; nextCursor: string | null }> =>
+  api.get('/api/inbox', { params: { band, q } }).then(r => r.data);
+
+/** Approve a review_item or approval-kind inbox item. */
+export const inboxApprove = (
+  id: string,
+  kind: string,
+): Promise<{ ok: boolean; alreadyApplied?: boolean }> =>
+  api.post(`/api/inbox/${id}/approve`, { kind }).then(r => r.data);
+
+/** Reject a review_item or approval-kind inbox item. */
+export const inboxReject = (
+  id: string,
+  kind: string,
+  reason?: string,
+): Promise<{ ok: boolean; alreadyApplied?: boolean }> =>
+  api.post(`/api/inbox/${id}/reject`, { kind, reason }).then(r => r.data);
+
+/** Archive a single inbox item. */
+export const inboxArchive = (
+  id: string,
+  kind: string,
+): Promise<{ ok: boolean; alreadyApplied?: boolean }> =>
+  api.post(`/api/inbox/${id}/archive`, { kind }).then(r => r.data);
+
+/**
+ * Fetch the run trace for a given agent run.
+ * The run trace data is embedded in the agent-run detail response (toolCallsLog).
+ * This wrapper fetches the full run detail and returns the trace events shape
+ * expected by RunTraceEvent consumers.
+ */
+export const fetchRunTrace = (
+  runId: string,
+): Promise<{ events: RunTraceEvent[] }> =>
+  api.get(`/api/agent-runs/${runId}`).then(r => {
+    const events: RunTraceEvent[] = Array.isArray(r.data?.toolCallsLog)
+      ? (r.data.toolCallsLog as RunTraceEvent[])
+      : [];
+    return { events };
+  });
