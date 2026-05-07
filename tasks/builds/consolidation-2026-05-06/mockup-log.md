@@ -1654,3 +1654,56 @@ patterns.md (new file):
 - `prototypes/consolidation-2026-05-06/project-edit.html`
 - `tasks/builds/consolidation-2026-05-06/patterns.md` (new)
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 11 — 2026-05-07 (knowledge indent + spending workspace trim + sortable tables)
+
+Three focused fixes plus extending the round 10 sort+filter pattern across additional tables.
+
+knowledge.html / org-knowledge.html:
+- Added `page-content` class alongside `page-body` on the wrapper div, restoring the standard left gutter and top breathing room so the title and content align with home / activity / recurring-tasks.
+
+spending.html (workspace view trim):
+- Workspace view drops the Workspace column from the Ledger via `data-view-org-only` on the column + `body[data-view="workspace"]` selector hiding it.
+- Ledger rows in workspace view filtered to active workspace (Acme Corp) only.
+- KPI subtitle copy fixed: "This month" instead of "This month (all workspaces)" in workspace view.
+- Org view unchanged.
+
+Sortable + filterable column pattern applied site-wide:
+- spending Ledger: sort on Timestamp / Workspace / Agent / Type / Tokens / Cost; filter on Workspace (org view) / Agent / Type.
+- spending per-workspace caps table (org view only): sort + filter on Workspace.
+- agents.html agents list: sort on Agent name / Status / Reports to / Last run / Runs / Cost; filter on Status / Reports to.
+- integrations.html "All connections" table: 15 connection rows across Gmail / Slack / HubSpot / GoHighLevel / Stripe / Drive / Salesforce / Linear / Notion / GitHub / Zoom / Mixpanel and three web-login providers; sort on all columns; filter on Provider / Auth method / Status. Replaces the earlier 3-row Logins table. integrations.html IS the Connections page; no separate connections.html exists.
+
+All sort/filter dropdowns follow the round 10 UX rules: stay open until Apply / Cancel / Esc / outside click; smart Select all toggle; snapshot-on-open for Cancel.
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/knowledge.html`
+- `prototypes/consolidation-2026-05-06/org-knowledge.html`
+- `prototypes/consolidation-2026-05-06/spending.html`
+- `prototypes/consolidation-2026-05-06/agents.html`
+- `prototypes/consolidation-2026-05-06/integrations.html`
+
+## Round 12 — 2026-05-07 (activity sortable+filter, patterns.md site-wide default)
+
+Closes out the sort/filter pattern application across the prototype set and formalises the pattern as the site-wide default for tables.
+
+activity.html:
+- Added `.sf-*` CSS block (sf-th, sf-caret-btn, sf-dropdown, sf-dropdown-footer, sf-cancel-btn, sf-apply-btn) matching the spending/agents/integrations convention.
+- Replaced static `<thead>` with sortable+filterable headers across all 8 columns (Type, Subject, Status, Actor, Sev, Workspace, Created, Duration). Filterable: Type / Status / Actor / Subaccount.
+- Added column sort + colFilters state (`actSortKey`, `actSortDir`, `actColFilters`, `_actFilterSnapshot`) with default sort by Created descending.
+- Added `actSortBy / actToggleFilter / buildActDropdown / actSelectAllToggle / actClearFilter / actApplyFilter / actCancelFilter / closeAllActDropdowns / snapshotActFilter` helpers.
+- `applyFilters()` now applies column filters as an AND pass after the existing chip filters, then sorts via column sort key when set (falls back to legacy sort dropdown).
+- Legacy sort dropdown clears `actSortKey` on change so it overrides column sort if the user picks it.
+- Sort-indicator arrows render in the active column header (up arrow asc, down arrow desc).
+- 28 mock data rows already present from round 7-final; no new data needed.
+
+patterns.md (§ 5):
+- Marked the sort+filter pattern as **site-wide default** for any table with more than ~5 rows or with categorical columns.
+- Listed implementing pages: recurring-tasks (canonical reference, .col-filter-* convention), spending (Ledger + caps), agents, integrations, activity (.sf-* convention).
+- Documented the two CSS naming conventions in use (.col-filter-* and .sf-*) and noted that the production implementation should pick one.
+- Added implementation note pointing to `tasks/builds/consolidation-foundation/spec.md § 4.3` as the eventual extraction target.
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/activity.html`
+- `tasks/builds/consolidation-2026-05-06/patterns.md`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry, plus round 11 entry above)

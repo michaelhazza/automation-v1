@@ -133,6 +133,8 @@ function makeWorkspaceBadgeClickable(badgeEl, subaccountName) {
 
 ## 5. Sortable + filterable table columns
 
+> **Site-wide default:** any table with more than ~5 rows or with categorical columns gets sort + filter on the relevant columns. This pattern is the default; opt out only when a table is genuinely small or read-only.
+
 Column headers support both sorting (click the label) and filtering (click the caret button).
 
 **Sort:** `sortByColumn(col)` toggles `sortDir` (-1/1) and calls `renderRows()`. Active column caret shows up/down arrow via `sort-arrow` span.
@@ -140,7 +142,7 @@ Column headers support both sorting (click the label) and filtering (click the c
 **Filter dropdown UX rules:**
 - Dropdown stays open until user explicitly closes it (Apply, Cancel, Esc, or outside click)
 - Individual checkbox changes do NOT close the dropdown
-- "Select all" is a smart toggle: all checked → uncheck all; any unchecked → check all
+- "Select all" is a smart toggle: all checked, uncheck all; any unchecked, check all
 - "Clear" unchecks all
 - "Apply" commits filter and closes
 - "Cancel" restores the snapshot (state at dropdown-open time) and closes
@@ -148,9 +150,22 @@ Column headers support both sorting (click the label) and filtering (click the c
 
 **Snapshot pattern:** On open, save checkbox states to `_filterSnapshot[col]`. On Cancel/outside-close, restore.
 
-**Caret highlight:** When a column is actively filtered (fewer items checked than total), the caret button gets class `active` (indigo color).
+**Caret highlight:** When a column is actively filtered (fewer items checked than total), the caret button gets class `active` (indigo color) or `filtered` (the spending/agents/integrations/activity convention).
 
-**CSS:** `.col-filter-dropdown-footer` holds Cancel + Apply buttons side by side. `.col-filter-cancel` is the secondary button. `.col-filter-apply` is the primary button.
+**CSS:** Two naming conventions are in use across the prototype set:
+- `recurring-tasks.html`: `.col-filter-*` (dropdown-footer, cancel, apply). The earlier convention.
+- `spending.html`, `agents.html`, `integrations.html`, `activity.html`: `.sf-*` (sf-th, sf-caret-btn, sf-dropdown, sf-dropdown-footer, sf-cancel-btn, sf-apply-btn). The later convention.
+
+Both implement the same UX rules. The eventual production component should pick one.
+
+**Implementing pages (per-page inline implementation):**
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html` — first implementation, `.col-filter-*` convention. Canonical reference for the snapshot/Cancel mechanic.
+- `prototypes/consolidation-2026-05-06/spending.html` — `.sf-*` convention. Two tables: Ledger (sa/agent/type filterable) and per-workspace caps (workspace filterable, org view only).
+- `prototypes/consolidation-2026-05-06/agents.html` — `.sf-*` convention. Status / Reports to filterable.
+- `prototypes/consolidation-2026-05-06/integrations.html` — `.sf-*` convention. 15-row connections table; Provider / Auth method / Status filterable.
+- `prototypes/consolidation-2026-05-06/activity.html` — `.sf-*` convention. 28-row activity table; Type / Status / Actor / Subaccount filterable. Coexists with the page's higher-level chip filters above the table.
+
+**Implementation note:** for the prototype set, sort + filter logic is inlined per-page rather than extracted to a shared script. This is acceptable for prototypes — the eventual production implementation should extract into a shared `<SortableTable>` component (see `tasks/builds/consolidation-foundation/spec.md § 4.3`) to eliminate duplicate state and snapshot handling.
 
 ---
 
