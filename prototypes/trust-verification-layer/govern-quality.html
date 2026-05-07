@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Govern / Quality (new page)
+
+  A new fourth Govern primitive alongside Knowledge / Spending / Connections.
+  Mirrors the structure of knowledge.html (sortable table, filters, view-mode switcher).
+
+  Columns: agent name, attached scorecard, 7-day mean score, 7-day trend (sparkline),
+           runs scored / runs total (sampling %), drift indicator, last bench.
+  Filters: scorecard attached, drift state, workspace view-mode.
+  Row click: opens drawer with per-dimension trend (30-day chart), recent low-scoring
+             runs (deep-link to run-trace), action to run a fresh bench.
+  Empty state: no scorecards exist anywhere.
+
+  Primary task: operator scans for agents getting worse.
+  Primary action per screen: "Run bench" on the agent that needs attention.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Govern / Quality | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Filter chips ── */
+  .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .filter-chip {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600);
+    background: white; cursor: pointer; transition: all 0.12s;
+  }
+  .filter-chip:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+  .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+  .filter-chip.red-active { background: var(--red-600); color: white; border-color: var(--red-600); }
+  .filter-sep { width: 1px; height: 18px; background: var(--slate-200); flex-shrink: 0; margin: 0 2px; }
+  .filter-group-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); white-space: nowrap; }
+
+  /* ── Toolbar ── */
+  .page-toolbar {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .page-toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .search-input {
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--slate-200);
+    font-size: 13px; color: var(--slate-700); outline: none; width: 200px;
+  }
+  .search-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
+
+  /* ── Quality table ── */
+  .quality-table { width: 100%; border-collapse: collapse; }
+  .quality-table thead tr {
+    background: var(--slate-50); border-bottom: 2px solid var(--slate-200);
+  }
+  .quality-table th {
+    text-align: left; padding: 10px 14px;
+    font-size: 10.5px; font-weight: 700; color: var(--slate-400);
+    text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
+    cursor: pointer; user-select: none;
+  }
+  .quality-table th:hover { color: var(--slate-700); }
+  .quality-table th .sort-arrow { font-size: 9px; margin-left: 3px; opacity: 0.5; }
+  .quality-table tbody tr {
+    border-bottom: 1px solid var(--slate-100); transition: background 0.1s; cursor: pointer;
+  }
+  .quality-table tbody tr:last-child { border-bottom: none; }
+  .quality-table tbody tr:hover { background: var(--slate-50); }
+  .quality-table td { padding: 13px 14px; font-size: 13px; color: var(--slate-700); vertical-align: middle; }
+
+  .agent-name-cell { display: flex; align-items: center; gap: 9px; }
+  .agent-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--indigo-100), var(--violet-50));
+    border: 1px solid var(--indigo-200);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 12px; color: var(--indigo-600); font-weight: 700;
+  }
+  .agent-name { font-size: 13px; font-weight: 600; color: var(--slate-800); }
+  .agent-sub { font-size: 11px; color: var(--slate-400); }
+
+  .scorecard-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 500; border-radius: 4px; padding: 2px 7px;
+    white-space: nowrap;
+  }
+  .sc-attached { background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+  .sc-none { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-200); font-style: italic; }
+
+  .mean-score { font-size: 13px; font-weight: 700; }
+  .mean-good { color: var(--emerald-600); }
+  .mean-warn { color: var(--amber-600); }
+  .mean-bad  { color: var(--red-600); }
+
+  .drift-indicator {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .drift-up     { color: var(--emerald-600); }
+  .drift-down   { color: var(--red-600); }
+  .drift-stable { color: var(--slate-400); }
+
+  .runs-cell { font-size: 12px; color: var(--slate-600); white-space: nowrap; }
+  .runs-pct { font-size: 11px; color: var(--slate-400); }
+
+  .bench-cell { font-size: 12px; color: var(--slate-500); white-space: nowrap; }
+  .bench-warn { color: var(--amber-600); font-weight: 500; }
+
+  /* ── Drawer ── */
+  .drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+    z-index: 40; display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .drawer-overlay.open { display: flex; }
+  .drawer-panel {
+    width: 540px; background: white; height: 100vh; overflow-y: auto;
+    display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.12);
+  }
+  .drawer-head {
+    padding: 18px 20px; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .drawer-title { font-size: 16px; font-weight: 700; color: var(--slate-800); }
+  .drawer-close {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; font-size: 18px; color: var(--slate-400);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .drawer-close:hover { background: var(--slate-100); color: var(--slate-700); }
+  .drawer-body { padding: 20px; flex: 1; }
+  .drawer-footer { padding: 16px 20px; border-top: 1px solid var(--slate-200); flex-shrink: 0; display: flex; gap: 10px; }
+
+  .drawer-section { margin-bottom: 24px; }
+  .drawer-section-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--slate-400); margin-bottom: 12px;
+  }
+
+  /* ── 30-day chart (hero visualisation — primary task is "read the trajectory") ── */
+  .chart-wrap {
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    padding: 14px; background: white; overflow-x: auto;
+  }
+  .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--slate-600); }
+  .legend-dot { width: 10px; height: 3px; border-radius: 1.5px; }
+
+  /* ── Low-scoring run rows ── */
+  .low-run-row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 0;
+    border-bottom: 1px solid var(--slate-100); font-size: 12.5px;
+  }
+  .low-run-row:last-child { border-bottom: none; }
+  .low-run-score { font-size: 13px; font-weight: 700; color: var(--red-600); flex-shrink: 0; width: 40px; }
+  .low-run-agent { flex: 1; color: var(--slate-700); }
+  .low-run-date { font-size: 11.5px; color: var(--slate-400); flex-shrink: 0; }
+  .low-run-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; text-decoration: none; flex-shrink: 0; }
+  .low-run-link:hover { text-decoration: underline; }
+
+  /* ── Empty state ── */
+  .empty-quality {
+    padding: 64px 24px; text-align: center;
+    display: none;
+  }
+  .empty-quality.visible { display: block; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'govern-quality.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Govern</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Quality</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">Back to prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+          <div>
+            <h1>Quality</h1>
+            <p>Scorecard performance across all agents. Spot drift before it becomes a problem.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+            <!-- Alert strip -->
+            <div style="display:flex;align-items:center;gap:6px;background:var(--red-50);border:1px solid #fecaca;border-radius:8px;padding:6px 12px;font-size:12px;color:var(--red-700);">
+              <span style="width:7px;height:7px;border-radius:50%;background:var(--red-500);display:inline-block;flex-shrink:0;"></span>
+              <strong>2 agents</strong> drifting down this week
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="page-toolbar">
+        <div class="filter-chips">
+          <button class="filter-chip active" onclick="filterRows('all',this)">All agents (6)</button>
+
+          <div class="filter-sep"></div>
+          <span class="filter-group-label">Scorecard:</span>
+          <button class="filter-chip" onclick="filterRows('attached',this)">Attached</button>
+          <button class="filter-chip" onclick="filterRows('no-scorecard',this)">None</button>
+
+          <div class="filter-sep"></div>
+          <span class="filter-group-label">Drift:</span>
+          <button class="filter-chip" onclick="filterRows('drifting-down',this)">Drifting down</button>
+          <button class="filter-chip" onclick="filterRows('drifting-up',this)">Drifting up</button>
+          <button class="filter-chip" onclick="filterRows('stable',this)">Stable</button>
+        </div>
+        <div class="page-toolbar-right">
+          <input class="search-input" type="text" placeholder="Search agents...">
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="card">
+        <table class="quality-table" id="quality-table">
+          <thead>
+            <tr>
+              <th>Agent <span class="sort-arrow">&#9650;</span></th>
+              <th>Scorecard</th>
+              <th>7-day mean</th>
+              <th>Trend</th>
+              <th>Scored / Total</th>
+              <th>Drift</th>
+              <th>Last bench</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="quality-rows">
+
+            <!-- Row 1: Outreach Agent — drifting down, at risk -->
+            <tr data-filter="attached drifting-down" onclick="openDrawer('outreach')">
+              <td>
+                <div class="agent-name-cell">
+                  <div class="agent-icon">OA</div>
+                  <div>
+                    <div class="agent-name">Outreach Agent</div>
+                    <div class="agent-sub">Outbound sales</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="scorecard-chip sc-attached">Outreach Quality v2</span></td>
+              <td><span class="mean-score mean-warn">0.77</span></td>
+              <td>
+                <svg width="70" height="22" viewBox="0 0 70 22">
+                  <polyline points="0,8 12,9 24,11 36,12 48,14 60,16 70,17" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+              </td>
+              <td class="runs-cell">47 / 234 <span class="runs-pct">(20%)</span></td>
+              <td><span class="drift-indicator drift-down">&#8600; &minus;0.06</span></td>
+              <td class="bench-cell bench-warn">May 2 &middot; update suggested</td>
+              <td>
+                <a href="model-bench.html" class="btn btn-xs btn-primary" onclick="event.stopPropagation()">Run bench</a>
+              </td>
+            </tr>
+
+            <!-- Row 2: Content Agent — drifting down -->
+            <tr data-filter="attached drifting-down" onclick="openDrawer('content')">
+              <td>
+                <div class="agent-name-cell">
+                  <div class="agent-icon" style="background:linear-gradient(135deg,#fdf4ff,#f5f3ff);border-color:#ddd6fe;color:#7c3aed;">CA</div>
+                  <div>
+                    <div class="agent-name">Content Agent</div>
+                    <div class="agent-sub">Blog and social content</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="scorecard-chip sc-attached">Content Quality v1</span></td>
+              <td><span class="mean-score mean-warn">0.71</span></td>
+              <td>
+                <svg width="70" height="22" viewBox="0 0 70 22">
+                  <polyline points="0,6 12,7 24,10 36,12 48,15 60,17 70,19" fill="none" stroke="#ef4444" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+              </td>
+              <td class="runs-cell">31 / 156 <span class="runs-pct">(20%)</span></td>
+              <td><span class="drift-indicator drift-down">&#8600; &minus;0.11</span></td>
+              <td class="bench-cell bench-warn">Apr 18 &middot; overdue</td>
+              <td>
+                <a href="model-bench.html" class="btn btn-xs btn-primary" onclick="event.stopPropagation()">Run bench</a>
+              </td>
+            </tr>
+
+            <!-- Row 3: CRM Enrichment Agent — stable, good -->
+            <tr data-filter="attached stable" onclick="openDrawer('crm')">
+              <td>
+                <div class="agent-name-cell">
+                  <div class="agent-icon" style="background:linear-gradient(135deg,#ecfdf5,#f0fdf4);border-color:#a7f3d0;color:#059669;">CE</div>
+                  <div>
+                    <div class="agent-name">CRM Enrichment Agent</div>
+                    <div class="agent-sub">Contact enrichment</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="scorecard-chip sc-attached">Data Quality v1</span></td>
+              <td><span class="mean-score mean-good">0.93</span></td>
+              <td>
+                <svg width="70" height="22" viewBox="0 0 70 22">
+                  <polyline points="0,12 12,11 24,10 36,9 48,9 60,8 70,8" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+              </td>
+              <td class="runs-cell">22 / 110 <span class="runs-pct">(20%)</span></td>
+              <td><span class="drift-indicator drift-up">&#8599; +0.03</span></td>
+              <td class="bench-cell">May 4 &middot; current</td>
+              <td></td>
+            </tr>
+
+            <!-- Row 4: Scheduling Agent — stable, very good -->
+            <tr data-filter="attached stable" onclick="openDrawer('scheduling')">
+              <td>
+                <div class="agent-name-cell">
+                  <div class="agent-icon" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#bfdbfe;color:#1d4ed8;">SA</div>
+                  <div>
+                    <div class="agent-name">Scheduling Agent</div>
+                    <div class="agent-sub">Calendar and booking</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="scorecard-chip sc-attached">Scheduling v1</span></td>
+              <td><span class="mean-score mean-good">0.91</span></td>
+              <td>
+                <svg width="70" height="22" viewBox="0 0 70 22">
+                  <polyline points="0,9 12,8 24,9 36,8 48,8 60,7 70,8" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+              </td>
+              <td class="runs-cell">18 / 88 <span class="runs-pct">(20%)</span></td>
+              <td><span class="drift-indicator drift-stable">&#8212; 0.00</span></td>
+              <td class="bench-cell">May 1 &middot; current</td>
+              <td></td>
+            </tr>
+
+            <!-- Row 5: Reporting Agent — no scorecard -->
+            <tr data-filter="no-scorecard stable" onclick="openDrawer('reporting')">
+              <td>
+                <div class="agent-name-cell">
+                  <div class="agent-icon" style="background:var(--slate-100);border-color:var(--slate-200);color:var(--slate-400);">RA</div>
+                  <div>
+                    <div class="agent-name">Reporting Agent</div>
+                    <div class="agent-sub">Weekly summary reports</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="scorecard-chip sc-none">No scorecard</span></td>
+              <td><span style="color:var(--slate-300);font-size:13px;">--</span></td>
+              <td><span style="color:var(--slate-300);">--</span></td>
+              <td class="runs-cell" style="color:var(--slate-400);">0 / 45 <span class="runs-pct">(0%)</span></td>
+              <td><span class="drift-indicator drift-stable" style="color:var(--slate-300);">n/a</span></td>
+              <td class="bench-cell" style="color:var(--slate-400);">Never</td>
+              <td>
+                <a href="agent-edit-scorecard.html" class="btn btn-xs btn-secondary" onclick="event.stopPropagation()">Add scorecard</a>
+              </td>
+            </tr>
+
+            <!-- Row 6: Inbox Triage — no scorecard -->
+            <tr data-filter="no-scorecard stable" onclick="openDrawer('inbox-triage')">
+              <td>
+                <div class="agent-name-cell">
+                  <div class="agent-icon" style="background:var(--slate-100);border-color:var(--slate-200);color:var(--slate-400);">IT</div>
+                  <div>
+                    <div class="agent-name">Inbox Triage Agent</div>
+                    <div class="agent-sub">Email classification</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="scorecard-chip sc-none">No scorecard</span></td>
+              <td><span style="color:var(--slate-300);font-size:13px;">--</span></td>
+              <td><span style="color:var(--slate-300);">--</span></td>
+              <td class="runs-cell" style="color:var(--slate-400);">0 / 312 <span class="runs-pct">(0%)</span></td>
+              <td><span class="drift-indicator drift-stable" style="color:var(--slate-300);">n/a</span></td>
+              <td class="bench-cell" style="color:var(--slate-400);">Never</td>
+              <td>
+                <a href="agent-edit-scorecard.html" class="btn btn-xs btn-secondary" onclick="event.stopPropagation()">Add scorecard</a>
+              </td>
+            </tr>
+
+          </tbody>
+        </table>
+
+        <!-- Empty state (hidden by default) -->
+        <div class="empty-quality" id="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.25;margin:0 auto 14px;display:block;color:var(--slate-400);"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <h3 style="font-size:15px;font-weight:600;color:var(--slate-600);margin-bottom:6px;">No scorecards yet</h3>
+          <p style="font-size:13px;color:var(--slate-400);max-width:320px;margin:0 auto 18px;line-height:1.5;">Attach a scorecard to an agent to start tracking quality. Scores accumulate automatically on sampled runs.</p>
+          <a href="agent-edit-scorecard.html" class="btn btn-primary">Go to Build / Agents</a>
+        </div>
+      </div><!-- /card -->
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── Agent detail drawer ─────────────────────────────────────────── -->
+<div class="drawer-overlay" id="agent-drawer" onclick="handleDrawerBg(event)">
+  <div class="drawer-panel" onclick="event.stopPropagation()">
+    <div class="drawer-head">
+      <span class="drawer-title" id="drawer-agent-name">Outreach Agent</span>
+      <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body">
+
+      <!-- Dimension trend — hero visualisation -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">30-day score trend, per dimension</div>
+        <div class="chart-wrap">
+          <div class="chart-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:var(--indigo-500);"></span>tone_match</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--emerald-500);"></span>factual_grounding</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--amber-500);"></span>hook_strength</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--sky-500);"></span>call_to_action</span>
+          </div>
+          <!-- 30-day multi-line sparklines — the primary task here IS reading trajectory -->
+          <svg width="100%" height="100" viewBox="0 0 440 100" preserveAspectRatio="none" style="display:block;">
+            <!-- Grid lines -->
+            <line x1="0" y1="20" x2="440" y2="20" stroke="#f1f5f9" stroke-width="1"/>
+            <line x1="0" y1="50" x2="440" y2="50" stroke="#f1f5f9" stroke-width="1"/>
+            <line x1="0" y1="80" x2="440" y2="80" stroke="#f1f5f9" stroke-width="1"/>
+            <!-- Y axis labels -->
+            <text x="0" y="18" font-size="8" fill="#94a3b8">1.0</text>
+            <text x="0" y="48" font-size="8" fill="#94a3b8">0.7</text>
+            <text x="0" y="78" font-size="8" fill="#94a3b8">0.5</text>
+            <!-- Floor line for hook_strength at 0.70 -->
+            <line x1="16" y1="50" x2="440" y2="50" stroke="#fde68a" stroke-width="1" stroke-dasharray="3,3"/>
+            <!-- tone_match line (stable ~0.84) -->
+            <polyline points="16,32 58,30 100,29 142,31 184,28 226,29 268,27 310,28 352,27 394,26 440,26"
+              fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round"/>
+            <!-- factual_grounding line (very stable ~0.96) -->
+            <polyline points="16,14 58,13 100,14 142,12 184,13 226,12 268,11 310,13 352,11 394,11 440,10"
+              fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>
+            <!-- hook_strength line (drifting down from 0.82 to 0.72) -->
+            <polyline points="16,29 58,31 100,34 142,36 184,38 226,41 268,44 310,46 352,49 394,51 440,52"
+              fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"/>
+            <!-- call_to_action line (stable ~0.81) -->
+            <polyline points="16,31 58,30 100,32 142,30 184,29 226,31 268,29 310,30 352,28 394,29 440,28"
+              fill="none" stroke="#38bdf8" stroke-width="2" stroke-linejoin="round"/>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--slate-300);margin-top:4px;padding:0 16px;">
+            <span>Apr 7</span><span>Apr 14</span><span>Apr 21</span><span>Apr 28</span><span>May 5</span><span>Today</span>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding:8px 12px;background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;font-size:12px;color:var(--amber-700);">
+          <strong>hook_strength</strong> has crossed below the 0.70 floor on 6 of the last 12 scored runs. A bench run is suggested.
+        </div>
+      </div>
+
+      <!-- Recent low-scoring runs -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Recent low-scoring runs</div>
+        <div style="border:1px solid var(--slate-200);border-radius:8px;padding:0 12px;">
+          <div class="low-run-row">
+            <span class="low-run-score">0.66</span>
+            <div class="low-run-agent">
+              <div style="font-weight:500;color:var(--slate-800);">Run #4821</div>
+              <div style="font-size:11px;color:var(--slate-400);">hook_strength: 0.62, tone_match: 0.79</div>
+            </div>
+            <span class="low-run-date">May 6</span>
+            <a href="run-trace.html" class="low-run-link">Trace</a>
+          </div>
+          <div class="low-run-row">
+            <span class="low-run-score">0.69</span>
+            <div class="low-run-agent">
+              <div style="font-weight:500;color:var(--slate-800);">Run #4798</div>
+              <div style="font-size:11px;color:var(--slate-400);">hook_strength: 0.65, call_to_action: 0.71</div>
+            </div>
+            <span class="low-run-date">May 4</span>
+            <a href="run-trace.html" class="low-run-link">Trace</a>
+          </div>
+          <div class="low-run-row">
+            <span class="low-run-score">0.71</span>
+            <div class="low-run-agent">
+              <div style="font-weight:500;color:var(--slate-800);">Run #4784</div>
+              <div style="font-size:11px;color:var(--slate-400);">hook_strength: 0.68</div>
+            </div>
+            <span class="low-run-date">May 2</span>
+            <a href="run-trace.html" class="low-run-link">Trace</a>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /drawer-body -->
+    <div class="drawer-footer">
+      <a href="model-bench.html" class="btn btn-primary">Run bench</a>
+      <a href="agent-edit-scorecard.html" class="btn btn-secondary">Edit scorecard</a>
+    </div>
+  </div>
+</div>
+
+<script>
+function filterRows(filter, btn) {
+  document.querySelectorAll('.filter-chips .filter-chip').forEach(c => c.classList.remove('active','red-active'));
+  btn.classList.add('active');
+
+  const rows = document.querySelectorAll('#quality-rows tr');
+  rows.forEach(row => {
+    const f = row.dataset.filter || '';
+    if (filter === 'all') row.style.display = '';
+    else row.style.display = f.includes(filter) ? '' : 'none';
+  });
+}
+
+function openDrawer(agentKey) {
+  const names = {
+    outreach: 'Outreach Agent',
+    content: 'Content Agent',
+    crm: 'CRM Enrichment Agent',
+    scheduling: 'Scheduling Agent',
+    reporting: 'Reporting Agent',
+    'inbox-triage': 'Inbox Triage Agent'
+  };
+  document.getElementById('drawer-agent-name').textContent = names[agentKey] || agentKey;
+  document.getElementById('agent-drawer').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('agent-drawer').classList.remove('open');
+}
+function handleDrawerBg(e) {
+  if (e.target === document.getElementById('agent-drawer')) closeDrawer();
+}
+</script>
+</body>
+</html>

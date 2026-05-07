@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trust Verification Layer Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; -webkit-font-smoothing: antialiased; }
+  body { padding: 40px 48px; max-width: 1240px; margin: 0 auto; }
+
+  .masthead { margin-bottom: 36px; }
+  .masthead-eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe;
+    border-radius: 5px; padding: 3px 8px; margin-bottom: 12px;
+  }
+  .masthead h1 { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .masthead p { font-size: 14px; color: #64748b; max-width: 720px; line-height: 1.6; }
+  .meta-row { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
+  .meta-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #64748b; }
+  .meta-item strong { color: #334155; font-weight: 600; }
+
+  .section { margin-bottom: 36px; }
+  .section-heading {
+    display: flex; align-items: baseline; gap: 12px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #94a3b8; margin-bottom: 14px; padding-bottom: 10px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .section-heading-desc { font-size: 12.5px; font-weight: 400; color: #94a3b8; text-transform: none; letter-spacing: 0; margin-left: auto; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+
+  .proto-card {
+    background: white; border: 1px solid #e8ecf0; border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    transition: all 0.15s;
+    position: relative;
+  }
+  .proto-card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
+
+  .proto-card-title-link {
+    color: #0f172a; font-size: 14px; font-weight: 700;
+  }
+  .proto-card-title-link::before {
+    content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px;
+  }
+
+  .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .proto-card-file { font-size: 11px; font-family: monospace; color: #94a3b8; background: #f1f5f9; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
+  .proto-card-desc { font-size: 12.5px; color: #64748b; line-height: 1.5; margin-bottom: 8px; }
+  .proto-card-footer { display: flex; align-items: center; justify-content: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f1f5f9; gap: 8px; }
+
+  .layer-badge {
+    display: inline-flex; align-items: center;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    border-radius: 4px; padding: 2px 7px; white-space: nowrap;
+  }
+  .layer-1 { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .layer-2 { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+  .layer-3 { background: #fdf4ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+  .layer-new { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+
+  .decisions-box {
+    background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 32px;
+  }
+  .decisions-box h3 { font-size: 13px; font-weight: 700; color: #92400e; margin-bottom: 10px; }
+  .decisions-box ul { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .decisions-box li {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 12.5px; color: #78350f; line-height: 1.45;
+  }
+  .decisions-box li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #f59e0b; margin-top: 6px; flex-shrink: 0; }
+
+  a { text-decoration: none; }
+  .ref-link { position: relative; z-index: 2; font-size: 11.5px; color: #4f46e5; font-weight: 600; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 5px; padding: 4px 10px; }
+  .ref-link:hover { background: #e0e7ff; }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="masthead-eyebrow">Trust Verification Layer</div>
+  <h1>Trust Verification Layer Prototype</h1>
+  <p>Six screens extending the post-consolidation IA with three trust layers: skill verification (Layer 1), agent scorecards and model bench (Layer 2), and correction-sourced auto-memory (Layer 3). No new top-level navigation. All surfaces extend existing pages.</p>
+  <div class="meta-row">
+    <div class="meta-item"><strong>Date:</strong> 2026-05-07</div>
+    <div class="meta-item"><strong>Status:</strong> Round 1, awaiting operator review</div>
+    <div class="meta-item"><strong>Base prototypes:</strong> <a href="../consolidation-2026-05-06/index.html" style="color:#4f46e5;font-weight:600;">Consolidation 2026-05-06</a></div>
+  </div>
+</div>
+
+<div class="decisions-box">
+  <h3>Round 1 design decisions</h3>
+  <ul>
+    <li>model-bench is a focused page (not a modal): bench has a results + approval step that benefits from full-width table layout. Modal would be cramped.</li>
+    <li>Scorecard config is a new tab on agent-edit (not a section), consistent with the tab-per-domain pattern already established (Skills, Data sources, Budget, etc.).</li>
+    <li>Source filter added only to Auto-memory tab on Knowledge. Authored memory tab is manual-only by definition so the filter is redundant there.</li>
+    <li>home.html trust tile skipped: the existing 2x3 widget grid would be disrupted by a third column or an extra row. Brief permits this skip when the tile would crowd the design. Entry through Inbox + Govern / Quality is sufficient.</li>
+    <li>Verify summary bar added above the event list on run-trace as a quick scan strip (pass / fail / inconclusive counts). Adds no vertical height to individual rows.</li>
+    <li>Govern / Quality sidebar entry is a stub in the copied _sidebar.js; the operator reaches it from the topbar breadcrumb or direct link in this prototype.</li>
+  </ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- LAYER 1: Skill verification                                       -->
+<!-- ================================================================ -->
+<div class="section">
+  <div class="section-heading">
+    <span>Layer 1: Skill verification</span>
+    <span class="section-heading-desc">Verify badges on every run step</span>
+  </div>
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="run-trace.html" class="proto-card-title-link">Run trace (extended)</a>
+        <div class="proto-card-file">run-trace.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Adds two trust affordances to the existing run trace layout:
+        <strong>Verify badge</strong> per step (pass / fail / inconclusive / n/a) with hover tooltip showing the reason.
+        <strong>Correct action</strong> on LLM-generated outputs (hover menu on llm_call and tool_result rows), opening a modal: original output (read-only), edited output, optional reason. After save, shows a "captured as auto-memory" toast.
+      </div>
+      <div class="proto-card-footer">
+        <span class="layer-badge layer-1">Layer 1</span>
+        <span class="layer-badge layer-3">Layer 3</span>
+        <a href="../consolidation-2026-05-06/run-trace.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- LAYER 2: Agent scorecards + model bench                          -->
+<!-- ================================================================ -->
+<div class="section">
+  <div class="section-heading">
+    <span>Layer 2: Agent scorecards + model bench</span>
+    <span class="section-heading-desc">Quality tracking and model comparison</span>
+  </div>
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="agent-edit-scorecard.html" class="proto-card-title-link">Agent edit: Scorecard tab (extended)</a>
+        <div class="proto-card-file">agent-edit-scorecard.html</div>
+      </div>
+      <div class="proto-card-desc">
+        New Scorecard tab on the agent edit page. Contains: scorecard dimensions list (name, description, floor threshold 0-1, enabled toggle, Add dimension button), sampling rate slider (default 20%), judge model selector, Run bench link, and a recent score summary strip (last 50 runs, mean per dimension, inline sparklines, drift warning).
+      </div>
+      <div class="proto-card-footer">
+        <span class="layer-badge layer-2">Layer 2</span>
+        <a href="../consolidation-2026-05-06/agent-edit.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="govern-quality.html" class="proto-card-title-link">Govern / Quality (new page)</a>
+        <div class="proto-card-file">govern-quality.html</div>
+      </div>
+      <div class="proto-card-desc">
+        New fourth Govern primitive. Sortable table of agents with: attached scorecard, 7-day mean score, 7-day sparkline trend, scored / total runs (sampling %), drift indicator (arrow + delta), last bench date. Filters: scorecard attached, drift state. Row click opens drawer with 30-day per-dimension trend chart, recent low-scoring runs (deep-link to trace), and Run bench action. Empty state when no scorecards exist.
+      </div>
+      <div class="proto-card-footer">
+        <span class="layer-badge layer-new">New page</span>
+        <span class="layer-badge layer-2">Layer 2</span>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="model-bench.html" class="proto-card-title-link">Model bench (new page)</a>
+        <div class="proto-card-file">model-bench.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Focused page (not a modal) for the bench workflow. Three states navigable via tabs at top: Setup (candidate model chips, sample count, scorecard preview, Run bench button), Running (progress bars per model, live mean score, cost so far, Cancel), Results (table with mean score, variance, latency, cost-per-task, composite winner highlighted, Approve as default per row).
+      </div>
+      <div class="proto-card-footer">
+        <span class="layer-badge layer-new">New page</span>
+        <span class="layer-badge layer-2">Layer 2</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- LAYER 3: Correction-sourced auto-memory                          -->
+<!-- ================================================================ -->
+<div class="section">
+  <div class="section-heading">
+    <span>Layer 3: Correction-sourced auto-memory</span>
+    <span class="section-heading-desc">Capture loop closing on Knowledge</span>
+  </div>
+  <div class="card-grid">
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="run-trace.html" class="proto-card-title-link">Run trace (extended)</a>
+        <div class="proto-card-file">run-trace.html</div>
+      </div>
+      <div class="proto-card-desc">
+        The Correct action on run-trace is also the Layer 3 capture point. See Layer 1 card above for full description. The Correct button appears on LLM-generated step outputs; after save it shows a "captured as auto-memory" toast with a link to Knowledge.
+      </div>
+      <div class="proto-card-footer">
+        <span class="layer-badge layer-3">Layer 3</span>
+        <span class="layer-badge layer-1">Layer 1</span>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="knowledge.html" class="proto-card-title-link">Knowledge (extended)</a>
+        <div class="proto-card-file">knowledge.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Extends the existing Knowledge page with: Source filter chip in the Auto-memory tab (All / From runs / From corrections / Manual), Source column on every entry card showing the source label, two seed rows with source "From corrections" (one tone correction, one subject-line correction) demonstrating the full approve / edit-and-override / reject lifecycle. Authored memory tab is unchanged.
+      </div>
+      <div class="proto-card-footer">
+        <span class="layer-badge layer-3">Layer 3</span>
+        <a href="../consolidation-2026-05-06/knowledge.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- SKIPPED / DEFERRED                                               -->
+<!-- ================================================================ -->
+<div class="section">
+  <div class="section-heading">
+    <span>Skipped / deferred</span>
+    <span class="section-heading-desc">Decisions made in Round 1 with rationale</span>
+  </div>
+  <div class="card-grid">
+    <div class="proto-card" style="border-style:dashed;background:#fafbfc;">
+      <div class="proto-card-header">
+        <span class="proto-card-title-link" style="cursor:default;color:#475569;">Home (trust tile)</span>
+        <div class="proto-card-file">home.html</div>
+      </div>
+      <div class="proto-card-desc" style="color:#64748b;">
+        Skipped per brief guidance: "If adding the tile would crowd the page or disrupt the existing design, skip this screen entirely." The existing home uses a fixed 2-column, 3-row widget grid. Adding a third tile to a row would require grid restructuring that disrupts the established layout. Entry through Inbox (verify failures appear as items) and Govern / Quality is sufficient.
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
