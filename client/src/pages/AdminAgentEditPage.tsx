@@ -1761,7 +1761,7 @@ function AgentBudgetTab({ agentId }: { agentId: string }) {
       .then(r => {
         if (r.data.length > 0) setResolvedSubaccountId(r.data[0].subaccountId);
       })
-      .catch(logAndSwallow('AdminAgentEditPage: agent activity subaccount resolution'));
+      .catch(logAndSwallow('AdminAgentEditPage: agent activity subaccount resolution', { severity: 'critical' }));
   }, [agentId, resolvedSubaccountId]);
 
   useEffect(() => {

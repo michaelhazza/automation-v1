@@ -18,6 +18,19 @@
  */
 const KEY_VERSION = 'v1';
 
+// Branded type — only normaliseEmail() may construct this
+export type NormalisedEmail = string & { readonly __brand: 'NormalisedEmail' };
+
+export function normaliseEmail(input: string): NormalisedEmail {
+  return input.trim().toLowerCase() as NormalisedEmail;
+}
+
+export const loginEmailOnlyKey = (email: NormalisedEmail): string =>
+  `rl:${KEY_VERSION}:auth:login:email:${email}`;
+
+export const loginEmailOnlyKeyBurst = (email: NormalisedEmail): string =>
+  `rl:${KEY_VERSION}:auth:login:email:burst:${email}`;
+
 export const rateLimitKeys = {
   // ---------------- auth (Phase 2D) ----------------
   // Short window: 10 / 60s — burst protection

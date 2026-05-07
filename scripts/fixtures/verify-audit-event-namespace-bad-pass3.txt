@@ -1,0 +1,6 @@
+# Known-bad fixture for verify-audit-event-namespace.sh (B.4) — Pass 3
+# This pattern SHOULD trip the gate: a raw event-name string assigned to a
+# variable in a file that also calls recordSecurityEvent.
+
+const event = 'auth.login.failure';
+recordSecurityEvent({ event, organisationId: orgId, meta: {} });

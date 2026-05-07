@@ -126,6 +126,30 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
 
+  grep_invariants:
+    # Phase 3 — B.1–B.4 structural grep gates. No DB or Node required; pure bash.
+    # Runs unconditionally on every PR so regressions are caught before ready-to-merge.
+    name: Grep invariants (Phase 3 B.1-B.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: B.1 Assert-active guard (soft-deletable table queries)
+        run: bash scripts/verify-assert-active.sh
+
+      - name: B.2 No raw console calls in server/
+        run: bash scripts/verify-no-raw-console.sh
+
+      - name: B.3 Rate-limit key normalisation (no NormalisedEmail cast bypass)
+        run: bash scripts/verify-rate-limit-key-normalisation.sh
+
+      - name: B.4 Audit event namespace (no raw eventType strings)
+        run: bash scripts/verify-audit-event-namespace.sh
+
+      - name: "E.6 Skill error envelope (return paths must include ok: field)"
+        run: bash scripts/verify-skill-error-envelope.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/

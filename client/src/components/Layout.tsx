@@ -362,6 +362,10 @@ export default function Layout({ user, children }: LayoutProps) {
       setSubaccounts([]);
       if (activeClientId) { removeActiveClient(); setActiveClientIdState(null); setActiveClientNameState(null); }
     }
+    // activeClientId is intentionally excluded — this effect is an org-change effect.
+    // Including it would refetch subaccounts on every client switch, which is wasteful
+    // and incorrect (subaccount list is org-scoped, not client-scoped).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasOrgContext, activeOrgId]);
 
   // Fetch org permissions
@@ -404,7 +408,7 @@ export default function Layout({ user, children }: LayoutProps) {
   // Incident badge — system admin only, initial load
   useEffect(() => {
     if (!isSystemAdmin) return;
-    api.get('/api/system/incidents/badge-count').then(({ data }) => setIncidentCount(data.count ?? 0)).catch(logAndSwallow('Layout: incident badge refresh'));
+    api.get('/api/system/incidents/badge-count').then(({ data }) => setIncidentCount(data.count ?? 0)).catch(logAndSwallow('Layout: incident badge refresh', { severity: 'critical' }));
   }, [isSystemAdmin]);
 
   // Live agent badge — initial load + WebSocket updates
@@ -1231,7 +1235,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 setSubaccounts(prev => [...prev, newEntry]);
                 handleSelectClient(newEntry);
                 // Refresh list in background to sync any server-side changes
-                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(logAndSwallow('Layout: subaccounts background refresh'));
+                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(logAndSwallow('Layout: subaccounts background refresh', { severity: 'critical' }));
               } catch (err: unknown) {
                 const e = err as { response?: { status?: number; data?: { error?: string } } };
                 const msg = e.response?.data?.error;

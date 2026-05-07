@@ -680,6 +680,14 @@ export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
  */
 export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
 
+// ── Pre-launch Phase 3 D.4/D.5 — GHL agency enrolment caps ────────────────
+
+/** Maximum GHL locations enrolled inline before deferring to the background pagination job. */
+export const MAX_GHL_LOCATIONS_TO_ENROL = 250;
+
+/** Maximum pages the background pagination job may process in a single run. */
+export const MAX_GHL_PAGES_PER_RUN = 200;
+
 // ── ClientPulse Session 2 — apiAdapter dispatch ────────────────────────────
 
 /**
