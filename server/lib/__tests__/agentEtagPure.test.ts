@@ -109,6 +109,22 @@ describe('canonicalStringify', () => {
   it('serialises strings with proper escaping', () => {
     expect(canonicalStringify('hello "world"')).toBe('"hello \\"world\\""');
   });
+
+  it('throws a TypeError when called with undefined', () => {
+    expect(() => canonicalStringify(undefined)).toThrow(TypeError);
+    expect(() => canonicalStringify(undefined)).toThrow('canonicalStringify: undefined is not a valid input');
+  });
+
+  it('serialises array with undefined element as null (matching JSON.stringify behaviour)', () => {
+    // JSON.stringify([undefined]) === '[null]'
+    const result = canonicalStringify([undefined]);
+    expect(result).toBe('[null]');
+  });
+
+  it('serialises mixed array with undefined elements correctly', () => {
+    const result = canonicalStringify([1, undefined, 'x']);
+    expect(result).toBe('[1,null,"x"]');
+  });
 });
 
 // ── computeAgentEtag tests ───────────────────────────────────────────────────

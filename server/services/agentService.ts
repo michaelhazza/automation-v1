@@ -2134,6 +2134,7 @@ export const agentService = {
       // Insert new sources
       for (const d of diff.added) {
         await tx.insert(agentDataSourcesTable).values({
+          id: uuidv4(),
           agentId,
           name: d.ref,
           sourceType: d.kind as 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive',

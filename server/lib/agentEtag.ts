@@ -45,6 +45,9 @@ export function computeAgentEtag(payload: AgentFullForEtag): string {
  * - BigInts → throw.
  */
 export function canonicalStringify(value: unknown): string {
+  if (value === undefined) {
+    throw new TypeError('canonicalStringify: undefined is not a valid input');
+  }
   return _serialise(value);
 }
 
@@ -69,7 +72,7 @@ function _serialise(value: unknown): string {
   }
 
   if (Array.isArray(value)) {
-    const items = value.map((item) => _serialise(item));
+    const items = value.map((item) => (item === undefined ? 'null' : _serialise(item)));
     return '[' + items.join(',') + ']';
   }
 
