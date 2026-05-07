@@ -8,6 +8,7 @@ import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ConfigAssistantPopupProvider } from './hooks/useConfigAssistantPopup';
 import ConfigAssistantPopup from './components/config-assistant/ConfigAssistantPopup';
+import { buildOperateRedirectUrl } from './lib/operateRedirects';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
@@ -15,8 +16,11 @@ const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const AutomationsPage = lazy(() => import('./pages/AutomationsPage'));
 const AutomationExecutionPage = lazy(() => import('./pages/AutomationExecutionPage'));
-const ActivityPage = lazy(() => import('./pages/ActivityPage'));
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+// Operate stream pages (C8)
+const HomePage = lazy(() => import('./pages/operate/HomePage'));
+const InboxPage = lazy(() => import('./pages/operate/InboxPage'));
+const OperateActivityPage = lazy(() => import('./pages/operate/ActivityPage'));
+const RunTracePage = lazy(() => import('./pages/operate/RunTracePage'));
 const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminAutomationsPage = lazy(() => import('./pages/AdminAutomationsPage'));
@@ -72,7 +76,6 @@ const WorkflowsLibraryPage = lazy(() => import('./pages/WorkflowsLibraryPage'));
 const WorkflowRunDetailPage = lazy(() => import('./pages/WorkflowRunDetailPage'));
 const WorkflowRunPage = lazy(() => import('./pages/subaccount/WorkflowRunPage'));
 const WorkflowStudioPage = lazy(() => import('./pages/WorkflowStudioPage'));
-const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
@@ -292,6 +295,55 @@ function BriefRedirect() {
   return <Navigate to={`/admin/tasks/${briefId}`} replace />;
 }
 
+// ── Operate-stream redirects (C8) ────────────────────────────────────────────
+// Locked redirect grammar — see client/src/lib/operateRedirects.ts
+
+/** /admin/runs/:runId?<query> → /run-trace/:runId?<query> */
+function AdminRunRedirect() {
+  const { runId } = useParams<{ runId: string }>();
+  const { search, hash } = useLocation();
+  if (!runId) return <Navigate to="/" replace />;
+  const to = buildOperateRedirectUrl(`/run-trace/${encodeURIComponent(runId)}`, search, undefined, hash);
+  return <Navigate to={to} replace />;
+}
+
+/** /admin/subaccounts/:subaccountId/runs/:runId?<query>
+ *  → /run-trace/:runId?subaccountId=:subaccountId&<query> */
+function AdminSubaccountRunRedirect() {
+  const { subaccountId, runId } = useParams<{ subaccountId: string; runId: string }>();
+  const { search, hash } = useLocation();
+  if (!runId || !subaccountId) return <Navigate to="/" replace />;
+  const to = buildOperateRedirectUrl(
+    `/run-trace/${encodeURIComponent(runId)}`,
+    search,
+    { key: 'subaccountId', value: subaccountId },
+    hash,
+  );
+  return <Navigate to={to} replace />;
+}
+
+/** /admin/agent-inbox?<query> → /inbox?<query> */
+function AdminAgentInboxRedirect() {
+  const { search, hash } = useLocation();
+  const to = buildOperateRedirectUrl('/inbox', search, undefined, hash);
+  return <Navigate to={to} replace />;
+}
+
+/** /subaccounts/:subaccountId/agent-inbox?<query>
+ *  → /inbox?subaccountId=:subaccountId&<query> */
+function SubaccountAgentInboxRedirect() {
+  const { subaccountId } = useParams<{ subaccountId: string }>();
+  const { search, hash } = useLocation();
+  if (!subaccountId) return <Navigate to="/inbox" replace />;
+  const to = buildOperateRedirectUrl(
+    '/inbox',
+    search,
+    { key: 'subaccountId', value: subaccountId },
+    hash,
+  );
+  return <Navigate to={to} replace />;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -366,12 +418,14 @@ export default function App() {
         } />
 
         <Route element={<ProtectedLayout user={user} loading={loading} />}>
-          <Route path="/" element={<DashboardPage user={user!} />} />
+          <Route path="/" element={<HomePage user={user!} />} />
           <Route path="/automations" element={<AutomationsPage user={user!} />} />
           <Route path="/automations/:id" element={<AutomationExecutionPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
-          <Route path="/inbox" element={<Navigate to="/" replace />} />
+          <Route path="/inbox" element={<InboxPage user={user!} />} />
+          <Route path="/activity" element={<OperateActivityPage user={user!} />} />
+          <Route path="/run-trace/:id" element={<RunTracePage user={user!} />} />
           <Route path="/workflows" element={<WorkflowsLibraryPage user={user!} />} />
           <Route path="/workflow-runs/:runId" element={<WorkflowRunDetailPage user={user!} />} />
           {/* §9.2 — subaccount-scoped run page (envelope endpoint + WS live). */}
@@ -424,7 +478,7 @@ export default function App() {
             {/* Memory & Briefings Phase 5 — block detail (S24) */}
             <Route path="/admin/memory-blocks/:blockId" element={<MemoryBlockDetailPage />} />
             <Route path="/admin/subaccounts/:subaccountId/inbox" element={<Navigate to="/" replace />} />
-            <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<AdminSubaccountRunRedirect />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects" element={<PageProjectsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects/:projectId" element={<PageProjectDetailPage user={user!} />} />
@@ -446,8 +500,10 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/pulse" element={<Navigate to="/" replace />} />
             {/* Activity — org scope (redirects to home) */}
             <Route path="/admin/activity" element={<Navigate to="/" replace />} />
-            {/* Activity — subaccount scope */}
-            <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
+            {/* Agent Inbox — redirects to canonical /inbox (locked redirect grammar C8) */}
+            <Route path="/admin/agent-inbox" element={<AdminAgentInboxRedirect />} />
+            {/* Activity — subaccount scope (redirects to canonical /activity) */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<Navigate to="/activity" replace />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
             {/* Configuration Assistant */}
@@ -500,8 +556,8 @@ export default function App() {
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/automations" element={<SystemAutomationsPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
-            {/* Activity — system scope */}
-            <Route path="/system/activity" element={<ActivityPage user={user!} />} />
+            {/* Activity — system scope (redirects to canonical /activity) */}
+            <Route path="/system/activity" element={<Navigate to="/activity" replace />} />
             {/* Skill Studio — system scope */}
             <Route path="/system/skill-studio" element={<SkillStudioPage user={user!} />} />
           </Route>
@@ -516,8 +572,11 @@ export default function App() {
           {/* Review queue (portal access) */}
           <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
 
-          {/* Run trace viewer — org-level (admin agent and skill test runs) */}
-          <Route path="/admin/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+          {/* Run trace — org-level redirect to canonical /run-trace/:runId */}
+          <Route path="/admin/runs/:runId" element={<AdminRunRedirect />} />
+
+          {/* Agent Inbox (subaccount-scoped) — redirects to canonical /inbox (locked redirect grammar C8) */}
+          <Route path="/subaccounts/:subaccountId/agent-inbox" element={<SubaccountAgentInboxRedirect />} />
 
           {/* Live Agent Execution Log — per-run live + historical timeline.
               Spec: tasks/live-agent-execution-log-spec.md §6.5. */}

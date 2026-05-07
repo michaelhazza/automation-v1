@@ -59,7 +59,9 @@ export const APP_ROUTE_PATTERNS = [
   '/system/job-queues',
   '/system/llm-pnl',
   '/system/settings',
-  // Operate stream — run-trace canonical route (added in C4; wired in C8)
+  // Operate stream — canonical routes (wired in C8)
+  '/inbox',
+  '/activity',
   '/run-trace/:id',
 ] as const;
 
