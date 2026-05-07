@@ -169,6 +169,9 @@ interface RunTraceEventRendererProps {
   embedded?: boolean;
 }
 
+// embedded: reserved for the recursion-guard invariant (RunTracePage.tsx). No modal affordances
+// exist in this renderer today, so the prop is intentionally unused — future contributors adding
+// run-id links or "view in modal" buttons MUST check this flag and suppress those affordances.
 export function RunTraceEventRenderer({ runId, embedded: _embedded }: RunTraceEventRendererProps) {
   const [events, setEvents] = useState<RunTraceToolCallEvent[] | null>(null);
   const [loading, setLoading] = useState(true);

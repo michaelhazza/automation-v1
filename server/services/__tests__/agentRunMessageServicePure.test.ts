@@ -2,7 +2,7 @@
  * agentRunMessageServicePure.test.ts — Sprint 3 P2.1 Sprint 3A pure tests.
  *
  * Runnable via:
- *   npx tsx server/services/__tests__/agentRunMessageServicePure.test.ts
+ *   npx vitest run server/services/__tests__/agentRunMessageServicePure.test.ts
  */
 
 import { expect, test } from 'vitest';
