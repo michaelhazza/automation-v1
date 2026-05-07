@@ -459,6 +459,20 @@ export function applySortAndFilters<Row>(
 - Filter committed only on Apply.
 - Caret highlights when fewer items checked than total.
 
+**Filter caret icon (resolves prototype round 14 visual feedback).** The trigger is a Material-style funnel SVG, not a text caret/arrow glyph. Use `currentColor` for `stroke` so the existing button colour states (default `slate-400`, hover `slate-700`, filtered `indigo-500`) drive the icon colour without per-state SVG variants:
+
+```html
+<button class="sf-caret-btn" aria-label="Filter">
+  <svg viewBox="0 0 16 16" width="11" height="11" fill="none"
+       stroke="currentColor" stroke-width="1.6"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M2 3h12l-4.5 6v4l-3 1.5V9z"/>
+  </svg>
+</button>
+```
+
+Rationale: the original down-arrow caret read as "expand/dropdown" rather than "filter," and users found it ambiguous. The funnel matches the established Google / Material convention for filter affordances. `currentColor` keeps the styling DRY across the three button states.
+
 **Error handling:**
 - Bad column key in `initialSort` (no matching `key` in `columns`): silently ignore (no sort applied, no throw).
 - Custom `getFilterOptions` that returns non-string `value`: TypeScript catches at compile time.
@@ -824,18 +838,26 @@ interface PageShellProps {
   position: fixed; bottom: 0; left: 0; right: 0;
   background: white;
   border-top: 1px solid var(--border, #e2e8f0);
-  padding: 14px 28px;
+  padding: 14px 0;                /* horizontal padding lives on the inner band, not here */
   box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
   z-index: 100;
 }
 .form-footer-inner {
   max-width: 720px;
   margin: 0 auto;
+  padding: 0 28px;                /* matches the form-body's 28px gutter */
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 ```
+
+**Padding model rationale (resolves prototype round 14 alignment bug).** Earlier iterations used `padding: 14px 28px` on `.form-footer` (outer) and no padding on `.form-footer-inner`. With `margin: 0 auto` centring the inner band inside the already-padded outer, the inner ended up offset 28px **left** of the form-body card column — Discard's left edge sat at `(viewport - 720)/2`, but the form card's left edge sat at `(viewport - 720)/2 + 28`. Visually the buttons were 28px to the left of where users expected.
+
+The fix: move the 28px horizontal padding from outer to inner with `box-sizing: border-box` so the inner's `max-width: 720px` includes the padding. Now Discard's left edge lines up exactly with the card's left edge, and Delete's right edge (with `margin-left: auto`) lines up with the card's right edge. This is also consistent with the spec's locked default that `.page-content` and `.form-footer` share the same 28px gutter.
+
+> Note: spec §4.4 currently shows the older padding model. The contract change is implementation-only (the visual contract — buttons aligned to form column — is unchanged). Update spec §4.4's CSS block to match if the spec is amended in a follow-up round.
 
 `FormFooter` JSDoc states verbatim: "Pages using `<FormFooter>` MUST be wrapped in `<PageShell bottomPadding={100}>` (or larger). Without it, the last form field is visually clipped behind the footer. `<FormFooter>` does NOT inject a spacer div."
 
