@@ -62,7 +62,7 @@ Each row records what already exists, the verdict (reuse / extend / replace / ne
 | Sticky form footer | None as a reusable component. Existing edit pages render bespoke action rows. | **New** CSS classes (`.form-footer`, `.form-footer-inner`) + tiny React wrapper (`<FormFooter>`) | Used by agent-edit and project-edit. Style block already exists in the prototype's `_shared.css`; this spec ports it to the production stylesheet. |
 | App shell + sidebar | `client/src/components/Layout.tsx` (1347 lines) | **Extend** | Layout already owns the sidebar, breadcrumb, command palette, ask bar, and socket wiring. Phase 0 refactors the **nav config** out into a typed array and adds the new view-mode switcher, but does not rewrite Layout's responsibilities. |
 | Workspace / org / system view mode | Existing: `getActiveOrgId`, `getActiveClientId`, `setActiveClient` in `client/src/lib/auth.ts`. The mode is implicit (org admins switch via the client switcher in the topbar). | **Extend** | Add an explicit `viewMode: 'workspace' \| 'org' \| 'system'` derived from existing identity state, plus a UI control in the sidebar pill row. The underlying state stays as-is, this is a UI surface on top, not a new identity model. |
-| Workspace badge (clickable for org admin) | None. Each call site styles a badge inline. | **New** (`<WorkspaceBadge>`) | Clickable for `org_admin`, calls `setActiveClient` + reload. Used by activity table rows, activity drawer, activity modal, run-trace embedded page. |
+| Workspace badge (clickable for org admin) | None. Each call site styles a badge inline. | **New** (`<WorkspaceBadge>`) | Clickable for `org_admin`, calls the `switchWorkspace(clientId, clientName)` helper (§4.5). Used by activity table rows, activity drawer, activity modal, run-trace embedded page. |
 | View-mode switcher control | None. Today the topbar has separate Org and Client switchers. | **New** (`<ViewModeSwitcher>`) | Three-segment control (Workspace / Org / System) shown in the sidebar above the client switcher when the user has org-admin permissions. System tab visible only for system admins. |
 | Tabs | No shared primitive; each tabbed page rolls its own with Tailwind. | Out of scope | Tabs are page-local enough that the cost of a new primitive isn't justified yet. Revisit if a third tabbed page lands without one. |
 | Toast / snackbar | Already exists somewhere, assume reusable. | Out of scope | Not used by any of the new primitives. |
@@ -97,6 +97,17 @@ Size token map: `sm = 480px`, `md = 720px`, `lg = 1024px`, `xl = 1280px`, `ifram
 
 **Producer:** any caller. **Consumer:** `Modal.tsx`. **Source-of-truth precedence:** if both `size` and `maxWidth` are passed, `size` wins. Document this; warn in dev only.
 
+**Overlay z-index ladder (cross-cuts §4.1 and §4.2, locked here):**
+
+| Layer | Default zIndex |
+|---|---|
+| Modal | `1000` |
+| Drawer | `900` |
+| Backdrop (any overlay) | overlay's zIndex `- 1` |
+| Nested overlay (Modal-over-Drawer, e.g. run-trace popup over activity drawer) | parent's zIndex `+ 10` |
+
+Consumers stacking a Modal on top of another overlay pass `zIndex={parent + 10}`. Backdrops are computed by the primitive (always `zIndex - 1`); consumers do not set backdrop z-index directly.
+
 ### 4.2 `<Drawer>` (NEW)
 
 `client/src/components/Drawer.tsx`
@@ -114,6 +125,12 @@ interface DrawerProps {
 ```
 
 Behaviour: portal-rendered, fade-in backdrop, slide-in panel, Esc closes, backdrop click closes, focus trap (same pattern as `Modal`). No body-scroll lock conflict with Modal; both manage their own.
+
+**Overlay exclusivity invariant (cross-cuts §4.1 and §4.2):**
+
+- Only one top-level overlay (Modal OR Drawer) is active at a time. Consumers MUST close the active overlay before opening another of the same kind.
+- Carveout: a Modal MAY open over an active Drawer (the run-trace-popup-over-activity-drawer case). The Modal sets `zIndex={drawerZ + 10}` per the ladder in §4.1; both primitives keep their own focus trap and scroll lock without conflict because the Modal's trap takes precedence while it is mounted, and the Drawer's trap reactivates on Modal close.
+- Two simultaneous Modals or two simultaneous Drawers are a consumer bug, not a primitive concern. The primitives do NOT police global overlay state in Phase 0 (would require introducing an OverlayManager, explicitly deferred per §10).
 
 ### 4.3 `<SortableTable>` (NEW)
 
@@ -157,6 +174,25 @@ Behaviour (locked here, do not redesign in A/B/C):
 - Caret highlights when column has an active filter (fewer items checked than total).
 - Sort tiebreaker: stable insertion order from `rows` prop (consistent with §8 development-discipline rule on sort tiebreakers in `DEVELOPMENT_GUIDELINES.md`).
 
+**Sort comparator semantics (locked):**
+
+- **String sort:** `localeCompare` with `{ sensitivity: 'base' }` (case- and accent-insensitive).
+- **Number sort:** numeric subtraction (`a - b`); both values coerced via `Number(...)` first.
+- **Null handling:** `null` and `undefined` always sort to the bottom in BOTH ascending and descending directions. The directional arrow flips ordering of non-null values only.
+- **Mixed types:** if `getValue` returns mixed types across rows for the same column, the comparator coerces every value with `String(v)` and falls back to the locale-aware string comparison above. Implementation must NOT throw on mixed input.
+- The default comparator is exposed but not extensible in Phase 0; consumers needing custom sort precompute a sortable scalar via `getValue`.
+
+**Filter value identity (locked):**
+
+- Each filter option is keyed by `String(getValue(row) ?? '__NULL__')`. The `'__NULL__'` sentinel ensures null/undefined values collapse into a single distinguishable filter option rather than producing duplicate empty-string entries for non-string inputs (dates, floats, derived values).
+- A custom `getFilterOptions` MUST return options whose `value` field is a deterministic string; non-string `value` fields are a type error.
+- This rule prevents subtle equality bugs where two visually-identical options (e.g. `Date` instances representing the same instant) produce two filter entries.
+
+**Persist key namespacing (locked):**
+
+- The `persistKey` prop names the consumer logically (e.g. `'spending-ledger'`). The component prefixes it as `table:${persistKey}` when reading/writing localStorage so SortableTable storage cannot collide with non-table consumers.
+- Callers pass the unprefixed identifier; the component owns the namespace.
+
 **Out of scope for Phase 0:** server-side sort/filter, virtualised rendering, column resize, column drag-reorder, multi-sort. Hooks are exposed in props (`getValue`, `getFilterOptions`) so Specs A/B/C can wire client-side filters without modifying the component.
 
 ### 4.4 `<FormFooter>` + CSS
@@ -183,8 +219,9 @@ CSS classes (added to whichever stylesheet currently holds shared classes, see `
 
 Notes:
 - `position: fixed` (not `sticky`) so the footer is visible from page load, not only at scroll-bottom. This decision was reached in round 13 of the prototype after user feedback.
-- Pages using `<FormFooter>` MUST add bottom padding of at least 100px to the form-body container so the last field isn't covered by the fixed footer. The component documents this in its JSDoc.
 - The destructive button (e.g. "Delete agent") uses `margin-left: auto` to push to the right edge of the inner band.
+
+**Spacing contract (locked):** pages using `<FormFooter>` MUST be wrapped in `<PageShell bottomPadding={100}>` (or larger). `<FormFooter>` does NOT inject its own spacer div — keeping the spacing decision at the page-shell level avoids hidden spacers in the DOM and lets the page tune `bottomPadding` if it needs more clearance. A page that uses `<FormFooter>` without `<PageShell bottomPadding>` will visually clip its last field; this is a consumer bug that surfaces at G2 manual verification, not a primitive concern.
 
 ### 4.5 `<WorkspaceBadge>` (NEW)
 
@@ -202,12 +239,56 @@ interface WorkspaceBadgeProps {
 ```
 
 Behaviour:
-- Pill variant uses a deterministic colour based on `clientName` hash (matching the prototype palette: indigo / amber / emerald / red / sky / slate).
-- When `clickable` and user has org-admin permission in the active org, click, calls `setActiveClient(clientId, clientName)` then `window.location.reload()`.
+- Pill variant uses a deterministic colour from `hashToColor(clientName)` (see `client/src/lib/colorHash.ts` below; matching the prototype palette: indigo / amber / emerald / red / sky / slate).
+- When `clickable` and user has org-admin permission in the active org, click calls `switchWorkspace(clientId, clientName)` (see helper below).
 - When not clickable (workspace user, or `clickable={false}`), renders as a plain pill.
 - Tooltip: "Switch to <name> workspace" when clickable.
 
 **Permission read:** from existing `auth.ts` user/permission state. No new permission concept introduced.
+
+**`switchWorkspace` helper (NEW):**
+
+`client/src/lib/workspace.ts`
+
+```ts
+import { setActiveClient } from '@/lib/auth';
+
+/**
+ * Switches the active workspace and refreshes app state.
+ *
+ * TEMPORARY: relies on a hard reload because Phase 0 does not yet have
+ * router-level state refresh. A later phase replaces the reload with a
+ * targeted invalidation. Do NOT inline `window.location.reload()` elsewhere
+ * in the codebase; route every workspace switch through this helper.
+ */
+export function switchWorkspace(clientId: string, clientName: string): void {
+  setActiveClient(clientId, clientName);
+  window.location.reload();
+}
+```
+
+`<WorkspaceBadge>` calls `switchWorkspace` rather than inlining `setActiveClient` + `window.location.reload()`. This isolates the temporary reload pattern to a single call site so the eventual replacement (router-level refresh) is a single-file change.
+
+**`hashToColor` helper (NEW, extracted util):**
+
+`client/src/lib/colorHash.ts`
+
+```ts
+export type Palette = ReadonlyArray<string>;
+
+export const DEFAULT_WORKSPACE_PALETTE: Palette = [
+  'indigo', 'amber', 'emerald', 'red', 'sky', 'slate',
+];
+
+/**
+ * Deterministic palette assignment from an arbitrary string input.
+ * Reused wherever a stable visual identity per name is needed
+ * (workspace badges today, potentially agent/skill badges later).
+ */
+export function hashToColor(input: string, palette: Palette = DEFAULT_WORKSPACE_PALETTE): string;
+```
+
+Extraction rationale: the same hash logic recurs across consolidated UI (workspace badges in lists, drawers, modals, run-trace embeds). One source of truth prevents palette drift.
 
 ### 4.6 `<ViewModeSwitcher>` (NEW)
 
@@ -234,20 +315,72 @@ Behaviour:
 - Otherwise `org` if no active client is selected and the user has org-admin permission.
 - Otherwise `workspace`.
 
-`onChange('org')` clears `activeClient`. `onChange('workspace')` requires an active client; if none is selected, the consumer must open the client picker (handled by `Layout`).
+**Illegal-transition handling (locked at hook level):** the `useViewMode` hook owns transition validation so consumers cannot drift on the rule. The hook contract:
+
+```ts
+// client/src/hooks/useViewMode.ts
+export interface UseViewModeReturn {
+  viewMode: ViewMode;
+  availableModes: ReadonlyArray<ViewMode>;
+  /** Returns false and triggers onRequireClientSelection if the transition is illegal. */
+  setViewMode: (next: ViewMode) => boolean;
+}
+
+export interface UseViewModeOptions {
+  /** Called when setViewMode('workspace') is attempted with no activeClient. Layout wires this to its existing client-picker open flow. */
+  onRequireClientSelection?: () => void;
+}
+
+export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn;
+```
+
+Transition rules:
+- `setViewMode('org')` clears `activeClient` and switches mode. Returns `true`.
+- `setViewMode('workspace')` with `activeClient` set → switches mode. Returns `true`.
+- `setViewMode('workspace')` with NO `activeClient` → no-op, returns `false`, invokes `options.onRequireClientSelection?.()` if provided. The hook does NOT change state.
+- `setViewMode('system')` with `system_admin` permission → enables `system_admin_org_override`. Returns `true`. Without the permission → no-op, returns `false`.
+
+`<ViewModeSwitcher onChange={setViewMode}>` propagates the boolean return implicitly via React state; consumers that need to react to a rejected transition wire `onRequireClientSelection`. `Layout.tsx` is the canonical consumer and wires it to its client picker.
 
 ### 4.7 Sidebar nav config (refactor)
 
 Today, `Layout.tsx` inlines its nav structure across hundreds of lines. Phase 0 extracts it into a typed config:
 
 ```ts
+// client/src/config/routes.ts (NEW central route map)
+/**
+ * Single source of truth for every route the app navigates to. All Phase-0
+ * primitives that take a route prop reference this union so adding/renaming
+ * a route is a one-file change and stale links surface as TypeScript errors.
+ */
+export const APP_ROUTES = [
+  '/',
+  '/inbox',
+  '/activity',
+  '/agents',
+  '/agents/:id/edit',
+  '/recurring-tasks',
+  '/projects/:id/edit',
+  '/knowledge',
+  '/org-knowledge',
+  '/spending',
+  '/integrations',
+  // ... extended by A/B/C as their pages are added
+] as const;
+
+export type AppRoute = (typeof APP_ROUTES)[number];
+```
+
+```ts
 // client/src/config/sidebar.ts
+import type { AppRoute } from './routes';
+
 export type NavGroup = 'work' | 'build' | 'tasks' | 'external' | 'setup' | 'clientpulse';
 
 export interface NavItem {
   group: NavGroup;
   label: string;
-  to: string;                         // route path
+  to: AppRoute;                       // typed route, not raw string
   icon: keyof typeof Icons;           // existing Icons map in Layout
   permission?: string;                // optional permission key; gates visibility
   viewModes?: ReadonlyArray<ViewMode>;// modes in which this item is visible (default: all)
@@ -256,6 +389,8 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [ /* ... */ ];
 ```
+
+**Why typed `to`:** with `to: string`, an A/B/C edit can silently land a typo (`/recurrring-tasks`) or a stale path (after a Spec-A rename) that compiles cleanly. With `to: AppRoute`, the build fails at the spec boundary. The route map lives in `client/src/config/routes.ts` so each downstream spec adds its own routes there in a small, mergeable diff.
 
 `Layout.tsx` reads `NAV_ITEMS`, filters by current `viewMode` and `user.permissions`, groups by `NavGroup`, and renders the existing markup. **No visual change**, same icons, same group labels, same styling.
 
@@ -274,8 +409,12 @@ interface PageShellProps {
   children: React.ReactNode;
   /** Bottom padding override (e.g. 100 when used with FormFooter). */
   bottomPadding?: number;
+  /** Override the default 1280px content max-width. Use sparingly (e.g. wide tables). */
+  maxWidth?: number;
 }
 ```
+
+**Default max-width: `1280px`** (locked). Applied via `.page-content { max-width: 1280px; margin: 0 auto; }`. Consumers needing a wider band (e.g. a six-column table) pass `maxWidth` explicitly; the default applies otherwise so A/B/C consumers do not pick divergent values.
 
 CSS additions (around 10 lines) in the production stylesheet.
 
@@ -292,7 +431,10 @@ Files **created** by this spec:
 | `client/src/components/ViewModeSwitcher.tsx` | NEW primitive |
 | `client/src/components/PageShell.tsx` | NEW primitive |
 | `client/src/config/sidebar.ts` | NEW config; nav items extracted from `Layout.tsx` |
-| `client/src/hooks/useViewMode.ts` | NEW hook returning `{ viewMode, setViewMode, availableModes }` derived from existing identity state |
+| `client/src/config/routes.ts` | NEW central route map; `AppRoute` union typed at compile time. Source of truth for every navigable path in the app. |
+| `client/src/hooks/useViewMode.ts` | NEW hook returning `{ viewMode, setViewMode, availableModes }` derived from existing identity state; owns illegal-transition handling (§4.6) |
+| `client/src/lib/workspace.ts` | NEW `switchWorkspace(clientId, clientName)` helper isolating `setActiveClient + window.location.reload()` (§4.5). Single call site so the eventual router-level refresh is a one-file change. |
+| `client/src/lib/colorHash.ts` | NEW `hashToColor(input, palette)` util extracted from prototype-inline logic. Used by `<WorkspaceBadge>` today; shared with future consumers. |
 | `tasks/builds/consolidation-foundation/plan.md` | Implementation plan written by `architect` after spec accepted |
 
 Files **modified** by this spec:
@@ -325,17 +467,17 @@ This section exists to make the "not applicable" verdict explicit so spec-review
 
 This spec's implementation plan (`plan.md`) will be authored by `architect` after the spec is accepted. The expected chunk shape:
 
-1. **C1 — Modal extension.** Add `size`, `footer`, `bodyPadding`, `zIndex` props. Update existing call sites only where breakage would occur (none expected).
-2. **C2 — Drawer + WorkspaceBadge.** Two small standalone components with no upstream dependencies.
-3. **C3 — SortableTable.** The largest chunk. Single component file, plus minimal storybook-equivalent (an inline demo page if helpful, gate behind a dev-only route or remove before merge).
-4. **C4 — useViewMode + ViewModeSwitcher.** Hook + component. Exports `availableModes` derivation logic.
-5. **C5 — sidebar config + Layout refactor.** Extract `NAV_ITEMS` into `client/src/config/sidebar.ts`. Wire `<ViewModeSwitcher>`. Confirm no visual diff.
-6. **C6 — FormFooter + PageShell + shared CSS.** Component wrappers + class additions to the production stylesheet.
+1. **C1 — Modal extension.** Add `size`, `footer`, `bodyPadding`, `zIndex` props. Add the z-index ladder to the JSDoc. Update existing call sites only where breakage would occur (none expected).
+2. **C2 — Drawer + WorkspaceBadge + helpers.** Drawer primitive (with overlay-exclusivity invariant); WorkspaceBadge plus `client/src/lib/colorHash.ts` and `client/src/lib/workspace.ts`. Independent of C1.
+3. **C3 — SortableTable.** The largest chunk. Single component file. Locks the sort-comparator semantics, filter-value-identity rule, and persistKey namespacing per §4.3. Inline demo page optional (delete before merge or gate behind a dev-only route).
+4. **C4 — useViewMode + ViewModeSwitcher.** Hook + component. Hook owns illegal-transition handling and exposes `onRequireClientSelection`.
+5. **C5 — routes + sidebar config + Layout refactor.** Land `client/src/config/routes.ts` (`AppRoute` union), then `client/src/config/sidebar.ts` consuming it; refactor `Layout.tsx` to read `NAV_ITEMS`; wire `<ViewModeSwitcher>` and pass `onRequireClientSelection` to its existing client-picker open flow. Confirm no visual diff.
+6. **C6 — FormFooter + PageShell + shared CSS.** Component wrappers + class additions to the production stylesheet, including `.page-content { max-width: 1280px }`.
 7. **C7 — Doc + handoff.** Update `architecture.md` "Key files per domain" table to point at the new components. Update `KNOWLEDGE.md` only if a non-obvious gotcha was hit during implementation.
 
 Total target: 2-3 days of one builder (sonnet). Single PR.
 
-**Dependency graph:** C5 depends on C4 (Layout reads `useViewMode`). All other chunks are independent. C3 (SortableTable) does not depend on C1 (Modal extension) because the filter dropdown uses an inline popover, not a modal portal.
+**Dependency graph:** C5 depends on C4 (Layout reads `useViewMode` and wires `onRequireClientSelection`). C5 also lands `client/src/config/routes.ts` before `sidebar.ts` references it (intra-chunk ordering). All other chunks are independent. C3 (SortableTable) does not depend on C1 (Modal extension) because the filter dropdown uses an inline popover, not a modal portal.
 
 ## 8. Testing posture
 
