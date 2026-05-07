@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/consolidation-govern/spec.md
-active_plan: tasks/builds/consolidation-govern/plan.md
-build_slug: consolidation-govern
-branch: ui-consolidation-govern
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-08
+last_merge_ready_pr: #273
+last_merge_ready_slug: consolidation-govern
+last_merge_ready_branch: ui-consolidation-govern
 last_merged_pr: #270
 last_merged_slug: consolidation-foundation
 last_merged_branch: claude/consolidation-foundation
@@ -24,11 +27,17 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/consolidation-govern/spec.md`
-**Active plan:** `tasks/builds/consolidation-govern/plan.md`
-**Active build slug:** `consolidation-govern`
-**Branch:** `ui-consolidation-govern` (PR #273)
-**Status:** **REVIEWING** — Phase 2 execution complete (2026-05-08). All 13 chunks built, integrated, reviewed. PR #273 created and ready for Phase 3. G2 gate passed (lint, typecheck, builds). Spec-conformance: 18 directional gaps deferred. PR-reviewer: 5 blockers fixed, 7 strong recommendations fixed, 3 false positives dismissed. Adversarial-reviewer: 3 findings (2 pre-existing, 1 new) deferred to post-merge backlog (CONSOL-GOV-DEF-17/18/19). See `tasks/builds/consolidation-govern/progress.md` for full Phase 2 summary.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — PR #273 (`ui-consolidation-govern` → `main`) is labelled `ready-to-merge`. CI is running G5 (full lint + typecheck + test gates). When CI is green, the operator follows the merge sequence in `tasks/builds/consolidation-govern/handoff.md § Operator merge sequence`. **finalisation-coordinator does not auto-merge.**
+
+> ⚠ **chatgpt-pr-review was SKIPPED in Phase 3** — operator instructed autonomous mode, which is incompatible with the manual ChatGPT-web review loop. Reduced review coverage relative to a standard finalisation. The PR did receive: spec-conformance, pr-reviewer (5 blockers + 7 strong recommendations all fixed), adversarial-reviewer (3 findings deferred to post-merge), and dual-reviewer. Consider running `chatgpt-pr-review` manually before merge if the build's risk profile warrants it.
+
+**Merge-ready:** PR #273 — `consolidation-govern`. Govern surface — Knowledge / Spending / Connections consolidated UI shipped across 13 build chunks. Spec: `tasks/builds/consolidation-govern/spec.md`. Phase 3 handoff: `tasks/builds/consolidation-govern/handoff.md`.
+
+Phase 3 deltas applied during finalisation: (a) S2-induced typecheck regression fixed in `client/src/App.tsx` — 10 route handlers consolidated with main's PR #271/#272 pattern (`/agents` → `AgentsListPage`, `/agents/:id/edit` → `AgentEditPage`, `/recurring-tasks` → `RecurringTasksPage`, `/projects/:id/edit` → `ProjectEditPage`, plus 6 legacy redirects); (b) migration `0286_govern_auto_update_disabled.sql` renamed to `0287_*` to resolve the collision with main's `0286_consolidation_build_schema_additions.sql`; (c) `architecture.md` migration filename updated; (d) 4 KNOWLEDGE.md patterns appended (closed-enum service-boundary mapping, targeted onConflictDoNothing, migration-number collision after S2, App.tsx route regression after upstream page deletions); (e) CONSOL-GOV-DEF-9 in `tasks/todo.md` marked closed (testConnection error.code mapping fixed in Phase 2). Doc-sync sweep complete with 13 verdicts recorded. `ready-to-merge` label applied at 2026-05-07T23:13:39Z.
 
 **Just merged:** PR #270 — `consolidation-foundation` (squash-merged from `claude/consolidation-foundation` 2026-05-07). Phase 0 cross-cutting frontend primitives extracted from the broader consolidation prototype set. Ships shared `PageShell` / `Drawer` / `Modal` / `SortableTable` / `FormFooter` / `SearchBox` / `EmptyState` / `ErrorState` / `WorkspaceBadge` / `ViewModeSwitcher` primitives, route registry (`client/src/config/routes.ts` with branded `AppRoute` type, `APP_ROUTE_PATTERNS` literal-tuple, `buildRoute` helper using a negative-lookahead regex to prevent `:id` matching inside `:idFoo`), sidebar config (`client/src/config/sidebar.ts` with `buildNavItems` factory + `NavGroup` types), Layout refactor consuming the new config, helpers (`colorHash` deterministic FNV-1a, `workspace.switchWorkspace` as the only allowed reload call site, `useViewMode` + `useViewModePure`), reference-counted scroll-lock singleton (`overlayScrollLock.ts`) keyed via `Symbol.for(...)` for HMR-safe coordination across stacked overlays. ModuleGuard added for `/clientpulse/*` and `/reports/*` route trees (closed adversarial-reviewer confirmed hole). Late-build bundle: 5 vitest test files converted from custom `npx tsx` harness to vitest's `expect()` API; portable framework tests refactored to read `FRAMEWORK_VERSION` dynamically so future bumps don't break the suite; `finalisation-coordinator` agent updated to auto-resolve known-shape S2 merge conflicts (append-only artefact files take HEAD or union; code-area conflicts still pause). Pipeline: per-chunk pr-reviewer + dual-reviewer + adversarial-reviewer rounds → branch-level chatgpt-pr-review (2 rounds APPROVED) → S2 merge of origin/main with three resolved conflicts (spec.md / plan.md kept HEAD; tasks/todo.md union-merged) → G4 regression guard clean → doc-sync sweep complete → ready-to-merge labelled → all CI green. 6 items deferred (CONSOL-FND-DEF-1..6 in `tasks/todo.md`). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T08-15-18Z.md`. **Manual G2 still owed by operator:** visual diff of Layout sidebar across user shapes; ViewModeSwitcher transitions; SortableTable filter dropdown select-all; direct-URL nav to `/clientpulse` for a non-system-admin without that module.
 
@@ -74,7 +83,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-07T09:11:23Z
+**Last updated:** 2026-05-07T23:13:39Z
 
 ---
 

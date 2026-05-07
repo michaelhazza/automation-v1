@@ -3254,10 +3254,7 @@ These items require operator action outside the file system (repo/GitHub setting
   - Gap: Backend `ConnectionRow` returns `{ id, kind, provider, label, displayName, authMethod, status, createdAt }`. Frontend `ConnectionsPage.tsx` reads `r.name`, `r.lastSyncAt`, `r.owner.kind/id/name` — these are undefined at runtime.
   - Suggested approach: In `connectionsService.ts`, project `COALESCE(display_name, label, provider) AS name`, source `lastSyncAt` from `last_successful_sync_at` (integration_connections) or `last_health_check_at` (mcp_server_configs), and compute `owner: subaccount_id IS NULL ? { kind: 'org', ... } : { kind: 'workspace', id: subaccount_id, name: subaccount.name }`. Drop `kind/label/displayName` from the wire response.
 
-- [ ] **CONSOL-GOV-DEF-9 — `ConnectionTestResponse.error.code` outside §4.9 closed enum.**
-  - Spec section: §4.9
-  - Gap: `connectionTokenService.testConnection` emits `'NO_CREDENTIALS'`, `'TOKEN_EXPIRED'`, `'NOT_FOUND'`, `'SERVER_ERROR'`, `'UNKNOWN'` — none are in the spec's closed enum `'TIMEOUT' \| 'AUTH_FAILED' \| 'NETWORK_ERROR' \| 'PROVIDER_ERROR'`. Frontend displays whatever code arrives so users see invalid codes.
-  - Suggested approach: Map the implementation's internal codes onto the spec enum: `NO_CREDENTIALS` / `TOKEN_EXPIRED` → `AUTH_FAILED`; `NOT_FOUND` → `PROVIDER_ERROR` (or change to a non-error 404 path); `SERVER_ERROR` → `PROVIDER_ERROR`; `UNKNOWN` → `PROVIDER_ERROR`. Cover with a colocated unit test that asserts every branch returns one of the four enum values.
+- [x] **CONSOL-GOV-DEF-9 — `ConnectionTestResponse.error.code` outside §4.9 closed enum.** — CLOSED in PR #273 (consolidation-govern). pr-reviewer Blocker B-1 fix mapped `NO_CREDENTIALS|TOKEN_EXPIRED|SERVER_ERROR|UNKNOWN` → `TIMEOUT|AUTH_FAILED|NETWORK_ERROR|PROVIDER_ERROR` at the `connectionTokenService.testConnection` boundary. See KNOWLEDGE.md 2026-05-08 entry "Closed-enum service-boundary mapping for typed error.code contracts" for the pattern.
 
 - [ ] **CONSOL-GOV-DEF-12 — `ConnectionUsage` missing `lastUsedAt` / `nextFireAt`; `recurringTasks` always empty.**
   - Spec section: §4.10
@@ -3349,7 +3346,7 @@ These items require operator action outside the file system (repo/GitHub setting
 
 ## Deferred from adversarial-reviewer — consolidation-govern (2026-05-08)
 
-Three findings — two in pre-existing code, one in new code — surfaced during the consolidation-govern adversarial review. All defence-in-depth or reliability hygiene; none block this branch.
+Three findings — two in pre-existing code, one in new code — surfaced during the consolidation-govern adversarial review. All defence-in-depth or reliability hygiene; none block this branch. **Captured against PR #273 (consolidation-govern); deferred to post-merge security-hardening queue.**
 
 - [ ] **CONSOL-GOV-DEF-17 — `demoteBlockToReference` UPDATE unscoped by organisationId.**
   - File: `server/services/knowledgeService.ts:492-495` (PRE-EXISTING, not new in this branch)
