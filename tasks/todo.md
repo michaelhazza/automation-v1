@@ -377,6 +377,10 @@ All ten items below are **architect-time runtime quotas / picks** — none are s
 
 ## PR Review deferred items
 
+### PR #269 — feat-iee-worker-boot-timing (2026-05-07 — ChatGPT review round 1)
+
+- [ ] [auto] **F5: Longitudinal-monitoring fields in `iee.worker.boot_timing` — `hostname` / `containerId`, `gitSha` / `buildId`, `coldStart: true`** — ChatGPT round 1 flagged this as a future enhancement once there are multiple worker fleets, explicitly marked "not needed for this PR". Defer until longitudinal monitoring is on the roadmap. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-feat-iee-worker-boot-timing-2026-05-07T07-37-03Z.md`. PR #269 — https://github.com/michaelhazza/automation-v1/pull/269.
+
 ### PR #250 — claude-evaluate-new-features-waqfY / subaccount-optimiser chunk 1 (2026-05-02 — ChatGPT review rounds 1–2)
 
 - [ ] [user] **F9: Add concurrency / duplicate-execution test for upsertRecommendation** — `skipReasonCoverage.test.ts` covers the deterministic skip paths exhaustively (cooldown / hash_match / sub_threshold / cap / eviction). Untested today: the 23505-race catch path (`agentRecommendationsService.ts:419–432`) and the per-`(scope, agent)` advisory-lock concurrency. Add (a) a unit test that mocks a 23505 throw on INSERT and asserts the re-lookup returns `was_new: false` with the existing id, and (b) an integration test exercising two parallel `upsertRecommendation` calls against the same dedupe key, asserting exactly one new row + one no-op return. Pair with TI-005 follow-up if the integration harness lands first. Source: ChatGPT PR review round 1 — user-approved as recommended (defer). PR #250 — https://github.com/michaelhazza/automation-v1/pull/250.

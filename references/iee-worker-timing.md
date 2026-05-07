@@ -21,9 +21,14 @@ fields:
   bossStartMs         // pg-boss start() — schema check, queue tables, listen channels.
   playwrightCheckMs   // version + binary smoke check.
   dbCompatCheckMs     // SELECT version() round-trip.
-  bootstrapTotalMs    // sum of the three phases above.
+  bootstrapTotalMs    // elapsed bootstrap duration covering the measured phases (tBootstrapStart → tAfterDbCompatCheck). Includes any small gaps between probes and any future logic inserted between them, so it is NOT strictly the arithmetic sum of the three phase fields.
   processToReadyMs    // nodeBootMs + bootstrapTotalMs — the figure that matters end-to-end.
 ```
+
+### Numerical invariants
+
+- All `*Ms` fields are rounded with `Math.round(...)`. As a result, `bossStartMs + playwrightCheckMs + dbCompatCheckMs` may differ from `bootstrapTotalMs` by ±1-2ms even before accounting for inter-phase gaps. Treat any sub-5ms discrepancy as rounding noise, not a measurement bug.
+- Exactly one `iee.worker.boot_timing` log line MUST be emitted per successful worker bootstrap. If you ever see two (or zero) for a single boot, that is a regression — bootstrap was retried internally, partially re-run, or skipped its tail. Investigate `worker/src/bootstrap.ts` rather than re-tuning thresholds.
 
 ## What is NOT captured here
 

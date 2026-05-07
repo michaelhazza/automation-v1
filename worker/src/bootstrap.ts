@@ -25,7 +25,11 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const workerInstanceId = randomUUID();
   setBaseLogContext({ workerInstanceId });
 
-  // Captures Node + tsx + module-load cost incurred BEFORE bootstrap() ran.
+  // Captures Node + tsx + module-load cost incurred BEFORE bootstrap() ran,
+  // including any synchronous top-level module initialisation (top-level
+  // await, side-effectful imports) executed before bootstrap() entry. If
+  // nodeBootMs spikes after a refactor, suspect a newly-added expensive
+  // top-level import.
   const nodeBootMs = Math.round(process.uptime() * 1000);
   const tBootstrapStart = performance.now();
 
