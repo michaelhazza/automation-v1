@@ -51,3 +51,32 @@ Orphan artefact sweep: `8ae2e7bb` (route file, plan.md, §8.30 guideline).
 
 Operator implicitly continued via the post-dev request. No new spec drift identified. Recording the auto-continue here per the playbook's "skip the operator pause" instruction.
 
+## Branch-level review pass
+
+| Step | Verdict | Log |
+|------|---------|-----|
+| 8.1 spec-conformance | CONFORMANT (0 mechanical fixes; 2 directional gaps already in `migration-gaps.md`) | `tasks/review-logs/spec-conformance-log-consolidation-build-2026-05-07T20-26-01Z.md` |
+| 8.2 pr-reviewer round 1 | CHANGES_REQUESTED (1 blocking, 2 strong, 3 non-blocking) | `tasks/review-logs/pr-review-log-consolidation-build-2026-05-07T20-30-27Z.md` |
+| 8.3 fix-loop round 1 | B1 fixed (post-delete navigation `/build/agents` -> `/agents`); G3 clean | commit `84d9f285` |
+| 8.4 pr-reviewer round 2 | APPROVED | `tasks/review-logs/pr-review-log-consolidation-build-rerun-2026-05-07T20-34-45Z.md` |
+| 8.5 adversarial-reviewer | ADVISORY (0 confirmed-holes, 1 likely-hole, 6 worth-confirming) | `tasks/review-logs/adversarial-review-log-consolidation-build-2026-05-07T20-36-33Z.md` |
+| 8.6 dual-reviewer Codex | APPROVED (4 findings, all ACCEPT, all fixed) | `tasks/review-logs/dual-review-log-consolidation-build-2026-05-07T20-45-58Z.md` |
+| 8.7 post-Codex re-review | APPROVED | `tasks/review-logs/pr-review-log-consolidation-build-post-codex-2026-05-07T20-46-45Z.md` |
+| Final G3 | lint 0 errors, typecheck clean, recurring-tasks vitest 63/63 | — |
+
+Fix-loop iterations: 2 (B1 + Codex F1-F4). Commits: `84d9f285` (B1), `42d95e86` (Codex F1-F4).
+
+## Doc Sync gate
+
+Investigation procedure ran against the post-fix-loop diff:
+
+- architecture.md updated: no — checked `TestRunnerCard`, `isSystemManaged`, `TRIGGER_ADD_NOT_SUPPORTED`, `formatFireCondition`, `/agents`/`/build/agents`. The C11 doc-sync work at `74239a9f` already captured the structural references correctly. The post-fix-loop changes (B1 navigation correction, F1 component mount, F2 RRULE wiring, F3 strip removal, F4 501 guard) are surgical patches that don't change the architecture.md surface.
+- capabilities.md updated: no — no add / remove / rename of a product capability, agency capability, skill, or integration in the fix-loop diff. The C11 capabilities.md update at `74239a9f` covered the consolidation surface.
+- integration-reference.md updated: n/a — no integration behaviour changes.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no build-discipline / convention / locked-rule changes.
+- frontend-design-principles.md updated: n/a — no new UI pattern, hard rule, or worked example introduced.
+- KNOWLEDGE.md updated: yes (1 entry — "PUT /api/agents/:id/triggers rejects added triggers with 501 in Phase 1") covering Codex finding F4's behavioural guard.
+- spec-context.md updated: n/a (not a spec-review session).
+
+
+

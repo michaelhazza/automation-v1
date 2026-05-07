@@ -2796,3 +2796,9 @@ Skipping NFC produces long-tail duplicate revision bugs that are nearly impossib
 **Date:** 2026-05-07
 **Source:** Consolidation-build C11 doc-sync pass.
 `formatFireCondition` parses FREQ, BYDAY, BYMONTHDAY, and INTERVAL from RRULE strings and returns a human-readable label. Any RRULE pattern using other components (BYSETPOS, BYHOUR, COUNT, UNTIL, WKST, etc.) falls back to returning the literal RRULE string unchanged. This is intentional for Phase 1 — do not add a full RRULE parser unless the product requirement explicitly calls for it.
+
+### [2026-05-07] Gotcha — `PUT /api/agents/:id/triggers` rejects added triggers with 501 in Phase 1
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build dual-reviewer Codex finding F4.
+`agentService.replaceTriggers` accepts updates and soft-deletes of existing triggers but throws `{ statusCode: 501, errorCode: 'TRIGGER_ADD_NOT_SUPPORTED' }` if any new triggers are in the diff. Reason: triggers are subaccount-scoped (`subaccountAgentId` FK, not `agentId`) so an org-level insert via this route would be orphaned — the row would not appear in `getFull` (which filters by `subaccountAgentId`) and would not fire (the trigger service fires by `subaccountId`). The new tab-scoped UI Schedule tab is `readOnly={true}` in Phase 1 and `WRITE_ORDER` excludes `'schedule'`, so no caller exercises this path today. Phase 2 should resolve a default `subaccountAgentId` (e.g. via the org subaccount) and remove the 501 guard. See `tasks/builds/consolidation-build/migration-gaps.md` § "Triggers schema — no direct agentId column".
