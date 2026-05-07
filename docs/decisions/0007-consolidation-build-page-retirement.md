@@ -52,7 +52,8 @@ New server-side primitives introduced to support the consolidated pages:
   - Skill authoring is discoverable from the same surface where skills are managed
   - Goal management is co-located with the project it belongs to
   - Navigation sidebar is simpler; fewer top-level items in the Build section
-  - Reduced route/permission gate surface area to maintain
+  - Reduced route/permission gate surface area to maintain: fewer permission-gated routes means fewer auth checks, fewer configuration drift points, and simpler delegation rules
+  - Fewer permission surfaces (one agent-edit permission gate covers all tabs; previously scattered across AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage)
 - **Negative:**
   - Bookmark / deep-link breakage risk mitigated by redirect routes, but not fully eliminated for any integration that constructed URLs by string-interpolation against the old patterns
   - `schedule` and `budget` tabs in `AgentEditPage` are Phase 1 placeholders — trigger editing still uses the existing per-workspace override page; budget cap fields have no backing schema (always null/zero, writes accepted but not persisted). These are deferred to Phase 2
