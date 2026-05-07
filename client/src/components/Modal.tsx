@@ -37,9 +37,9 @@ interface ModalProps {
   /** Body padding preset. 'none' removes padding for full-bleed content. */
   bodyPadding?: 'default' | 'none';
   /**
-   * z-index for the backdrop layer. The dialog panel uses `zIndex + 1` implicitly
-   * (both are inside the same stacking context, so relative order is determined by
-   * DOM order — the panel follows the backdrop). Default: 1000.
+   * z-index for the backdrop layer. The dialog panel is a descendant rendered after
+   * the backdrop in DOM order, so it naturally paints on top within the same stacking
+   * context — no separate z-index is needed on the panel. Default: 1000.
    */
   zIndex?: number;
 }
@@ -59,6 +59,9 @@ export default function Modal({
   const previousFocusRef = useRef<Element | null>(null);
 
   // Warn in dev when both size and maxWidth are explicitly supplied.
+  // NOTE: We compare against the default value (520) as a heuristic — we cannot
+  // distinguish "caller passed maxWidth={520}" from "prop received its default."
+  // The warning is best-effort; the precedence rule (size wins) is always enforced.
   if (size !== undefined && maxWidth !== 520 && process.env.NODE_ENV !== 'production') {
     console.warn(
       '[Modal] Both `size` and `maxWidth` were supplied. `size` takes precedence; `maxWidth` is ignored.'
