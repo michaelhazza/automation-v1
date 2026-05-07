@@ -377,9 +377,10 @@ All ten items below are **architect-time runtime quotas / picks** — none are s
 
 ## PR Review deferred items
 
-### PR #269 — feat-iee-worker-boot-timing (2026-05-07 — ChatGPT review round 1)
+### PR #269 — feat-iee-worker-boot-timing (2026-05-07 — ChatGPT review rounds 1–2)
 
-- [ ] [auto] **F5: Longitudinal-monitoring fields in `iee.worker.boot_timing` — `hostname` / `containerId`, `gitSha` / `buildId`, `coldStart: true`** — ChatGPT round 1 flagged this as a future enhancement once there are multiple worker fleets, explicitly marked "not needed for this PR". Defer until longitudinal monitoring is on the roadmap. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-feat-iee-worker-boot-timing-2026-05-07T07-37-03Z.md`. PR #269 — https://github.com/michaelhazza/automation-v1/pull/269.
+- [ ] [auto] **F5 (round 1): Longitudinal-monitoring fields in `iee.worker.boot_timing` — `hostname` / `containerId`, `gitSha` / `buildId`, `coldStart: true`** — ChatGPT round 1 flagged this as a future enhancement once there are multiple worker fleets, explicitly marked "not needed for this PR". Defer until longitudinal monitoring is on the roadmap. Source: ChatGPT PR review round 1; session log `tasks/review-logs/chatgpt-pr-review-feat-iee-worker-boot-timing-2026-05-07T07-37-03Z.md`. PR #269 — https://github.com/michaelhazza/automation-v1/pull/269.
+- [ ] [auto] **F2-R2 (round 2): Add explicit `dbCompatCheckOk: boolean` field to `iee.worker.boot_timing`** — currently the compat-check `try/catch` swallows failures silently and `dbCompatCheckMs` collapses to near-zero on failure, with no boolean to distinguish "fast success" from "failed and skipped". ChatGPT round 2 explicitly framed this as "not necessary for this PR… probably overkill today" and gated it on whether this instrumentation becomes production-critical. Defer until either the operator wires this log into production alerting, or a real incident depends on knowing whether the compat check actually ran. Source: ChatGPT PR review round 2; session log `tasks/review-logs/chatgpt-pr-review-feat-iee-worker-boot-timing-2026-05-07T07-37-03Z.md`. PR #269 — https://github.com/michaelhazza/automation-v1/pull/269.
 
 ### PR #250 — claude-evaluate-new-features-waqfY / subaccount-optimiser chunk 1 (2026-05-02 — ChatGPT review rounds 1–2)
 

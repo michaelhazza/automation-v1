@@ -28,6 +28,7 @@ fields:
 ### Numerical invariants
 
 - All `*Ms` fields are rounded with `Math.round(...)`. As a result, `bossStartMs + playwrightCheckMs + dbCompatCheckMs` may differ from `bootstrapTotalMs` by ±1-2ms even before accounting for inter-phase gaps. Treat any sub-5ms discrepancy as rounding noise, not a measurement bug.
+- `processToReadyMs` is computed as `nodeBootMs + bootstrapTotalMs` (both already rounded), so it inherits ±1ms rounding from each component — expect up to ±2ms drift versus a hypothetical raw-float computation. Same rule: sub-5ms is noise.
 - Exactly one `iee.worker.boot_timing` log line MUST be emitted per successful worker bootstrap. If you ever see two (or zero) for a single boot, that is a regression — bootstrap was retried internally, partially re-run, or skipped its tail. Investigate `worker/src/bootstrap.ts` rather than re-tuning thresholds.
 
 ## What is NOT captured here
