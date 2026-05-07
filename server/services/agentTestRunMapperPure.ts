@@ -12,16 +12,11 @@ export function mapAgentRunToTestResult(
   run: Pick<AgentRun, 'id' | 'status' | 'startedAt' | 'completedAt' | 'summary'>,
 ): AgentTestResult {
   const mappedStatus: AgentTestResult['status'] =
-    run.status === 'completed'
-      ? 'completed'
-      : run.status === 'failed' ||
-        run.status === 'timeout' ||
-        run.status === 'budget_exceeded' ||
-        run.status === 'cancelled' ||
-        run.status === 'loop_detected' ||
-        run.status === 'completed_with_uncertainty'
-      ? 'failed'
-      : 'running';
+    run.status === 'completed' ? 'completed' :
+    (run.status === 'failed' || run.status === 'timeout' || run.status === 'budget_exceeded' ||
+     run.status === 'cancelled' || run.status === 'loop_detected' || run.status === 'completed_with_uncertainty' ||
+     run.status === 'awaiting_clarification' || run.status === 'waiting_on_clarification') ? 'failed' :
+    'running';
 
   const durationMs =
     run.completedAt && run.startedAt

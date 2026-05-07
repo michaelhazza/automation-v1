@@ -258,15 +258,16 @@ router.post('/api/agents/:id/test-run',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    const { id } = req.params;
     res.setHeader('Deprecation', 'true');
     res.setHeader('Sunset', '2027-01-01');
+    res.setHeader('Link', `</api/agents/${id}/test>; rel="successor-version"`);
     logger.warn('deprecated_endpoint_called', {
       path: req.path,
       deprecated_test_run_path: true,
       userId: req.user?.id,
+      agentId: id,
     });
-
-    const { id } = req.params;
     const limitResult = await rateLimitCheck(rateLimitKeys.testRun(req.user!.id), TEST_RUN_RATE_LIMIT_PER_HOUR, 3600);
     if (!limitResult.allowed) {
       setRateLimitDeniedHeaders(res, limitResult.resetAt, limitResult.nowEpochMs);

@@ -89,6 +89,16 @@ describe('mapAgentRunToTestResult', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('awaiting_clarification status maps to failed (cannot complete without human input)', () => {
+    const result = mapAgentRunToTestResult(makeRun({ status: 'awaiting_clarification' }));
+    expect(result.status).toBe('failed');
+  });
+
+  it('waiting_on_clarification status maps to failed (cannot complete without human input)', () => {
+    const result = mapAgentRunToTestResult(makeRun({ status: 'waiting_on_clarification' }));
+    expect(result.status).toBe('failed');
+  });
+
   it('missing completedAt yields durationMs: null', () => {
     const result = mapAgentRunToTestResult(makeRun({
       status: 'completed',
