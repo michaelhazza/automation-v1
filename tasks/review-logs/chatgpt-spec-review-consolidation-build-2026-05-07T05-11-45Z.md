@@ -6,6 +6,7 @@
 - PR: #268 — https://github.com/michaelhazza/automation-v1/pull/268
 - Mode: manual
 - Started: 2026-05-07T05:11:45Z
+- **Verdict:** APPROVED (2 rounds)
 
 ---
 
@@ -57,3 +58,70 @@ Overall verdict: APPROVED — READY FOR PLAN PHASE
 - [user] F2: Added force=true safeguard to §4.2 full-replacement endpoints
 - [user] F4: Split AgentTestResponse into AgentTestAccepted (202) and AgentTestResult (polled); strict async model
 - [user] MinorC: Added non-blocking async requirement to §4.11 confirmation dialogs
+
+---
+
+## Round 2 — 2026-05-07T05:35:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: Clean, production-ready spec. Round 1 fixes landed well. No blockers. 4 final micro-tightenings.
+
+Finding 1 — ETag canonicalisation: "canonical JSON (stable key order)" still ambiguous. Rules needed: keys sorted lexicographically at every level, undefined omitted, arrays preserved in order, numbers normalised, booleans/null preserved, UTF-8 before hashing.
+
+Finding 2 — Full-replacement safeguard identity keys: comparison criteria not defined. Identity keys: skill.id, dataSource.id, trigger.id. Deletion = set difference (existing IDs − incoming IDs).
+
+Finding 3 — Recurring tasks cursor pagination stability: no ordering guarantee. Default sort (nextFireAt DESC, id DESC); cursor encodes both; all queries must include id as tiebreaker.
+
+Finding 4 — Agent test idempotency key scope: no scope definition. Scope: (agentId, workspaceContextId); reuse within 24h returns same run; after expiry = new request. Server MAY enforce TTL eviction.
+
+Minor A — Agents list parentAgentName null handling: fallback "Unknown agent" if parentAgentId != null and name unavailable.
+Minor B — nextFireAt null semantics: null for event-driven triggers and manual-only tasks.
+Minor C — Project PATCH partial null handling: explicit null clears field; omitted = no change.
+Minor D — Test runner UX: disable Run test button while request in-flight for same idempotencyKey.
+
+Overall verdict: DONE — LOCK SPEC
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1: ETag canonicalisation rules (key sort, undefined omit, array order, number normalisation, UTF-8) | technical | apply | auto (apply) | medium | Prevents ghost 409s from inconsistent serialisation across environments |
+| F2: Identity keys for full-replacement deletion detection (skill.id, dataSource.id, trigger.id) | technical | apply | auto (apply) | medium | Prevents ambiguity when configJson changes but ID unchanged; avoids accidental rejection |
+| F3: Recurring tasks pagination stability (default sort, id tiebreaker, cursor encodes both) | technical | apply | auto (apply) | medium | Prevents duplicate/missing rows across pages |
+| F4: Idempotency key scope (agentId+workspaceContextId, 24h TTL, expiry = new request) | technical | apply | auto (apply) | medium | Prevents cross-context reuse; defines lifecycle for ops |
+| MinorA: parentAgentName null fallback "Unknown agent" | technical | apply | auto (apply) | low | Plugs edge case in AgentListItem |
+| MinorB: nextFireAt null semantics (event-driven and manual tasks) | technical | apply | auto (apply) | low | Prevents implementer confusion on null meaning |
+| MinorC: Project PATCH null = clear, omit = no-op | technical | apply | auto (apply) | low | Standard PATCH semantics; prevents ambiguity |
+| MinorD: Disable Run test button while in-flight | user-facing | apply | apply (user: as recommended) | low | Visible UX behaviour; prevents duplicate submissions before TTL kicks in |
+
+### Applied (auto-applied technical + user-approved user-facing)
+- [auto] F1: ETag canonicalisation rules added to §4.2
+- [auto] F2: Identity keys (skill.id, dataSource.id, trigger.id) added to full-replacement safeguard in §4.2; configJson-only updates clarified as non-deletions
+- [auto] F3: Pagination stability invariant (default sort + id tiebreaker + cursor encoding) added to §4.4
+- [auto] F4: Idempotency key scope + 24h TTL + expiry semantics added to §4.3
+- [auto] MinorA: parentAgentName null fallback comment added to AgentListItem §4.1
+- [auto] MinorB: nextFireAt null semantics comment added to RecurringTask §4.4
+- [auto] MinorC: PATCH null/omit semantics added to §4.5
+- [user] MinorD: In-flight button guard added to §4.7
+- [integrity] Fixed Round 1 formatting artifact — budget PATCH list item restored to correct position in §4.2
+
+Top themes: contract precision (ETag, pagination, idempotency), edge-case coverage (null semantics, fallbacks), UX correctness (in-flight guard).
+
+---
+
+## Final Summary
+- **Verdict:** APPROVED (2 rounds)
+- Rounds: 2
+- Auto-accepted (technical): 13 applied | 0 rejected | 0 deferred
+- User-decided: 4 applied | 0 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / consolidation-build: none
+- KNOWLEDGE.md updated: no (no novel reusable patterns surfaced beyond existing ETag/idempotency conventions)
+- architecture.md updated: n/a (no cross-spec contract changes)
+- capabilities.md updated: n/a
+- integration-reference.md updated: n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a
+- spec-context.md updated: n/a
+- frontend-design-principles.md updated: n/a
+- PR: #268 — https://github.com/michaelhazza/automation-v1/pull/268

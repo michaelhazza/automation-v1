@@ -106,7 +106,7 @@ interface AgentListItem {
   description: string | null;
   status: 'active' | 'paused' | 'draft';
   parentAgentId: string | null;
-  parentAgentName: string | null;
+  parentAgentName: string | null;  // fallback "Unknown agent" if parentAgentId != null but name unavailable
   lastRunAt: string | null;
   runs30d: number;    // sourced from agent_runs aggregation; eventually consistent, may lag up to 60 seconds
   cost30d: number;    // sourced from agent_runs aggregation; eventually consistent, may lag up to 60 seconds
@@ -157,10 +157,19 @@ interface AgentFull {
 - `PUT /api/agents/:id/data-sources` — full replacement
 - `PUT /api/agents/:id/triggers` — full replacement (delegates to existing trigger service)
 
-**Full-replacement safeguard:** `PUT /skills`, `PUT /data-sources`, and `PUT /triggers` MUST reject payloads that omit previously persisted items unless `force=true` is passed as a query parameter. Default behaviour: compare existing vs incoming set; if a deletion is detected, return `409 Conflict` with the current set. The confirmation flows in §4.11 (skill remove, trigger pause/resume) are responsible for passing `force=true` when the user has explicitly confirmed the removal.
 - `PATCH /api/agents/:id/budget`
 
-**ETag contract:** ETag is agent-global (not per-tab). Generated as sha256 of the canonical JSON representation of the full agent record (stable key order). Concurrent edits from different tabs or sessions return `409 Conflict`; client re-fetches and surfaces "Another user changed this — reload?" banner. (See `architecture.md § Idempotency Keys` for the existing pattern.)
+**Full-replacement safeguard:** `PUT /skills`, `PUT /data-sources`, and `PUT /triggers` MUST reject payloads that omit previously persisted items unless `force=true` is passed as a query parameter. Default behaviour: compare existing vs incoming set using identity key difference (existing IDs − incoming IDs); if a deletion is detected, return `409 Conflict` with the current set. Identity keys: skill → `skill.id`, data source → `dataSource.id`, trigger → `trigger.id`. The confirmation flows in §4.11 (skill remove, trigger pause/resume) are responsible for passing `force=true` when the user has explicitly confirmed the removal. Updating `configJson` or other fields without changing the ID set is never considered a deletion.
+
+**ETag contract:** ETag is agent-global (not per-tab). Generated as sha256 of the canonical JSON representation of the full agent record. Concurrent edits from different tabs or sessions return `409 Conflict`; client re-fetches and surfaces "Another user changed this — reload?" banner. (See `architecture.md § Idempotency Keys` for the existing pattern.)
+
+**ETag canonicalisation rules** (must be consistent across all services producing or consuming the ETag):
+- Keys sorted lexicographically at every level of nesting
+- Undefined and absent values omitted (not serialised as `null` or `undefined`)
+- Arrays preserved in their stored order (no sorting)
+- Numbers normalised: no trailing zeros, no string coercion
+- Booleans and `null` preserved as-is
+- String encoded as UTF-8 before hashing
 
 ### 4.3 Agent test-run — inline Test runner
 
@@ -170,7 +179,7 @@ interface AgentFull {
 interface AgentTestRequest {
   input: string;                  // textarea content
   workspaceContextId: string;     // active client/sub-account
-  idempotencyKey: string;         // client-generated UUID
+  idempotencyKey: string;         // client-generated UUID; scoped to (agentId + workspaceContextId)
 }
 
 // POST → 202 Accepted (always immediate)
@@ -189,7 +198,9 @@ interface AgentTestResult {
 }
 ```
 
-**Idempotency:** key-based per `server/lib/testRunIdempotency.ts`. Re-submitting the same `idempotencyKey` returns 200 with the existing run's current state (no duplicate execution).
+**Idempotency:** key-based per `server/lib/testRunIdempotency.ts`. Re-submitting the same `idempotencyKey` within its scope returns 200 with the existing run's current state (no duplicate execution).
+
+**Idempotency key scope:** A key is unique per `(agentId, workspaceContextId)`. Reuse of the same key within 24 hours returns the same run. After the 24-hour TTL expires the key is treated as a new request. Server MAY enforce background eviction of expired idempotency records.
 
 ### 4.4 Recurring tasks — aggregated list
 
@@ -207,6 +218,10 @@ interface RecurringTasksQuery {
   sortDir?: 'asc' | 'desc';
 }
 
+// Pagination invariant: all paginated queries include `id` as a tiebreaker to ensure stable ordering.
+// Default sort: (nextFireAt DESC, id DESC). Cursor encodes both fields.
+// All sortKey orderings MUST append id DESC as a secondary sort.
+
 interface RecurringTask {
   id: string;
   name: string;
@@ -218,7 +233,7 @@ interface RecurringTask {
   status: 'active' | 'paused' | 'error';
   lastFiredAt: string | null;
   fires30d: number;
-  nextFireAt: string | null;
+  nextFireAt: string | null;  // null for event-driven triggers and manual-only tasks (no scheduled next fire)
 }
 ```
 
@@ -250,6 +265,8 @@ interface ProjectPatch {
 }
 ```
 
+**PATCH semantics:** an explicit `null` value clears the field (e.g. `"targetDate": null` removes the target date); an omitted field is a no-op (no change to the existing value).
+
 Migrated-from-Goals notice rendered inline as a static banner if the project has `migratedFromGoalsAt != null`. No new endpoint for the notice — it's a property on the project record returned by `GET /api/projects/:id`.
 
 ### 4.6 Sticky form footer (frontend contract)
@@ -259,6 +276,8 @@ Per foundation §4.4. Agent-edit and project-edit each render `<FormFooter>` at 
 ### 4.7 Inline Test runner card (frontend contract — agent-edit only)
 
 Per prototype round 15, the Test runner is an inline `<section class="section-card">` at the bottom of agent-edit content (always visible across tabs). Layout: 2-column grid (`1fr 240px`) for Test input + Workspace context, collapsing to single column at <720px. Action row: regular-width Run test button, inline meta line ("Last run completed in Xs"), right-aligned "View run trace" link. Result block: emerald-tinted card with header + body. **Not** a right rail; **not** a modal. Simple inline card.
+
+**In-flight guard:** The Run test button MUST be disabled while a test request for the same `idempotencyKey` is in-flight. Button re-enables when polling reaches a terminal state (`completed` or `failed`). This prevents accidental duplicate submissions before the 24-hour idempotency TTL provides its guarantee.
 
 ### 4.8 Page-level full-text search
 
