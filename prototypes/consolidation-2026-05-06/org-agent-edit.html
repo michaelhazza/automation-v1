@@ -26,7 +26,28 @@
 <link rel="stylesheet" href="_shared.css">
 <style>
   .agent-layout { display: flex; gap: 0; height: calc(100vh - 88px); overflow: hidden; }
-  .agent-content { flex: 1; overflow-y: auto; padding: 24px 28px; }
+  .agent-content { flex: 1; overflow-y: auto; padding: 24px 28px 0 28px; display: flex; flex-direction: column; }
+
+  /* Personality tab */
+  .personality-trait {
+    padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200); background: white; cursor: pointer;
+    color: var(--slate-500); transition: all 0.12s;
+  }
+  .personality-trait:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+  .personality-trait.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* Sticky form footer */
+  .sticky-form-footer {
+    position: sticky; bottom: 0; left: 0; right: 0;
+    background: white;
+    border-top: 1px solid var(--slate-200);
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.04);
+    padding: 12px 24px;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    z-index: 200; flex-shrink: 0;
+  }
+  .sticky-form-footer .footer-delete { margin-left: auto; }
 
   .section-card {
     background: white; border: 1px solid var(--border);
@@ -358,12 +379,8 @@
         <span class="badge badge-green" style="font-size:10px;margin-left:6px;">Active</span>
       </div>
       <div class="topbar-spacer"></div>
-      <!-- Dirty state: Save/Discard (shown when dirty) -->
-      <div id="dirty-actions" style="display:flex;gap:8px;align-items:center;">
-        <span style="font-size:12px;color:var(--amber-600);background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:3px 8px;">Unsaved changes</span>
-        <button class="btn btn-sm btn-secondary" onclick="discardChanges()">Discard</button>
-        <button class="btn btn-sm btn-primary">Save changes</button>
-      </div>
+      <!-- Dirty state indicator (actions moved to sticky footer) -->
+      <span id="dirty-indicator" style="font-size:12px;color:var(--amber-600);background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:3px 8px;">Unsaved changes</span>
       <a href="index.html" class="btn btn-sm btn-secondary" style="margin-left:8px;">&#8592; All prototypes</a>
     </div>
 
@@ -405,6 +422,7 @@
         <div class="tabs" id="agent-tabs" style="margin-bottom:18px;">
           <button class="tab-btn active" onclick="switchAgentTab('configure',this)" id="tab-btn-configure">Configure</button>
           <button class="tab-btn" onclick="switchAgentTab('behaviour',this)" id="tab-btn-behaviour">Behaviour</button>
+          <button class="tab-btn" onclick="switchAgentTab('personality',this)" id="tab-btn-personality">Personality</button>
           <button class="tab-btn" onclick="switchAgentTab('skills',this)" id="tab-btn-skills">Skills <span class="tab-count">5</span></button>
           <button class="tab-btn" onclick="switchAgentTab('datasources',this)" id="tab-btn-datasources">Data sources <span class="tab-count">4</span></button>
           <button class="tab-btn" onclick="switchAgentTab('schedule',this)" id="tab-btn-schedule">Schedule</button>
@@ -540,6 +558,100 @@ Note: Workspaces may append workspace-specific instructions to this system role.
             </div>
           </div>
         </div><!-- /tab-behaviour -->
+
+        <!-- ── PERSONALITY TAB ──────────────────────────────────── -->
+        <div class="tab-panel" id="tab-personality" style="display:none;max-width:680px;">
+          <div id="org-personality-enabled-state">
+            <div class="section-card" style="margin-bottom:14px;">
+              <div class="section-card-header" style="justify-content:space-between;">
+                <div>
+                  <h3>Personality</h3>
+                  <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Org-level personality template. Deployed workspaces inherit this unless they override it locally.</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:12px;color:var(--emerald-600);font-weight:600;">Active</span>
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="org-personality-toggle" checked onchange="toggleOrgPersonality(this.checked)" style="accent-color:var(--indigo-600);width:15px;height:15px;">
+                  </label>
+                </div>
+              </div>
+              <div class="section-card-body">
+                <div class="form-field" style="margin-bottom:14px;">
+                  <label class="form-label">Personality description</label>
+                  <textarea class="form-textarea" id="org-personality-textarea" style="min-height:90px;font-size:13.5px;line-height:1.6;" oninput="markDirty()">Direct, confident, mid-Atlantic professional. Skips small talk. Uses concrete numbers when possible. Acknowledges uncertainty rather than guessing. Never oversells.</textarea>
+                  <div class="form-hint">Workspaces may override this description at deployment time.</div>
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label" style="margin-bottom:8px;">Trait emphasis</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px;" id="org-personality-traits">
+                    <button class="personality-trait active" data-trait="direct" onclick="toggleTrait(this)">Direct</button>
+                    <button class="personality-trait active" data-trait="confident" onclick="toggleTrait(this)">Confident</button>
+                    <button class="personality-trait" data-trait="warm" onclick="toggleTrait(this)">Warm</button>
+                    <button class="personality-trait active" data-trait="formal" onclick="toggleTrait(this)">Formal</button>
+                    <button class="personality-trait" data-trait="casual" onclick="toggleTrait(this)">Casual</button>
+                    <button class="personality-trait active" data-trait="technical" onclick="toggleTrait(this)">Technical</button>
+                    <button class="personality-trait" data-trait="empathetic" onclick="toggleTrait(this)">Empathetic</button>
+                    <button class="personality-trait" data-trait="concise" onclick="toggleTrait(this)">Concise</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card" style="margin-bottom:14px;">
+              <div class="section-card-header"><h3>Voice examples</h3></div>
+              <div class="section-card-body">
+                <div style="margin-bottom:12px;">
+                  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:6px;">Intro email</div>
+                  <div style="font-size:13px;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;line-height:1.6;">
+                    Hi Marcus, I noticed your team is expanding into enterprise accounts. We've helped three similar agencies cut their qualification time by 40%. Worth 20 minutes?
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);margin-bottom:6px;">Objection handling</div>
+                  <div style="font-size:13px;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;line-height:1.6;">
+                    Understood. Budget's tight. One option: we start with a single workflow and measure impact at 30 days. If the numbers don't work, we stop. No long-term commitment.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <div class="section-card-header" style="justify-content:space-between;">
+                <h3>Workspace override policy</h3>
+                <span style="font-size:12px;color:var(--slate-400);">Controls what subaccounts can change</span>
+              </div>
+              <div class="section-card-body">
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:9px 12px;border-radius:8px;border:1px solid var(--indigo-300);background:var(--indigo-50);">
+                    <input type="radio" name="org-personality-override" value="allow" checked style="margin-top:2px;flex-shrink:0;accent-color:var(--indigo-600);">
+                    <div>
+                      <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Allow override</div>
+                      <div style="font-size:11.5px;color:var(--slate-500);margin-top:1px;">Workspaces can customise the personality description and trait emphasis</div>
+                    </div>
+                  </label>
+                  <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:9px 12px;border-radius:8px;border:1px solid var(--slate-200);background:white;">
+                    <input type="radio" name="org-personality-override" value="locked" style="margin-top:2px;flex-shrink:0;accent-color:var(--indigo-600);">
+                    <div>
+                      <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Locked</div>
+                      <div style="font-size:11.5px;color:var(--slate-500);margin-top:1px;">Org personality applies to all workspaces without exception</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div><!-- /org-personality-enabled-state -->
+
+          <div id="org-personality-disabled-state" style="display:none;">
+            <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:12px;padding:28px 32px;text-align:center;margin-bottom:16px;">
+              <div style="font-size:28px;margin-bottom:12px;opacity:0.4;">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--slate-400);margin:0 auto;display:block;"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+              </div>
+              <div style="font-size:15px;font-weight:600;color:var(--slate-700);margin-bottom:6px;">Personality is disabled</div>
+              <div style="font-size:13px;color:var(--slate-500);max-width:380px;margin:0 auto 20px;">Enable personality to give this agent a distinctive org-wide voice that all workspaces inherit.</div>
+              <button class="btn btn-primary" onclick="toggleOrgPersonality(true);document.getElementById('org-personality-toggle').checked=true;">Enable personality</button>
+            </div>
+          </div><!-- /org-personality-disabled-state -->
+        </div><!-- /tab-personality -->
 
         <!-- ── SKILLS TAB ────────────────────────────────────────── -->
         <div class="tab-panel" id="tab-skills">
@@ -1377,6 +1489,13 @@ Note: Workspaces may append workspace-specific instructions to this system role.
           </div>
         </div><!-- /tab-deployments -->
 
+        <!-- Sticky form footer -->
+        <div class="sticky-form-footer">
+          <button class="btn btn-secondary" onclick="discardChanges()">Discard</button>
+          <button class="btn btn-primary" onclick="showToast('Org agent saved. Propagating to 4 workspaces...')">Save changes</button>
+          <button class="btn btn-secondary footer-delete" style="color:var(--red-500);border-color:var(--red-200);" onclick="showToast('Delete confirmation required')">Delete agent</button>
+        </div>
+
       </div><!-- /agent-content -->
     </div><!-- /agent-layout -->
   </div>
@@ -1542,19 +1661,49 @@ Note: Workspaces may append workspace-specific instructions to this system role.
 <script>
 /* ── Tab switching ────────────────────────────────────────────────── */
 function switchAgentTab(name, btn) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('#agent-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-  const panel = document.getElementById('tab-' + name);
-  if (panel) panel.classList.add('active');
   btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.remove('active');
+    if (p.id !== 'tab-' + name) p.style.display = 'none';
+  });
+  var target = document.getElementById('tab-' + name);
+  if (target) { target.classList.add('active'); target.style.display = ''; }
 }
 
 /* ── Dirty state ─────────────────────────────────────────────────── */
 function markDirty() {
-  document.getElementById('dirty-actions').style.display = 'flex';
+  var el = document.getElementById('dirty-indicator');
+  if (el) el.style.display = '';
 }
 function discardChanges() {
-  document.getElementById('dirty-actions').style.display = 'none';
+  showToast('Changes discarded');
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────── */
+function showToast(msg) {
+  var t = document.getElementById('toast-msg');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast-msg';
+    t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--slate-800);color:white;padding:8px 18px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.style.opacity = '0'; }, 2200);
+}
+
+/* ── Personality ──────────────────────────────────────────────────── */
+function toggleOrgPersonality(checked) {
+  document.getElementById('org-personality-enabled-state').style.display = checked ? '' : 'none';
+  document.getElementById('org-personality-disabled-state').style.display = checked ? 'none' : '';
+  var toggle = document.getElementById('org-personality-toggle');
+  if (toggle) toggle.checked = checked;
+}
+function toggleTrait(btn) {
+  btn.classList.toggle('active');
 }
 
 /* ── Skill group collapse ─────────────────────────────────────────── */

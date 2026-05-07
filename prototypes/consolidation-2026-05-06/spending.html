@@ -421,13 +421,13 @@
   <div class="main">
     <!-- Topbar -->
     <div class="topbar">
-      <div class="topbar-breadcrumb">
-        <span>Org</span>
+      <div class="topbar-breadcrumb" id="topbar-breadcrumb">
+        <span id="topbar-context">Org</span>
         <span>/</span>
         <span class="topbar-breadcrumb-current">Spending</span>
       </div>
       <div class="topbar-spacer"></div>
-      <button class="btn btn-primary" onclick="openOrgCapModal()">
+      <button class="btn btn-primary" id="edit-org-cap-btn" onclick="openOrgCapModal()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
         Edit org cap
       </button>
@@ -440,7 +440,7 @@
       <div class="page-header-row">
         <div>
           <h1>Spending</h1>
-          <p>Acme Corp organisation &middot; 4 client workspaces</p>
+          <p id="page-subtitle">Acme Corp organisation &middot; 4 client workspaces</p>
         </div>
       </div>
 
@@ -454,13 +454,13 @@
       <div class="tab-panel active" id="panel-caps">
 
         <!-- Org-level cap card -->
-        <div class="org-cap-card">
+        <div class="org-cap-card" id="org-cap-card">
           <div class="org-cap-header">
-            <h3>Organisation monthly cap</h3>
-            <a class="org-cap-link" onclick="openOrgCapModal()">Edit org cap</a>
+            <h3 id="cap-card-title">Organisation monthly cap</h3>
+            <span id="cap-card-action"><a class="org-cap-link" onclick="openOrgCapModal()">Edit org cap</a></span>
           </div>
-          <div class="org-cap-big">$5,000 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ month</span></div>
-          <div class="org-cap-sub">Budget for all client workspaces combined</div>
+          <div class="org-cap-big" id="cap-card-amount">$5,000 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ month</span></div>
+          <div class="org-cap-sub" id="cap-card-sub">Budget for all client workspaces combined</div>
           <!-- Progress bar with pace line -->
           <div class="org-cap-bar-wrap">
             <div class="org-cap-bar-fill" style="width:25.7%"></div>
@@ -477,6 +477,7 @@
         </div>
 
         <!-- Per-subaccount caps table -->
+        <div id="per-workspace-section">
         <div class="section-label" style="margin-bottom:12px">Per-workspace caps</div>
         <div class="card" style="margin-bottom:0">
           <table class="data-table">
@@ -685,8 +686,10 @@
           </table>
         </div>
 
+        </div><!-- /per-workspace-section -->
+
         <!-- Defaults panel -->
-        <div class="defaults-panel">
+        <div class="defaults-panel" id="defaults-panel-section">
           <div class="defaults-panel-left">
             <div class="defaults-item">
               <div class="defaults-label">Default daily cap</div>
@@ -699,6 +702,44 @@
             <div style="font-size:12.5px;color:var(--slate-400)">Applied to new workspaces on creation</div>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="openDefaultsModal()">Edit defaults</button>
+        </div>
+
+        <!-- Workspace-mode single cap card (shown in workspace view) -->
+        <div id="workspace-cap-section" style="display:none;max-width:520px;">
+          <div class="org-cap-card" style="margin-bottom:14px;">
+            <div class="org-cap-header">
+              <h3>Daily cap</h3>
+            </div>
+            <div class="org-cap-big">$50 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ day</span></div>
+            <div class="org-cap-sub">Acme Corp · set by org admin</div>
+            <div class="org-cap-bar-wrap">
+              <div class="org-cap-bar-fill" style="width:19%"></div>
+              <div class="pace-line" style="left:19.4%"></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div class="org-cap-meta">$9.50 used &middot; 19% &middot; <span style="color:var(--emerald-600);">under pace</span></div>
+              <div style="font-size:12px;color:var(--slate-400)">Day 6 of 31</div>
+            </div>
+          </div>
+          <div class="org-cap-card">
+            <div class="org-cap-header">
+              <h3>Monthly cap</h3>
+            </div>
+            <div class="org-cap-big">$1,500 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ month</span></div>
+            <div class="org-cap-sub">Acme Corp · set by org admin</div>
+            <div class="org-cap-bar-wrap">
+              <div class="org-cap-bar-fill" style="width:20.8%"></div>
+              <div class="pace-line" style="left:19.4%"></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div class="org-cap-meta">$312 used &middot; 20.8% &middot; <span class="over-pace">on pace for $1,180 this month</span></div>
+              <div style="font-size:12px;color:var(--slate-400)">Day 6 of 31</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;font-size:12.5px;color:var(--slate-500);">
+            Need a higher cap?
+            <a href="#" style="color:var(--indigo-600);font-weight:500;text-decoration:none;" onclick="showToast('Cap increase request sent to org admin')">Request increase</a>
+          </div>
         </div>
 
       </div>
@@ -1117,10 +1158,51 @@
 
 <script src="_sidebar.js"></script>
 <script>
-/* ── Init sidebar in org mode ──────────────────────────────────── */
+/* ── View detection ─────────────────────────────────────────────── */
+function getActiveView() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('view')) return params.get('view');
+  var storedProfile = localStorage.getItem('prototype.sidebar.mode') || 'org';
+  if (storedProfile === 'workspace') return 'workspace';
+  return 'org';
+}
+
+/* ── Init: mode-aware setup ─────────────────────────────────────── */
 (function() {
-  var storedMode = localStorage.getItem('prototype.sidebar.mode') || 'org';
+  var view = getActiveView();
+  var sidebarMode = (view === 'workspace') ? 'workspace' : 'org';
+  var storedMode = localStorage.getItem('prototype.sidebar.mode') || sidebarMode;
   renderSidebar(storedMode, 'spending.html');
+
+  if (view === 'workspace') {
+    /* ── Workspace view adjustments ─────────────────────────────── */
+    // Topbar: hide Edit org cap, update context label
+    var editBtn = document.getElementById('edit-org-cap-btn');
+    if (editBtn) editBtn.style.display = 'none';
+    var ctx = document.getElementById('topbar-context');
+    if (ctx) ctx.textContent = 'Acme Corp';
+
+    // Page subtitle
+    var sub = document.getElementById('page-subtitle');
+    if (sub) sub.textContent = 'Acme Corp · 1 workspace';
+
+    // Caps tab: hide org-cap-card (org aggregate), hide per-workspace table,
+    // hide defaults panel, show workspace-specific cap cards
+    var orgCapCard = document.getElementById('org-cap-card');
+    if (orgCapCard) orgCapCard.style.display = 'none';
+    var perWs = document.getElementById('per-workspace-section');
+    if (perWs) perWs.style.display = 'none';
+    var defPanel = document.getElementById('defaults-panel-section');
+    if (defPanel) defPanel.style.display = 'none';
+    var wsSection = document.getElementById('workspace-cap-section');
+    if (wsSection) wsSection.style.display = '';
+
+    // Ledger: hide "All workspaces" filter, pre-select Acme Corp
+    var filterSel = document.getElementById('filter-subaccount');
+    if (filterSel) {
+      filterSel.style.display = 'none';
+    }
+  }
 })();
 
 /* ── Tab switching ──────────────────────────────────────────────── */

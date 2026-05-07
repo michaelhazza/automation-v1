@@ -29,7 +29,7 @@
 <link rel="stylesheet" href="_shared.css">
 <style>
   .agent-layout { display: flex; gap: 0; height: calc(100vh - 88px); overflow: hidden; }
-  .agent-content { flex: 1; overflow-y: auto; padding: 24px 28px; }
+  .agent-content { flex: 1; overflow-y: auto; padding: 24px 28px 0 28px; display: flex; flex-direction: column; }
   .test-panel {
     width: 320px; flex-shrink: 0;
     border-left: 1px solid var(--border); background: white;
@@ -63,6 +63,42 @@
   .mode-card input[type=radio] { margin-top: 2px; flex-shrink: 0; }
   .mode-card-label { font-size: 13px; font-weight: 500; color: var(--slate-800); }
   .mode-card-desc { font-size: 11.5px; color: var(--slate-500); margin-top: 1px; }
+
+  /* Personality tab */
+  .personality-trait {
+    padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200); background: white; cursor: pointer;
+    color: var(--slate-500); transition: all 0.12s;
+  }
+  .personality-trait:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+  .personality-trait.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* Sticky form footer */
+  .sticky-form-footer {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid var(--slate-200);
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.04);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 200;
+    flex-shrink: 0;
+  }
+  .sticky-form-footer .footer-delete {
+    margin-left: auto;
+  }
+
+  /* Inline tier label (replaces primary filter chips) */
+  .skill-tier-label {
+    font-size: 10px; color: var(--slate-400); font-weight: 500;
+    letter-spacing: 0.02em; margin-left: 2px;
+  }
 
   /* Decision 3 — filter chips (local copy; shared.css candidate) */
   .conn-chip {
@@ -385,11 +421,7 @@
         <span class="badge badge-green" style="font-size:10px;margin-left:6px;">Active</span>
       </div>
       <div class="topbar-spacer"></div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span style="font-size:12px;color:var(--amber-600);background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:3px 8px;">Unsaved changes</span>
-        <button class="btn btn-sm btn-secondary">Discard</button>
-        <button class="btn btn-sm btn-primary">Save changes</button>
-      </div>
+      <span style="font-size:12px;color:var(--amber-600);background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:3px 8px;">Unsaved changes</span>
       <a href="index.html" class="btn btn-sm btn-secondary" style="margin-left:8px;">&#8592; All prototypes</a>
     </div>
 
@@ -407,6 +439,7 @@
         <div class="tabs" id="agent-tabs" style="margin-bottom:18px;">
           <button class="tab-btn active" onclick="switchAgentTab('configure',this)">Configure</button>
           <button class="tab-btn" onclick="switchAgentTab('behaviour',this)">Behaviour</button>
+          <button class="tab-btn" onclick="switchAgentTab('personality',this)">Personality</button>
           <button class="tab-btn" onclick="switchAgentTab('skills',this)">Skills <span class="tab-count">7</span></button>
           <button class="tab-btn" onclick="switchAgentTab('datasources',this)">Data sources <span class="tab-count">6</span></button>
           <button class="tab-btn" onclick="switchAgentTab('schedule',this)">Schedule</button>
@@ -537,6 +570,88 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
           </div>
         </div><!-- /tab-behaviour -->
 
+        <!-- ── PERSONALITY TAB ──────────────────────────────────── -->
+        <div class="tab-panel" id="tab-personality" style="display:none;max-width:680px;">
+
+          <!-- Personality activated state (default) -->
+          <div id="personality-enabled-state">
+
+            <div class="section-card" style="margin-bottom:14px;">
+              <div class="section-card-header" style="justify-content:space-between;">
+                <div>
+                  <h3>Personality</h3>
+                  <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Gives this agent a distinctive voice across all communications.</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:12px;color:var(--emerald-600);font-weight:600;">Active</span>
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="personality-toggle" checked onchange="togglePersonality(this.checked)" style="accent-color:var(--indigo-600);width:15px;height:15px;">
+                  </label>
+                </div>
+              </div>
+              <div class="section-card-body">
+                <div class="form-field" style="margin-bottom:14px;">
+                  <label class="form-label">Personality description</label>
+                  <textarea class="form-textarea" id="personality-textarea" style="min-height:90px;font-size:13.5px;line-height:1.6;">Direct, confident, mid-Atlantic professional. Skips small talk. Uses concrete numbers when possible. Acknowledges uncertainty rather than guessing. Never oversells.</textarea>
+                  <div style="font-size:11.5px;color:var(--slate-400);margin-top:5px;">Free-form description injected before each run. Keep it under 100 words.</div>
+                </div>
+
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label" style="margin-bottom:8px;">Trait emphasis</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px;" id="personality-traits">
+                    <button class="personality-trait active" data-trait="direct" onclick="toggleTrait(this)">Direct</button>
+                    <button class="personality-trait active" data-trait="confident" onclick="toggleTrait(this)">Confident</button>
+                    <button class="personality-trait" data-trait="warm" onclick="toggleTrait(this)">Warm</button>
+                    <button class="personality-trait active" data-trait="formal" onclick="toggleTrait(this)">Formal</button>
+                    <button class="personality-trait" data-trait="casual" onclick="toggleTrait(this)">Casual</button>
+                    <button class="personality-trait active" data-trait="technical" onclick="toggleTrait(this)">Technical</button>
+                    <button class="personality-trait" data-trait="empathetic" onclick="toggleTrait(this)">Empathetic</button>
+                    <button class="personality-trait" data-trait="concise" onclick="toggleTrait(this)">Concise</button>
+                  </div>
+                  <div style="font-size:11.5px;color:var(--slate-400);margin-top:7px;">Select traits that best describe this agent's communication style.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <div class="section-card-header"><h3>Voice examples</h3></div>
+              <div class="section-card-body">
+                <div style="font-size:12.5px;color:var(--slate-600);line-height:1.6;margin-bottom:12px;">Optional: provide a few example phrases or sentences in this agent's voice. These are injected as few-shot guidance.</div>
+                <textarea class="form-textarea" style="min-height:70px;font-size:13px;font-family:'JetBrains Mono',monospace;">Hi Jordan, quick update: 3 of the 12 prospects responded. Two are warm — I've drafted follow-ups for your review.
+The Q1 pipeline shows 23 active leads at various stages. No blockers to report.</textarea>
+              </div>
+            </div>
+
+          </div><!-- /personality-enabled-state -->
+
+          <!-- Personality disabled state -->
+          <div id="personality-disabled-state" style="display:none;">
+            <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:12px;padding:28px 32px;text-align:center;margin-bottom:16px;">
+              <div style="width:44px;height:44px;border-radius:10px;background:var(--slate-100);border:1px solid var(--slate-200);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--slate-400)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div style="font-size:15px;font-weight:600;color:var(--slate-700);margin-bottom:6px;">Personality is disabled</div>
+              <div style="font-size:13px;color:var(--slate-500);max-width:380px;margin:0 auto 20px;line-height:1.6;">Enable personality to give this agent a distinctive voice across all communications. When active, the personality description is injected at the start of every run.</div>
+              <button class="btn btn-primary" onclick="document.getElementById('personality-toggle-disabled').click()">Enable personality</button>
+              <input type="checkbox" id="personality-toggle-disabled" style="display:none;" onchange="togglePersonality(this.checked)">
+            </div>
+
+            <div class="section-card" style="opacity:0.45;pointer-events:none;">
+              <div class="section-card-header"><h3>Personality description</h3></div>
+              <div class="section-card-body">
+                <textarea class="form-textarea" style="min-height:90px;" disabled>Direct, confident, mid-Atlantic professional. Skips small talk...</textarea>
+                <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px;">
+                  <button class="personality-trait" disabled>Direct</button>
+                  <button class="personality-trait" disabled>Confident</button>
+                  <button class="personality-trait" disabled>Formal</button>
+                  <button class="personality-trait" disabled>Technical</button>
+                </div>
+              </div>
+            </div>
+          </div><!-- /personality-disabled-state -->
+
+        </div><!-- /tab-personality -->
+
         <!-- ── SKILLS TAB ────────────────────────────────────────── -->
         <div class="tab-panel" id="tab-skills">
 
@@ -544,16 +659,31 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
           <div class="section-card" style="margin-bottom:18px;">
             <div class="section-card-header" style="justify-content:space-between;">
               <h3>Enabled skills <span style="font-weight:400;color:var(--slate-400);font-size:12px;">7</span></h3>
-              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong> in <strong style="color:var(--slate-600);">Acme Corp</strong></span>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div class="search-wrap" style="min-width:180px;">
+                  <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="search-box" style="padding-left:28px;font-size:12px;" type="search" placeholder="Search enabled skills...">
+                </div>
+              </div>
+            </div>
+            <!-- Category filter chips -->
+            <div id="enabled-skill-filter-chips" style="padding:8px 14px;border-bottom:1px solid var(--slate-100);display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="conn-chip active" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('all',this)">All <span style="opacity:0.65;">7</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('communication',this)">Communication <span style="opacity:0.65;">3</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('data',this)">Data <span style="opacity:0.65;">2</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('analysis',this)">Analysis <span style="opacity:0.65;">1</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('custom',this)">Custom <span style="opacity:0.65;">2</span></button>
             </div>
             <div class="skill-toggle-list" style="border:none;border-radius:0;">
 
-              <!-- Send email: System -->
-              <div class="skill-toggle-row" id="enabled-row-send-email" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+              <!-- Send email: Communication -->
+              <div class="skill-toggle-row" id="enabled-row-send-email" data-category="communication" onclick="openSkillDrawer()" style="cursor:pointer;">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Send email</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Send email</div>
+                    <span class="skill-tier-label">System</span>
+                  </div>
                   <div class="skill-desc">Gmail · Send outreach, follow-ups, and proposal emails</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
@@ -563,12 +693,14 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
               </div>
 
-              <!-- Read email inbox: System -->
-              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+              <!-- Read email inbox: Communication -->
+              <div class="skill-toggle-row" data-category="communication" onclick="openSkillDrawer()" style="cursor:pointer;">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07"/><path d="M2 6.92v3a2 2 0 002.18 2 19.79 19.79 0 008.63 3.07"/><path d="M22 6.92L12 13.92 2 6.92"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Read email inbox</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Read email inbox</div>
+                    <span class="skill-tier-label">System</span>
+                  </div>
                   <div class="skill-desc">Gmail · Monitor and analyse incoming messages</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
@@ -580,10 +712,12 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
 
               <!-- HubSpot: read contacts: System -->
               <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">HubSpot: read contacts</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">HubSpot: read contacts</div>
+                    <span class="skill-tier-label">System</span>
+                  </div>
                   <div class="skill-desc">HubSpot · Query contact records from CRM</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
@@ -593,12 +727,14 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
               </div>
 
-              <!-- LinkedIn: post message: Org-custom -->
-              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+              <!-- LinkedIn: post message: Communication -->
+              <div class="skill-toggle-row" data-category="communication" onclick="openSkillDrawer()" style="cursor:pointer;">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">LinkedIn: post message</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">LinkedIn: post message</div>
+                    <span class="skill-tier-label">Org</span>
+                  </div>
                   <div class="skill-desc">LinkedIn · Post connection requests and messages</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
@@ -608,12 +744,14 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'org')">&#8942;</button>
               </div>
 
-              <!-- Sentiment analysis: Org-custom -->
-              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+              <!-- Sentiment analysis: Analysis -->
+              <div class="skill-toggle-row" data-category="analysis" onclick="openSkillDrawer()" style="cursor:pointer;">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Sentiment analysis</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Sentiment analysis</div>
+                    <span class="skill-tier-label">Org</span>
+                  </div>
                   <div class="skill-desc">Classifies email and message tone as positive, neutral, or negative</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
@@ -623,13 +761,15 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'org')">&#8942;</button>
               </div>
 
-              <!-- Acme: Outreach scoring rubric: This client -->
-              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+              <!-- Acme: Outreach scoring rubric: Custom -->
+              <div class="skill-toggle-row" data-category="custom" onclick="openSkillDrawer()" style="cursor:pointer;">
                 <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Acme: Outreach scoring rubric</div>
-                  <div class="skill-desc">Custom · Score lead quality using Acme's proprietary rubric</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Acme: Outreach scoring rubric</div>
+                    <span class="skill-tier-label">Custom</span>
+                  </div>
+                  <div class="skill-desc">Score lead quality using Acme's proprietary rubric</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
                   <input type="checkbox" class="toggle-input" id="tog-en-rubric" checked>
@@ -638,13 +778,15 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
 
-              <!-- Acme: Lead qualification: This client -->
-              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
-                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+              <!-- Acme: Lead qualification: Custom -->
+              <div class="skill-toggle-row" data-category="custom" onclick="openSkillDrawer()" style="cursor:pointer;">
                 <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="skill-name">Acme: Lead qualification</div>
-                  <div class="skill-desc">Custom · Qualify inbound leads against Acme ICP criteria</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Acme: Lead qualification</div>
+                    <span class="skill-tier-label">Custom</span>
+                  </div>
+                  <div class="skill-desc">Qualify inbound leads against Acme ICP criteria</div>
                 </div>
                 <div class="toggle-wrap" onclick="event.stopPropagation()">
                   <input type="checkbox" class="toggle-input" id="tog-en-leadq" checked>
@@ -653,13 +795,13 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
               </div>
 
-              <!-- Gmail: send email -- Active but dependency broken (Salesforce token expired) -->
-              <div class="skill-toggle-row skill-row-broken" data-tip="Gmail integration disconnected. Re-connect at Connections and Integrations." style="cursor:default;" onclick="event.stopPropagation()">
-                <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+              <!-- Gmail: send email -- Active but dependency broken -->
+              <div class="skill-toggle-row skill-row-broken" data-category="communication" data-tip="Gmail integration disconnected. Re-connect at Connections." style="cursor:default;" onclick="event.stopPropagation()">
                 <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
                 <div style="flex:1;min-width:0;">
                   <div style="display:flex;align-items:center;gap:6px;">
                     <div class="skill-name">Gmail: send email</div>
+                    <span class="skill-tier-label">System</span>
                     <span class="chip-broken">
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:#d97706;vertical-align:-1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                       Disconnected
@@ -682,7 +824,7 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
             <div class="section-card-header">
               <div>
                 <h3>Add skills</h3>
-                <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Search across all 247 available skills</div>
+                <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Search across 247 available skills</div>
               </div>
               <button class="btn btn-sm btn-primary" onclick="openSkillCreator()">+ Add custom skill</button>
             </div>
@@ -694,27 +836,27 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                   <input class="search-box" id="skill-library-search" style="padding-left:28px;font-size:13px;" type="search" placeholder="Search skills by name, action, or category..." oninput="filterSkillLibrary(this.value)">
                 </div>
               </div>
+              <!-- Functional category chips (not tier chips) -->
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;" id="skill-lib-filter-chips">
                 <button class="conn-chip active" onclick="setSkillLibFilter('all',this)">All <span style="opacity:0.65;">247</span></button>
-                <button class="conn-chip" onclick="setSkillLibFilter('system',this)">System <span style="opacity:0.65;">180</span></button>
-                <button class="conn-chip" onclick="setSkillLibFilter('org',this)">Organisation <span style="opacity:0.65;">15</span></button>
-                <button class="conn-chip" onclick="setSkillLibFilter('client',this)">This client <span style="opacity:0.65;">3</span></button>
-                <button class="conn-chip" onclick="setSkillLibFilter('custom',this)">Custom only <span style="opacity:0.65;">18</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('communication',this)">Communication <span style="opacity:0.65;">82</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('data',this)">Data <span style="opacity:0.65;">95</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('analysis',this)">Analysis <span style="opacity:0.65;">52</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('custom',this)">Custom <span style="opacity:0.65;">18</span></button>
               </div>
 
-              <!-- System skills group -->
+              <!-- Communication skills group -->
               <div class="skill-group-header" id="lib-grp-system-header" onclick="toggleSkillGroup('lib-grp-system',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;margin-top:0;">
                 <span class="skill-group-label">
                   <span class="skill-group-caret" id="caret-lib-grp-system">&#9660;</span>
-                  System <span style="font-weight:500;color:var(--slate-500);">180 skills</span>
+                  Communication <span style="font-weight:500;color:var(--slate-500);">82 skills</span>
                 </span>
-                <span class="tier-chip tier-system">Built-in</span>
               </div>
               <div id="lib-grp-system" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:10px;">
 
                 <!-- Twilio: send SMS -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="twilio send sms">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="twilio send sms">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Twilio: send SMS</div>
@@ -724,8 +866,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Zoom: create meeting -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="zoom create meeting">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="zoom create meeting">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Zoom: create meeting</div>
@@ -735,8 +877,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Calendly: list events -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="calendly list events">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="calendly list events">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Calendly: list events</div>
@@ -746,8 +888,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Airtable: append row -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="airtable append row">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="airtable append row">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Airtable: append row</div>
@@ -757,8 +899,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Notion: append page -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="notion append page">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="notion append page">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Notion: append page</div>
@@ -768,8 +910,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Stripe: create payment -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="stripe create payment">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="stripe create payment">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Stripe: create payment</div>
@@ -779,8 +921,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Stripe: list customers -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="stripe list customers">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="stripe list customers">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Stripe: list customers</div>
@@ -790,8 +932,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Google Calendar: list events -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="google calendar list events">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="google calendar list events">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Google Calendar: list events</div>
@@ -801,8 +943,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Google Sheets: append row -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="google sheets append row">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="google sheets append row">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Google Sheets: append row</div>
@@ -812,8 +954,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Asana: create task -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="asana create task">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="asana create task">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Asana: create task</div>
@@ -823,8 +965,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Linear: create issue -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="linear create issue">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="linear create issue">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Linear: create issue</div>
@@ -834,8 +976,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- GitHub: create PR -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="github create pull request pr">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="github create pull request pr">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">GitHub: create PR</div>
@@ -845,8 +987,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Discord: send message -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="discord send message">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="discord send message">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Discord: send message</div>
@@ -856,8 +998,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Webhook: POST -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="webhook post http request">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="webhook post http request">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Webhook: POST</div>
@@ -867,8 +1009,8 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Database: query -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-name="database query sql read">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="database query sql read">
+                  
                   <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div class="skill-name">Database: query</div>
@@ -878,8 +1020,7 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- HubSpot: create deal -- Locked (dependency missing) -->
-                <div class="skill-toggle-row skill-row-locked lib-skill-row" data-tier="system" data-name="hubspot create deal" data-tip="Requires HubSpot integration. Connect HubSpot at Connections to enable this skill." style="cursor:not-allowed;">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row skill-row-locked lib-skill-row" data-tier="system" data-category="data" data-name="hubspot create deal" data-tip="Requires HubSpot integration. Connect HubSpot at Connections to enable this skill." style="cursor:not-allowed;">
                   <div class="skill-icon" style="background:var(--slate-50);border-color:var(--slate-200);color:var(--slate-400);">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                   </div>
@@ -894,8 +1035,7 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
 
                 <!-- Gmail: delete emails -- Destructive skill -->
-                <div class="skill-toggle-row skill-row-destructive lib-skill-row" data-tier="system" data-name="gmail delete emails destructive" data-tip="Destructive actions are disabled by default. Click to enable for this agent.">
-                  <span class="tier-chip tier-system" style="flex-shrink:0;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> System</span>
+                <div class="skill-toggle-row skill-row-destructive lib-skill-row" data-tier="system" data-category="communication" data-name="gmail delete emails destructive" data-tip="Destructive actions are disabled by default. Click to enable for this agent.">
                   <div class="skill-icon" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg></div>
                   <div style="flex:1;min-width:0;">
                     <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
@@ -916,103 +1056,127 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
                 </div>
               </div><!-- /lib-grp-system -->
 
-              <!-- Organisation skills group -->
+              </div><!-- /lib-grp-system show-all -->
+
+              <!-- Data skills group -->
               <div class="skill-group-header" id="lib-grp-org-header" onclick="toggleSkillGroup('lib-grp-org',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;">
                 <span class="skill-group-label">
                   <span class="skill-group-caret" id="caret-lib-grp-org">&#9660;</span>
-                  Organisation <span style="font-weight:500;color:var(--slate-500);">15 skills</span>
+                  Data <span style="font-weight:500;color:var(--slate-500);">95 skills</span>
                 </span>
-                <span class="tier-chip tier-org">Org-custom</span>
               </div>
               <div id="lib-grp-org" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:10px;">
 
-                <!-- Acme: Compliance prefilter -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme compliance prefilter">
-                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
-                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                <!-- HubSpot: create contact -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="hubspot create contact">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
                   <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Compliance prefilter</div>
-                    <div class="skill-desc">Custom · Screen content against Acme's compliance requirements</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">HubSpot: create contact</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">HubSpot · Create new CRM contact records</div>
                   </div>
-                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Compliance prefilter','org')">Add</button>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'HubSpot: create contact','system')">Add</button>
                 </div>
 
-                <!-- Acme: Internal escalation -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme internal escalation">
-                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
-                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 11 21 7 17 3"/><line x1="21" y1="7" x2="9" y2="7"/><polyline points="7 21 3 17 7 13"/><line x1="15" y1="17" x2="3" y2="17"/></svg></div>
+                <!-- Salesforce: read records -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-category="data" data-name="salesforce read records">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
                   <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Internal escalation</div>
-                    <div class="skill-desc">Custom · Route issues to the correct internal team</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Salesforce: read records</div>
+                      <span class="skill-tier-label">Org</span>
+                    </div>
+                    <div class="skill-desc">Salesforce · Query account, opportunity, and lead records</div>
                   </div>
-                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Internal escalation','org')">Add</button>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Salesforce: read records','org')">Add</button>
                 </div>
 
-                <!-- Acme: Approval channel routing -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme approval channel routing">
-                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
-                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+                <!-- Stripe: read payments -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="stripe read payments">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
                   <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Approval channel routing</div>
-                    <div class="skill-desc">Custom · Send approval requests to the right Slack channel</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Stripe: read payments</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">Stripe · Query payment history and subscription data</div>
                   </div>
-                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Approval channel routing','org')">Add</button>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Stripe: read payments','system')">Add</button>
                 </div>
 
                 <!-- Acme: Vendor lookup -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme vendor lookup">
-                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-category="data" data-name="acme vendor lookup">
                   <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
                   <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Vendor lookup</div>
-                    <div class="skill-desc">Custom · Query the Acme approved vendor registry</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Acme: Vendor lookup</div>
+                      <span class="skill-tier-label">Custom</span>
+                    </div>
+                    <div class="skill-desc">Query the Acme approved vendor registry</div>
                   </div>
                   <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Vendor lookup','org')">Add</button>
                 </div>
 
-                <!-- Acme: Document signing -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-name="acme document signing">
-                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org</span>
-                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
-                  <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Document signing</div>
-                    <div class="skill-desc">Custom · Trigger e-signature workflows via DocuSign</div>
-                  </div>
-                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Document signing','org')">Add</button>
+                <!-- Show all link -->
+                <div style="padding:10px 14px;text-align:center;">
+                  <a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Show all 95 data skills</a>
                 </div>
 
               </div><!-- /lib-grp-org -->
 
-              <!-- This client skills group -->
+              <!-- Analysis skills group -->
               <div class="skill-group-header" id="lib-grp-client-header" onclick="toggleSkillGroup('lib-grp-client',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;">
                 <span class="skill-group-label">
                   <span class="skill-group-caret" id="caret-lib-grp-client">&#9660;</span>
-                  This client <span style="font-weight:500;color:var(--slate-500);">2 available (3 already enabled)</span>
+                  Analysis <span style="font-weight:500;color:var(--slate-500);">52 skills</span>
                 </span>
-                <span class="tier-chip tier-subaccount">Acme Corp</span>
               </div>
               <div id="lib-grp-client" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:4px;">
 
-                <!-- Acme: Pricing approval logic -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="client" data-name="acme pricing approval logic">
-                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
-                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                <!-- Extract entities -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="analysis" data-name="extract entities">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg></div>
                   <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Pricing approval logic</div>
-                    <div class="skill-desc">Custom · Validate deal pricing against Acme's approval matrix</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Extract entities</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">Identify people, companies, dates and facts in text</div>
                   </div>
-                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Pricing approval logic','client')">Add</button>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Extract entities','system')">Add</button>
                 </div>
 
-                <!-- Acme: Demo scheduler -->
-                <div class="skill-toggle-row lib-skill-row" data-tier="client" data-name="acme demo scheduler">
-                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
-                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                <!-- Summarise content -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="analysis" data-name="summarise content">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="12" y2="18"/></svg></div>
                   <div style="flex:1;min-width:0;">
-                    <div class="skill-name">Acme: Demo scheduler</div>
-                    <div class="skill-desc">Custom · Book product demos using Acme's scheduling rules</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Summarise content</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">Generate concise summaries of documents and conversations</div>
                   </div>
-                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Demo scheduler','client')">Add</button>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Summarise content','system')">Add</button>
+                </div>
+
+                <!-- Acme: Deal stage mapping -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="client" data-category="analysis" data-name="acme deal stage mapping">
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Acme: Deal stage mapping</div>
+                      <span class="skill-tier-label">Custom</span>
+                    </div>
+                    <div class="skill-desc">Map deal activity to Acme's pipeline stage definitions</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Deal stage mapping','client')">Add</button>
+                </div>
+
+                <!-- Show all link -->
+                <div style="padding:10px 14px;text-align:center;">
+                  <a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Show all 52 analysis skills</a>
                 </div>
 
               </div><!-- /lib-grp-client -->
@@ -1424,6 +1588,13 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
           </div>
         </div><!-- /tab-runs -->
 
+      <!-- Sticky form footer -->
+      <div class="sticky-form-footer">
+        <button class="btn btn-secondary" onclick="showToast('Changes discarded')">Discard</button>
+        <button class="btn btn-primary" onclick="showToast('Agent saved')">Save changes</button>
+        <button class="btn btn-secondary footer-delete" style="color:var(--red-500);border-color:var(--red-200);" onclick="showToast('Delete confirmation required')">Delete agent</button>
+      </div>
+
       </div><!-- /agent-content -->
 
       <!-- Test panel -->
@@ -1810,8 +1981,23 @@ Constraints: Escalate to human review for deals over $20k before sending proposa
 function switchAgentTab(id, btn) {
   document.querySelectorAll('#agent-tabs .tab-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('tab-' + id).classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.remove('active');
+    if (p.id !== 'tab-' + id) p.style.display = 'none';
+  });
+  var target = document.getElementById('tab-' + id);
+  if (target) { target.classList.add('active'); target.style.display = ''; }
+}
+function togglePersonality(checked) {
+  document.getElementById('personality-enabled-state').style.display = checked ? '' : 'none';
+  document.getElementById('personality-disabled-state').style.display = checked ? 'none' : '';
+  var toggle = document.getElementById('personality-toggle');
+  if (toggle) toggle.checked = checked;
+  var toggleDisabled = document.getElementById('personality-toggle-disabled');
+  if (toggleDisabled) toggleDisabled.checked = checked;
+}
+function toggleTrait(btn) {
+  btn.classList.toggle('active');
 }
 function togglePromptHistory() {
   var body = document.getElementById('prompt-history-body');
@@ -1873,23 +2059,36 @@ function filterSkillLibrary(query) {
     row.style.display = (!q || name.indexOf(q) > -1) ? '' : 'none';
   });
 }
-function setSkillLibFilter(tier, el) {
+function setSkillLibFilter(cat, el) {
   document.querySelectorAll('#skill-lib-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
   el.classList.add('active');
   document.querySelectorAll('.lib-skill-row').forEach(function(row) {
-    if (tier === 'all') {
+    if (cat === 'all') {
       row.style.display = '';
     } else {
-      row.style.display = (row.getAttribute('data-tier') === tier) ? '' : 'none';
+      row.style.display = (row.getAttribute('data-category') === cat) ? '' : 'none';
     }
   });
-  // Show/hide group headers based on filter
+  // Show/hide group headers based on category filter
+  var groupMap = { 'system': 'communication', 'org': 'data', 'client': 'analysis' };
   ['system','org','client'].forEach(function(g) {
     var hdr = document.getElementById('lib-grp-' + g + '-header');
     var body = document.getElementById('lib-grp-' + g);
-    var show = (tier === 'all' || tier === g || tier === 'custom');
+    var grpCat = groupMap[g];
+    var show = (cat === 'all' || cat === grpCat || cat === 'custom');
     if (hdr) hdr.style.display = show ? '' : 'none';
     if (body) body.style.display = show ? '' : 'none';
+  });
+}
+function setEnabledCatFilter(cat, el) {
+  document.querySelectorAll('#enabled-skill-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.skill-toggle-list .skill-toggle-row').forEach(function(row) {
+    if (cat === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.getAttribute('data-category') === cat) ? '' : 'none';
+    }
   });
 }
 function addSkillToEnabled(btn, name, tier) {

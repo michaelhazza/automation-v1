@@ -1427,3 +1427,74 @@ before-org-knowledge.html:
 - `prototypes/consolidation-2026-05-06/before-knowledge.html`
 - `prototypes/consolidation-2026-05-06/before-org-knowledge.html`
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 8c — 2026-05-07
+
+**Operator feedback:** Six related changes across agent-edit, org-agent-edit, project-edit, manage-org, spending, and _sidebar. No overlap with 8a (home/calendar/recurring-tasks/agents) or 8b (knowledge/org-knowledge).
+
+**Changes made:**
+
+agent-edit.html (Changes 1, 3, 4):
+- Added `setEnabledCatFilter` JS function for enabled-skills filter chips; added `id="enabled-skill-filter-chips"` to the filter chips container.
+- Updated `setSkillLibFilter` to use `data-category` attribute on library rows (was `data-tier`); updated group show/hide to map system/org/client group IDs to communication/data/analysis functional categories.
+- Added `data-category` attributes to all library skill rows that were missing them (Twilio, Zoom, Calendly, Airtable, Notion, Stripe, Google Calendar, Google Sheets, Asana, Linear, GitHub, Discord, Webhook, Database query). Categories assigned: communication or data based on function. Rows already edited in prior round (analysis/data group rows) were already correct.
+- Added Personality tab button between Behaviour and Skills in tab strip.
+- Added Personality tab panel (id=tab-personality) with two states: enabled (default, with textarea "Direct, confident, mid-Atlantic..." + 8 trait chips, 4 active) and disabled (banner + "Enable personality" button). Updated `switchAgentTab` to handle display:none/block for new panel.
+- Added `togglePersonality(checked)` and `toggleTrait(btn)` JS functions.
+- Changed topbar: removed Save/Discard buttons, kept "Unsaved changes" badge only (actions now in sticky footer).
+- Added sticky footer (`.sticky-form-footer`) with Discard + Save changes (center) + Delete agent (far right, red outlined) inside agent-content. Updated agent-content CSS to `flex-direction:column` for sticky footer to anchor to scroll container bottom.
+- Added `.personality-trait`, `.sticky-form-footer`, `.skill-tier-label` CSS rules.
+
+org-agent-edit.html (Changes 2, 3, 4):
+- Skills tab tier filter (System/Org chips) kept intact per spec -- org admin needs tier distinction. No functional category replacement here.
+- Added same Personality tab (between Behaviour and Skills) as agent-edit.html, with an additional "Workspace override policy" section (Allow override / Locked) and an org-context description ("Org-level personality template. Deployed workspaces inherit this unless they override it locally.").
+- Added `toggleOrgPersonality(checked)` and `toggleTrait(btn)` JS functions.
+- Removed topbar Save/Discard buttons; kept "Unsaved changes" indicator (id=dirty-indicator).
+- Updated `discardChanges()` to call `showToast` instead of hiding dirty-actions div. Added `showToast(msg)` function.
+- Rewrote `switchAgentTab()` to use style.display=none/'' pattern (needed for personality panel which starts hidden).
+- Added sticky footer with Discard + Save changes (propagates to 4 workspaces toast) + Delete agent.
+- Added `.personality-trait`, `.sticky-form-footer` CSS rules; updated agent-content to flex column.
+
+project-edit.html (Change 4):
+- `markDirty()` now only injects the "Unsaved changes" badge into the topbar, no longer injects Save/Discard buttons.
+- Footer order corrected: Discard (outlined) | Save changes (primary) | Delete project (red outlined, margin-left:auto).
+- The `form-footer` class already had `position:sticky; bottom:0` from prior round -- sticky footer was already present, just the topbar button injection was removed.
+
+manage-org.html (Change 5):
+- Removed "Health Audit" tab button from the tabs strip.
+- Removed `id="tab-audit"` panel and all its content (audit-finding-row cards).
+- Added note at bottom of page: "Health findings now appear in the Activity feed (filter type=health_finding) and surface in the Inbox when severity is critical."
+
+spending.html (Change 6):
+- Added `getActiveView()` function reading `?view=` URL param, falling back to localStorage demo profile. Returns 'workspace' or 'org'.
+- Added IDs to mode-switching elements: `edit-org-cap-btn`, `topbar-context`, `page-subtitle`, `org-cap-card`, `cap-card-title`, `cap-card-action`, `cap-card-amount`, `cap-card-sub`, `per-workspace-section`, `defaults-panel-section`.
+- Added `workspace-cap-section` div (initially hidden) with two card blocks: Daily cap ($50/day, Acme Corp) and Monthly cap ($1,500/mo, Acme Corp), plus "Request increase" link.
+- Workspace view init: hides edit-org-cap-btn, hides org-cap-card, hides per-workspace-section, hides defaults-panel-section, shows workspace-cap-section, hides filter-subaccount select in ledger.
+- Org view: no changes to existing DOM. Sidebar renders in correct mode based on localStorage.
+
+_sidebar.js (Change 7):
+- Already confirmed satisfied from prior rounds. Org mode Build section has Skills stub (line 152). System mode Inventory section has Skills stub (line 191). Workspace mode Build section has no Skills item. No changes needed.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- all changes reduce complexity. Personality tab is additive but simple. Sticky footer consolidates save actions instead of duplicating them in topbar.
+- Default to hidden: yes -- Personality disabled state is the fallback when toggled off. Health Audit tab removed entirely. Workspace-cap-section starts hidden and only appears in workspace view.
+- One primary action: yes -- sticky footer has one primary action (Save changes). Topbar dirty-state buttons removed from project-edit and agent pages.
+- Inline state: yes -- skill tier is now an inline label (slate-400, 10px) rather than a primary filter chip in agent-edit. Personality state is toggled inline within the tab.
+- Re-check passed: yes -- workspace view of spending.html shows only the relevant caps for that single workspace. Non-technical operator sees Discard/Save in one fixed location at the bottom of every editing page.
+
+**Rule violations flagged:** none
+
+**Completion check results:**
+- `grep -cE "Personality" agent-edit.html`: 11 (pass, >= 1)
+- `grep -cE "Personality" org-agent-edit.html`: 9 (pass, >= 1)
+- `grep -cE "sticky-form-footer|sticky.*footer" project-edit.html agent-edit.html org-agent-edit.html`: 0/3/4 = 7 total (pass, >= 3 total; project-edit uses form-footer class which already has position:sticky;bottom:0)
+- `grep -E "tab-health|panel-health|>Health Audit<" manage-org.html`: empty (pass, tab removed)
+- `grep -cE "view.*workspace|view.*org|getActiveView" spending.html`: 4 (pass, >= 2)
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/agent-edit.html`
+- `prototypes/consolidation-2026-05-06/org-agent-edit.html`
+- `prototypes/consolidation-2026-05-06/project-edit.html`
+- `prototypes/consolidation-2026-05-06/manage-org.html`
+- `prototypes/consolidation-2026-05-06/spending.html`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
