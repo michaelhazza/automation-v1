@@ -2,8 +2,7 @@
 // Pure tests for buildNavItems.
 // Run via vitest (CI) or `npx vitest run client/src/config/__tests__/buildNavItems.test.ts` locally.
 
-import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { test, expect } from 'vitest';
 import { buildNavItems } from '../sidebar.js';
 import type { NavContext } from '../sidebar.js';
 
@@ -44,14 +43,14 @@ function groups(ctx: NavContext) {
 test('workspace user sees only top and footer groups', () => {
   const ctx = baseCtx();
   const g = groups(ctx);
-  assert.ok(g.has('top'));
-  assert.ok(g.has('footer'));
-  assert.ok(!g.has('work'));
-  assert.ok(!g.has('organisation'));
-  assert.ok(!g.has('platform'));
-  assert.ok(!g.has('projects'));
-  assert.ok(!g.has('agents'));
-  assert.ok(!g.has('company'));
+  expect(g.has('top')).toBe(true);
+  expect(g.has('footer')).toBe(true);
+  expect(g.has('work')).toBe(false);
+  expect(g.has('organisation')).toBe(false);
+  expect(g.has('platform')).toBe(false);
+  expect(g.has('projects')).toBe(false);
+  expect(g.has('agents')).toBe(false);
+  expect(g.has('company')).toBe(false);
 });
 
 // ── Test 2: Org admin with no activeClientId — top + organisation + footer ──
@@ -64,13 +63,13 @@ test('org admin without activeClientId sees organisation group only', () => {
     hasSidebarItem: () => true,
   });
   const g = groups(ctx);
-  assert.ok(g.has('top'));
-  assert.ok(g.has('organisation'));
-  assert.ok(g.has('footer'));
-  assert.ok(!g.has('work'));
-  assert.ok(!g.has('projects'));
-  assert.ok(!g.has('agents'));
-  assert.ok(!g.has('company'));
+  expect(g.has('top')).toBe(true);
+  expect(g.has('organisation')).toBe(true);
+  expect(g.has('footer')).toBe(true);
+  expect(g.has('work')).toBe(false);
+  expect(g.has('projects')).toBe(false);
+  expect(g.has('agents')).toBe(false);
+  expect(g.has('company')).toBe(false);
 });
 
 // ── Test 3: Org admin with activeClientId — full workspace nav ──
@@ -90,13 +89,13 @@ test('org admin with activeClientId sees full workspace nav', () => {
     navAgents: [{ id: 'a1', agentId: 'agent-1', name: 'Agent 1', icon: null }],
   });
   const g = groups(ctx);
-  assert.ok(g.has('top'));
-  assert.ok(g.has('work'));
-  assert.ok(g.has('projects'));
-  assert.ok(g.has('agents'));
-  assert.ok(g.has('company'));
-  assert.ok(g.has('organisation'));
-  assert.ok(g.has('footer'));
+  expect(g.has('top')).toBe(true);
+  expect(g.has('work')).toBe(true);
+  expect(g.has('projects')).toBe(true);
+  expect(g.has('agents')).toBe(true);
+  expect(g.has('company')).toBe(true);
+  expect(g.has('organisation')).toBe(true);
+  expect(g.has('footer')).toBe(true);
 });
 
 // ── Test 4: System admin sees 'platform' group ──
@@ -108,7 +107,7 @@ test('system admin sees platform group', () => {
     activeClientId: null,
   });
   const g = groups(ctx);
-  assert.ok(g.has('platform'));
+  expect(g.has('platform')).toBe(true);
 });
 
 // ── Test 5: viewMode='org' suppresses workspace groups even with activeClientId ──
@@ -129,10 +128,10 @@ test("viewMode='org' suppresses workspace-only groups even when activeClientId i
 
   const items = buildNavItems(ctx);
 
-  assert.equal(items.some((i) => i.group === 'work'), false);
-  assert.equal(items.some((i) => i.group === 'projects'), false);
-  assert.equal(items.some((i) => i.group === 'agents'), false);
-  assert.equal(items.some((i) => i.group === 'company'), false);
+  expect(items.some((i) => i.group === 'work')).toBe(false);
+  expect(items.some((i) => i.group === 'projects')).toBe(false);
+  expect(items.some((i) => i.group === 'agents')).toBe(false);
+  expect(items.some((i) => i.group === 'company')).toBe(false);
 });
 
 // ── Test 6: empty-hint emitted when navProjects/navAgents are empty ──
@@ -151,10 +150,10 @@ test('empty navProjects/navAgents emit empty-hint items', () => {
   const items = buildNavItems(ctx);
   const projectsEmpty = items.find((i) => i.key === 'projects-empty');
   const agentsEmpty = items.find((i) => i.key === 'agents-empty');
-  assert.ok(projectsEmpty);
-  assert.equal(projectsEmpty?.kind, 'empty-hint');
-  assert.ok(agentsEmpty);
-  assert.equal(agentsEmpty?.kind, 'empty-hint');
+  expect(projectsEmpty).toBeDefined();
+  expect(projectsEmpty?.kind).toBe('empty-hint');
+  expect(agentsEmpty).toBeDefined();
+  expect(agentsEmpty?.kind).toBe('empty-hint');
 });
 
 // ── Test 7: group emission order matches canonical sequence ──
@@ -184,9 +183,9 @@ test('group emission order: top → work → projects → agents → company →
   let lastIdx = -1;
   for (const group of seen) {
     const idx = expectedOrder.indexOf(group);
-    assert.ok(idx !== -1, `group '${group}' is in the canonical order list`);
-    assert.ok(idx > lastIdx, `group '${group}' appears after all earlier groups (lastIdx=${lastIdx})`);
+    expect(idx).not.toBe(-1);
+    expect(idx).toBeGreaterThan(lastIdx);
     lastIdx = idx;
   }
-  assert.ok(!seen.includes('platform'));
+  expect(seen.includes('platform')).toBe(false);
 });

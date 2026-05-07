@@ -8,8 +8,7 @@
  *   - isLegalTransition: every cell of the spec §4.6 transition table
  */
 
-import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { test, expect } from 'vitest';
 import {
   deriveViewMode,
   deriveAvailableModes,
@@ -45,22 +44,20 @@ function systemAdminNoOverride(): ViewModeContext {
 // deriveViewMode
 // ---------------------------------------------------------------------------
 
-console.log('\nderiveViewMode');
-
 test('workspace user (no override, no orgAdmin, hasActiveClient) → workspace', () => {
-  assert.equal(deriveViewMode(workspaceUser()), 'workspace');
+  expect(deriveViewMode(workspaceUser())).toBe('workspace');
 });
 
 test('org admin with no active client → org', () => {
-  assert.equal(deriveViewMode(orgAdminNoClient()), 'org');
+  expect(deriveViewMode(orgAdminNoClient())).toBe('org');
 });
 
 test('org admin with active client → workspace', () => {
-  assert.equal(deriveViewMode(orgAdminWithClient()), 'workspace');
+  expect(deriveViewMode(orgAdminWithClient())).toBe('workspace');
 });
 
 test('system admin with override active → system', () => {
-  assert.equal(deriveViewMode(systemAdminWithOverride()), 'system');
+  expect(deriveViewMode(systemAdminWithOverride())).toBe('system');
 });
 
 test('stale override flag without isSystemAdmin → workspace (no inconsistent system mode)', () => {
@@ -73,7 +70,7 @@ test('stale override flag without isSystemAdmin → workspace (no inconsistent s
     isOrgAdmin: true,
     isSystemAdmin: false,
   };
-  assert.equal(deriveViewMode(downgraded), 'workspace');
+  expect(deriveViewMode(downgraded)).toBe('workspace');
 });
 
 test('stale override flag without isSystemAdmin and no client → org (org admin path)', () => {
@@ -83,25 +80,23 @@ test('stale override flag without isSystemAdmin and no client → org (org admin
     isOrgAdmin: true,
     isSystemAdmin: false,
   };
-  assert.equal(deriveViewMode(downgraded), 'org');
+  expect(deriveViewMode(downgraded)).toBe('org');
 });
 
 // ---------------------------------------------------------------------------
 // deriveAvailableModes
 // ---------------------------------------------------------------------------
 
-console.log('\nderiveAvailableModes');
-
 test('workspace-only user → [workspace]', () => {
-  assert.deepEqual(deriveAvailableModes(workspaceUser()), ['workspace']);
+  expect(deriveAvailableModes(workspaceUser())).toEqual(['workspace']);
 });
 
 test('org admin (not system admin) → [workspace, org]', () => {
-  assert.deepEqual(deriveAvailableModes(orgAdminNoClient()), ['workspace', 'org']);
+  expect(deriveAvailableModes(orgAdminNoClient())).toEqual(['workspace', 'org']);
 });
 
 test('system admin → [workspace, org, system]', () => {
-  assert.deepEqual(deriveAvailableModes(systemAdminWithOverride()), ['workspace', 'org', 'system']);
+  expect(deriveAvailableModes(systemAdminWithOverride())).toEqual(['workspace', 'org', 'system']);
 });
 
 // ---------------------------------------------------------------------------
@@ -111,84 +106,82 @@ test('system admin → [workspace, org, system]', () => {
 // plus idempotent same-to-same transitions.
 // ---------------------------------------------------------------------------
 
-console.log('\nisLegalTransition');
-
 // ── Idempotent same-to-same ──────────────────────────────────────────────────
 
 test('workspace → workspace (idempotent) → true regardless of context', () => {
-  assert.equal(isLegalTransition('workspace', 'workspace', workspaceUser()), true);
-  assert.equal(isLegalTransition('workspace', 'workspace', orgAdminNoClient()), true);
+  expect(isLegalTransition('workspace', 'workspace', workspaceUser())).toBe(true);
+  expect(isLegalTransition('workspace', 'workspace', orgAdminNoClient())).toBe(true);
 });
 
 test('org → org (idempotent) → true', () => {
-  assert.equal(isLegalTransition('org', 'org', orgAdminNoClient()), true);
+  expect(isLegalTransition('org', 'org', orgAdminNoClient())).toBe(true);
 });
 
 test('system → system (idempotent) → true', () => {
-  assert.equal(isLegalTransition('system', 'system', systemAdminWithOverride()), true);
+  expect(isLegalTransition('system', 'system', systemAdminWithOverride())).toBe(true);
 });
 
 // ── setViewMode('org') ───────────────────────────────────────────────────────
 
 test('workspace → org: org admin → true', () => {
-  assert.equal(isLegalTransition('workspace', 'org', orgAdminWithClient()), true);
+  expect(isLegalTransition('workspace', 'org', orgAdminWithClient())).toBe(true);
 });
 
 test('org → org: org admin (idempotent, covered above, explicit check) → true', () => {
-  assert.equal(isLegalTransition('org', 'org', orgAdminNoClient()), true);
+  expect(isLegalTransition('org', 'org', orgAdminNoClient())).toBe(true);
 });
 
 test('system → org: org admin → true', () => {
-  assert.equal(isLegalTransition('system', 'org', systemAdminNoOverride()), true);
+  expect(isLegalTransition('system', 'org', systemAdminNoOverride())).toBe(true);
 });
 
 test('workspace → org: workspace-only user → false', () => {
-  assert.equal(isLegalTransition('workspace', 'org', workspaceUser()), false);
+  expect(isLegalTransition('workspace', 'org', workspaceUser())).toBe(false);
 });
 
 test('org → org: workspace-only user → false (idempotent overrides: same-to-same always true)', () => {
   // same-to-same is always legal even if user would not normally be allowed in 'org'
-  assert.equal(isLegalTransition('org', 'org', workspaceUser()), true);
+  expect(isLegalTransition('org', 'org', workspaceUser())).toBe(true);
 });
 
 // ── setViewMode('workspace') — has activeClient → true ──────────────────────
 
 test('org → workspace: has active client → true', () => {
-  assert.equal(isLegalTransition('org', 'workspace', orgAdminWithClient()), true);
+  expect(isLegalTransition('org', 'workspace', orgAdminWithClient())).toBe(true);
 });
 
 test('system → workspace: has active client → true', () => {
-  assert.equal(isLegalTransition('system', 'workspace', systemAdminNoOverride()), true);
+  expect(isLegalTransition('system', 'workspace', systemAdminNoOverride())).toBe(true);
 });
 
 // ── setViewMode('workspace') — no activeClient → false ──────────────────────
 
 test('org → workspace: no active client → false', () => {
-  assert.equal(isLegalTransition('org', 'workspace', orgAdminNoClient()), false);
+  expect(isLegalTransition('org', 'workspace', orgAdminNoClient())).toBe(false);
 });
 
 test('system → workspace: no active client → false', () => {
-  assert.equal(isLegalTransition('system', 'workspace', systemAdminWithOverride()), false);
+  expect(isLegalTransition('system', 'workspace', systemAdminWithOverride())).toBe(false);
 });
 
 // ── setViewMode('system') — has system_admin → true ─────────────────────────
 
 test('workspace → system: system admin → true', () => {
-  assert.equal(isLegalTransition('workspace', 'system', systemAdminNoOverride()), true);
+  expect(isLegalTransition('workspace', 'system', systemAdminNoOverride())).toBe(true);
 });
 
 test('org → system: system admin → true', () => {
-  assert.equal(isLegalTransition('org', 'system', systemAdminNoOverride()), true);
+  expect(isLegalTransition('org', 'system', systemAdminNoOverride())).toBe(true);
 });
 
 // ── setViewMode('system') — lacks system_admin → false ──────────────────────
 
 test('workspace → system: org admin only (not system admin) → false', () => {
-  assert.equal(isLegalTransition('workspace', 'system', orgAdminWithClient()), false);
+  expect(isLegalTransition('workspace', 'system', orgAdminWithClient())).toBe(false);
 });
 
 test('org → system: workspace-only user → false', () => {
-  assert.equal(isLegalTransition('org', 'system', workspaceUser()), false);
+  expect(isLegalTransition('org', 'system', workspaceUser())).toBe(false);
 });
 
 // ── Composite: setViewMode('workspace') from workspace (same-to-same, no client) ──
@@ -197,5 +190,5 @@ test('workspace → workspace: no active client still returns true (idempotent)'
   // The callback is NOT triggered here — isLegalTransition does not invoke callbacks.
   // The hook wires the callback; the pure function just returns legality.
   const ctx: ViewModeContext = { hasActiveClient: false, hasSystemOverride: false, isOrgAdmin: false, isSystemAdmin: false };
-  assert.equal(isLegalTransition('workspace', 'workspace', ctx), true);
+  expect(isLegalTransition('workspace', 'workspace', ctx)).toBe(true);
 });
