@@ -32,15 +32,6 @@ Repos can stay on older versions intentionally. The framework is designed to be 
 
 ---
 
-## 2.2.1 — 2026-05-07
-
-**Highlights:** finalisation-coordinator now auto-resolves known-shape merge conflicts during S2 sync instead of pausing for operator confirmation on every run.
-
-**Changed:**
-- `.claude/agents/finalisation-coordinator.md` § Step 2 — added an auto-resolve table for append-only artefact files and feature-branch-canonical files: `tasks/builds/{slug}/spec.md`/`plan.md`/`progress.md`/`handoff.md`/`mockup-log.md` and `tasks/current-focus.md` are taken from HEAD ("ours"); `tasks/todo.md`, `tasks/review-logs/_index.jsonl`, `tasks/lessons.md`, and `KNOWLEDGE.md` are union-merged by stripping conflict markers (safe because all four are append-only by convention). Code-area conflicts (`client/`, `server/`, `shared/`, `worker/`, `scripts/`, `migrations/`, `architecture.md`, `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`) still pause for operator review. Removes the operator round-trip on conflicts that always have a deterministic resolution. Also relaxes the post-merge overlap check from "require explicit confirmation" to "continue silently" — overlap alone is not a signal; the conflict protocol handles the actual collisions.
-
----
-
 ## 2.2.0 — 2026-05-04
 
 **Highlights:** adds sync infrastructure for one-command framework upgrade across consuming repos. Introduces `manifest.json` (file ownership declaration), `sync.js` (deterministic sync engine, ~300 lines JS with JSDoc types), and `SYNC.md` (guided upgrade prompt for Claude sessions). Migrates placeholder format from `[PROJECT_NAME]` to canonical `{{PROJECT_NAME}}` (double-brace) across all agent files and docs. ADAPT.md Phase 6 now records adoption state in `.claude/.framework-state.json` for future syncs.
