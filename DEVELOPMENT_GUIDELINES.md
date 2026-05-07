@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-05-05 (§8.27 leftJoin / `isActive` ON-vs-WHERE; §8.28 JWT `iat` second-precision alignment; §8.29 per-route body-size cap before the global parser — pre-launch-phase-2 hardening pass)
+**Last updated:** 2026-05-07 (§8.30 non-durable async PLAN_GAP documentation — consolidation-build)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -224,6 +224,10 @@ JWT `iat` is second-precision (`iat * 1000` is whole-second × 1000). Any state 
 ### 8.29 Per-route body-size caps install BEFORE the global JSON parser
 
 Routes that need a tighter body cap than the global `express.json({ limit: '10mb' })` (audit endpoints, abuse-prone reporting endpoints, anything where authenticated abuse can inflate downstream layers) install a path-scoped `express.json({ limit: '<smaller>' })` BEFORE the global parser. Once `req._body` is populated by the tight parser, the global parser short-circuits — oversized payloads return 413 from the path-scoped parser. Reverse order silently lets oversized bodies through.
+
+### 8.30 Non-durable async operations must carry an explicit durability comment
+
+Any fire-and-forget (`void promise.catch(...)`) that bypasses the pg-boss durable queue must carry a comment naming the residual risk (e.g. orphaned `agent_runs` rows on process restart) and a `tasks/builds/*/migration-gaps.md` PLAN_GAP entry. Silently non-durable is worse than explicitly deferred — a future developer cannot tell whether the omission was deliberate.
 
 ---
 
