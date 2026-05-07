@@ -21,13 +21,12 @@ export const APP_ROUTE_PATTERNS = [
   // Parametric project / agent detail
   '/projects/:id',
   '/agents/:agentId',
+  '/agents/:id/edit',
   '/portal/:clientId',
   // Parametric subaccount workspace routes
   '/admin/subaccounts/:subaccountId/workspace',
-  '/admin/subaccounts/:subaccountId/scheduled-tasks',
   '/admin/subaccounts/:subaccountId/schedule-calendar',
   '/admin/subaccounts/:subaccountId/page-projects',
-  '/admin/subaccounts/:subaccountId/triggers',
   '/admin/subaccounts/:subaccountId/actions',
   '/admin/subaccounts/:subaccountId/goals',
   '/admin/subaccounts/:subaccountId/team',
@@ -37,19 +36,19 @@ export const APP_ROUTE_PATTERNS = [
   '/admin/subaccounts/:subaccountId/usage',
   // Org-admin routes (no subaccount param)
   '/admin/subaccounts',
-  '/admin/agents',
   '/admin/schedule-calendar',
   '/admin/automations',
-  '/admin/skills',
   '/admin/users',
   '/admin/teams',
   '/admin/health-findings',
   '/admin/org-settings',
   '/admin/spending-budgets',
   '/admin/tasks/:briefId',
+  // Consolidated build routes
+  '/agents',
+  '/recurring-tasks',
   // System-admin routes
   '/system/organisations',
-  '/system/agents',
   '/system/skills',
   '/system/workflow-studio',
   '/system/automations',
