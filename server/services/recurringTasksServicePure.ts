@@ -69,6 +69,9 @@ export interface ScheduledTaskRow {
   lastRunAt: Date | null;
   totalRuns: number;
   consecutiveFailures: number;
+  rrule: string;
+  timezone: string;
+  scheduleTime: string;
 }
 
 export interface ManualRunRow {
@@ -283,7 +286,7 @@ export function unionRecurringTasks(input: UnionInput): RecurringTask[] {
       id: `schedule:${s.id}`,
       name: s.title,
       fireKind: 'schedule',
-      fireCondition: formatFireCondition({ kind: 'schedule', rrule: '', timezone: 'UTC', scheduleTime: '' }),
+      fireCondition: formatFireCondition({ kind: 'schedule', rrule: s.rrule, timezone: s.timezone, scheduleTime: s.scheduleTime }),
       action: agentName,
       scope: subaccount
         ? { kind: subaccount.isOrgSubaccount ? 'org' : 'workspace', id: subaccount.id, name: subaccount.name }

@@ -25,6 +25,7 @@ import BudgetTab from './components/AgentEditTabs/BudgetTab';
 import RunsTab from './components/AgentEditTabs/RunsTab';
 import AgentVersionChip from './components/AgentVersionChip';
 import DeleteAgentDialog from './components/DeleteAgentDialog';
+import { TestRunnerCard } from './components/TestRunnerCard';
 
 type TabKey = 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
 
@@ -318,6 +319,13 @@ export default function AgentEditPage() {
           <RunsTab agentId={id!} runs={data.runs} />
         )}
       </div>
+
+      {/* Inline Test runner card — always visible across tabs (spec §4.7) */}
+      {!isReadOnly && (
+        <div className="px-6 pb-6">
+          <TestRunnerCard agentId={id!} />
+        </div>
+      )}
 
       {/* Footer */}
       {!isReadOnly && (

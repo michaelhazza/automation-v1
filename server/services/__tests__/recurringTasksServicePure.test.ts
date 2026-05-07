@@ -71,6 +71,9 @@ function makeScheduledTask(overrides: Partial<ScheduledTaskRow> = {}): Scheduled
     lastRunAt: new Date('2026-05-03T12:00:00Z'),
     totalRuns: 10,
     consecutiveFailures: 0,
+    rrule: 'FREQ=WEEKLY;BYDAY=MO',
+    timezone: 'UTC',
+    scheduleTime: '09:00',
     ...overrides,
   };
 }

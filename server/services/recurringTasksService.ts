@@ -71,6 +71,9 @@ export const recurringTasksService = {
           lastRunAt: scheduledTasks.lastRunAt,
           totalRuns: scheduledTasks.totalRuns,
           consecutiveFailures: scheduledTasks.consecutiveFailures,
+          rrule: scheduledTasks.rrule,
+          timezone: scheduledTasks.timezone,
+          scheduleTime: scheduledTasks.scheduleTime,
         })
         .from(scheduledTasks)
         .where(eq(scheduledTasks.organisationId, orgId)),

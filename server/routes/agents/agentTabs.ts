@@ -28,9 +28,8 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const payload = await agentService.getFull(req.params.id, req.orgId!);
-    // Strip isSystemManaged from client response (internal guard only)
-    const { isSystemManaged: _omit, ...clientPayload } = payload;
-    res.json(clientPayload);
+    // isSystemManaged is part of the public AgentFull contract — client uses it for read-only gating.
+    res.json(payload);
   }),
 );
 
@@ -49,8 +48,7 @@ router.patch(
       req.body,
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 
@@ -69,8 +67,7 @@ router.patch(
       req.body,
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 
@@ -89,8 +86,7 @@ router.patch(
       req.body,
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 
@@ -111,8 +107,7 @@ router.put(
       { force },
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 
@@ -133,8 +128,7 @@ router.put(
       { force },
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 
@@ -155,8 +149,7 @@ router.put(
       { force },
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 
@@ -175,8 +168,7 @@ router.patch(
       req.body,
       { role: req.user?.role },
     );
-    const { isSystemManaged: _omit, ...clientPayload } = result;
-    res.json(clientPayload);
+    res.json(result);
   }),
 );
 

@@ -2270,16 +2270,19 @@ export const agentService = {
           })
           .where(and(eq(agentTriggersTable.id, t.id), eq(agentTriggersTable.organisationId, orgId)));
       }
-      // Insert new triggers (kind maps to eventType; default org_task_created for unknown)
-      for (const t of diff.added) {
-        await tx.insert(agentTriggersTable).values({
-          organisationId: orgId,
-          eventType: 'org_task_created',
-          eventFilter: (t.spec as Record<string, unknown>) ?? {},
-          isActive: t.status === 'active',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
+      // Phase 1: trigger creation is not supported at the org level. Triggers are
+      // subaccount-scoped (linked via subaccountAgentId, not agentId), so a trigger
+      // inserted here would be orphaned — it would not appear in getFull (which
+      // filters by subaccountAgentId) and would not fire (the trigger service fires
+      // by subaccountId). Until the Schedule tab is wired through the subaccount
+      // route, reject add operations with a clear error.
+      // See migration-gaps.md § "Triggers schema — no direct agentId column".
+      if (diff.added.length > 0) {
+        throw {
+          statusCode: 501,
+          message: 'Adding triggers via the org-level agent endpoint is not supported in Phase 1. Use the subaccount-scoped trigger routes.',
+          errorCode: 'TRIGGER_ADD_NOT_SUPPORTED',
+        };
       }
     });
 
