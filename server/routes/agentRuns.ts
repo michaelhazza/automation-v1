@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin, hasOrgPermission } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
@@ -13,6 +13,7 @@ import { agentRuns, agentRunSnapshots } from '../db/schema/index.js';
 import { eq, and, gte, sql, inArray, count } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
+import { mapAgentRunToTestResult } from '../services/agentTestRunMapperPure.js';
 
 const router = Router();
 
@@ -167,6 +168,30 @@ router.get(
   '/api/agent-runs/:id',
   authenticate,
   asyncHandler(async (req, res) => {
+    if (req.query.shape === 'test') {
+      const hasPermission = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_VIEW);
+      if (!hasPermission) {
+        res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+        return;
+      }
+      const [run] = await db
+        .select({
+          id: agentRuns.id,
+          status: agentRuns.status,
+          startedAt: agentRuns.startedAt,
+          completedAt: agentRuns.completedAt,
+          summary: agentRuns.summary,
+        })
+        .from(agentRuns)
+        .where(and(eq(agentRuns.id, req.params.id), eq(agentRuns.organisationId, req.orgId!)))
+        .limit(1);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      res.json(mapAgentRunToTestResult(run));
+      return;
+    }
     const run = await agentActivityService.getRunDetail(req.params.id, req.orgId!);
     res.json(run);
   })

@@ -2767,51 +2767,50 @@ Skipping NFC produces long-tail duplicate revision bugs that are nearly impossib
 **Pattern:** When a UI primitive contains non-trivial logic (sorting, filtering, mode-derivation, transition rules), split into two files: `Foo.tsx` (the React wrapper — hooks, state, event handlers, render) and `fooPure.ts` (the deterministic helpers — sort comparators, filter predicates, derivation rules, transition guards). The pure module exports plain functions with explicit input/output types and zero React dependency. Tests live next to the pure module under `__tests__/fooPure.test.ts` using the existing convention: `npx tsx <test-path>` runs them in isolation, no test runner setup, fast feedback. The React wrapper's behaviour is verified by integration of the pure module's contract — the wrapper itself does not need its own unit suite if the pure module is fully covered.
 **Why it matters:** UI logic is normally locked behind component-render machinery and is hard to test deterministically. The split moves the testable surface out from under React, eliminates jsdom setup, runs in milliseconds, and produces a stable contract surface that downstream specs (Specs A/B/C consuming the same primitives) can rely on without rebuilding test infrastructure. Locks in the existing repo convention (`*Pure.ts` + `*Pure.test.ts` as the unit-test surface).
 
-### [2026-05-07] Gotcha — `inboxService` naming: no `inbox_items` table, no `status` column; band derivation is a JS union over three tables
+### [2026-05-07] Gotcha — `agentTriggers` has no `agentId` FK; triggers are scoped through `subaccountAgents`
 
 **Date:** 2026-05-07
-**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
-**Gotcha:** There is no `inbox_items` table and no single `status` column. The inbox service (`server/services/inboxServicePure.ts`) unions `tasks` / `review_items` / `agent_runs` with `inbox_read_states`. Band derivation (urgency tiers) runs in JS over the merged result set, not in SQL. `kind='approval'` items are sourced from `actions` rows where `status='pending_approval'`, NOT from `review_items`. Do not look for an `inbox_items` table or a direct `status` column — neither exists.
-**Why it matters:** Future authors will assume a normalised inbox table exists (natural naming intuition). The union-plus-JS-derivation pattern is non-obvious and breaks any code that tries to add a SQL filter on `inbox_items.status`.
+**Source:** Consolidation-build C11 doc-sync pass.
+`GET /api/agents/:id/full` (in `server/routes/agents/agentTabs.ts`) joins through `subaccountAgents` to get agent-scoped triggers — NOT through a direct `agentId` on `agentTriggers`. The `agentTriggers` table does not have an `agentId` foreign key; trigger rows are linked to a sub-account agent via the `subaccountAgents.agentId` join. Any query that tries to filter `agentTriggers` directly by `agentId` will return nothing silently.
 
-### [2026-05-07] Gotcha — `triggerType` is deprecated; `triggerSource` is canonical; both are emitted; do NOT rename in place
-
-**Date:** 2026-05-07
-**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
-**Gotcha:** The activity API emits BOTH `triggerType` (legacy internal enum: `manual | scheduled | webhook | agent | system`) AND `triggerSource` (spec §4.1 enum: `schedule | event | manual | api | retry | unknown`) on every `ActivityItem`. `triggerSource` is the canonical field going forward. `triggerType` is deprecated and will be removed after consumers migrate. Do NOT rename `triggerType` to `triggerSource` in place — that is a breaking change to any consumer still reading `triggerType`. The pattern is additive-only; removal happens in a separate migration step once all consumers are confirmed migrated.
-**Why it matters:** Renaming in place looks like a safe cleanup but silently breaks any caller that only reads `triggerType`. The dual-emit approach gives a migration window; the in-place rename closes it instantly.
-
-### [2026-05-07] Invariant — Run-trace masking (`projectForRole`) is read-path only; applying it on the write path is a regression
+### [2026-05-07] Gotcha — `AgentFull.budget` fields are Phase 1 placeholders; writes accepted but not persisted
 
 **Date:** 2026-05-07
-**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
-**Invariant:** `agentRunMessageServicePure.ts::projectForRole(messages, role)` is called ONLY from the `GET /api/agent-runs/:id/trace-events` read endpoint. It is NEVER called from the `appendMessage` write path. If you see masking applied to the write path (e.g. inside `appendMessage` or any message-persistence function), that is a regression — the stored message must be unmasked; projection happens at read time only.
-**Why it matters:** Applying masking at write time corrupts the stored record permanently. Role-based projection must always be a view transformation, not a storage transformation.
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentFull.budget` (`dailyCapUsd`, `monthlyCapUsd`, `warnThresholdPct`) are always null/zero. The `spendingBudgets` table is for agentic commerce spend (external transactions), NOT for LLM cost caps. Budget cap fields on agents have no backing schema yet — writes to the budget tab in `AgentEditPage` are accepted by the server but not persisted. This is an explicit Phase 2 deferral. Do not build features that assume these fields are live without first checking whether the backing schema has landed.
 
-### [2026-05-07] Invariant — `aggregateFilterOptions` in `activityServicePure.ts` runs pre-pagination; never move it post-slice
-
-**Date:** 2026-05-07
-**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
-**Invariant:** `aggregateFilterOptions` in `server/services/activityServicePure.ts` runs over the FULL filtered/merged item set BEFORE the cursor slice. The returned counts reflect the entire result set, not the current page. Do not move the aggregation call to after the slice step — that would make counts reflect only the current page and break filter UI (which shows counts across all pages).
-**Why it matters:** Pre-pagination aggregation is the intended contract. Post-pagination aggregation is a subtle bug that makes filter counts shrink as the user pages through results, breaking the UX expectation that filter counts are stable.
-
-### [2026-05-07] Invariant — Activity cursor walk is always `createdAt DESC, id ASC`; `sortDir` is display-only re-sort applied after the page slice
+### [2026-05-07] Gotcha — `WRITE_ORDER` in `AgentEditPage` intentionally excludes `schedule` and `budget` tabs
 
 **Date:** 2026-05-07
-**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
-**Invariant:** In `activityService.ts`, the canonical cursor walk order is always `createdAt DESC, id ASC` regardless of the `sortDir` parameter. `sortDir` controls a display-only re-sort applied AFTER the page slice (see `resolveDisplaySort` JSDoc). Do NOT implement a flipping tiebreaker that changes the cursor walk direction based on `sortDir` — that would break cursor stability across pages. The cursor is always forward-walking in canonical order; display order is a presentation concern.
-**Why it matters:** A flipping cursor is a well-known pagination bug: page 2 with `sortDir=asc` would use a different walk order than page 1 with `sortDir=desc`, producing gaps or duplicates at page boundaries. The separation of cursor order from display order is intentional and must be preserved.
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentEditPage.tsx` defines a `WRITE_ORDER` constant that controls which tabs participate in ETag-gated saves. The `schedule` and `budget` tabs are excluded from this list. Trigger editing is done via the existing per-workspace override page (not consolidated into `AgentEditPage`). Budget caps have no backing schema yet. A future developer who sees the missing tabs should consult the ADR `docs/decisions/0007-consolidation-build-page-retirement.md` before assuming the omission is a bug.
 
-### [2026-05-08] Pattern — Locked redirect grammar drift survives spec-conformance, dual-reviewer, AND pure-helper unit tests; only humans catch it
+### [2026-05-07] Gotcha — `startRunAsync` in `agentExecutionService.ts` uses bare fire-and-forget (non-durable)
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`startRunAsync` is a fire-and-forget invocation — if the process crashes after the call site returns but before the run completes, the run is not recovered. This is a known PLAN_GAP documented in `tasks/builds/consolidation-build/migration-gaps.md`. Do not rely on this path for durable task execution. The durable path is through the pg-boss job queue.
+
+### [2026-05-07] Gotcha — `formatFireCondition` in `recurringTasksServicePure.ts` handles a subset of the RRULE spec
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`formatFireCondition` parses FREQ, BYDAY, BYMONTHDAY, and INTERVAL from RRULE strings and returns a human-readable label. Any RRULE pattern using other components (BYSETPOS, BYHOUR, COUNT, UNTIL, WKST, etc.) falls back to returning the literal RRULE string unchanged. This is intentional for Phase 1 — do not add a full RRULE parser unless the product requirement explicitly calls for it.
+
+### [2026-05-07] Gotcha — `PUT /api/agents/:id/triggers` rejects added triggers with 501 in Phase 1
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build dual-reviewer Codex finding F4.
+`agentService.replaceTriggers` accepts updates and soft-deletes of existing triggers but throws `{ statusCode: 501, errorCode: 'TRIGGER_ADD_NOT_SUPPORTED' }` if any new triggers are in the diff. Reason: triggers are subaccount-scoped (`subaccountAgentId` FK, not `agentId`) so an org-level insert via this route would be orphaned — the row would not appear in `getFull` (which filters by `subaccountAgentId`) and would not fire (the trigger service fires by `subaccountId`). The new tab-scoped UI Schedule tab is `readOnly={true}` in Phase 1 and `WRITE_ORDER` excludes `'schedule'`, so no caller exercises this path today. Phase 2 should resolve a default `subaccountAgentId` (e.g. via the org subaccount) and remove the 501 guard. See `tasks/builds/consolidation-build/migration-gaps.md` § "Triggers schema — no direct agentId column".
+
+### [2026-05-08] Pattern — Legacy route telemetry and deprecation tracking
 
 **Date:** 2026-05-08
-**Source:** finalisation-coordinator finalisation pass on PR #272 (slug: consolidation-operate); ChatGPT PR review Round 1 finding F1.
-**Pattern:** When a spec locks a redirect grammar (e.g. `/admin/X → /X` for org scope; `/admin/subaccounts/:saId/X → /X?subaccountId=:saId` with scope promotion), the canonical-target literal in `client/src/App.tsx` is the only place the grammar is encoded — pure-helper tests (operateRedirects.test.ts) validate the URL-composition function but cannot validate that each route's `<Navigate to="..." />` target matches the locked grammar. spec-conformance, pr-reviewer, dual-reviewer, and adversarial-reviewer all missed `/admin/activity → /` (should have been `/activity`); only the human ChatGPT review pass caught it. Mitigation: when shipping a locked redirect grammar, add a JSON/array of `{ from, to, scopePromotion? }` records that BOTH the App.tsx routes AND a unit test consume — so a literal divergence is mechanically detectable.
-**Why it matters:** Redirect grammar errors silently drop users on the wrong page. The pure-helper test suite cannot detect the mismatch because the helper is correct; the data fed to it is wrong. Without the array-of-rules pattern, every redirect addition risks the same drift, and only manual review catches it.
+**Source:** Consolidation-build Round 2 ChatGPT tightening (task 4).
+Legacy routes from the pre-consolidation UI (`/admin/agents`, `/admin/skills`, `/admin/skill-studio`, `/system/skill-analyser`, etc.) are consolidated into `/agents`, `/recurring-tasks`, and `/projects`. Today, client-side `<Navigate>` components in `client/src/App.tsx:401-511` redirect old bookmarks silently. Future telemetry: add a middleware or custom Navigate wrapper to emit structured logs with `sourceRoute`, `destinationRoute`, `userAgent`, and `timestamp`. Monitor redirect volumes in logs; after traffic drops below a threshold for N days, routes can be retired entirely. See `docs/doc-sync.md` § Legacy Route Deprecation for the tracking process. (Phase 1: redirects active, no telemetry. Phase 2: add telemetry emit. Phase 3+: retire routes.)
 
-### [2026-05-08] Pattern — High-risk-composition tests close the gap between unit-tested rules and production failures
+### [2026-05-08] Pattern — Skill Studio iframe recursion protection pattern
 
 **Date:** 2026-05-08
-**Source:** finalisation-coordinator finalisation pass on PR #272 (slug: consolidation-operate); ChatGPT PR review Round 1 finding F2.
-**Pattern:** When a pure helper composes N independent rules (e.g. `buildOperateRedirectUrl` composes 5: base path + duplicate suppression + promoted-key precedence + insertion-order preservation + hash preservation), N tests covering each rule in isolation are NOT sufficient — they leave a `5! / each-rule-tested-once` gap. Add at least one test that exercises ALL N rules simultaneously in the highest-risk combination, with the expected output written out long-hand. The test name should call this out (e.g. `handles hash + promoted param + duplicate inbound param (highest-risk composition)`) so future maintainers see immediately that this case anchors the function's contract.
-**Why it matters:** Rule interactions are where production bugs surface — a duplicate-suppression rule that wins over the promoted-key rule, or an insertion-order rule that drops the hash, will pass each isolated test but break in the field. The composition test catches order-of-operations regressions that no isolated test can.
+**Source:** Consolidation-build Round 2 ChatGPT tightening (task 7).
+Skill Studio is no longer embedded as an iframe in the consolidation-build UI. If a future phase embeds Skill Studio (or similar recursive-openable components), apply the `embedded` prop pattern: pages accept an optional `embedded?: boolean` prop; when true, suppress recursive-open affordances (e.g., "Edit in modal", "Open in new window", "Open Skill Studio"). Example in existing codebase: `client/src/pages/AdminBoardConfigPage.tsx` and `AdminCategoriesPage.tsx` check `!embedded` before rendering navigation affordances. Pattern: wrap recursive-open buttons in `{!embedded && (<button>...</button>)}`. (Phase 1: SkillsTab uses a modal picker, not an embedded Skill Studio, so no protection needed yet. Phase 2+: if embedding is added, apply this pattern.)

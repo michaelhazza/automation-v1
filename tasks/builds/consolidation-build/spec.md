@@ -244,6 +244,8 @@ Producer: new `server/services/recurringTasksService.ts` that unions over `agent
 2. Heartbeat-derived tasks — secondary
 3. Manual runs — always independent (never deduplicated against other sources)
 
+**Deduplication invariant:** Identical triggers and schedules from different sources collapse to a single row via identity-key deduplication. Deduplication occurs BEFORE pagination and filtering. Identical is defined as same (agentId + triggerId + fireKind + spec). Totals returned in response (fires30d, etc.) reflect post-dedup counts. Clients must not assume 1:1 correspondence between returned rows and underlying DB records; N source records may map to 1 RecurringTask row.
+
 Tasks are uniquely identified by `(agentId + triggerId)` for trigger/heartbeat rows, or `(agentId + runId)` for manual rows. No cross-source deduplication is attempted.
 
 ### 4.5 Projects — edit endpoint

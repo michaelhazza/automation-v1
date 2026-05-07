@@ -14,6 +14,11 @@ export const APP_ERROR_CODES = [
   'MISSING_SUBACCOUNT_ID',
   'MISSING_SUBACCOUNT_AGENT_ID',
   'SUBACCOUNT_AGENT_NOT_FOUND',
+  // Project service codes
+  'PROJECT_NOT_FOUND',
+  'INVALID_LINKED_AGENT',
+  'INVALID_BUDGET',
+  'INVALID_NAME',
   // Generic legacy adapter code emitted by asyncHandler when normalising duck-shape errors
   'LEGACY_ERROR',
 ] as const;
