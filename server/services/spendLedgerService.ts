@@ -5,6 +5,7 @@ import {
   amountMinorToCostUsd,
   chargeTypeToContractType,
   type DbChargeType,
+  type CursorPayload,
 } from './spendLedgerServicePure.js';
 
 export interface LedgerListInput {
@@ -47,14 +48,10 @@ export async function listLedger(input: LedgerListInput): Promise<LedgerListResu
   const cursor = input.cursor ? decodeCursor(input.cursor) : null;
 
   // INVARIANT I1: seek pagination via tuple comparison. Never SQL OFFSET.
-  // DESC: WHERE (timestamp, id) < (cursor.primary, cursor.id)
-  // ASC:  WHERE (timestamp, id) > (cursor.primary, cursor.id)
-  // Column names reference the `ordered` CTE which queries from `base` (aliases: timestamp, id).
-  const cursorClause = cursor
-    ? input.sortDir === 'asc'
-      ? sql`AND (timestamp, id) > (${cursor.primary}::timestamptz, ${cursor.id})`
-      : sql`AND (timestamp, id) < (${cursor.primary}::timestamptz, ${cursor.id})`
-    : sql``;
+  // DESC: WHERE (col, id) < (cursor.primary, cursor.id)
+  // ASC:  WHERE (col, id) > (cursor.primary, cursor.id)
+  // Column names reference the `ordered` CTE which queries from `base`.
+  const cursorClause = cursor ? buildCursorClause(input.sortKey, input.sortDir, cursor) : sql``;
 
   // Scope filter (workspace scope scopes to a single subaccount)
   const scopeFilter =
@@ -72,6 +69,12 @@ export async function listLedger(input: LedgerListInput): Promise<LedgerListResu
   const agentFilter =
     input.agent && input.agent.length > 0
       ? sql`AND ac.agent_id = ANY(${input.agent}::uuid[])`
+      : sql``;
+
+  // Charge type filter (array of charge types)
+  const typeFilter =
+    input.type && input.type.length > 0
+      ? sql`AND ac.charge_type = ANY(${input.type}::text[])`
       : sql``;
 
   // Date range filters
@@ -126,6 +129,7 @@ export async function listLedger(input: LedgerListInput): Promise<LedgerListResu
         ${scopeFilter}
         ${workspaceFilter}
         ${agentFilter}
+        ${typeFilter}
         ${fromFilter}
         ${toFilter}
         ${qFilter}
@@ -166,12 +170,11 @@ export async function listLedger(input: LedgerListInput): Promise<LedgerListResu
 
   const lastRow = hasMore ? allRows[limit - 1] : null;
   const nextCursor = lastRow
-    ? encodeCursor({
-        primary: typeof lastRow.timestamp === 'string'
-          ? lastRow.timestamp
-          : new Date(lastRow.timestamp as unknown as string).toISOString(),
-        id: lastRow.id,
-      })
+    ? (() => {
+        const sortAlias = cursorSortAlias(input.sortKey);
+        const lastPrimaryValue = String((lastRow as Record<string, unknown>)[sortAlias]);
+        return encodeCursor({ primary: lastPrimaryValue, id: lastRow.id });
+      })()
     : null;
 
   const rows: LedgerRowOut[] = pageRows.map((r) => ({
@@ -216,4 +219,31 @@ function primarySortCol(key: LedgerListInput['sortKey']): string {
     tokens: 'amount_minor',
     cost: 'amount_minor',
   } satisfies Record<LedgerListInput['sortKey'], string>)[key];
+}
+
+function cursorSortAlias(key: LedgerListInput['sortKey']): string {
+  return ({
+    timestamp: 'timestamp',
+    workspace: 'subaccount_name',
+    agent: 'agent_name',
+    type: 'charge_type',
+    tokens: 'amount_minor',
+    cost: 'amount_minor',
+  } satisfies Record<LedgerListInput['sortKey'], string>)[key];
+}
+
+function buildCursorClause(
+  sortKey: LedgerListInput['sortKey'],
+  sortDir: LedgerListInput['sortDir'],
+  cursor: CursorPayload,
+): ReturnType<typeof sql> {
+  const col = cursorSortAlias(sortKey);
+  const op = sortDir === 'asc' ? '>' : '<';
+  const cast =
+    sortKey === 'timestamp'
+      ? sql`::timestamptz`
+      : sortKey === 'tokens' || sortKey === 'cost'
+        ? sql`::bigint`
+        : sql``;
+  return sql`AND (${sql.raw(col)}, id) ${sql.raw(op)} (${cursor.primary}${cast}, ${cursor.id})`;
 }
