@@ -16,12 +16,41 @@
  */
 
 // ---------------------------------------------------------------------------
-// TriggerType — shared type for both the exported ActivityItem field and the
-// pure helper below.  Matches executions.triggerType + the derived values for
-// agent_runs.
+// TriggerType — internal DB-level type for agent_runs.run_type derivations and
+// executions.triggerType values.  Matches executions.triggerType + the derived
+// values for agent_runs.
 // ---------------------------------------------------------------------------
 
 export type TriggerType = 'manual' | 'scheduled' | 'webhook' | 'agent' | 'system';
+
+// ---------------------------------------------------------------------------
+// TriggerSource — spec §4.1 public-API enum for the triggerSource field.
+// Maps from internal TriggerType values to the canonical spec value-set.
+// ---------------------------------------------------------------------------
+
+export type TriggerSource = 'schedule' | 'event' | 'manual' | 'api' | 'retry' | 'unknown';
+
+/**
+ * Maps an internal TriggerType (or null) to the spec §4.1 TriggerSource enum.
+ *
+ * Mapping:
+ *   'scheduled' → 'schedule'
+ *   'webhook'   → 'event'
+ *   'manual'    → 'manual'
+ *   'agent'     → 'event'
+ *   'system'    → 'api'
+ *   null / anything else → 'unknown'
+ */
+export function mapInternalTriggerToSource(triggerType: TriggerType | null): TriggerSource {
+  switch (triggerType) {
+    case 'scheduled': return 'schedule';
+    case 'webhook':   return 'event';
+    case 'manual':    return 'manual';
+    case 'agent':     return 'event';
+    case 'system':    return 'api';
+    default:          return 'unknown';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // mapAgentRunTriggerType — pure derivation of triggerType from the
@@ -55,18 +84,18 @@ export function mapAgentRunTriggerType(
 }
 
 // ---------------------------------------------------------------------------
-// addNullAdditiveFields — returns the null-valued additive fields for activity
-// types that do not carry run/user context (review_item, health_finding,
-// inbox_item, workflow_run).  Exported for unit testing.
+// addNullAdditiveFields — returns the additive fields for activity types that
+// do not carry run/user context (review_item, health_finding, inbox_item,
+// workflow_run).  Exported for unit testing.
 // ---------------------------------------------------------------------------
 
 export function addNullAdditiveFields(): {
   triggeredByUserId: null;
   triggeredByUserName: null;
   triggerType: null;
-  /** C1 (ui-consolidation-operate): new spec name for triggerType. Emitted alongside
-   *  triggerType; triggerType deprecated and will be removed after consumers migrate. */
-  triggerSource: null;
+  /** C1 (ui-consolidation-operate): spec §4.1 name. Non-nullable; sources without
+   *  a recognised trigger kind emit 'unknown' per spec mandate. */
+  triggerSource: TriggerSource;
   durationMs: null;
   runId: null;
 } {
@@ -74,7 +103,7 @@ export function addNullAdditiveFields(): {
     triggeredByUserId: null,
     triggeredByUserName: null,
     triggerType: null,
-    triggerSource: null,
+    triggerSource: 'unknown',
     durationMs: null,
     runId: null,
   };

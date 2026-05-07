@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   aggregateFilterOptions,
   mapAgentRunTriggerType,
+  mapInternalTriggerToSource,
   sortActivityItems,
   addNullAdditiveFields,
 } from '../activityServicePure.js';
@@ -249,7 +250,7 @@ describe('aggregateFilterOptions', () => {
     });
   });
 
-  describe('missing/null triggerSource falls back to unknown subaccountId', () => {
+  describe('missing/null subaccountId falls back to "unknown" bucket', () => {
     it('items with null subaccountId are counted under "unknown"', () => {
       const items: AggregableItem[] = [
         makeItem({ id: '1', subaccountId: null, subaccountName: null }),
@@ -369,16 +370,47 @@ describe('mapAgentRunTriggerType', () => {
 });
 
 // ---------------------------------------------------------------------------
+// mapInternalTriggerToSource — spec §4.1 enum mapping
+// ---------------------------------------------------------------------------
+
+describe('mapInternalTriggerToSource', () => {
+  it('maps scheduled → schedule', () => {
+    expect(mapInternalTriggerToSource('scheduled')).toBe('schedule');
+  });
+
+  it('maps webhook → event', () => {
+    expect(mapInternalTriggerToSource('webhook')).toBe('event');
+  });
+
+  it('maps manual → manual', () => {
+    expect(mapInternalTriggerToSource('manual')).toBe('manual');
+  });
+
+  it('maps agent → event', () => {
+    expect(mapInternalTriggerToSource('agent')).toBe('event');
+  });
+
+  it('maps system → api', () => {
+    expect(mapInternalTriggerToSource('system')).toBe('api');
+  });
+
+  it('maps null → unknown (string, not null)', () => {
+    expect(mapInternalTriggerToSource(null)).toBe('unknown');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // addNullAdditiveFields
 // ---------------------------------------------------------------------------
 
 describe('addNullAdditiveFields', () => {
-  it('returns all expected null fields including triggerSource', () => {
+  it('returns null for user/run/duration fields and "unknown" for triggerSource', () => {
     const fields = addNullAdditiveFields();
     expect(fields.triggeredByUserId).toBeNull();
     expect(fields.triggeredByUserName).toBeNull();
     expect(fields.triggerType).toBeNull();
-    expect(fields.triggerSource).toBeNull();
+    // triggerSource must be the string 'unknown', never null — spec §4.1 mandate
+    expect(fields.triggerSource).toBe('unknown');
     expect(fields.durationMs).toBeNull();
     expect(fields.runId).toBeNull();
   });

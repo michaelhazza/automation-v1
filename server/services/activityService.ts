@@ -13,8 +13,8 @@ import {
 } from '../db/schema/index.js';
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
 import { workspaceActors } from '../db/schema/workspaceActors.js';
-import { mapAgentRunTriggerType, sortActivityItems, addNullAdditiveFields, aggregateFilterOptions } from './activityServicePure.js';
-import type { TriggerType, FilterOptionsResult } from './activityServicePure.js';
+import { mapAgentRunTriggerType, mapInternalTriggerToSource, sortActivityItems, addNullAdditiveFields, aggregateFilterOptions } from './activityServicePure.js';
+import type { TriggerType, TriggerSource, FilterOptionsResult } from './activityServicePure.js';
 
 const VALID_TRIGGER_TYPES = new Set<string>(['manual', 'scheduled', 'webhook', 'agent', 'system']);
 
@@ -73,10 +73,11 @@ export type ActivityItem = {
   triggeredByUserId: string | null;
   triggeredByUserName: string | null;
   triggerType: TriggerType | null;
-  /** C1 (ui-consolidation-operate): new spec name for triggerType. Both fields are
+  /** C1 (ui-consolidation-operate): spec §4.1 public name for the trigger kind.
+   *  Non-nullable; sources with no recognised trigger emit 'unknown'. Both fields are
    *  emitted during this stream; triggerType is deprecated and will be removed after
    *  consumers migrate (see C9 doc-sync). */
-  triggerSource: TriggerType | null;
+  triggerSource: TriggerSource;
   durationMs: number | null;
   runId: string | null;
 };
@@ -120,9 +121,8 @@ export type ActivityFilters = {
    *  severity → sortKey=severity sortDir=asc. */
   sort?: 'newest' | 'oldest' | 'severity' | 'attention_first';
   /** C1 (ui-consolidation-operate): spec §4.1 sort grammar. Takes precedence over `sort`.
-   *  INVARIANT: cursor secondary tiebreaker direction follows the primary sort direction.
-   *  When sortDir flips, the tiebreaker direction also flips so that (primary, id) remain
-   *  in the same effective order. */
+   *  Pagination walks canonical `createdAt DESC, id ASC`; the sortKey/sortDir pair is
+   *  applied as a display-only re-sort over the canonical page slice. */
   sortKey?: 'createdAt' | 'updatedAt' | 'severity';
   /** C1 (ui-consolidation-operate): sort direction for sortKey. */
   sortDir?: 'asc' | 'desc';
@@ -332,8 +332,8 @@ async function fetchAgentRuns(
             : triggeredByUserName)
         : null,
       triggerType: derivedTrigger,
-      /** C1: triggerSource is the spec §4.1 name for the same field. Both are emitted. */
-      triggerSource: derivedTrigger,
+      /** C1: triggerSource is the spec §4.1 name; mapped from internal TriggerType. */
+      triggerSource: mapInternalTriggerToSource(derivedTrigger),
       durationMs: run.durationMs ?? null,
       runId: run.id,
     };
@@ -585,10 +585,12 @@ async function fetchWorkflowExecutions(
     triggerType: (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
       ? (exec.triggerType as TriggerType)
       : null,
-    /** C1: triggerSource is the spec §4.1 name for the same field. Both are emitted. */
-    triggerSource: (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
-      ? (exec.triggerType as TriggerType)
-      : null,
+    /** C1: triggerSource is the spec §4.1 name; mapped from internal TriggerType. */
+    triggerSource: mapInternalTriggerToSource(
+      (exec.triggerType && VALID_TRIGGER_TYPES.has(exec.triggerType))
+        ? (exec.triggerType as TriggerType)
+        : null
+    ),
     durationMs: exec.durationMs ?? null,
     runId: exec.id,
   }));
@@ -724,8 +726,8 @@ async function fetchAuditEvents(
       triggeredByUserId: null,
       triggeredByUserName: null,
       triggerType: null,
-      /** C1: triggerSource mirrors triggerType; both are null for audit events. */
-      triggerSource: null,
+      /** C1: audit events have no trigger kind; spec mandates 'unknown' (not null). */
+      triggerSource: 'unknown' as TriggerSource,
       durationMs: null,
       runId: null,
     };
@@ -770,10 +772,9 @@ function filterBySubaccount(items: ActivityItem[], subaccountIds: string[]): Act
  * C1: Derive the effective sort key from filters. If sortKey/sortDir are provided,
  * they win over the legacy `sort` enum.
  *
- * INVARIANT: When sortDir flips (to 'asc'), the tiebreaker direction also flips so
- * that (primary, id) remain in the same effective order — i.e. the cursor encoding
- * is (primarySortValue, id) walked in the effective order of the request. The legacy
- * id ASC under createdAt DESC is preserved only for the sort=attention_first shim.
+ * Pagination always walks the canonical `createdAt DESC, id ASC` order; the
+ * requested sort is applied as a display-only re-sort over the canonical slice.
+ * The id ASC tiebreaker is fixed — it does NOT flip when sortDir changes.
  */
 function resolveDisplaySort(filters: ActivityFilters): string {
   if (filters.sortKey) {
