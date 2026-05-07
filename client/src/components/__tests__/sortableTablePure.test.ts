@@ -97,18 +97,6 @@ test("NaN inputs ('abc' and 'def') — hint:number falls to string compare", () 
 });
 
 // ---------------------------------------------------------------------------
-// compareForSort — mixed
-// ---------------------------------------------------------------------------
-
-console.log('\n── compareForSort (mixed) ──');
-
-test('1 vs "foo" with hint:mixed → String(1)="1" < "foo" → negative', () => {
-  const result = compareForSort(1, 'foo', 'mixed');
-  // '1' < 'foo' alphabetically
-  assert.ok(result < 0, `Expected negative, got ${result}`);
-});
-
-// ---------------------------------------------------------------------------
 // compareForSort — null/undefined handled by caller
 // ---------------------------------------------------------------------------
 // Note: compareForSort itself does not receive null in normal usage (applySortAndFilters
@@ -120,7 +108,7 @@ console.log('\n── compareForSort (caller null contract, via applySortAndFilt
 // Null-to-bottom tests are covered more fully under applySortAndFilters below.
 // Here we just confirm compareForSort doesn't throw on edge inputs.
 test('compareForSort does not throw on undefined inputs (treated as strings)', () => {
-  assert.doesNotThrow(() => compareForSort(undefined, 'foo', 'mixed'));
+  assert.doesNotThrow(() => compareForSort(undefined, 'foo', 'string'));
 });
 
 // ---------------------------------------------------------------------------

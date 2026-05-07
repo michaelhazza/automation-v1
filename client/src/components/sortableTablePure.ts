@@ -35,7 +35,6 @@ export interface ColumnDef<Row> {
  * Hint semantics:
  *   'number'  — Number(a) - Number(b); NaN falls back to localeCompare(String(a), String(b)).
  *   'string'  — localeCompare with sensitivity:'base'.
- *   'mixed'   — String(a) vs String(b), then localeCompare.
  *
  * null / undefined handling: callers in applySortAndFilters handle null/undefined BEFORE
  * calling compareForSort, so this function should never receive them in practice. If it
@@ -45,7 +44,7 @@ export interface ColumnDef<Row> {
 export function compareForSort(
   a: unknown,
   b: unknown,
-  hint: 'string' | 'number' | 'mixed',
+  hint: 'string' | 'number',
 ): number {
   if (hint === 'number') {
     const na = Number(a);
@@ -57,11 +56,7 @@ export function compareForSort(
     return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
   }
 
-  if (hint === 'string') {
-    return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
-  }
-
-  // 'mixed'
+  // 'string'
   return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
 }
 
@@ -133,7 +128,7 @@ export function applySortAndFilters<Row>(
       const dir = sort.dir;
 
       // Derive a type hint from the first non-null value in the column
-      let hint: 'string' | 'number' | 'mixed' = 'mixed';
+      let hint: 'string' | 'number' = 'string';
       if (col.getValue) {
         for (const row of rows) {
           const v = col.getValue(row);

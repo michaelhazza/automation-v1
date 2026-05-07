@@ -267,6 +267,26 @@ function FilterDropdown({ columnKey, options, active, onApply, isFiltered }: Fil
 }
 
 // ---------------------------------------------------------------------------
+// SortIndicator
+// ---------------------------------------------------------------------------
+
+interface SortIndicatorProps {
+  colKey: string;
+  sort: { key: string; dir: 'asc' | 'desc' } | null;
+}
+
+function SortIndicator({ colKey, sort }: SortIndicatorProps) {
+  if (sort?.key !== colKey) {
+    return <span className="ml-1 text-slate-300 text-xs">⇅</span>;
+  }
+  return (
+    <span className="ml-1 text-slate-600 text-xs">
+      {sort.dir === 'asc' ? '↑' : '↓'}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SortableTable
 // ---------------------------------------------------------------------------
 
@@ -305,6 +325,11 @@ export function SortableTable<Row>({
   // -- Persistence --
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Keep a ref to the latest sort/filters so the unmount flush reads current state,
+  // not stale closure values from mount time.
+  const pendingFlushRef = useRef<{ sort: typeof sort; filters: typeof filters }>({ sort, filters });
+  pendingFlushRef.current = { sort, filters };
+
   const schedulePersist = useCallback(
     (nextSort: typeof sort, nextFilters: typeof filters) => {
       if (!persistKey) return;
@@ -323,24 +348,24 @@ export function SortableTable<Row>({
     [persistKey],
   );
 
-  // Flush on unmount
+  // Flush on unmount — reads from ref to avoid stale closure over sort/filters.
   useEffect(() => {
     return () => {
       if (persistTimerRef.current !== null) {
         clearTimeout(persistTimerRef.current);
         if (persistKey) {
+          const { sort: latestSort, filters: latestFilters } = pendingFlushRef.current;
           const serialised: PersistedState = {
-            sort,
+            sort: latestSort,
             filters: Object.fromEntries(
-              Object.entries(filters).map(([k, s]) => [k, Array.from(s)]),
+              Object.entries(latestFilters).map(([k, s]) => [k, Array.from(s)]),
             ),
           };
           writePersistedState(persistKey, serialised);
         }
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [persistKey]);
 
   // -- Sort handler --
   const handleSortClick = (colKey: string) => {
@@ -365,18 +390,6 @@ export function SortableTable<Row>({
 
   // -- Derive displayed rows --
   const displayedRows = applySortAndFilters(rows, sort, filters, columns);
-
-  // -- Sort indicator --
-  const SortIndicator = ({ colKey }: { colKey: string }) => {
-    if (sort?.key !== colKey) {
-      return <span className="ml-1 text-slate-300 text-xs">⇅</span>;
-    }
-    return (
-      <span className="ml-1 text-slate-600 text-xs">
-        {sort.dir === 'asc' ? '↑' : '↓'}
-      </span>
-    );
-  };
 
   return (
     <div className="w-full overflow-x-auto">
@@ -424,7 +437,7 @@ export function SortableTable<Row>({
                         onClick={() => handleSortClick(col.key)}
                       >
                         {col.label}
-                        <SortIndicator colKey={col.key} />
+                        <SortIndicator colKey={col.key} sort={sort} />
                       </button>
                     ) : (
                       <span>{col.label}</span>
