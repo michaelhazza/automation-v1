@@ -1355,7 +1355,11 @@ function buildDrawerBody(row) {
   html += field('Status', `<span class="status-badge ${statusClass(row.status)}">${statusLabel(row.status)}</span>`);
   html += field('Actor', row.actor);
   if (row.severity) html += field('Severity', `<span class="sev-dot ${sevClass(row.severity)}" style="display:inline-block;margin-right:5px;"></span>${row.severity}`);
-  if (row.subaccount) html += field('Workspace', `<span class="ws-pill">${row.subaccount}</span>`);
+  if (row.subaccount) {
+    const wsClickable = (window.getActiveProfile && window.getActiveProfile() === 'org_admin')
+      ? `style="cursor:pointer;" title="Click to switch to ${row.subaccount}" onclick="event.stopPropagation();if(window.setActiveSubaccount)window.setActiveSubaccount('${row.subaccount}');location.reload();"` : '';
+    html += field('Workspace', `<span class="ws-pill" ${wsClickable}>${row.subaccount}</span>`);
+  }
   html += field('Created', new Date(row.createdAt).toLocaleString());
   if (row.duration) html += field('Duration', row.duration);
 
@@ -1364,7 +1368,9 @@ function buildDrawerBody(row) {
   // Type-specific fields
   if (row.type === 'agent_run') {
     html += field('Agent', d.agentName || '');
-    html += field('Run ID', d.runId || '');
+    if (d.runId) {
+      html += field('Run', `<a href="#" style="color:var(--indigo-600);font-weight:500;" onclick="event.preventDefault();event.stopPropagation();openRunTraceModal('${d.runId}','Run ${d.runId}')">View run trace (${d.runId})</a>`);
+    }
     html += field('Trigger', d.trigger || '');
     html += field('Progress', d.step || '');
     if (d.errorCode) {
@@ -1459,11 +1465,21 @@ function buildDrawerBody(row) {
   return html;
 }
 
+function openRunTraceModal(runId, runLabel) {
+  const modal = document.getElementById('run-trace-modal');
+  if (!modal) return;
+  document.getElementById('run-trace-modal-title').textContent = runLabel || ('Run ' + runId);
+  document.getElementById('run-trace-iframe').src = 'run-trace.html?embedded=1&run=' + encodeURIComponent(runId);
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
 function buildDrawerFooter(row) {
   const btns = [];
+  const d = row.detail || {};
 
-  if (row.type === 'agent_run') {
-    btns.push(`<a href="run-trace.html" class="btn btn-primary" style="font-size:12.5px;padding:7px 14px;">View run trace</a>`);
+  if (row.type === 'agent_run' && d.runId) {
+    btns.push(`<button class="btn btn-primary" style="font-size:12.5px;padding:7px 14px;" onclick="openRunTraceModal('${d.runId}','Run ${d.runId}')">View run trace</button>`);
   }
   if (row.type === 'inbox_item' || row.type === 'review_item') {
     btns.push(`<a href="inbox.html" class="btn btn-primary" style="font-size:12.5px;padding:7px 14px;">View in Inbox</a>`);
@@ -1515,11 +1531,48 @@ function buildDrawerFooter(row) {
   // Render table
   applyFilters();
 
-  // Keyboard: Escape closes drawer
+  // Keyboard: Escape closes drawer or run-trace modal
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && openDrawerRow) closeDrawer();
+    if (e.key === 'Escape') {
+      const rtModal = document.getElementById('run-trace-modal');
+      if (rtModal && !rtModal.hidden) {
+        rtModal.hidden = true;
+        document.body.style.overflow = '';
+      } else if (openDrawerRow) {
+        closeDrawer();
+      }
+    }
+  });
+
+  // Wire workspace badges in table for org admin
+  function makeWsBadgeClickable(el, subaccountName) {
+    if (window.getActiveProfile && window.getActiveProfile() === 'org_admin') {
+      el.style.cursor = 'pointer';
+      el.title = 'Switch to ' + subaccountName + ' workspace';
+      el.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (window.setActiveSubaccount) window.setActiveSubaccount(subaccountName);
+        location.reload();
+      });
+    }
+  }
+  document.querySelectorAll('.ws-pill').forEach(function(el) {
+    makeWsBadgeClickable(el, el.textContent.trim());
   });
 })();
 </script>
+
+<!-- Run trace modal -->
+<div id="run-trace-modal" class="modal-overlay" hidden style="z-index:210;" onclick="if(event.target===this){this.hidden=true;document.body.style.overflow='';}">
+  <div class="modal-card modal-card-xl" style="height:calc(100vh - 48px);">
+    <div class="modal-header">
+      <span class="modal-title" id="run-trace-modal-title">Run trace</span>
+      <button class="modal-close" onclick="document.getElementById('run-trace-modal').hidden=true;document.body.style.overflow='';">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:0;overflow:hidden;">
+      <iframe id="run-trace-iframe" src="" style="width:100%;height:100%;border:none;" title="Run trace"></iframe>
+    </div>
+  </div>
+</div>
 </body>
 </html>

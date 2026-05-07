@@ -133,9 +133,9 @@
   .dot-meta    { background: var(--slate-300); }
   .dot-deleg   { background: var(--violet-500); }
 
-  /* Event detail panel */
+  /* Event detail panel — wider (540px) */
   .event-detail {
-    width: 360px; flex-shrink: 0;
+    width: 540px; flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: white; display: flex; flex-direction: column;
     overflow-y: auto;
@@ -233,17 +233,25 @@
 <body style="overflow:hidden;">
 <div class="app-shell" style="height:100vh;overflow:hidden;">
 
-  <!-- Sidebar (three-mode shared) -->
+  <!-- Sidebar — hidden in embedded mode -->
   <div id="sidebar-mount"></div>
   <script src="_sidebar.js"></script>
-  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'run-trace.html');</script>
+  <script>
+    (function() {
+      var p = new URLSearchParams(window.location.search);
+      if (p.get('embedded') !== '1') {
+        renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'run-trace.html');
+      }
+    })();
+  </script>
 
   <div class="main" style="overflow:hidden;">
-    <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+    <!-- Replaces strip — hidden in embedded mode -->
+    <div id="replaces-strip" style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
       Replaces 2 pages:
       <a href="before-run-trace.html" style="color:var(--indigo-600);font-weight:600;">AgentRunLivePage + RunTraceViewerPage (before)</a>
     </div>
-    <div class="topbar">
+    <div class="topbar" id="run-trace-topbar">
       <div class="topbar-breadcrumb">
         <span>Agents</span>
         <span style="color:#cbd5e1">/</span>
@@ -850,6 +858,29 @@ function switchRunTab(id, btn) {
   document.getElementById('tab-trace').style.display = id === 'trace' ? 'flex' : 'none';
   document.getElementById('tab-graph').style.display = id === 'graph' ? 'flex' : 'none';
 }
+
+/* ── Embedded mode ─────────────────────────────────── */
+(function applyEmbeddedMode() {
+  var params = new URLSearchParams(window.location.search);
+  var isEmbedded = params.get('embedded') === '1';
+  if (!isEmbedded) return;
+
+  /* Hide sidebar */
+  var sidebar = document.getElementById('sidebar-mount');
+  if (sidebar) sidebar.style.display = 'none';
+
+  /* Hide replaces strip */
+  var strip = document.getElementById('replaces-strip');
+  if (strip) strip.style.display = 'none';
+
+  /* Hide topbar */
+  var topbar = document.getElementById('run-trace-topbar');
+  if (topbar) topbar.style.display = 'none';
+
+  /* Adjust run-layout height since topbar is gone */
+  var runLayout = document.querySelector('.run-layout');
+  if (runLayout) runLayout.style.height = '100vh';
+})();
 </script>
 </body>
 </html>

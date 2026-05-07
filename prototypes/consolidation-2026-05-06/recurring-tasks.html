@@ -392,6 +392,11 @@ td.actions-cell { position: relative; }
   display: none;
 }
 .col-filter-dropdown.open { display: block; }
+.col-filter-dropdown-footer { display: flex; gap: 6px; padding: 8px 10px 4px; border-top: 1px solid var(--border); }
+.col-filter-cancel { flex: 1; padding: 5px 10px; font-size: 12px; border: 1px solid var(--border); background: white; border-radius: 6px; cursor: pointer; color: var(--slate-600); }
+.col-filter-cancel:hover { background: var(--slate-50); }
+.col-filter-apply { flex: 1; padding: 5px 10px; background: var(--indigo-600); color: white; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.col-filter-apply:hover { background: var(--indigo-700); }
 .col-filter-dropdown-head {
   padding: 6px 12px 4px;
   display: flex; align-items: center; justify-content: space-between;
@@ -409,15 +414,7 @@ td.actions-cell { position: relative; }
 }
 .col-filter-option:hover { background: var(--slate-50); }
 .col-filter-option input[type="checkbox"] { accent-color: var(--indigo-500); cursor: pointer; }
-.col-filter-apply {
-  margin: 6px 10px 4px;
-  padding: 5px 12px; border-radius: 6px;
-  font-size: 12px; font-weight: 600;
-  background: var(--indigo-600); color: white; border: none;
-  cursor: pointer; width: calc(100% - 20px);
-  transition: background 0.12s;
-}
-.col-filter-apply:hover { background: var(--indigo-700); }
+/* .col-filter-apply is defined above in .col-filter-dropdown-footer block */
 
 /* ── Run now button (inline on manual rows) ──────────────────── */
 .run-now-btn {
@@ -478,18 +475,13 @@ td.actions-cell { position: relative; }
   <!-- Main content -->
   <main class="page-main">
 
-    <!-- Header: title left, search + actions right -->
+    <!-- Header: title left, actions right (search moved to filter bar) -->
     <div class="page-header">
       <div class="page-header-left">
         <h1 class="page-title">Recurring tasks</h1>
         <p class="page-subtitle">Acme Corp &middot; 14 active tasks &middot; 3 paused</p>
       </div>
       <div class="page-header-actions">
-        <!-- Search input moved to right of header -->
-        <div class="search-box" style="flex:0 0 280px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input type="text" id="search-input" placeholder="Search tasks by name, agent, brief..." oninput="applyAllFilters()">
-        </div>
         <button class="btn btn-outline" onclick="openOneoffModal()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Run a one-off task
@@ -501,8 +493,8 @@ td.actions-cell { position: relative; }
       </div>
     </div>
 
-    <!-- Filter bar (quick-access chips only -- scope/project are now table columns) -->
-    <div class="filter-bar">
+    <!-- Filter bar: chips on left, search on right -->
+    <div class="filter-bar" style="justify-content:space-between;">
       <div class="filter-chips" id="filter-chips">
         <span class="chip active" data-filter="all">All (17)</span>
         <span class="chip" data-filter="schedule">Schedule-fired (8)</span>
@@ -512,6 +504,11 @@ td.actions-cell { position: relative; }
         <span class="chip" data-filter="active">Active (14)</span>
         <span class="chip" data-filter="paused">Paused (3)</span>
         <span class="chip" data-filter="error">Error (1)</span>
+      </div>
+      <!-- Search moved into filter bar (right side) -->
+      <div class="search-box" style="flex:0 0 240px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="search-input" placeholder="Search tasks..." oninput="applyAllFilters()">
       </div>
     </div>
 
@@ -529,13 +526,16 @@ td.actions-cell { position: relative; }
                 <button class="col-filter-caret" id="fc-btn-fire" onclick="toggleFilterDropdown('fire', event)" title="Filter by fire condition">&#9660;</button>
                 <div class="col-filter-dropdown" id="fc-drop-fire">
                   <div class="col-filter-dropdown-head">
-                    <a onclick="selectAllFilter('fire')">All</a>
+                    <a onclick="selectAllFilter('fire')">Select all</a>
                     <a onclick="clearFilter('fire')">Clear</a>
                   </div>
                   <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="schedule" checked> Schedule-fired</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="event" checked> Event-fired</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="manual" checked> Manual</label>
-                  <button class="col-filter-apply" onclick="applyColumnFilter('fire')">Apply</button>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('fire')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('fire')">Apply</button>
+                  </div>
                 </div>
               </div>
             </th>
@@ -545,7 +545,7 @@ td.actions-cell { position: relative; }
                 <button class="col-filter-caret" id="fc-btn-agent" onclick="toggleFilterDropdown('agent', event)" title="Filter by agent">&#9660;</button>
                 <div class="col-filter-dropdown" id="fc-drop-agent">
                   <div class="col-filter-dropdown-head">
-                    <a onclick="selectAllFilter('agent')">All</a>
+                    <a onclick="selectAllFilter('agent')">Select all</a>
                     <a onclick="clearFilter('agent')">Clear</a>
                   </div>
                   <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Account Health Agent" checked> Account Health Agent</label>
@@ -558,7 +558,10 @@ td.actions-cell { position: relative; }
                   <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Internal Escalation" checked> Internal Escalation</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Onboarding Agent" checked> Onboarding Agent</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Compliance Prefilter" checked> Compliance Prefilter</label>
-                  <button class="col-filter-apply" onclick="applyColumnFilter('agent')">Apply</button>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('agent')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('agent')">Apply</button>
+                  </div>
                 </div>
               </div>
             </th>
@@ -568,12 +571,15 @@ td.actions-cell { position: relative; }
                 <button class="col-filter-caret" id="fc-btn-scope" onclick="toggleFilterDropdown('scope', event)" title="Filter by scope">&#9660;</button>
                 <div class="col-filter-dropdown" id="fc-drop-scope">
                   <div class="col-filter-dropdown-head">
-                    <a onclick="selectAllFilter('scope')">All</a>
+                    <a onclick="selectAllFilter('scope')">Select all</a>
                     <a onclick="clearFilter('scope')">Clear</a>
                   </div>
                   <label class="col-filter-option"><input type="checkbox" data-filter="scope" value="Acme Corp" checked> Acme Corp</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="scope" value="Organisation" checked> Organisation</label>
-                  <button class="col-filter-apply" onclick="applyColumnFilter('scope')">Apply</button>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('scope')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('scope')">Apply</button>
+                  </div>
                 </div>
               </div>
             </th>
@@ -583,14 +589,17 @@ td.actions-cell { position: relative; }
                 <button class="col-filter-caret" id="fc-btn-project" onclick="toggleFilterDropdown('project', event)" title="Filter by project">&#9660;</button>
                 <div class="col-filter-dropdown" id="fc-drop-project">
                   <div class="col-filter-dropdown-head">
-                    <a onclick="selectAllFilter('project')">All</a>
+                    <a onclick="selectAllFilter('project')">Select all</a>
                     <a onclick="clearFilter('project')">Clear</a>
                   </div>
                   <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Q1 Outreach Campaign" checked> Q1 Outreach Campaign</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Customer Health Q2" checked> Customer Health Q2</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Compliance Audit 2026" checked> Compliance Audit 2026</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="project" value="" checked> (None)</label>
-                  <button class="col-filter-apply" onclick="applyColumnFilter('project')">Apply</button>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('project')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('project')">Apply</button>
+                  </div>
                 </div>
               </div>
             </th>
@@ -600,13 +609,16 @@ td.actions-cell { position: relative; }
                 <button class="col-filter-caret" id="fc-btn-status" onclick="toggleFilterDropdown('status', event)" title="Filter by status">&#9660;</button>
                 <div class="col-filter-dropdown" id="fc-drop-status">
                   <div class="col-filter-dropdown-head">
-                    <a onclick="selectAllFilter('status')">All</a>
+                    <a onclick="selectAllFilter('status')">Select all</a>
                     <a onclick="clearFilter('status')">Clear</a>
                   </div>
                   <label class="col-filter-option"><input type="checkbox" data-filter="status" value="active" checked> Active</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="status" value="paused" checked> Paused</label>
                   <label class="col-filter-option"><input type="checkbox" data-filter="status" value="error" checked> Error</label>
-                  <button class="col-filter-apply" onclick="applyColumnFilter('status')">Apply</button>
+                  <div class="col-filter-dropdown-footer">
+                    <button class="col-filter-cancel" onclick="cancelColumnFilter('status')">Cancel</button>
+                    <button class="col-filter-apply" onclick="applyColumnFilter('status')">Apply</button>
+                  </div>
                 </div>
               </div>
             </th>
@@ -1136,24 +1148,65 @@ function sortByColumn(col) {
 }
 
 /* ── Column filter dropdown toggle ───────────────────────────── */
+
+// Snapshot of checkbox states when a dropdown opens, for Cancel to restore
+var _filterSnapshot = {};
+
+function _snapshotFilter(col) {
+  _filterSnapshot[col] = {};
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => {
+    _filterSnapshot[col][cb.value] = cb.checked;
+  });
+}
+
+function _restoreFilter(col) {
+  const snap = _filterSnapshot[col];
+  if (!snap) return;
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => {
+    if (cb.value in snap) cb.checked = snap[cb.value];
+  });
+}
+
 function toggleFilterDropdown(col, e) {
   e.stopPropagation();
   const drop = document.getElementById('fc-drop-' + col);
   const isOpen = drop.classList.contains('open');
   closeAllFilterDropdowns();
-  if (!isOpen) drop.classList.add('open');
+  if (!isOpen) {
+    _snapshotFilter(col);
+    drop.classList.add('open');
+  }
 }
 
 function closeAllFilterDropdowns() {
   document.querySelectorAll('.col-filter-dropdown.open').forEach(d => d.classList.remove('open'));
 }
-document.addEventListener('click', closeAllFilterDropdowns);
 
+// Close on outside click but NOT when clicking inside a dropdown
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.col-filter-dropdown') && !e.target.closest('.col-filter-caret')) {
+    closeAllFilterDropdowns();
+  }
+});
+
+// Esc closes open dropdown
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeAllFilterDropdowns();
+});
+
+// Smart toggle: if all checked → uncheck all; if any unchecked → check all
 function selectAllFilter(col) {
-  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => cb.checked = true);
+  const cbs = Array.from(document.querySelectorAll(`input[data-filter="${col}"]`));
+  const allChecked = cbs.every(cb => cb.checked);
+  cbs.forEach(cb => cb.checked = !allChecked);
 }
 function clearFilter(col) {
   document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => cb.checked = false);
+}
+
+function cancelColumnFilter(col) {
+  _restoreFilter(col);
+  closeAllFilterDropdowns();
 }
 
 function applyColumnFilter(col) {

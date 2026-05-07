@@ -1565,3 +1565,92 @@ recurring-tasks.html sortable/filterable columns:
 - `prototypes/consolidation-2026-05-06/calendar.html`
 - `prototypes/consolidation-2026-05-06/recurring-tasks.html`
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 10 — 2026-05-07 00:00
+
+**Operator feedback:** 8 distinct fix areas: shared modal primitive, shared run-trace popup, shared workspace switching, home.html layout fixes, activity.html run-trace popup + workspace badges, inbox.html priority bands, recurring-tasks.html search-to-filter-bar + dropdown UX, run-trace.html right panel + embedded mode, agent-edit.html skills tab footer, project-edit.html sticky footer, plus patterns.md document.
+
+**Changes made:**
+
+_shared.css:_
+- Added `.modal-overlay`, `.modal-card`, `.modal-card-large`, `.modal-card-xl`, `.modal-header`, `.modal-title`, `.modal-close`, `.modal-body`, `.modal-footer` classes — shared modal primitive
+- Added `.form-footer-sticky` and `.form-footer-sticky-inner` classes — shared sticky form footer primitive
+
+home.html (largely rewritten):
+- Runs chart card: flex: 1 fill on chart area; sparkline bars stretch to fill card height
+- Row 3 changed from full-width activity to 2-column: Recent activity (left) + Quick actions (right)
+- Activity table: dropped Run column, now 5 columns (Activity / Subaccount / Actor / Type / Time), 8 rows
+- Row click opens activity modal (not page navigation)
+- Activity modal shows: description, subaccount badge, actor, type, project, run link, when
+- Run link in activity modal opens run-trace.html in a modal-card-xl iframe (z-index 210, on top of activity modal at 200)
+- Workspace badges wired via `makeWorkspaceBadgeClickable()` for org_admin profile
+- `ACTIVITY_DATA` object drives both table rows and modal content
+
+activity.html:
+- "View run trace" button in drawer footer now opens run-trace modal (not navigation)
+- Run field added to drawer for agent_run event type
+- Workspace pills in table and drawer wired for clickable subaccount switching (org_admin only)
+- Run-trace modal HTML added after script block (z-index 210)
+- Escape key handler updated to check run-trace modal first
+
+inbox.html:
+- Replaced flat list + old "Earlier" toggle with 3 collapsible priority bands
+- HIGH PRIORITY (red left border, default expanded): 3 items — run failed, spending cap, expired connections
+- NEEDS ACTION (amber left border, default expanded): existing approval/conflict/clarification items
+- PREVIOUS (slate border, default collapsed): old "Earlier, read" items
+- All kb-hint divs removed (7 instances)
+- Each item: actions in top-right flex wrapper, date label in bottom-right at 11px slate-500 ("Added: date" or "Triggered: date")
+- `toggleBand()` function drives expand/collapse; band headers are sticky
+
+recurring-tasks.html:
+- Search input moved from page header into filter bar right side (flex: 0 0 240px)
+- Filter dropdowns: dropdown stays open until Apply/Cancel/Esc/outside click
+- Individual checkbox changes do NOT close dropdown
+- "Select all" is smart toggle (all on -> all off; any off -> all on)
+- Cancel button added to each dropdown footer; Cancel restores snapshot (state at open time)
+- Snapshot pattern: `_snapshotFilter(col)` on open, `_restoreFilter(col)` on Cancel
+- Outside-click handler uses `.closest()` to avoid closing when interacting inside dropdown
+- Esc closes any open dropdown
+- CSS: `.col-filter-dropdown-footer`, `.col-filter-cancel` added; old standalone `.col-filter-apply` rule replaced
+
+run-trace.html:
+- Right detail panel width: 360px -> 540px
+- Added `id` attributes to replaces-strip and topbar elements for JS targeting
+- `?embedded=1` mode: hides sidebar mount, replaces-strip, topbar; sets `.run-layout { height: 100vh }`
+- Sidebar rendering skipped in embedded mode (URLSearchParams check before renderSidebar call)
+
+agent-edit.html:
+- Confirmed sticky footer in correct position inside `.agent-content` (overflow-y: auto scroll container)
+- Confirmed "Run test" button inside test-panel-body, not floating loose
+- Confirmed skills tab structure: enabled-skill section + library-grid section properly enclosed in tab-skills div
+
+project-edit.html:
+- `.form-footer` updated to full-width sticky strip with `box-shadow: 0 -2px 8px rgba(0,0,0,0.04)`
+- Added `.form-footer-inner { max-width: 720px; margin: 0 auto; }` to center button group to match form column
+- Footer HTML wrapped in `.form-footer-inner` div
+- `form-body` bottom padding reduced from 80px to 32px (sticky footer handles visual bottom clearance)
+
+patterns.md (new file):
+- Created `tasks/builds/consolidation-2026-05-06/patterns.md`
+- 7 sections: Modal primitive, Activity drawer/modal, Run-trace popup, Cross-page workspace switching, Sortable+filterable table columns, Inbox priority bands, Sticky form footer
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- all changes serve operator navigation tasks; modal overlays keep context; priority bands let operators triage inbox without cognitive overload
+- Default to hidden: yes -- run-trace opens in modal (not new page); filter dropdowns stay closed until caret; PREVIOUS band starts collapsed; embedded mode hides all chrome
+- One primary action: yes -- no new primary actions added; all changes are navigation and filter UX improvements
+- Inline state: yes -- workspace badges clickable inline; run trace inline in modal; activity context inline in modal overlay
+- Re-check passed: yes -- inbox bands make priority visible at a glance; filter dropdowns behave like familiar spreadsheet-style controls; modals keep operator in context
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/_shared.css`
+- `prototypes/consolidation-2026-05-06/home.html`
+- `prototypes/consolidation-2026-05-06/activity.html`
+- `prototypes/consolidation-2026-05-06/inbox.html`
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html`
+- `prototypes/consolidation-2026-05-06/run-trace.html`
+- `prototypes/consolidation-2026-05-06/agent-edit.html` (confirmed, no changes needed)
+- `prototypes/consolidation-2026-05-06/project-edit.html`
+- `tasks/builds/consolidation-2026-05-06/patterns.md` (new)
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

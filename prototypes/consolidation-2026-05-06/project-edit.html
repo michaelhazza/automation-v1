@@ -122,7 +122,7 @@
   .form-body {
     max-width: 720px;
     margin: 0 auto;
-    padding: 28px 28px 80px;
+    padding: 28px 28px 32px;
     display: flex;
     flex-direction: column;
     gap: 24px;
@@ -433,10 +433,15 @@
     background: white;
     border-top: 1px solid var(--border, #e2e8f0);
     padding: 14px 28px;
+    z-index: 10;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  }
+  .form-footer-inner {
+    max-width: 720px;
+    margin: 0 auto;
     display: flex;
     align-items: center;
     gap: 10px;
-    z-index: 10;
   }
   .btn-destructive {
     margin-left: auto;
@@ -709,9 +714,11 @@
 
     <!-- Footer (sticky, always visible) -->
     <div class="form-footer" id="form-footer">
-      <button class="btn btn-outline" onclick="discardChanges()">Discard</button>
-      <button class="btn btn-primary" onclick="saveProject()">Save changes</button>
-      <button class="btn-destructive" onclick="showStubAction('delete project confirmation')">Delete project</button>
+      <div class="form-footer-inner">
+        <button class="btn btn-outline" onclick="discardChanges()">Discard</button>
+        <button class="btn btn-primary" onclick="saveProject()">Save changes</button>
+        <button class="btn-destructive" onclick="showStubAction('delete project confirmation')">Delete project</button>
+      </div>
     </div>
 
   </div><!-- /page-main -->
