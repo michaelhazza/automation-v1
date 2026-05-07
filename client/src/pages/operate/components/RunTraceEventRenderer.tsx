@@ -112,6 +112,7 @@ function ToolCallEventCard({ event }: { event: RunTraceToolCallEvent }) {
   return (
     <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
       <button
+        type="button"
         className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
