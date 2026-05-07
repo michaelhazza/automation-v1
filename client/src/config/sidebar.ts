@@ -193,6 +193,16 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'activity',
       });
     }
+    if (hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) {
+      items.push({
+        group: 'work',
+        kind: 'link',
+        key: 'knowledge',
+        label: 'Knowledge',
+        to: staticRoute('/knowledge'),
+        iconKey: 'skills',
+      });
+    }
   }
 
   // ── projects group — only in workspace mode ──────────────────────────────
@@ -451,20 +461,20 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
       items.push({
         group: 'organisation',
         kind: 'link',
-        key: 'spending-budgets',
-        label: 'Spending Budgets',
-        to: staticRoute('/admin/spending-budgets'),
+        key: 'spending',
+        label: 'Spending',
+        to: staticRoute('/spending'),
         iconKey: 'usage',
       });
     }
-    if (activeClientId && (hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver') || hasClientPerm('spend_approver'))) {
+    if (hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) {
       items.push({
         group: 'organisation',
         kind: 'link',
-        key: 'spend-ledger',
-        label: 'Spend Ledger',
-        to: buildRoute('/admin/subaccounts/:subaccountId/spend-ledger', { subaccountId: activeClientId }),
-        iconKey: 'diagnostic',
+        key: 'connections',
+        label: 'Connections',
+        to: staticRoute('/connections'),
+        iconKey: 'settings',
       });
     }
   }

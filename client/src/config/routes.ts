@@ -11,6 +11,10 @@ export const APP_ROUTE_PATTERNS = [
   '/',
   // User settings
   '/settings',
+  // Govern surface
+  '/knowledge',
+  '/spending',
+  '/connections',
   // Workspace-context routes
   '/automations',
   '/workflows',

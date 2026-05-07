@@ -2,7 +2,6 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import api from './lib/api';
-import { logAndSwallow } from './lib/silentCatchHelper';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -50,8 +49,6 @@ const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
 const SystemPnlPage = lazy(() => import('./pages/SystemPnlPage'));
 const SystemIncidentsPage = lazy(() => import('./pages/SystemIncidentsPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
-const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
-const SubaccountKnowledgePage = lazy(() => import('./pages/SubaccountKnowledgePage'));
 // Memory & Briefings Phase 2 — HITL review queue (S7)
 const MemoryReviewQueuePage = lazy(() => import('./pages/MemoryReviewQueuePage'));
 // Memory & Briefings Phase 3 — subaccount onboarding flow (S5)
@@ -116,9 +113,10 @@ const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'));
 const SystemModulesPage = lazy(() => import('./pages/SystemModulesPage'));
 
 // Agentic Commerce — Chunk 14 spend UI
-const SpendingBudgetsListPage = lazy(() => import('./pages/SpendingBudgetsListPage'));
-const SpendingBudgetDetailPage = lazy(() => import('./pages/SpendingBudgetDetailPage'));
-const SpendLedgerPage = lazy(() => import('./pages/SpendLedgerPage'));
+// Govern surface (consolidation-govern)
+const KnowledgePage = lazy(() => import('./pages/govern/KnowledgePage'));
+const SpendingPage = lazy(() => import('./pages/govern/SpendingPage'));
+const ConnectionsPage = lazy(() => import('./pages/govern/ConnectionsPage'));
 const SubaccountApprovalChannelsPage = lazy(() => import('./pages/SubaccountApprovalChannelsPage'));
 const OrgApprovalChannelsPage = lazy(() => import('./pages/OrgApprovalChannelsPage'));
 
@@ -242,50 +240,6 @@ function SubaccountIntegrationsRoute({ user }: { user: User }) {
   return <IntegrationsAndCredentialsPage user={user} subaccountId={subaccountId} />;
 }
 
-// Agentic Commerce — permission-aware route wrappers (Chunk 14)
-// Server enforces actual permission checks; these wrappers derive UI-level
-// edit/read-only mode from the permissions already loaded in Layout context.
-// Using user.role for a fast local decision; spend_approver is a permission-set
-// key that lives in orgPerms (Layout), not on user.role directly — so we default
-// canCreate/canEdit to true and let each page call /api/my-permissions if needed.
-// The server's 403 response is the authoritative gate.
-
-function SpendingBudgetsListPageRoute({ user }: { user: User }) {
-  const [canCreate, setCanCreate] = useState(false);
-  useEffect(() => {
-    api.get('/api/my-permissions').then(({ data }) => {
-      const perms: string[] = data?.permissions ?? [];
-      setCanCreate(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(logAndSwallow('SpendingBudgetsListPageRoute: permissions fetch', { severity: 'critical' }));
-  }, [user]);
-  return <SpendingBudgetsListPage canCreate={canCreate} />;
-}
-
-function SpendingBudgetDetailPageRoute({ user }: { user: User }) {
-  const [canEdit, setCanEdit] = useState(false);
-  useEffect(() => {
-    api.get('/api/my-permissions').then(({ data }) => {
-      const perms: string[] = data?.permissions ?? [];
-      setCanEdit(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(logAndSwallow('SpendingBudgetDetailPageRoute: permissions fetch'));
-  }, [user]);
-  return <SpendingBudgetDetailPage user={user} canEdit={canEdit} />;
-}
-
-function SpendLedgerPageRoute({ user }: { user: User }) {
-  const { subaccountId } = useParams<{ subaccountId: string }>();
-  const [readOnly, setReadOnly] = useState(true);
-  useEffect(() => {
-    if (!subaccountId) return;
-    api.get(`/api/subaccounts/${subaccountId}/my-permissions`).then(({ data }) => {
-      const perms: string[] = data?.permissions ?? [];
-      const hasSpend = perms.includes('spend_approver') || perms.includes('org.spend.admin');
-      setReadOnly(!hasSpend);
-    }).catch(logAndSwallow('SpendLedgerPageRoute: permissions fetch'));
-  }, [subaccountId]);
-  return <SpendLedgerPage user={user} readOnly={readOnly} />;
-}
-
 function BriefRedirect() {
   const { briefId } = useParams<{ briefId: string }>();
   if (!briefId) return <Navigate to="/admin/tasks" replace />;
@@ -406,9 +360,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/mailbox" element={<AgentMailboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/calendar" element={<AgentCalendarPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
-            {/* Unified Knowledge page (spec §7.2) — References + Memory Blocks in one place */}
-            <Route path="/admin/subaccounts/:subaccountId/knowledge" element={<SubaccountKnowledgePage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/memory"    element={<Navigate to="/knowledge" replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/knowledge" element={<Navigate to="/knowledge" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
@@ -463,12 +416,17 @@ export default function App() {
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
-            {/* Agentic Commerce — Chunk 14: Spending Budgets + Spend Ledger + Approval Channels */}
-            <Route path="/admin/spending-budgets" element={<SpendingBudgetsListPageRoute user={user!} />} />
-            <Route path="/admin/spending-budgets/:budgetId" element={<SpendingBudgetDetailPageRoute user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<SpendLedgerPageRoute user={user!} />} />
+            {/* Agentic Commerce — legacy approval channels */}
             <Route path="/admin/subaccounts/:subaccountId/approval-channels" element={<SubaccountApprovalChannelsPage />} />
             <Route path="/admin/org-approval-channels" element={<OrgApprovalChannelsPage user={user!} />} />
+            {/* Govern surface — consolidated pages */}
+            <Route path="/knowledge"    element={<KnowledgePage />} />
+            <Route path="/spending"     element={<SpendingPage />} />
+            <Route path="/connections"  element={<ConnectionsPage />} />
+            {/* Redirect legacy spend paths so bookmarks survive */}
+            <Route path="/admin/spending-budgets"                        element={<Navigate to="/spending" replace />} />
+            <Route path="/admin/spending-budgets/:budgetId"             element={<Navigate to="/spending" replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<Navigate to="/spending" replace />} />
           </Route>
 
           {/* ClientPulse routes — gated by module subscription. Sidebar suppresses
