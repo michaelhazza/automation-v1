@@ -148,7 +148,7 @@ export function unionRecurringTasks(input: UnionInput): RecurringTask[] {
 
     rows.push({
       id: `trigger:${t.id}`,
-      name: `${agentName} — ${t.eventType}`,
+      name: `${agentName}: ${t.eventType}`,
       fireKind: 'event',
       fireCondition: formatFireCondition({ kind: 'event', eventType: t.eventType }),
       action: agentName,
@@ -259,8 +259,10 @@ export function applyFilters(rows: RecurringTask[], query: RecurringTasksQuery):
       result = result.filter((r) => r.scope.kind === 'workspace');
     } else if (s === 'org') {
       result = result.filter((r) => r.scope.kind === 'org');
+    } else {
+      // 'system' scope: no rows match in current model (triggers/schedules are workspace/org scoped)
+      result = [];
     }
-    // 'system' — no rows match in current model; returns empty
   }
 
   if (query.fireKind && query.fireKind.length > 0) {
@@ -290,6 +292,21 @@ export function applyFilters(rows: RecurringTask[], query: RecurringTasksQuery):
 
 type SortKey = NonNullable<RecurringTasksQuery['sortKey']>;
 
+function getSortValue(row: RecurringTask, key: SortKey): string | number | null {
+  switch (key) {
+    case 'name': return row.name;
+    case 'fireCondition': return row.fireCondition;
+    case 'action': return row.action;
+    case 'scope': return row.scope.name;
+    case 'project': return row.project?.name ?? null;
+    case 'status': return row.status;
+    case 'lastFired': return row.lastFiredAt;
+    case 'fires30d': return row.fires30d;
+    case 'nextFire': return row.nextFireAt;
+    default: return null;
+  }
+}
+
 /**
  * Sort rows by sortKey then by id DESC tiebreaker.
  *
@@ -305,20 +322,7 @@ export function applySortWithTiebreaker(
   const key: SortKey = sortKey ?? 'nextFire';
   const dir: 'asc' | 'desc' = sortDir ?? 'desc';
 
-  const getValue = (r: RecurringTask): string | number | null => {
-    switch (key) {
-      case 'name': return r.name;
-      case 'fireCondition': return r.fireCondition;
-      case 'action': return r.action;
-      case 'scope': return r.scope.name;
-      case 'project': return r.project?.name ?? null;
-      case 'status': return r.status;
-      case 'lastFired': return r.lastFiredAt;
-      case 'fires30d': return r.fires30d;
-      case 'nextFire': return r.nextFireAt;
-      default: return r.nextFireAt;
-    }
-  };
+  const getValue = (r: RecurringTask): string | number | null => getSortValue(r, key);
 
   return [...rows].sort((a, b) => {
     const av = getValue(a);
@@ -355,26 +359,11 @@ interface CursorPayload {
 }
 
 export function encodeCursor(row: RecurringTask, sortKey: SortKey, sortDir: 'asc' | 'desc'): string {
-  const getValue = (): string | number | null => {
-    switch (sortKey) {
-      case 'name': return row.name;
-      case 'fireCondition': return row.fireCondition;
-      case 'action': return row.action;
-      case 'scope': return row.scope.name;
-      case 'project': return row.project?.name ?? null;
-      case 'status': return row.status;
-      case 'lastFired': return row.lastFiredAt;
-      case 'fires30d': return row.fires30d;
-      case 'nextFire': return row.nextFireAt;
-      default: return row.nextFireAt;
-    }
-  };
-
   const payload: CursorPayload = {
     v: 1,
     k: sortKey,
     d: sortDir,
-    s: getValue(),
+    s: getSortValue(row, sortKey),
     i: row.id,
   };
 

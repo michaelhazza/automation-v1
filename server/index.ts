@@ -198,6 +198,8 @@ import workflowDraftsRouter from './routes/workflowDrafts.js';
 import clientErrorsRouter from './routes/clientErrors.js';
 // F3 Baseline Capture — baseline status, manual entry, admin reset (Chunks 4A/4B)
 import baselinesRouter from './routes/baselines.js';
+// Consolidation Build C3 — recurring tasks aggregator
+import recurringTasksRouter from './routes/recurringTasks.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -442,6 +444,8 @@ app.use(fileRevertRouter);
 app.use(workflowDraftsRouter);
 app.use(clientErrorsRouter);
 app.use(baselinesRouter);
+// Consolidation Build C3 — recurring tasks aggregator
+app.use(recurringTasksRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

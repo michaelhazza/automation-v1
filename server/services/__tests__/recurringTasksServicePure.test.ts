@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   unionRecurringTasks,
+  applyFilters,
   applySortWithTiebreaker,
   encodeCursor,
   decodeCursor,
@@ -114,7 +115,7 @@ function makeInput(overrides: Partial<UnionInput> = {}): UnionInput {
 function makeRecurringTask(overrides: Partial<RecurringTask> = {}): RecurringTask {
   return {
     id: 'trigger:trigger-1',
-    name: 'Reporter Agent — task_created',
+    name: 'Reporter Agent: task_created',
     fireKind: 'event',
     fireCondition: 'On task_created',
     action: 'Reporter Agent',
@@ -429,6 +430,43 @@ describe('applySearch', () => {
 
   it('whitespace-only q is identity', () => {
     expect(applySearch(rows, '   ')).toHaveLength(3);
+  });
+});
+
+// ── 7. applyFilters ───────────────────────────────────────────────────────────
+
+describe('applyFilters', () => {
+  const workspaceRow = makeRecurringTask({ id: 'r-ws', scope: { kind: 'workspace', id: 'sub-1', name: 'Acme Corp' } });
+  const orgRow = makeRecurringTask({ id: 'r-org', scope: { kind: 'org', id: 'sub-org-1', name: 'My Agency' } });
+  const rows = [workspaceRow, orgRow];
+
+  it('scope=workspace returns only workspace rows', () => {
+    const result = applyFilters(rows, { scope: 'workspace' });
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('r-ws');
+  });
+
+  it('scope=org returns only org rows', () => {
+    const result = applyFilters(rows, { scope: 'org' });
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('r-org');
+  });
+
+  it('scope=system returns zero rows (system scope not modelled — no rows match)', () => {
+    const result = applyFilters(rows, { scope: 'system' });
+    expect(result).toHaveLength(0);
+  });
+
+  it('scope=system returns zero rows even when input has both workspace and org rows', () => {
+    const mixed = [
+      makeRecurringTask({ id: 'ws-1', scope: { kind: 'workspace', id: 'sub-1', name: 'WS1' } }),
+      makeRecurringTask({ id: 'org-1', scope: { kind: 'org', id: 'sub-org-1', name: 'Org1' } }),
+    ];
+    expect(applyFilters(mixed, { scope: 'system' })).toHaveLength(0);
+  });
+
+  it('no scope filter returns all rows', () => {
+    expect(applyFilters(rows, {})).toHaveLength(2);
   });
 });
 
