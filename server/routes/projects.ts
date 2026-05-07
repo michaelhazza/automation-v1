@@ -106,7 +106,11 @@ router.post(
 
 /**
  * PATCH /api/subaccounts/:subaccountId/projects/:projectId
- * Update a project.
+ * Update a project (legacy route — delegates to projectService).
+ *
+ * Legacy callers may send: githubConnectionId, goalId, budgetCents (raw cents),
+ * budgetWarningPercent. These are normalised in projectService.fromApiPatch.
+ * budgetWarningPercent is mapped to budgetWarnThresholdPct before delegation.
  */
 router.patch(
   '/api/subaccounts/:subaccountId/projects/:projectId',
@@ -115,45 +119,14 @@ router.patch(
     const { subaccountId, projectId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const [existing] = await db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.subaccountId, subaccountId), isNull(projects.deletedAt)));
+    // Map legacy field name to service field name, keeping all others as-is
+    const { budgetWarningPercent, repoUrl, ...rest } = req.body as Record<string, unknown>;
+    const serviceBody: Record<string, unknown> = { ...rest };
+    if (budgetWarningPercent !== undefined) serviceBody.budgetWarnThresholdPct = budgetWarningPercent;
+    if (repoUrl !== undefined) serviceBody.repositoryUrl = repoUrl;
 
-    if (!existing) throw { statusCode: 404, message: 'Project not found' };
-
-    const { name, description, status, color, repoUrl, githubConnectionId, targetDate, budgetCents, budgetWarningPercent, goalId } = req.body as {
-      name?: string;
-      description?: string;
-      status?: 'active' | 'paused' | 'completed' | 'archived';
-      color?: string;
-      repoUrl?: string;
-      githubConnectionId?: string | null;
-      targetDate?: string | null;
-      budgetCents?: number | null;
-      budgetWarningPercent?: number | null;
-      goalId?: string | null;
-    };
-
-    const updates: Partial<typeof projects.$inferInsert> = { updatedAt: new Date() };
-    if (name !== undefined) updates.name = name.trim();
-    if (description !== undefined) updates.description = description?.trim() || null;
-    if (status !== undefined) updates.status = status;
-    if (color !== undefined) updates.color = color;
-    if (repoUrl !== undefined) updates.repoUrl = repoUrl?.trim() || null;
-    if (githubConnectionId !== undefined) updates.githubConnectionId = githubConnectionId || null;
-    if (targetDate !== undefined) updates.targetDate = targetDate ? new Date(targetDate) : null;
-    if (budgetCents !== undefined) updates.budgetCents = budgetCents;
-    if (budgetWarningPercent !== undefined) updates.budgetWarningPercent = budgetWarningPercent;
-    if (goalId !== undefined) updates.goalId = goalId || null;
-
-    const [updated] = await db
-      .update(projects)
-      .set(updates)
-      .where(eq(projects.id, projectId))
-      .returning();
-
-    res.json(updated);
+    const project = await projectService.patch(req.orgId!, projectId, serviceBody as Parameters<typeof projectService.patch>[2]);
+    res.json(project);
   })
 );
 

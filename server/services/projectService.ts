@@ -8,7 +8,7 @@ export interface ApiProject {
   subaccountId: string;
   name: string;
   description: string | null;
-  status: 'active' | 'paused' | 'archived';
+  status: 'active' | 'paused' | 'completed' | 'archived';
   color: string;
   objective: string | null;
   targetDate: string | null;
@@ -25,13 +25,17 @@ export interface ProjectPatch {
   name?: string;
   color?: string;
   description?: string;
-  status?: 'active' | 'paused' | 'archived';
+  status?: 'active' | 'paused' | 'completed' | 'archived';
   objective?: string | null;
   targetDate?: string | null;
   budgetUsd?: number | null;
   budgetWarnThresholdPct?: number;
   repositoryUrl?: string | null;
   linkedAgents?: string[];
+  // Legacy pass-through fields accepted by the subaccount route
+  githubConnectionId?: string | null;
+  goalId?: string | null;
+  budgetCents?: number | null;
 }
 
 export function toApiProject(row: typeof projects.$inferSelect): ApiProject {
@@ -41,7 +45,7 @@ export function toApiProject(row: typeof projects.$inferSelect): ApiProject {
     subaccountId: row.subaccountId,
     name: row.name,
     description: row.description ?? null,
-    status: row.status as 'active' | 'paused' | 'archived',
+    status: row.status as 'active' | 'paused' | 'completed' | 'archived',
     color: row.color,
     objective: row.objective ?? null,
     targetDate: row.targetDate?.toISOString() ?? null,
@@ -63,10 +67,18 @@ export function fromApiPatch(body: ProjectPatch): Partial<typeof projects.$infer
   if (body.color !== undefined) updates.color = body.color;
   if (body.objective !== undefined) updates.objective = body.objective ?? null;
   if (body.targetDate !== undefined) updates.targetDate = body.targetDate === null ? null : new Date(body.targetDate);
-  if (body.budgetUsd !== undefined) updates.budgetCents = body.budgetUsd === null ? null : Math.round(body.budgetUsd * 100);
+  if (body.budgetUsd !== undefined) {
+    updates.budgetCents = body.budgetUsd === null ? null : Math.round(body.budgetUsd * 100);
+  } else if (body.budgetCents !== undefined) {
+    // Legacy callers send raw cents; convert only if budgetUsd is not also provided
+    updates.budgetCents = body.budgetCents;
+  }
   if (body.budgetWarnThresholdPct !== undefined) updates.budgetWarningPercent = body.budgetWarnThresholdPct;
   if (body.repositoryUrl !== undefined) updates.repoUrl = body.repositoryUrl;
-  if (body.linkedAgents !== undefined) updates.linkedAgentIds = body.linkedAgents;
+  if (body.linkedAgents !== undefined) updates.linkedAgentIds = [...new Set(body.linkedAgents)];
+  // Legacy pass-through fields
+  if (body.githubConnectionId !== undefined) updates.githubConnectionId = body.githubConnectionId ?? null;
+  if (body.goalId !== undefined) updates.goalId = body.goalId ?? null;
   return updates;
 }
 
@@ -81,6 +93,16 @@ export const projectService = {
   },
 
   async patch(orgId: string, projectId: string, body: ProjectPatch): Promise<ApiProject> {
+    if (body.budgetUsd !== undefined && body.budgetUsd !== null) {
+      if (!Number.isFinite(body.budgetUsd) || body.budgetUsd < 0) {
+        throw { statusCode: 400, message: 'budgetUsd must be a non-negative finite number', errorCode: 'INVALID_BUDGET' };
+      }
+    }
+
+    if (body.name !== undefined && body.name.trim() === '') {
+      throw { statusCode: 400, message: 'name cannot be empty', errorCode: 'INVALID_NAME' };
+    }
+
     const updates = fromApiPatch(body);
 
     if (body.linkedAgents !== undefined && body.linkedAgents.length > 0) {

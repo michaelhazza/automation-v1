@@ -85,6 +85,36 @@ test('fromApiPatch: budgetUsd null sets budgetCents to null', () => {
   expect(result.budgetCents).toBeNull();
 });
 
+test('fromApiPatch: budgetUsd -1 still converts to budgetCents -100 (validation is in patch, not mapper)', () => {
+  const result = fromApiPatch({ budgetUsd: -1 } as ProjectPatch);
+  expect(result.budgetCents).toBe(-100);
+});
+
+test('fromApiPatch: legacy budgetCents passes through when budgetUsd is absent', () => {
+  const result = fromApiPatch({ budgetCents: 9900 } as ProjectPatch);
+  expect(result.budgetCents).toBe(9900);
+});
+
+test('fromApiPatch: budgetUsd takes precedence over budgetCents when both present', () => {
+  const result = fromApiPatch({ budgetUsd: 100, budgetCents: 9999 } as ProjectPatch);
+  expect(result.budgetCents).toBe(10000); // 100 * 100
+});
+
+test('fromApiPatch: linkedAgents deduplicates', () => {
+  const result = fromApiPatch({ linkedAgents: ['a', 'b', 'a', 'c', 'b'] } as ProjectPatch);
+  expect(result.linkedAgentIds).toEqual(['a', 'b', 'c']);
+});
+
+test('fromApiPatch: legacy githubConnectionId pass-through', () => {
+  const result = fromApiPatch({ githubConnectionId: 'gh-123' } as ProjectPatch);
+  expect(result.githubConnectionId).toBe('gh-123');
+});
+
+test('fromApiPatch: legacy goalId pass-through', () => {
+  const result = fromApiPatch({ goalId: 'goal-1' } as ProjectPatch);
+  expect(result.goalId).toBe('goal-1');
+});
+
 // ---------------------------------------------------------------------------
 // toApiProject tests
 // ---------------------------------------------------------------------------
@@ -97,6 +127,11 @@ test('toApiProject: budgetCents 500000 converts to budgetUsd 5000', () => {
 test('toApiProject: budgetCents null yields budgetUsd null', () => {
   const project = toApiProject(makeRow({ budgetCents: null }));
   expect(project.budgetUsd).toBeNull();
+});
+
+test('toApiProject: completed status passes through', () => {
+  const project = toApiProject(makeRow({ status: 'completed' }));
+  expect(project.status).toBe('completed');
 });
 
 test('toApiProject: linkedAgentIds null/undefined yields linkedAgents empty array', () => {
