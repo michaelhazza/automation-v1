@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07 (round 2 — bucket-1/bucket-2 polish folded in; all 12 sections complete; foundation Phase 0 patch assumed available)
+**Last updated:** 2026-05-07 (chatgpt-spec-review round 1 — list-endpoint invariants, auto-memory override gate, time-window definitions, "Other" rollup rules, connection-test enum, snapshot consistency, body-hash canonicalisation, cost precision, status enum tightened to three values; all 12 sections complete)
 **Author:** michael
 **Build slug:** consolidation-govern
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
@@ -85,6 +85,19 @@ This spec assumes `consolidation-foundation` has shipped or is in flight; founda
 
 ## 4. Public API contracts
 
+### 4.0 List endpoint invariants
+
+These invariants apply to every list endpoint in §4 (Knowledge §4.1, Spend Ledger §4.2, Connections §4.6) unless that endpoint says otherwise.
+
+- **Default ordering and cursor:** Each list endpoint declares an explicit default sort that ALWAYS ends with `id DESC` as the final tiebreaker:
+  - Knowledge: `ORDER BY created_at DESC, id DESC`
+  - Spend Ledger: `ORDER BY timestamp DESC, id DESC`
+  - Connections: `ORDER BY created_at DESC, id DESC`
+  The `cursor` value encodes both the primary sort field and `id`, so pagination is stable across rows with identical sort values and across concurrent updates. Sort overrides via `sortKey` / `sortDir` always include `id DESC` as the final tiebreaker.
+- **Max page size:** `limit` MUST be ≤ 50; requests with `limit > 50` are silently clamped to 50.
+- **`q` semantics:** Case-insensitive partial substring match against the fields named per endpoint. No stemming, no fuzzy match. Empty `q` is a no-op (not an empty-result filter). `q` composes with structured filters via AND.
+- **`filterOptions`:** Returned per `<SortableTable>` contract (foundation §4.3). Counts are computed AFTER RLS scoping but BEFORE applying the caller's filter selection so users see how many rows each filter value would yield. Options sort by descending count, then ascending value. Zero-count options are included so previously-selected filters remain visible after they no longer match any row.
+
 ### 4.1 Knowledge entries — list + Edit-and-override
 
 `GET /api/knowledge` (extends existing route):
@@ -92,7 +105,8 @@ This spec assumes `consolidation-foundation` has shipped or is in flight; founda
 ```ts
 interface KnowledgeListQuery {
   scope?: 'workspace' | 'org';
-  status?: ('pending_review' | 'in_use' | 'ignored' | 'overridden')[];
+  status?: ('pending_review' | 'in_use' | 'ignored')[];
+  autoUpdateDisabled?: boolean;               // separate filter (replaces the legacy 'overridden' status chip)
   kind?: ('belief' | 'fact' | 'observation' | 'preference' | 'issue')[];
   agent?: string[];
   q?: string;
@@ -106,7 +120,7 @@ interface KnowledgeEntry {
   kind: 'belief' | 'fact' | 'observation' | 'preference' | 'issue';
   body: string;
   confidence: number;                         // 0-1
-  status: 'pending_review' | 'in_use' | 'ignored' | 'overridden';
+  status: 'pending_review' | 'in_use' | 'ignored';
   source: { runId: string; agentName: string; extractedAt: string };
   subaccount: { id: string; name: string } | null;
   autoUpdateDisabled: boolean;                // true after Edit-and-override
@@ -118,9 +132,11 @@ interface KnowledgeEntry {
 
 **`POST /api/knowledge/:id/reject`** — moves to `ignored`. State-based.
 
-**`POST /api/knowledge/:id/override`** — body: `{ body: string }`. Sets `auto_update_disabled = true`, writes a manual revision, status stays `in_use` (or moves to `overridden`). UI label: "Edit and override" (per round 13 prototype rename). Idempotent: re-submitting the same body is a no-op (no new revision); a different body creates a new revision.
+**`POST /api/knowledge/:id/override`** — body: `{ body: string }`. Sets `auto_update_disabled = true`, writes a manual revision, status stays `in_use`. UI label: "Edit and override" (per round 13 prototype rename). Idempotent: re-submitting the same body is a no-op (no new revision); a different body creates a new revision.
 
-**Source-of-truth precedence** for memory blocks: `memory_blocks.body` is the live value; `memory_block_versions` is the audit log. When `auto_update_disabled = true`, the auto-extraction pipeline MUST skip writes to this row (existing pipeline gate to be confirmed in plan).
+**Status vs override:** `status` is closed at three values — `pending_review | in_use | ignored`. `auto_update_disabled` is the source of truth for "this block is detached from auto-extraction" and is exposed as a separate `autoUpdateDisabled` filter (and a row-level visual indicator), not as a fourth status. This avoids dual meaning where a row would simultaneously be "in use" and "overridden".
+
+**Source-of-truth precedence** for memory blocks: `memory_blocks.body` is the live value; `memory_block_versions` is the audit log. When `auto_update_disabled = true`, the auto-extraction pipeline MUST skip BOTH the `memory_blocks` UPDATE AND the `memory_block_versions` INSERT for that row, even when the freshly-extracted content differs from the live body. This prevents silent reversion via new version rows and divergence between `memory_blocks.body` and `memory_block_versions`. Pipeline gate is implemented in chunk C1 (§7).
 
 ### 4.2 Spending — Ledger list
 
@@ -190,6 +206,13 @@ interface SpendInsights {
 
 Pure aggregator over existing ledger data; no persistence. Synchronous read.
 
+**Time windows (UTC throughout):**
+- `mtdUsd`, `pctOfOrgTotal`: current MTD = first day of the current calendar month through "now".
+- `topSpender.deltaPct` and `fastestGrower.deltaPct`: `(current MTD spend - previous full calendar month spend) / previous full calendar month spend × 100`. Negative values allowed. Previous-month-zero → `null` (frontend renders "—"). "Previous month" = most recently completed calendar month.
+- `runs30d`: rolling 30 calendar days ending at "now".
+
+`fastestGrower` and `topSpender.deltaPct` MUST share the same window definition and inputs; divergence is a bug.
+
 ### 4.5 Spending — trends (top 5 by current MTD spend, last 6 months)
 
 `GET /api/spend/trends?scope=org`:
@@ -202,8 +225,16 @@ interface SpendTrends {
     capUsage6mo: number[];     // length 6, % values; >100 means over cap
     capBlownAt: number | null; // index 0-5 of first month over cap, or null
   }>;
-  // Workspace count is min(actual_workspace_count, 5). If org has >5 workspaces,
-  // index 4 is the synthetic 'Other' rollup containing the rest of the spend.
+  // Workspace ranking: top 4 by current MTD spend, then synthetic "Other" at index 4
+  // when the org has more than 5 workspaces.
+  //   actual_workspace_count <= 5: array length is the actual count; no "Other" entry.
+  //   actual_workspace_count >  5: array length is 5; positions 0-3 are the top 4
+  //     workspaces ranked by current MTD spend; position 4 is the synthetic rollup with
+  //     id = '__other__', name = 'Other', spend6mo = sum of all non-top-4 workspaces'
+  //     spend6mo per index, capUsage6mo = (sum of those workspaces' spend per month) /
+  //     (sum of those workspaces' caps per month); months where the summed cap is zero
+  //     or null yield capUsage6mo = null at that index. capBlownAt = first index where
+  //     the aggregate capUsage > 100, else null.
   monthLabels: string[];       // length 6, ['Apr', 'May', ..., 'Sep']
 }
 ```
@@ -267,7 +298,7 @@ interface ConnectionTestResponse {
   status: 'ok' | 'failed';
   latencyMs: number;
   testedAt: string;             // ISO
-  error?: { code: string; message: string };
+  error?: { code: 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR'; message: string };
   capabilities?: string[];      // e.g. ['read:contacts', 'write:emails'] for OAuth — verified scopes
 }
 ```
@@ -279,6 +310,15 @@ Behaviour:
 - For api-key connections: provider-specific ping (HubSpot, Stripe, etc).
 
 Producer: extends `connectionTokenService.ts` with a per-kind `testConnection()` dispatcher. **Idempotency:** unconditionally retryable; no state mutation. **Rate limit:** existing connection-test rate limiter (or add a new one if missing) — max 6 tests per connection per minute.
+
+**Response contract:**
+- HTTP status is ALWAYS 200, even on test failure. Network / timeout / auth failure surface as `status: 'failed'` with a structured `error` object; never as a 5xx.
+- `error.code` enum:
+  - `TIMEOUT` — provider did not respond within the 10s timeout.
+  - `AUTH_FAILED` — token / cookie / api-key rejected (provider 401 / 403).
+  - `NETWORK_ERROR` — DNS / connection / TLS failure before reaching the provider.
+  - `PROVIDER_ERROR` — provider responded with 4xx (non-auth) or 5xx, or returned a malformed response.
+- `error.message` is a short human-readable string suitable for an in-app notification; never includes secrets, tokens, or full URLs.
 
 ### 4.10 Connection disconnect — impact warning
 
@@ -295,6 +335,8 @@ interface ConnectionUsage {
 Producer: pure read aggregator over `agent_data_sources` + `agent_triggers` + workflow definitions. Used by the disconnect confirmation dialog so the user sees what will break.
 
 `POST /api/connections/:id/disconnect`: existing endpoint. Frontend pre-fetches `/usage` on the click to populate the `<ConfirmDialog>` body. Dialog copy: `"Disconnect <providerName>? <N> agents, <M> recurring tasks, and <K> workflows use this connection. They will fail until reconnected."` Type-to-confirm if `agents.length + recurringTasks.length + workflows.length > 0`.
+
+**Snapshot consistency:** The aggregator reads `agent_data_sources`, `agent_triggers`, and workflow definitions in a single read transaction (PostgreSQL `READ COMMITTED` is fine; the snapshot is taken at transaction start) so the three counts are mutually consistent — no cross-table mismatches if rows change mid-aggregation.
 
 ### 4.11 Spending — pace + period semantics
 
@@ -402,7 +444,7 @@ No new permission keys.
 **Execution model:**
 - Knowledge list / spend ledger / caps / insights / trends / connections list: synchronous, cached at the route layer where the existing pattern applies.
 - Knowledge approve / reject: synchronous, state-based idempotency (`UPDATE ... WHERE status = 'pending_review'`). Second caller of same action returns `200 alreadyApplied: true`.
-- Knowledge override: synchronous, key-based idempotency (`(memory_block_id, body_hash)` unique per revision). Submitting the same body twice returns the existing revision; submitting a different body creates a new revision. Sets `auto_update_disabled = true` atomically. **Concurrency:** `UPDATE ... WHERE etag = $expected`. ETag mismatch → 409 with current ETag.
+- Knowledge override: synchronous, key-based idempotency. `memory_block_versions` carries `UNIQUE (memory_block_id, body_hash)`. **Body hash canonicalisation** before hashing: (a) strip leading and trailing whitespace, (b) collapse internal whitespace runs to single spaces, (c) preserve case (override text is human-authored and case-sensitive). Hash function: SHA-256, hex-encoded, lower-case. Submitting the same canonicalised body twice returns the existing revision (no new row); submitting a different canonicalised body creates a new revision. Sets `auto_update_disabled = true` atomically with the version insert. **Concurrency:** `UPDATE ... WHERE etag = $expected`. ETag mismatch → 409 with current ETag.
 - Connection disconnect: synchronous, calls existing per-kind disconnect flow. Idempotent (already-disconnected → 200).
 - Connection test: synchronous-with-network-call. Wraps the provider call with a 10s timeout; failure returns `status: 'failed'`, never bubbles 5xx. Rate-limited per §4.9.
 
@@ -413,7 +455,9 @@ No new permission keys.
 - Connection disconnect: state-based.
 - HTTP mapping: never bubble `23505` as 500. ETag mismatch → 409. Rate-limit hit on connection test → 429 with `Retry-After`.
 
-**State machine:** `memory_block.status` is closed: `pending_review | in_use | ignored | overridden`. `auto_update_disabled` is a boolean side-channel, not a state. Existing transitions preserved; the override action moves status from `in_use → in_use` (no state change) plus `auto_update_disabled := true`. No new states. No new transitions for connections (existing lifecycle preserved).
+**Cost precision:** Spend amounts are stored at micro-USD precision (integer microcents = 10^-6 USD) to avoid floating-point drift in aggregators. Aggregators sum the integer column and divide by 1_000_000 at the API serialisation boundary; the public contract stays `costUsd: number` (decimal dollars). Frontend renders with `Intl.NumberFormat` — 2 decimals on Ledger rows, 4 decimals on Caps & budgets pace projections. If the existing `agent_charges` schema does not yet use integer microcents, the plan calls out the alignment migration before the C3 chunk ships. **Floats are NOT used in storage or aggregation.**
+
+**State machine:** `memory_block.status` is closed: `pending_review | in_use | ignored`. `auto_update_disabled` is a boolean side-channel, not a status. Existing transitions preserved; the override action keeps status as `in_use` (no state change) and sets `auto_update_disabled := true`. No new states. No new transitions for connections (existing lifecycle preserved).
 
 ## 7. Phase / chunk plan (preview)
 
@@ -503,15 +547,21 @@ frontend_tests: none_for_now
 - **Knowledge full-text search ranking tuning** (e.g. boost recent, boost high-confidence). Phase 1 uses default postgres ts_rank or LIKE.
 - **Spend currency selector / multi-currency support.** Phase 1 hardcodes USD with `$` glyph.
 - **Keyboard shortcuts** (e.g. A to approve a selected knowledge entry). Defer.
+- **Empty-state copy guidelines** per list page (Knowledge / Ledger / Connections). Spec names the `<EmptyState>` primitive and the "Clear filters" action; final copy iterated during build via mockup-designer.
 
 ## 11. Self-consistency check
 
 - Goals (§1) match Implementation (§4–7)? Yes — every page in §1 has contracts in §4, inventory in §5, chunks in §7. Reuse-vs-extend-vs-new verdicts in §3 match §5.
 - Every "must" / "guarantees" claim has a backing mechanism?
-  - Knowledge override sets `auto_update_disabled = true` atomically: stated in §6 (key-based + ETag).
-  - Auto-extraction pipeline skips when `auto_update_disabled = true`: backed by C1 chunk in §7.
-  - Connection test never bubbles 5xx: backed by §6 (10s timeout + structured error response).
-  - Top-5 ranking with Other rollup: stated in §4.5; pure-function test in §8.
+  - Knowledge override sets `auto_update_disabled = true` atomically with the version insert: stated in §6 (key-based + ETag, body-hash canonicalisation).
+  - Auto-extraction pipeline skips BOTH the `memory_blocks` UPDATE and the `memory_block_versions` INSERT when `auto_update_disabled = true`: stated in §4.1; backed by C1 chunk in §7.
+  - List endpoints are deterministically paginated (default order ends with `id DESC`; cursor encodes both fields): §4.0.
+  - Connection test never bubbles 5xx; `error.code` belongs to a closed enum: §4.9 + §6 (10s timeout + structured error response).
+  - Top-5 ranking with explicit "Other" rollup rules (≤5 → no Other; >5 → top 4 + synthetic `__other__`): §4.5; pure-function test in §8.
+  - Insights time windows (`mtdUsd`, `deltaPct`, `runs30d`) are unambiguous (UTC, calendar-month deltaPct, rolling-30d runs): §4.4.
+  - Connection-usage aggregator reads three tables in a single transaction for snapshot consistency: §4.10.
+  - Status enum is closed at three values; `auto_update_disabled` is the single source of truth for "detached from auto-extraction": §4.1 + §6.
+  - Spend amounts use integer microcents in storage and aggregation; no floats: §6 (Cost precision).
 - File inventory complete? Every page/component/service named in §4 appears in §5.
 - Phase dependency graph clean? §7 lists C2 → C1, C4 → C3, C7 → all C1–C6, C8/C9/C11 → C7, C10 → C9, C12 → C8+C9+C10+C11. No cycles.
 - Deferred items section exists? §10.
@@ -532,5 +582,13 @@ frontend_tests: none_for_now
 - [x] §9 Testing posture matches framing (§8).
 - [x] §10 ETag-mismatch HTTP mapping (409) declared; rate-limit (429) on connection test declared.
 - [x] §11 Frontmatter present (top of file).
+- [x] §12 List endpoint invariants (default sort + cursor + max page size + q semantics + filterOptions counts) consolidated in §4.0.
+- [x] §13 Auto-memory override invariant (skip UPDATE + skip version INSERT when disabled) explicit in §4.1.
+- [x] §14 Spend insights time windows (MTD / deltaPct / runs30d) explicitly UTC-anchored in §4.4.
+- [x] §15 Spend trends "Other" rollup behaviour spelled out for ≤5 and >5 workspace cases in §4.5.
+- [x] §16 Connection test failure contract (always 200, closed `error.code` enum) in §4.9.
+- [x] §17 Connection-usage snapshot consistency (single read transaction across three tables) in §4.10.
+- [x] §18 Status enum closed at three values; `auto_update_disabled` exposed as a separate filter in §4.1.
+- [x] §19 Cost precision invariant (integer microcents; no floats) in §6.
 
 Spec ready for `spec-reviewer`.
