@@ -3240,3 +3240,109 @@ These items require operator action outside the file system (repo/GitHub setting
 - [ ] **CONSOL-FND-DEF-5 — Central overlay manager / stack ownership.** Source: chatgpt-pr-review round 1 F6. Modal/Drawer coordination is currently convention-driven (zIndex hierarchy + spec-documented carveout for modal-over-drawer). Two independent components opening overlays simultaneously can both acquire scroll locks, bind escape handlers, and compete for focus restoration. ChatGPT explicitly flagged this as "not a blocker for this PR, but likely needed as consolidation expands." Build during Specs A/B/C if a multi-overlay consumer surfaces.
 
 - [ ] **CONSOL-FND-DEF-6 — CSS injection vector on project `color` field.** Source: adversarial-reviewer worth-confirming 4.1. `<span style={{ background: color }}>` in nav-item rendering accepts whatever the server returns. Server-side validation is the right gate; confirm projects.color is constrained to a CSS color token at the schema or service layer. If not, add validation server-side and a defensive client-side hex/rgb sanitiser.
+
+## Deferred from spec-conformance review — consolidation-govern (2026-05-07)
+
+**Captured:** 2026-05-07T20:21:46Z
+**Source log:** `tasks/review-logs/spec-conformance-log-consolidation-govern-2026-05-07T20-21-46Z.md`
+**Spec:** `tasks/builds/consolidation-govern/spec.md`
+
+### Runtime-impacting (address before merge)
+
+- [ ] **CONSOL-GOV-DEF-5 — Connection wire shape missing `name`, `lastSyncAt`, `owner`.**
+  - Spec section: §4.6 (Connection contract)
+  - Gap: Backend `ConnectionRow` returns `{ id, kind, provider, label, displayName, authMethod, status, createdAt }`. Frontend `ConnectionsPage.tsx` reads `r.name`, `r.lastSyncAt`, `r.owner.kind/id/name` — these are undefined at runtime.
+  - Suggested approach: In `connectionsService.ts`, project `COALESCE(display_name, label, provider) AS name`, source `lastSyncAt` from `last_successful_sync_at` (integration_connections) or `last_health_check_at` (mcp_server_configs), and compute `owner: subaccount_id IS NULL ? { kind: 'org', ... } : { kind: 'workspace', id: subaccount_id, name: subaccount.name }`. Drop `kind/label/displayName` from the wire response.
+
+- [ ] **CONSOL-GOV-DEF-9 — `ConnectionTestResponse.error.code` outside §4.9 closed enum.**
+  - Spec section: §4.9
+  - Gap: `connectionTokenService.testConnection` emits `'NO_CREDENTIALS'`, `'TOKEN_EXPIRED'`, `'NOT_FOUND'`, `'SERVER_ERROR'`, `'UNKNOWN'` — none are in the spec's closed enum `'TIMEOUT' \| 'AUTH_FAILED' \| 'NETWORK_ERROR' \| 'PROVIDER_ERROR'`. Frontend displays whatever code arrives so users see invalid codes.
+  - Suggested approach: Map the implementation's internal codes onto the spec enum: `NO_CREDENTIALS` / `TOKEN_EXPIRED` → `AUTH_FAILED`; `NOT_FOUND` → `PROVIDER_ERROR` (or change to a non-error 404 path); `SERVER_ERROR` → `PROVIDER_ERROR`; `UNKNOWN` → `PROVIDER_ERROR`. Cover with a colocated unit test that asserts every branch returns one of the four enum values.
+
+- [ ] **CONSOL-GOV-DEF-12 — `ConnectionUsage` missing `lastUsedAt` / `nextFireAt`; `recurringTasks` always empty.**
+  - Spec section: §4.10
+  - Gap: `getConnectionUsage` returns `agents: [{ id, name }]` (missing `lastUsedAt`), `recurringTasks: []` always, `workflows: [{ id, name }]` (correct).
+  - Suggested approach: For agents, JOIN `agent_data_sources.last_used_at` (or whichever telemetry column exists; confirm via grep). For recurring tasks, source from `scheduled_tasks` linked to the connection (column name to confirm; plan §R5 acknowledges this dimension may be absent — document the decision in the chunk's commit). For now if no source exists, the `recurringTasks: []` is honest but the `lastUsedAt: null` should still surface as an explicit field, not be omitted.
+
+### Contract correctness
+
+- [ ] **CONSOL-GOV-DEF-2 — `filterOptions` counts include user-supplied filters.**
+  - Spec section: §4.0
+  - Gap: Knowledge `listEntries` and spend `listLedger` aggregate filterOption counts FROM the same `base` CTE that already includes user-supplied filters. Spec §4.0 requires counts to be computed AFTER RLS scoping but BEFORE applying caller's filter selection so users see how many rows each filter value would yield.
+  - Suggested approach: Split the base CTE into `base_unfiltered` (RLS only) and `base_filtered` (with user filters). Aggregate filterOptions from `base_unfiltered`; page rows from `base_filtered`. Single SQL, two CTEs.
+
+- [ ] **CONSOL-GOV-DEF-6 — `ConnectionsQuery` filters accept only single value.**
+  - Spec section: §4.6
+  - Gap: Backend Zod schema accepts `z.enum(...)` for `provider`, `authMethod`, `status` (single value); spec defines them as arrays.
+  - Suggested approach: Switch to `z.union([z.string(), z.array(z.string())])` per the existing pattern in `agentCharges.ts` (`arrayify` helper); update the SQL to use `= ANY(...)` clauses.
+
+- [ ] **CONSOL-GOV-DEF-7 — `ConnectionsQuery.sortKey` not honoured.**
+  - Spec section: §4.6
+  - Gap: Route accepts only `sortDir`; `sortKey` is silently ignored and rows always sort by `created_at`.
+  - Suggested approach: Add the `sortKey` Zod enum and a column-mapping table mirroring the `spendLedgerService.primarySortCol` pattern. Map `'lastSync'` to `last_sync_at`, `'owner'` to a computed expression. Update the SQL `ORDER BY` to use the chosen column.
+
+- [ ] **CONSOL-GOV-DEF-17 — Knowledge `q` only searches body.**
+  - Spec section: §4.8
+  - Gap: `q` should match against `body + source.agentName + source.runId`. Implementation currently only matches `mb.content`.
+  - Suggested approach: Extend the `ILIKE` clause to OR against the agent name (JOIN `agents`) and `mb.source_run_id::text`. Confirm join performance under typical workspace sizes; cap with a partial index if needed.
+
+- [ ] **CONSOL-GOV-DEF-18 — Knowledge `filterOptions` returns only `status` facet.**
+  - Spec section: §4.0, §4.1
+  - Gap: Spec implies `kind`, `agent`, and `status` filterOptions surfaced for the SortableTable filter chips. Implementation only returns `status`.
+  - Suggested approach: Add `kind_options` and `agent_options` CTEs alongside the existing `status_options`. `kind` is best-effort until enrichment lands (returns single bucket); `agent` joins `agents` via `last_edited_by_agent_id`.
+
+### Documented deviations / schema-bound
+
+- [ ] **CONSOL-GOV-DEF-1 — `KnowledgeEntry.source.runId` empty string; `lastEditedBy` null.**
+  - Spec section: §4.1
+  - Gap: Mapper returns `source.runId: ''` and `lastEditedBy: null`. The empty `runId` makes the §4.12 run-trace iframe link broken (frontend will fetch `/run-trace/?embedded=1`).
+  - Suggested approach: Project `mb.source_run_id::text AS run_id` (already in the schema per Phase 5 / W3a). Map `lastEditedBy` from `mb.last_edited_by_agent_id` (kind: 'auto') or fall back to the most recent `memory_block_versions` row's `created_by_user_id` (kind: 'manual'). If neither exists, keep null.
+
+- [ ] **CONSOL-GOV-DEF-3 — Connections list runs row + facet queries in two separate executions.**
+  - Spec section: §4.0
+  - Gap: `connectionsService.listConnections` runs two `db.execute()` calls; counts are not snapshot-consistent under concurrent writes.
+  - Suggested approach: Inline the facet aggregation as additional CTEs in the same statement and `json_agg` everything into a single result row, mirroring `spendLedgerService.listLedger`.
+
+- [ ] **CONSOL-GOV-DEF-4 — Trends `cap6moCents` repeats current cap across 6 months.**
+  - Spec section: §4.5
+  - Gap: `spendTrendsService` reads only the current `workspace_limits.monthly_cost_limit_cents` and replicates across all 6 indices. Spec implies a per-month historical lookup. Schema doesn't track cap history today.
+  - Suggested approach: Either accept the approximation and document in the response shape (`cap6moCents reflects current cap, not historical`), or introduce a `workspace_limit_history` audit table. The latter is a separate spec amendment.
+
+- [ ] **CONSOL-GOV-DEF-10 — OAuth `testConnection` does not populate `capabilities`.**
+  - Spec section: §4.9
+  - Gap: Only the MCP path returns `capabilities` (from `discoveredToolsJson`). OAuth integrations should report verified scopes per spec §4.9 ("for OAuth — verified scopes").
+  - Suggested approach: For OAuth integrations, after the credential check, call a lightweight provider scope-verification endpoint (e.g. Gmail: `userinfo.email`; Slack: `auth.test`) and return the granted scopes. Per-provider implementation in the per-kind tester helpers.
+
+- [ ] **CONSOL-GOV-DEF-11 — Connection test rate limit not enforced.**
+  - Spec section: §4.9
+  - Gap: Spec mandates max 6 tests per connection per minute. Plan §R4 noted this could defer if no rate-limit infrastructure existed; the route does not currently rate-limit.
+  - Suggested approach: Use the existing `rate_limit_buckets` migration (0253) to enforce per-`(connectionId, userId)` buckets. If the bucket helper is not exposed yet, add a thin wrapper or use an in-process LRU + timer for Phase-2 with an explicit follow-up to migrate to Postgres-backed buckets.
+
+- [ ] **CONSOL-GOV-DEF-13 — Connection-usage aggregator runs two separate queries.**
+  - Spec section: §4.10
+  - Gap: `getConnectionUsage` issues `agentRows` and `workflowRows` in two `db.execute` calls; spec mandates single-CTE under READ COMMITTED for snapshot consistency.
+  - Suggested approach: UNION the three sources (agents, recurring tasks, workflows) inside a single CTE and project to typed columns; aggregate via `json_agg` per source.
+
+### Endpoint shape
+
+- [ ] **CONSOL-GOV-DEF-8 — `GET /api/connections/:id` detail endpoint not implemented.**
+  - Spec section: §4.6
+  - Gap: Spec names "GET /api/connections/:id — returns full detail (kind-specific)". Only `/usage` and `/test` exist. Frontend's connection detail flows would currently call legacy per-kind routes; spec intends a unified pass-through.
+  - Suggested approach: Add a thin route that loads the row from `integration_connections` or `mcp_server_configs`, returns the kind-specific detail shape (existing detail services). Alternatively defer if the frontend never reads detail in this stream and document.
+
+### Copy refinements
+
+- [ ] **CONSOL-GOV-DEF-14 — Pace `<HelpHint>` tooltip absent.**
+  - Spec section: §4.11
+  - Gap: `SpendingPage.CapsTab` shows static `"7-day window"` text instead of a `<HelpHint>` with copy `"Pace based on the last 7 days of spend extrapolated to the period end."`.
+  - Suggested approach: Wrap the pace card label in `<HelpHint content="Pace based on the last 7 days...">` and remove the static "7-day window" text. Component import already exists in the codebase.
+
+- [ ] **CONSOL-GOV-DEF-15 — Override confirm copy diverges from §4.12 spec literal.**
+  - Spec section: §4.12
+  - Gap: Spec wants `"Override <body excerpt>? Future automatic memory updates will skip this entry. The current value stays unchanged until you save."`. Implementation: `"This will update the entry and lock it from automatic updates. The override will be saved as a new version. Are you sure?"`.
+  - Suggested approach: Adopt the spec literal verbatim; insert the body excerpt (truncated to ~80 chars) at the front of the message.
+
+- [ ] **CONSOL-GOV-DEF-16 — Disconnect dialog copy diverges from §4.10 spec literal.**
+  - Spec section: §4.10
+  - Gap: Spec wants `"Disconnect <providerName>? <N> agents, <M> recurring tasks, and <K> workflows use this connection. They will fail until reconnected."` as a single sentence. Implementation breaks counts into separate divs and uses different verbs.
+  - Suggested approach: Render the spec sentence verbatim in a single `<p>` when impact > 0; collapse the multi-div layout. Keep the "Type 'disconnect'" gate.
