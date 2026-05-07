@@ -58,13 +58,13 @@ Run after every non-trivial change. No task is complete until relevant checks pa
 |---------|---------|----------------------|
 | Any code change | `npm run lint` | 3 |
 | Any TypeScript change | `npm run typecheck` | 3 |
-| Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx tsx <path-to-test>` | 2 |
+| Logic change in server/ | Targeted run of the test file(s) authored for THIS change — `npx vitest run <path-to-test>` | 2 |
 | Schema change | `npm run db:generate` — verify migration file | 1 |
 | Client change | `npm run build:client` | 2 |
 
 Run only relevant checks unless the change spans client + server. Never skip a failing check or suppress warnings to make one pass. After 3 failed fix attempts on the same check, STOP and escalate with the error, what was tried, and your root-cause hypothesis.
 
-**Test gates are CI-only.** Full suites (`test:gates`, `test:qa`, `test:unit`, `npm test`, `scripts/run-all-*`, `scripts/verify-*`, `scripts/gates/*`) do NOT run locally — CI handles them. Allowed locally: `lint`, `typecheck`, `build:server`/`build:client` when relevant, and targeted `npx tsx <test-path>` for tests authored in THIS change. Single source of truth: [`references/test-gate-policy.md`](./references/test-gate-policy.md).
+**Test gates are CI-only.** Full suites (`test:gates`, `test:qa`, `test:unit`, `npm test`, `scripts/run-all-*`, `scripts/verify-*`, `scripts/gates/*`) do NOT run locally — CI handles them. Allowed locally: `lint`, `typecheck`, `build:server`/`build:client` when relevant, and targeted `npx vitest run <test-path>` for tests authored in THIS change. **Runner is Vitest** — see `docs/testing-conventions.md`. Do not author tests with `node:test`, `node:assert`, or handwritten harnesses; `scripts/verify-test-quality.sh` rejects them. Single source of truth: [`references/test-gate-policy.md`](./references/test-gate-policy.md).
 
 ---
 

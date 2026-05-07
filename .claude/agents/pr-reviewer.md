@@ -32,7 +32,7 @@ Organise findings into three tiers. Be specific — point to file paths and line
 
 ### Strong Recommendations (should fix)
 
-- Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement. The implementer authors and runs ONLY the new test file locally (`npx tsx <path-to-test>`); the broader suite runs in CI on the PR — never ask the implementer to run `npm test` or any test-gate command.
+- Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement. The implementer authors a Vitest test (`**/__tests__/*.test.ts`, `import { test, expect } from 'vitest'`) and runs ONLY that file locally via `npx vitest run <path-to-test>`. Never recommend `npx tsx`, `node:test`, or handwritten harnesses — they are rejected by `scripts/verify-test-quality.sh`. The broader suite runs in CI on the PR; never ask the implementer to run `npm test` or any test-gate command.
 - Opportunities where a simpler approach exists — with concrete suggestion
 - Performance issues that will matter at scale — with evidence, not speculation
 

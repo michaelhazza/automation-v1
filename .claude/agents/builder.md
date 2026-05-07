@@ -82,7 +82,8 @@ npm run build:server
 npm run build:client
 
 # Targeted unit tests (ONLY for new pure functions with no DB/network/filesystem side effects)
-npx tsx <path-to-new-test-file>
+# Runner is Vitest — see docs/testing-conventions.md. Never `npx tsx`, `node:test`, or handwritten harnesses.
+npx vitest run <path-to-new-test-file>
 ```
 
 On each failure: read the diagnostic, fix the specific issue, re-run.
