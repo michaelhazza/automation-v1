@@ -11,7 +11,7 @@ import {
   removeToken, removeUserRole,
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
   getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
-  removeSystemAdminOrgOverride,
+  removeSystemAdminOrgOverride, getSystemAdminOrgOverride, setSystemAdminOrgOverride,
 } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
@@ -325,6 +325,13 @@ export default function Layout({ user, children }: LayoutProps) {
   // ViewMode — derived from identity state; wires to command palette for client selection
   const { viewMode, availableModes, setViewMode } = useViewMode({
     onRequireClientSelection: () => setCmdOpen(true),
+    // Sync Layout's React mirror state when setViewMode('org') clears the
+    // active client at the localStorage layer. Without this, downstream
+    // effects keep the stale client until something else triggers a render.
+    onClientCleared: () => {
+      setActiveClientIdState(null);
+      setActiveClientNameState(null);
+    },
   });
 
   // Module-driven sidebar config
@@ -502,8 +509,14 @@ export default function Layout({ user, children }: LayoutProps) {
   }, []);
 
   const handleSelectClientFromPalette = useCallback((id: string, name: string) => {
+    // Persist to localStorage so the selection survives reload / cross-tab.
+    setActiveClient(id, name);
     setActiveClientIdState(id);
     setActiveClientNameState(name);
+    // Selecting a client must drop the system override; otherwise a system admin
+    // can pick a workspace and remain in System mode, which contradicts spec §4.6
+    // (workspace selection => mode flips to workspace).
+    if (getSystemAdminOrgOverride()) setSystemAdminOrgOverride(false);
   }, []);
 
   // Close org picker on outside click
@@ -531,6 +544,10 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveClient(sa.id, sa.name);
     setActiveClientIdState(sa.id);
     setActiveClientNameState(sa.name);
+    // Selecting a client must drop the system override; otherwise a system admin
+    // can pick a workspace and remain in System mode, which contradicts spec §4.6
+    // (workspace selection => mode flips to workspace).
+    if (getSystemAdminOrgOverride()) setSystemAdminOrgOverride(false);
   };
 
   const handleOpenNewBrief = () => {

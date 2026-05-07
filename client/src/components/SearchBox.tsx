@@ -34,7 +34,13 @@ export function SearchBox({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep local in sync when the caller resets value externally (e.g. clear from outside).
+  // Cancel any pending debounce timer so a stale typed value cannot fire after the sync
+  // and undo the external reset.
   useEffect(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     setLocal(value);
   }, [value]);
 

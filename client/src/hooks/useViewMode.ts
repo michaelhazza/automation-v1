@@ -45,6 +45,11 @@ export interface UseViewModeOptions {
   /** Called when setViewMode('workspace') is attempted with no activeClient.
    *  Layout wires this to its existing client-picker open flow. */
   onRequireClientSelection?: () => void;
+  /** Called after setViewMode('org') successfully clears the active client.
+   *  Layout wires this to its mirror React state so activeClientId/Name reset
+   *  in lockstep with the localStorage mutation. Without this, Layout's state
+   *  retains the stale client until something else triggers a re-render. */
+  onClientCleared?: () => void;
 }
 
 /** Build a ViewModeContext snapshot from current localStorage state. */
@@ -108,6 +113,9 @@ export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn {
           if (currentCtx.hasSystemOverride) {
             setSystemAdminOrgOverride(false);
           }
+          // Notify the consumer so it can sync any React mirror state
+          // (e.g. Layout's activeClientId/Name) with the cleared identity state.
+          optionsRef.current?.onClientCleared?.();
           break;
         case 'workspace':
           // No identity mutation needed — activeClient is already set (legality guard above)
