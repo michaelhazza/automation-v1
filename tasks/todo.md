@@ -3240,3 +3240,13 @@ These items require operator action outside the file system (repo/GitHub setting
 - [ ] **CONSOL-FND-DEF-5 — Central overlay manager / stack ownership.** Source: chatgpt-pr-review round 1 F6. Modal/Drawer coordination is currently convention-driven (zIndex hierarchy + spec-documented carveout for modal-over-drawer). Two independent components opening overlays simultaneously can both acquire scroll locks, bind escape handlers, and compete for focus restoration. ChatGPT explicitly flagged this as "not a blocker for this PR, but likely needed as consolidation expands." Build during Specs A/B/C if a multi-overlay consumer surfaces.
 
 - [ ] **CONSOL-FND-DEF-6 — CSS injection vector on project `color` field.** Source: adversarial-reviewer worth-confirming 4.1. `<span style={{ background: color }}>` in nav-item rendering accepts whatever the server returns. Server-side validation is the right gate; confirm projects.color is constrained to a CSS color token at the schema or service layer. If not, add validation server-side and a defensive client-side hex/rgb sanitiser.
+
+## Deferred from spec-conformance review — consolidation-operate (2026-05-07)
+
+**Captured:** 2026-05-07T20:31:55Z
+**Source log:** `tasks/review-logs/spec-conformance-log-consolidation-operate-2026-05-07T20-31-55Z.md`
+**Spec:** `tasks/builds/consolidation-operate/spec.md`
+
+- [ ] **OPER-DEF-1 — InboxBand per-band color treatment.** Source: spec §4.6 directional gap. The spec calls for red (HIGH PRIORITY), amber (NEEDS ACTION), and slate (PREVIOUS) left borders on band headers; current `InboxBand.tsx` uses uniform `bg-slate-50 border-y` only. Bands are functional and labeled — this is cosmetic. Suggested approach: add a `band` switch that renders `border-l-4 border-l-{red-500|amber-500|slate-300}` on the band header.
+
+- [ ] **OPER-DEF-2 — Sidebar Inbox + Activity nav rows for workspace/org users.** Source: spec §5 file inventory + plan §C8. `client/src/config/sidebar.ts` has Home wired but no `/inbox` or `/activity` rows in the Work group for workspace/org users (only `sys-activity` exists for system_admin). Routes are reachable via direct URL but not exposed in the sidebar. Suggested approach: add two `staticRoute('/inbox')` and `staticRoute('/activity')` items to the Work group, gated to users with the appropriate inbox-read / activity-view permissions per spec §6. Single-row-per-stream policy still respected.
