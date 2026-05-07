@@ -15,6 +15,7 @@ export default function RecurringTasksPage() {
   const [data, setData] = useState<RecurringTasksResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -22,7 +23,7 @@ export default function RecurringTasksPage() {
     buildApi.listRecurringTasks({ scope: viewMode, q: q || undefined })
       .then(r => { setData(r); setLoading(false); })
       .catch(e => { setError(e); setLoading(false); });
-  }, [viewMode, q]);
+  }, [viewMode, q, retryKey]);
 
   const columns: ColumnDef<RecurringTask>[] = [
     { key: 'name', label: 'Name', sortable: true, getValue: (r) => r.name },
@@ -57,7 +58,7 @@ export default function RecurringTasksPage() {
   ];
 
   if (loading) return <PageShell><div className="p-8 text-slate-400">Loading recurring tasks...</div></PageShell>;
-  if (error) return <PageShell><ErrorState error={error} retry={() => { setLoading(true); setError(null); }} /></PageShell>;
+  if (error) return <PageShell><ErrorState error={error} retry={() => setRetryKey(k => k + 1)} /></PageShell>;
 
   const rows = data?.rows ?? [];
 

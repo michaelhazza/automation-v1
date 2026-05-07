@@ -18,15 +18,16 @@ export default function AgentsListPage() {
   const [agents, setAgents] = useState<AgentListItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
-  // Fetch agents when viewMode or q changes
+  // Fetch agents when viewMode, q, or retryKey changes
   React.useEffect(() => {
     setLoading(true);
     setError(null);
     buildApi.listAgents({ scope: viewMode, q: q || undefined })
       .then(r => { setAgents(r); setLoading(false); })
       .catch(e => { setError(e); setLoading(false); });
-  }, [viewMode, q]);
+  }, [viewMode, q, retryKey]);
 
   const columns: ColumnDef<AgentListItem>[] = [
     {
@@ -61,7 +62,7 @@ export default function AgentsListPage() {
   ];
 
   if (loading) return <PageShell><div className="p-8 text-slate-400">Loading agents...</div></PageShell>;
-  if (error) return <PageShell><ErrorState error={error} retry={() => { setLoading(true); setError(null); }} /></PageShell>;
+  if (error) return <PageShell><ErrorState error={error} retry={() => setRetryKey(k => k + 1)} /></PageShell>;
   if (!agents || agents.length === 0) return (
     <PageShell>
       <div className="px-6 py-4">

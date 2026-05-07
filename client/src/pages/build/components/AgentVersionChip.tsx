@@ -7,7 +7,7 @@ interface AgentVersionChipProps {
 }
 
 export default function AgentVersionChip({ count, editedAt, author }: AgentVersionChipProps) {
-  const label = `v${count}`;
+  const label = `v${Math.max(1, count)}`;
   const tooltipParts = [
     editedAt && `Last edited ${new Date(editedAt).toLocaleDateString()}`,
     author && `by ${author}`,
