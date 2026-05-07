@@ -403,9 +403,6 @@ export default function App() {
             <Route path="/admin/skills" element={<Navigate to="/agents" replace />} />
             <Route path="/admin/skills/:id" element={<Navigate to="/agents" replace />} />
             <Route path="/admin/skill-studio" element={<Navigate to="/agents" replace />} />
-            <Route path="/system/skill-studio" element={<Navigate to="/agents" replace />} />
-            <Route path="/system/skill-analyser" element={<Navigate to="/agents" replace />} />
-            <Route path="/system/agents" element={<Navigate to="/agents" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<Navigate to="/recurring-tasks" replace />} />
             <Route path="/agents/blueprints" element={<SubaccountBlueprintsPage user={user!} />} />
             {/* Legacy path — kept for bookmarks; renders the renamed page. */}
@@ -508,6 +505,10 @@ export default function App() {
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
             {/* Activity — system scope */}
             <Route path="/system/activity" element={<ActivityPage user={user!} />} />
+            {/* Legacy redirects — old system paths */}
+            <Route path="/system/agents" element={<Navigate to="/agents" replace />} />
+            <Route path="/system/skill-studio" element={<Navigate to="/agents" replace />} />
+            <Route path="/system/skill-analyser" element={<Navigate to="/agents" replace />} />
           </Route>
 
           {/* Subaccount connections */}
