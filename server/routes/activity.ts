@@ -42,7 +42,7 @@ function parseFilters(query: Record<string, unknown>): ActivityFilters {
 
   // C1 (ui-consolidation-operate): sortKey/sortDir take precedence over legacy `sort` enum.
   // If both arrive, sortKey/sortDir wins per spec §4.1.
-  const sortKey = (['createdAt', 'updatedAt', 'severity'].includes(query.sortKey as string)
+  const sortKey = (['createdAt', 'severity'].includes(query.sortKey as string)
     ? (query.sortKey as ActivityFilters['sortKey'])
     : undefined);
   const sortDir = (['asc', 'desc'].includes(query.sortDir as string)

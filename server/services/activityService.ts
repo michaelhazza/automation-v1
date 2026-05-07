@@ -123,7 +123,7 @@ export type ActivityFilters = {
   /** C1 (ui-consolidation-operate): spec §4.1 sort grammar. Takes precedence over `sort`.
    *  Pagination walks canonical `createdAt DESC, id ASC`; the sortKey/sortDir pair is
    *  applied as a display-only re-sort over the canonical page slice. */
-  sortKey?: 'createdAt' | 'updatedAt' | 'severity';
+  sortKey?: 'createdAt' | 'severity';
   /** C1 (ui-consolidation-operate): sort direction for sortKey. */
   sortDir?: 'asc' | 'desc';
   limit?: number;
@@ -775,6 +775,12 @@ function filterBySubaccount(items: ActivityItem[], subaccountIds: string[]): Act
  * Pagination always walks the canonical `createdAt DESC, id ASC` order; the
  * requested sort is applied as a display-only re-sort over the canonical slice.
  * The id ASC tiebreaker is fixed — it does NOT flip when sortDir changes.
+ *
+ * Note: the plan's Architecture Notes Rule 2 ("when sortDir flips, the tiebreaker
+ * direction also flips") does NOT apply here. That rule describes cursor-walk
+ * direction at the DB layer. Here, `sortDir` is a display-only re-sort applied
+ * AFTER the canonical-order page slice is already taken — the cursor walk direction
+ * is never changed, so the tiebreaker stays `id ASC` regardless of sortDir.
  */
 function resolveDisplaySort(filters: ActivityFilters): string {
   if (filters.sortKey) {
@@ -849,6 +855,9 @@ export async function listActivityItems(
   // C1: Compute filterOptions BEFORE pagination/cursor slicing.
   // INVARIANT: aggregator runs over the fully-merged, RLS-filtered, post-dimension-filter
   // set with faceted-search semantics (counts for dimension D ignore the active filter on D).
+  // Faceted-search semantics apply to the four spec dimensions: type, status, actor, subaccount.
+  // Severity is pre-applied before this call (filterBySeverity above) — it is NOT a faceted
+  // dimension and its filter does narrow the count results.
   // Cache-Control: private, no-store is enforced in the route handler — do NOT add public/s-maxage.
   const filterOptions = aggregateFilterOptions(items, {
     type: filters.type,
