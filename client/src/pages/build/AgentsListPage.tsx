@@ -33,6 +33,7 @@ export default function AgentsListPage() {
       key: 'name',
       label: 'Name',
       sortable: true,
+      getValue: (row) => row.name,
       render: (row) => (
         <span className="flex items-center gap-2">
           {row.name}
@@ -40,8 +41,8 @@ export default function AgentsListPage() {
         </span>
       ),
     },
-    { key: 'status', label: 'Status', sortable: true, filterable: true },
-    { key: 'agentTitle', label: 'Title', sortable: true },
+    { key: 'status', label: 'Status', sortable: true, filterable: true, getValue: (row) => row.status },
+    { key: 'agentTitle', label: 'Title', sortable: true, getValue: (row) => row.agentTitle },
     {
       key: 'subaccount',
       label: 'Workspace',
@@ -54,6 +55,7 @@ export default function AgentsListPage() {
       key: 'updatedAt',
       label: 'Last updated',
       sortable: true,
+      getValue: (row) => row.updatedAt,
       render: (row) => new Date(row.updatedAt).toLocaleDateString(),
     },
   ];
