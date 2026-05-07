@@ -48,6 +48,43 @@
 
 ---
 
-## Awaiting
+## Round 2 — 2026-05-07T08:30:00Z
 
-Round 2 — pending operator paste of next ChatGPT response.
+**ChatGPT verdict:** APPROVED. "I'd merge." No remaining blockers. Two ultra-low-severity notes, neither flagged as merge-blocking.
+
+### Findings
+
+| # | Title | Severity | Triage | ChatGPT recommendation | Decision | Rationale |
+|---|-------|----------|--------|------------------------|----------|-----------|
+| R2-N1 | `requestAnimationFrame` focus timing — RAF could theoretically run on a detached node if the drawer opens and immediately closes within the same frame | Ultra-low | technical | "No action needed" (ChatGPT's exact words) | no-action | ChatGPT explicitly stated no action needed and "in practice harmless because cleanup cancels the RAF". Verified: the existing `useEffect` cleanup (Drawer.tsx) calls `cancelAnimationFrame(raf)` on unmount, so the queued focus call will not fire on a detached node. The component already handles the case. |
+| R2-N2 | Global keyframe namespace — `drawer-fade-in` etc. are now effectively global contracts after F3 moved them out of inline `<style>` | Ultra-low | technical | "Fine as-is, but long-term ... purely preventative" | no-action | ChatGPT explicitly said "Fine as-is" and "purely preventative". The `drawer-*` prefix is itself an effective namespace. The other shared keyframes in `index.css` (`spin`, `fadeIn`, `pulse-dot`, `shimmer`, `freshness-pulse`) follow no global convention either, so introducing one for this PR alone would be inconsistent. If a global UI naming convention is later adopted across the design system, that's the right time to retrofit all keyframes — not now, partial. |
+
+### Round 2 actions
+
+None — both notes closed as no-action per ChatGPT's own framing.
+
+### Closing
+
+ChatGPT's overall assessment:
+- Architecture direction: strong
+- Invariant discipline: strong
+- Accessibility posture: above average
+- Shared primitive quality: production-worthy
+- Risk level: low
+
+**Verdict:** APPROVED. PR ready for finalisation handoff.
+
+### Round summary
+
+| Round | Findings | Implemented | Deferred | No-action | Verdict |
+|-------|----------|-------------|----------|-----------|---------|
+| 1 | 7 | 6 (F1–F5, F7) | 1 (F6 → CONSOL-FND-DEF-5) | 0 | APPROVE with tightenings |
+| 2 | 2 | 0 | 0 | 2 (R2-N1, R2-N2) | APPROVED |
+
+**Total commits during ChatGPT review:** 1 (`8907c62c`).
+
+---
+
+## Session closed
+
+2026-05-07T08:30:00Z — All ChatGPT-web rounds complete. PR #270 ready for finalisation phase.
