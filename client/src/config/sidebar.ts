@@ -173,6 +173,19 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'activity',
       });
     }
+    // Knowledge page calls /api/knowledge which is gated by org.agents.view
+    // (memory_blocks are extracted by agents). Keep the sidebar gate aligned
+    // with the route to avoid showing a 403 link.
+    if (hasOrgPerm('org.agents.view') || isSystemAdmin) {
+      items.push({
+        group: 'work',
+        kind: 'link',
+        key: 'knowledge',
+        label: 'Knowledge',
+        to: staticRoute('/knowledge'),
+        iconKey: 'skills',
+      });
+    }
   }
 
   // ── projects group — only in workspace mode ──────────────────────────────
@@ -426,20 +439,20 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
       items.push({
         group: 'organisation',
         kind: 'link',
-        key: 'spending-budgets',
-        label: 'Spending Budgets',
-        to: staticRoute('/admin/spending-budgets'),
+        key: 'spending',
+        label: 'Spending',
+        to: staticRoute('/spending'),
         iconKey: 'usage',
       });
     }
-    if (activeClientId && (hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver') || hasClientPerm('spend_approver'))) {
+    if (hasOrgPerm('org.connections.view') || isSystemAdmin) {
       items.push({
         group: 'organisation',
         kind: 'link',
-        key: 'spend-ledger',
-        label: 'Spend Ledger',
-        to: buildRoute('/admin/subaccounts/:subaccountId/spend-ledger', { subaccountId: activeClientId }),
-        iconKey: 'diagnostic',
+        key: 'connections',
+        label: 'Connections',
+        to: staticRoute('/connections'),
+        iconKey: 'settings',
       });
     }
   }

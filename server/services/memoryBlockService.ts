@@ -29,6 +29,7 @@ import {
   type MergeStrategy,
   type BlockConfidence,
 } from './memoryBlockUpsertPure.js';
+import { evaluateAutoExtractGate } from './memoryBlockGatePure.js';
 import {
   rankBlocksForInjection,
   type CandidateBlock,
@@ -957,6 +958,23 @@ export async function upsertFromWorkflow(
       return { kind: 'created', blockId: upsertCreatedId, truncated: decision.truncated };
     }
     case 'update': {
+      const gate = evaluateAutoExtractGate({
+        autoUpdateDisabled: existingRow!.autoUpdateDisabled,
+        contentUnchanged: existingRow!.content === decision.content,
+      });
+      if (gate.skipUpdate || gate.skipVersionInsert) {
+        if (gate.reason === 'override_locked') {
+          return {
+            kind: 'skipped',
+            reason: 'hitl_overwrite',
+            blockId: existingRow!.id,
+            previewContent: decision.content,
+          };
+        }
+        // no_change: merged content equals live body — nothing to persist.
+        return { kind: 'skipped', reason: 'empty_output' };
+      }
+
       let upsertUpdatedId!: string;
       const { writeVersionRow: wvrUpdate } = await import('./memoryBlockVersionService.js');
 

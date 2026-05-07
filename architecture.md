@@ -3495,6 +3495,19 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify Build stream project edit page | `client/src/pages/build/ProjectEditPage.tsx` (consolidated project edit, includes migrated goal management). Server: `server/services/projectService.ts` (project CRUD with `toApiProject` / `fromApiPatch` mappers). |
 | Modify Build stream identity-key diff helper | `server/lib/identityKeyDiff.ts` — safe full-replacement diff for arrays of objects with a stable identity key (e.g. skill slug arrays). Used by `agentTabs.ts` to compute add/remove deltas for agent skill attachment writes. |
 
+#### Govern (consolidation-govern, 2026-05)
+
+| Concern | Files |
+|---|---|
+| Knowledge list + override | `server/routes/knowledge.ts`, `server/services/knowledgeService.ts`, `server/services/knowledgeOverridePure.ts`, `client/src/pages/govern/KnowledgePage.tsx`, `client/src/pages/govern/components/KnowledgeRow.tsx`, `client/src/pages/govern/components/KnowledgeOverrideDialog.tsx` |
+| Auto-extraction gate | `server/services/memoryBlockGatePure.ts`, `server/services/memoryBlockService.ts` (gate call site) |
+| Spend ledger | `server/routes/agentCharges.ts` (`GET /api/spend/ledger`), `server/services/spendLedgerService.ts`, `server/services/spendLedgerServicePure.ts`, `client/src/pages/govern/SpendingPage.tsx` (LedgerTab) |
+| Spend insights / trends | `server/services/spendInsightsService.ts`, `server/services/spendInsightsServicePure.ts`, `server/services/spendTrendsService.ts`, `server/services/spendTrendsServicePure.ts`, `client/src/pages/govern/components/SpendInsightsRow.tsx`, `client/src/pages/govern/components/SpendBarChart.tsx`, `client/src/pages/govern/components/SpendTrendChart.tsx`, `client/src/pages/govern/components/CapUtilisationChart.tsx` |
+| Caps + pace | `server/services/computeBudgetService.ts` (extended), `server/services/computeBudgetServicePure.ts` (pace projector), `client/src/pages/govern/SpendingPage.tsx` (CapsTab) |
+| Connections list / usage / test / disconnect | `server/routes/integrationConnections.ts` (`GET /api/connections`, `GET /:id/usage`, `POST /:id/test`, `POST /:id/disconnect`), `server/services/connectionsService.ts` (incl. `disconnectConnection`), `server/services/connectionsListPure.ts`, `server/services/connectionTokenService.ts` (testConnection dispatcher with closed-enum error.code mapping), `client/src/pages/govern/ConnectionsPage.tsx`, `client/src/pages/govern/components/ConnectionTestButton.tsx`, `client/src/pages/govern/components/DisconnectConfirmDialog.tsx` |
+| Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
+| Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
+
 ---
 
 <a id="architecture-rules-automation-os-specific"></a>
