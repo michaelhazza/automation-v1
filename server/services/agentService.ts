@@ -2153,6 +2153,23 @@ export const agentService = {
       };
     }
 
+    // Audit: log identity-key removals if force=true (spec §4.2 identity-key safeguard + DEVELOPMENT_GUIDELINES §8.20)
+    if (options.force && diff.silentlyRemoved.length > 0) {
+      await auditService.log({
+        action: 'agent_skills_removed_by_identity_key',
+        organisationId: orgId,
+        entityType: 'agent',
+        entityId: agentId,
+        actorType: 'system',
+        metadata: {
+          removedCount: diff.silentlyRemoved.length,
+          removedSkillIds: diff.silentlyRemoved.map((s) => s.id),
+          beforeCount: current.skills.length,
+          afterCount: incoming.length,
+        },
+      });
+    }
+
     // Derive new slugs list from incoming (added + updated = all that remain)
     const finalSlugs = incoming.map((s) => s.key);
 
@@ -2188,6 +2205,23 @@ export const agentService = {
         errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
         removedIds: diff.silentlyRemoved.map((d) => d.id),
       };
+    }
+
+    // Audit: log identity-key removals if force=true (spec §4.2 identity-key safeguard + DEVELOPMENT_GUIDELINES §8.20)
+    if (options.force && diff.silentlyRemoved.length > 0) {
+      await auditService.log({
+        action: 'agent_data_sources_removed_by_identity_key',
+        organisationId: orgId,
+        entityType: 'agent',
+        entityId: agentId,
+        actorType: 'system',
+        metadata: {
+          removedCount: diff.silentlyRemoved.length,
+          removedDataSourceIds: diff.silentlyRemoved.map((d) => d.id),
+          beforeCount: current.dataSources.length,
+          afterCount: incoming.length,
+        },
+      });
     }
 
     await db.transaction(async (tx) => {
@@ -2245,6 +2279,23 @@ export const agentService = {
         errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
         removedIds: diff.silentlyRemoved.map((t) => t.id),
       };
+    }
+
+    // Audit: log identity-key removals if force=true (spec §4.2 identity-key safeguard + DEVELOPMENT_GUIDELINES §8.20)
+    if (options.force && diff.silentlyRemoved.length > 0) {
+      await auditService.log({
+        action: 'agent_triggers_removed_by_identity_key',
+        organisationId: orgId,
+        entityType: 'agent',
+        entityId: agentId,
+        actorType: 'system',
+        metadata: {
+          removedCount: diff.silentlyRemoved.length,
+          removedTriggerIds: diff.silentlyRemoved.map((t) => t.id),
+          beforeCount: current.triggers.length,
+          afterCount: incoming.length,
+        },
+      });
     }
 
     await db.transaction(async (tx) => {

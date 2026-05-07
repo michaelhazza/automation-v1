@@ -2,7 +2,15 @@ import crypto from 'node:crypto';
 
 /**
  * Minimal payload shape required to compute an ETag for an agent.
- * Arrays must be sorted stably by the caller (see INVARIANT-Q1-A in the spec).
+ *
+ * INVARIANT (Q1-Array-Ordering): Arrays in this payload MUST be sorted stably by the caller
+ * before passing to computeAgentEtag(). The function preserves array insertion order and does
+ * NOT reorder. Reordered arrays produce different ETags. See `spec.md` plan §Q1 + `C1 :: Q1-Array-Ordering`.
+ *
+ * Callers MUST order arrays at query time:
+ * - skills: order by (createdAt ASC, id ASC)
+ * - dataSources: order by (createdAt ASC, id ASC)
+ * - triggers: order by (createdAt ASC, id ASC)
  */
 export interface AgentFullForEtag {
   configure: {
