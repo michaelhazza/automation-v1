@@ -2766,3 +2766,38 @@ Skipping NFC produces long-tail duplicate revision bugs that are nearly impossib
 **Source:** Same finalisation pass — design pattern from `SortableTable.tsx` + `sortableTablePure.ts` (and `useViewMode.ts` + `useViewModePure.ts`).
 **Pattern:** When a UI primitive contains non-trivial logic (sorting, filtering, mode-derivation, transition rules), split into two files: `Foo.tsx` (the React wrapper — hooks, state, event handlers, render) and `fooPure.ts` (the deterministic helpers — sort comparators, filter predicates, derivation rules, transition guards). The pure module exports plain functions with explicit input/output types and zero React dependency. Tests live next to the pure module under `__tests__/fooPure.test.ts` using the existing convention: `npx tsx <test-path>` runs them in isolation, no test runner setup, fast feedback. The React wrapper's behaviour is verified by integration of the pure module's contract — the wrapper itself does not need its own unit suite if the pure module is fully covered.
 **Why it matters:** UI logic is normally locked behind component-render machinery and is hard to test deterministically. The split moves the testable surface out from under React, eliminates jsdom setup, runs in milliseconds, and produces a stable contract surface that downstream specs (Specs A/B/C consuming the same primitives) can rely on without rebuilding test infrastructure. Locks in the existing repo convention (`*Pure.ts` + `*Pure.test.ts` as the unit-test surface).
+
+### [2026-05-07] Gotcha — `inboxService` naming: no `inbox_items` table, no `status` column; band derivation is a JS union over three tables
+
+**Date:** 2026-05-07
+**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
+**Gotcha:** There is no `inbox_items` table and no single `status` column. The inbox service (`server/services/inboxServicePure.ts`) unions `tasks` / `review_items` / `agent_runs` with `inbox_read_states`. Band derivation (urgency tiers) runs in JS over the merged result set, not in SQL. `kind='approval'` items are sourced from `actions` rows where `status='pending_approval'`, NOT from `review_items`. Do not look for an `inbox_items` table or a direct `status` column — neither exists.
+**Why it matters:** Future authors will assume a normalised inbox table exists (natural naming intuition). The union-plus-JS-derivation pattern is non-obvious and breaks any code that tries to add a SQL filter on `inbox_items.status`.
+
+### [2026-05-07] Gotcha — `triggerType` is deprecated; `triggerSource` is canonical; both are emitted; do NOT rename in place
+
+**Date:** 2026-05-07
+**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
+**Gotcha:** The activity API emits BOTH `triggerType` (legacy internal enum: `manual | scheduled | webhook | agent | system`) AND `triggerSource` (spec §4.1 enum: `schedule | event | manual | api | retry | unknown`) on every `ActivityItem`. `triggerSource` is the canonical field going forward. `triggerType` is deprecated and will be removed after consumers migrate. Do NOT rename `triggerType` to `triggerSource` in place — that is a breaking change to any consumer still reading `triggerType`. The pattern is additive-only; removal happens in a separate migration step once all consumers are confirmed migrated.
+**Why it matters:** Renaming in place looks like a safe cleanup but silently breaks any caller that only reads `triggerType`. The dual-emit approach gives a migration window; the in-place rename closes it instantly.
+
+### [2026-05-07] Invariant — Run-trace masking (`projectForRole`) is read-path only; applying it on the write path is a regression
+
+**Date:** 2026-05-07
+**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
+**Invariant:** `agentRunMessageServicePure.ts::projectForRole(messages, role)` is called ONLY from the `GET /api/agent-runs/:id/trace-events` read endpoint. It is NEVER called from the `appendMessage` write path. If you see masking applied to the write path (e.g. inside `appendMessage` or any message-persistence function), that is a regression — the stored message must be unmasked; projection happens at read time only.
+**Why it matters:** Applying masking at write time corrupts the stored record permanently. Role-based projection must always be a view transformation, not a storage transformation.
+
+### [2026-05-07] Invariant — `aggregateFilterOptions` in `activityServicePure.ts` runs pre-pagination; never move it post-slice
+
+**Date:** 2026-05-07
+**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
+**Invariant:** `aggregateFilterOptions` in `server/services/activityServicePure.ts` runs over the FULL filtered/merged item set BEFORE the cursor slice. The returned counts reflect the entire result set, not the current page. Do not move the aggregation call to after the slice step — that would make counts reflect only the current page and break filter UI (which shows counts across all pages).
+**Why it matters:** Pre-pagination aggregation is the intended contract. Post-pagination aggregation is a subtle bug that makes filter counts shrink as the user pages through results, breaking the UX expectation that filter counts are stable.
+
+### [2026-05-07] Invariant — Activity cursor walk is always `createdAt DESC, id ASC`; `sortDir` is display-only re-sort applied after the page slice
+
+**Date:** 2026-05-07
+**Source:** ui-consolidation-operate build, Chunk C9 doc-sync.
+**Invariant:** In `activityService.ts`, the canonical cursor walk order is always `createdAt DESC, id ASC` regardless of the `sortDir` parameter. `sortDir` controls a display-only re-sort applied AFTER the page slice (see `resolveDisplaySort` JSDoc). Do NOT implement a flipping tiebreaker that changes the cursor walk direction based on `sortDir` — that would break cursor stability across pages. The cursor is always forward-walking in canonical order; display order is a presentation concern.
+**Why it matters:** A flipping cursor is a well-known pagination bug: page 2 with `sortDir=asc` would use a different walk order than page 1 with `sortDir=desc`, producing gaps or duplicates at page boundaries. The separation of cursor order from display order is intentional and must be preserved.
