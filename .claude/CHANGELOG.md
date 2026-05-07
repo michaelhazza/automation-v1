@@ -51,6 +51,15 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ---
 
+## 2.1.1 — 2026-05-07
+
+**Highlights:** finalisation-coordinator now auto-resolves known-shape merge conflicts during S2 sync instead of pausing for operator confirmation on every run.
+
+**Changed:**
+- `.claude/agents/finalisation-coordinator.md` § Step 2 — added an auto-resolve table for append-only artefact files and feature-branch-canonical files: `tasks/builds/{slug}/spec.md`/`plan.md`/`progress.md`/`handoff.md`/`mockup-log.md` and `tasks/current-focus.md` are taken from HEAD ("ours"); `tasks/todo.md`, `tasks/review-logs/_index.jsonl`, `tasks/lessons.md`, and `KNOWLEDGE.md` are union-merged by stripping conflict markers (safe because all four are append-only by convention). Code-area conflicts (`client/`, `server/`, `shared/`, `worker/`, `scripts/`, `migrations/`, `architecture.md`, `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`) still pause for operator review. Removes the operator round-trip on conflicts that always have a deterministic resolution. Also relaxes the post-merge overlap check from "require explicit confirmation" to "continue silently" — overlap alone is not a signal; the conflict protocol handles the actual collisions.
+
+---
+
 ## 2.1.0 — 2026-05-04
 
 **Highlights:** adds in-repo portable bundle infrastructure so the framework can be reproducibly exported to other repos. Adds the SessionStart hook for self-healing code-intelligence cache. Adds the `validate-setup` agent for ongoing framework health checks.
