@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Automation Detail (3 pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  padding: 24px; max-width: 1400px; margin: 0 auto;
+}
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.mini-tab {
+  padding: 5px 10px; font-size: 11px; color: var(--slate-500); cursor: default;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mini-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 10px; min-width: 80px; }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.schema-block {
+  background: #1e293b; border-radius: 4px; padding: 8px;
+  font-size: 9px; font-family: monospace; color: #94a3b8; margin-bottom: 6px;
+}
+.schema-block .kw { color: #7c3aed; }
+.schema-block .str { color: #10b981; }
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.impact-item { text-align: center; }
+.impact-item .big { font-size: 28px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 20px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 24px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>CURRENT STATE</span>
+  <span style="font-weight:400;">3 separate pages replaced by Automation Detail (accessible from automation list row)</span>
+  <a href="automation-detail.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- AutomationExecutionPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AutomationExecutionPage
+      <span class="route">/automations/:id/run</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Run automation</h3>
+      </div>
+      <div class="mini-row">
+        <span class="label">Automation</span>
+        <span style="font-weight:600">Welcome sequence</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Engine</span>
+        <span class="badge badge-indigo" style="font-size:9px">n8n</span>
+      </div>
+      <div class="mini-section-hdr">Input payload (JSON)</div>
+      <div style="background:white;border:1px solid var(--border);border-radius:4px;padding:8px;font-family:monospace;font-size:10px;color:var(--slate-700);height:60px;overflow:hidden;">
+        {<br>
+        &nbsp;"client_id": "acme-001",<br>
+        &nbsp;"contact_email": "..."
+      </div>
+      <div class="mini-section-hdr">File attachments</div>
+      <div style="background:var(--slate-50);border:1px dashed var(--slate-300);border-radius:4px;padding:10px;text-align:center;font-size:10px;color:var(--slate-400);">
+        Drop file or click to upload
+      </div>
+      <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:6px;">
+        <span class="mini-btn mini-btn-secondary">Cancel</span>
+        <span class="mini-btn mini-btn-primary">Run now</span>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Run-only page: no definition view, no history. User must navigate back to see definition or past runs.
+      </div>
+    </div>
+  </div>
+
+  <!-- ExecutionDetailPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      ExecutionDetailPage
+      <span class="route">/automations/:id/executions/:execId</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Execution detail</h3>
+        <span class="badge badge-green">Completed</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Execution ID</span>
+        <span style="font-family:monospace;font-size:9px">exec_7f2kPq...</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Started</span>
+        <span>Today 09:14:22</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Duration</span>
+        <span>1.4s</span>
+      </div>
+      <div class="mini-row">
+        <span class="label">Status</span>
+        <span class="badge badge-green" style="font-size:9px">Completed</span>
+      </div>
+      <div class="mini-section-hdr">Output</div>
+      <div class="schema-block">
+        {<br>
+        &nbsp;<span class="kw">"emails_sent":</span> <span class="str">3</span>,<br>
+        &nbsp;<span class="kw">"errors":</span> <span class="str">0</span>,<br>
+        &nbsp;<span class="kw">"status":</span> <span class="str">"ok"</span><br>
+        }
+      </div>
+      <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Execution-only view: no way to see automation definition or run a new execution from here.
+      </div>
+    </div>
+  </div>
+
+  <!-- AdminAutomationEditPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AdminAutomationEditPage
+      <span class="route">/admin/automations/:id/edit</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Edit automation</h3>
+        <span class="badge badge-amber">Admin only</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">Definition</div>
+        <div class="mini-tab">Trigger</div>
+        <div class="mini-tab">Settings</div>
+      </div>
+      <div class="mini-row"><span class="label">Name</span><input style="border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;flex:1;" value="Welcome sequence" readonly></div>
+      <div class="mini-row"><span class="label">Engine</span><input style="border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;flex:1;" value="n8n" readonly></div>
+      <div class="mini-section-hdr">Schema definition</div>
+      <div class="schema-block">
+        <span class="kw">nodes:</span><br>
+        &nbsp;- id: <span class="str">send_email</span><br>
+        &nbsp;&nbsp;type: <span class="str">email</span><br>
+        &nbsp;- id: <span class="str">update_crm</span><br>
+        &nbsp;&nbsp;type: <span class="str">webhook</span>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Edit-only page accessible only by admins. Separate from execution and history views. 3 context switches to see definition + run + past executions.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav-impact">
+  <h3>Navigation impact before consolidation</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">3</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Pages (3 separate routes)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">3</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Context switches per task</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">Locked</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Inline</div>
+      <div class="lbl">Admin-only definition view</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">No</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Yes</div>
+      <div class="lbl">Definition + run + history in one context</div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
+    In the consolidated view, automation detail opens from a row click on the automations list. All three concepts (definition, run sandbox, execution history) live as tabs in a single page. Admin edit is an inline toggle on the Definition tab, permission-gated.
+  </p>
+</div>
+
+</body>
+</html>

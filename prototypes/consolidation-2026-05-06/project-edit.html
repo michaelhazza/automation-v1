@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<!--
+  project-edit.html — Round 7b-11
+  Shows the AFTER state: Goals tree retired, per-project Objective field added.
+
+  Key decision (user option a):
+    - projects.objective field replaces the Goals tree as the agent-focusing context
+    - Goals tree (subaccount-level OKR hierarchy) retired — never read by agent execution code
+    - Objective IS read by agent context / prompts at runtime
+    - Subaccount-level strategy lives in Memory blocks (already implemented)
+
+  Primary task: operator edits a project and sets its Objective so agents have runtime context.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Edit: Q1 Outreach Campaign | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Page layout ─────────────────────────────────────────── */
+  .page-main {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden; /* prevent phantom horizontal scrollbar from fixed footer */
+    background: var(--slate-50, #f8fafc);
+  }
+
+  /* ── Topbar ─────────────────────────────────────────────── */
+  .topbar {
+    background: white;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    padding: 0 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 8px; }
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--slate-400, #94a3b8);
+  }
+  .breadcrumb a {
+    color: var(--slate-400, #94a3b8);
+    text-decoration: none;
+    transition: color 0.12s;
+  }
+  .breadcrumb a:hover { color: var(--slate-700, #334155); }
+  .breadcrumb-sep { color: var(--slate-300, #cbd5e1); font-size: 16px; line-height: 1; }
+  .breadcrumb-current { color: var(--slate-700, #334155); font-weight: 500; }
+
+  .topbar-actions { display: flex; align-items: center; gap: 8px; }
+
+  /* dirty indicator */
+  .dirty-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #f59e0b;
+    display: inline-block;
+    margin-right: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ── Page header ─────────────────────────────────────────── */
+  .page-header {
+    background: white;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    padding: 20px 28px 16px;
+  }
+  .page-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 4px;
+  }
+  .page-title-group { display: flex; align-items: center; gap: 12px; }
+  .project-color-dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #6366f1;
+    flex-shrink: 0;
+  }
+  .page-h1 {
+    font-size: 22px; font-weight: 800; color: var(--slate-900, #0f172a);
+    letter-spacing: -0.02em;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    border: 1px solid;
+  }
+  .status-badge.active {
+    background: #ecfdf5; color: #065f46; border-color: #a7f3d0;
+  }
+  .status-badge.active::before {
+    content: '';
+    width: 5px; height: 5px; border-radius: 50%;
+    background: #10b981;
+    display: inline-block;
+  }
+  .page-subtitle {
+    font-size: 13px; color: var(--slate-500, #64748b);
+    margin-top: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .page-subtitle-dot { color: var(--slate-300, #cbd5e1); }
+
+  /* ── Form body ───────────────────────────────────────────── */
+  .form-body {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 28px 28px 100px; /* bottom: leave room above fixed footer */
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* ── Form sections ───────────────────────────────────────── */
+  .form-section {
+    background: white;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .form-section-header {
+    padding: 14px 20px 13px;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    background: var(--slate-50, #f8fafc);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .form-section-title {
+    font-size: 13px; font-weight: 700; color: var(--slate-700, #334155);
+    letter-spacing: -0.01em;
+  }
+  .form-section-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  /* ── Field styles ────────────────────────────────────────── */
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field-row { display: flex; gap: 16px; }
+  .field-row .field { flex: 1; }
+
+  .field-label {
+    font-size: 12.5px; font-weight: 600;
+    color: var(--slate-700, #334155);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .field-required { color: #ef4444; font-size: 12px; }
+  .field-hint {
+    font-size: 11.5px; color: var(--slate-400, #94a3b8);
+  }
+
+  .form-input, .form-textarea, .form-select {
+    width: 100%;
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
+    color: var(--slate-800, #1e293b);
+    background: white;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    padding: 9px 12px;
+    transition: border-color 0.12s, box-shadow 0.12s;
+    outline: none;
+    -webkit-appearance: none;
+  }
+  .form-input:focus, .form-textarea:focus, .form-select:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  }
+  .form-textarea { resize: vertical; line-height: 1.55; }
+
+  /* ── Objective textarea (bigger / featured) ─────────────── */
+  .objective-textarea {
+    font-size: 14.5px;
+    line-height: 1.6;
+    min-height: 80px;
+    padding: 12px 14px;
+    color: var(--slate-900, #0f172a);
+    background: #fafafe;
+    border-color: #c7d2fe;
+  }
+  .objective-textarea:focus {
+    background: white;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  }
+  .objective-helper-band {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    color: #3730a3;
+    line-height: 1.55;
+  }
+  .objective-helper-band strong { color: #312e81; }
+  .objective-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .objective-count {
+    font-size: 11.5px;
+    color: var(--slate-400, #94a3b8);
+    font-variant-numeric: tabular-nums;
+  }
+  .objective-count.warn { color: #f59e0b; }
+  .objective-tip {
+    font-size: 11.5px; color: var(--slate-400, #94a3b8);
+    line-height: 1.45;
+  }
+
+  /* Examples expandable */
+  .examples-toggle {
+    background: none; border: none; padding: 0;
+    font-size: 12px; font-weight: 600;
+    color: #6366f1;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+    font-family: 'Inter', sans-serif;
+  }
+  .examples-toggle:hover { color: #4f46e5; }
+  .examples-toggle .chevron { transition: transform 0.2s; display: inline-block; }
+  .examples-toggle.open .chevron { transform: rotate(90deg); }
+
+  .examples-panel {
+    display: none;
+    background: var(--slate-50, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .examples-panel.visible { display: block; }
+  .examples-panel-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--slate-400, #94a3b8);
+    margin-bottom: 10px;
+  }
+  .example-item {
+    display: flex;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    font-size: 12.5px;
+    color: var(--slate-600, #475569);
+    line-height: 1.5;
+    cursor: pointer;
+    transition: color 0.12s;
+  }
+  .example-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .example-item:hover { color: #4f46e5; }
+  .example-item::before {
+    content: '';
+    width: 4px; height: 4px; border-radius: 50%;
+    background: #a5b4fc;
+    flex-shrink: 0;
+    margin-top: 6px;
+  }
+
+  /* ── Color swatch picker ─────────────────────────────────── */
+  .color-swatch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .color-swatch {
+    width: 28px; height: 28px; border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s;
+    border: 2px solid transparent;
+    flex-shrink: 0;
+  }
+  .color-swatch:hover { transform: scale(1.1); }
+  .color-swatch.selected {
+    border-color: var(--slate-800, #1e293b);
+    box-shadow: 0 0 0 2px white inset;
+  }
+  .color-swatch-custom {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 1.5px dashed var(--slate-300, #cbd5e1);
+    background: white;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: var(--slate-400, #94a3b8);
+    transition: border-color 0.12s;
+  }
+  .color-swatch-custom:hover { border-color: #6366f1; color: #6366f1; }
+
+  /* ── Budget field group ──────────────────────────────────── */
+  .input-prefix-wrap {
+    position: relative;
+  }
+  .input-prefix {
+    position: absolute;
+    left: 12px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 13.5px;
+    color: var(--slate-400, #94a3b8);
+    pointer-events: none;
+  }
+  .input-prefix-wrap .form-input {
+    padding-left: 22px;
+  }
+
+  /* ── Range slider ────────────────────────────────────────── */
+  .slider-row { display: flex; align-items: center; gap: 12px; }
+  .range-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 4px;
+    border-radius: 4px;
+    background: linear-gradient(to right, #6366f1 67%, #e2e8f0 67%);
+    outline: none;
+  }
+  .range-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #6366f1;
+    border: 2px solid white;
+    box-shadow: 0 1px 4px rgba(99,102,241,0.3);
+    cursor: pointer;
+  }
+  .range-value {
+    font-size: 13.5px; font-weight: 600;
+    color: var(--slate-700, #334155);
+    min-width: 36px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Linked agents chip row ──────────────────────────────── */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
+  .agent-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #3730a3;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 20px;
+    padding: 5px 10px 5px 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .agent-chip:hover { background: #e0e7ff; border-color: #a5b4fc; }
+  .agent-chip-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .agent-chip-remove {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #a5b4fc;
+    color: white;
+    font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    border: none;
+    padding: 0; margin: 0;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background 0.12s;
+  }
+  .agent-chip-remove:hover { background: #6366f1; }
+  .add-agent-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--slate-500, #64748b);
+    background: white;
+    border: 1px dashed var(--slate-300, #cbd5e1);
+    border-radius: 20px;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .add-agent-btn:hover { border-color: #6366f1; color: #6366f1; }
+
+  /* ── Migration notice card ───────────────────────────────── */
+  .migration-card {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 14px 18px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .migration-card-icon {
+    width: 20px; height: 20px;
+    flex-shrink: 0;
+    color: #3b82f6;
+    margin-top: 1px;
+  }
+  .migration-card-body { flex: 1; }
+  .migration-card-title {
+    font-size: 12.5px; font-weight: 700; color: #1d4ed8;
+    margin-bottom: 3px;
+  }
+  .migration-card-text {
+    font-size: 12px; color: #1e40af; line-height: 1.55;
+  }
+
+  /* ── Footer actions (fixed to bottom of viewport, always visible) ── */
+  /* Discard left edge aligns to form-body card left edge; Delete right  */
+  /* edge aligns to form-body card right edge. Achieved by giving the    */
+  /* inner band the same 28px horizontal padding as .form-body.          */
+  .form-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid var(--border, #e2e8f0);
+    padding: 14px 0;
+    z-index: 20;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  }
+  .form-footer-inner {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 28px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .btn-destructive {
+    margin-left: auto;
+    font-size: 13px; font-weight: 600;
+    padding: 8px 16px; border-radius: 7px;
+    background: white;
+    color: #ef4444;
+    border: 1.5px solid #fca5a5;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    font-family: 'Inter', sans-serif;
+  }
+  .btn-destructive:hover { background: #fef2f2; border-color: #ef4444; }
+
+  /* ── Repository URL with picker ──────────────────────────── */
+  .repo-input-wrap {
+    display: flex; gap: 8px;
+  }
+  .repo-input-wrap .form-input { flex: 1; }
+  .repo-pick-btn {
+    flex-shrink: 0;
+    font-size: 12.5px; font-weight: 600;
+    padding: 0 13px;
+    border-radius: 7px;
+    background: var(--slate-50, #f8fafc);
+    color: var(--slate-600, #475569);
+    border: 1px solid var(--border, #e2e8f0);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 5px;
+    font-family: 'Inter', sans-serif;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .repo-pick-btn:hover { border-color: #6366f1; color: #4f46e5; }
+  .github-icon { width: 14px; height: 14px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar('workspace', 'project-edit.html');</script>
+
+  <div class="page-main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="breadcrumb">
+          <a href="#">Projects</a>
+          <span class="breadcrumb-sep">/</span>
+          <span class="breadcrumb-current">Q1 Outreach Campaign</span>
+        </div>
+      </div>
+      <div class="topbar-actions" id="topbar-actions">
+        <!-- shown when dirty -->
+      </div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="page-header-row">
+        <div class="page-title-group">
+          <div class="project-color-dot" id="project-color-dot"></div>
+          <h1 class="page-h1">Q1 Outreach Campaign</h1>
+          <span class="status-badge active">Active</span>
+        </div>
+      </div>
+      <div class="page-subtitle">
+        <span>Acme Corp</span>
+        <span class="page-subtitle-dot">·</span>
+        <span>12 tasks</span>
+        <span class="page-subtitle-dot">·</span>
+        <span>3 active agents</span>
+        <span class="page-subtitle-dot">·</span>
+        <span>Started Jan 15 2026</span>
+      </div>
+    </div>
+
+    <!-- Form body -->
+    <div class="form-body">
+
+      <!-- SECTION 1: Identity -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <span class="form-section-title">Identity</span>
+        </div>
+        <div class="form-section-body">
+
+          <div class="field">
+            <label class="field-label">
+              Name <span class="field-required">*</span>
+            </label>
+            <input class="form-input" type="text" value="Q1 Outreach Campaign" id="proj-name" oninput="markDirty()">
+          </div>
+
+          <div class="field">
+            <label class="field-label">Color</label>
+            <div class="color-swatch-row" id="color-swatches">
+              <div class="color-swatch selected" data-color="#6366f1" style="background:#6366f1;" title="Indigo"></div>
+              <div class="color-swatch" data-color="#10b981" style="background:#10b981;" title="Emerald"></div>
+              <div class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;" title="Amber"></div>
+              <div class="color-swatch" data-color="#ef4444" style="background:#ef4444;" title="Red"></div>
+              <div class="color-swatch" data-color="#3b82f6" style="background:#3b82f6;" title="Blue"></div>
+              <div class="color-swatch-custom" title="Custom color" onclick="document.getElementById('custom-color-input').click()">+</div>
+              <input type="color" id="custom-color-input" style="position:absolute;opacity:0;width:0;height:0;" value="#6366f1" oninput="applyCustomColor(this.value)">
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Description</label>
+            <textarea class="form-textarea" rows="3" oninput="markDirty()" placeholder="Briefly describe what this project covers...">Multi-channel outbound campaign targeting mid-market SaaS companies in the EU region. Coordinated across LinkedIn, email, and referral channels. Three agents working in sequence: lead qualification, outreach execution, and demo scheduling.</textarea>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Status</label>
+            <select class="form-select" onchange="markDirty()">
+              <option value="active" selected>Active</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- SECTION 2: Objective (NEW) -->
+      <div class="form-section" style="border-color: #c7d2fe;">
+        <div class="form-section-header" style="background:#eef2ff;border-color:#c7d2fe;">
+          <span class="form-section-title" style="color:#3730a3;">Objective</span>
+          <span style="font-size:11px;background:#4f46e5;color:white;border-radius:4px;padding:2px 7px;font-weight:700;letter-spacing:0.04em;">NEW</span>
+        </div>
+        <div class="form-section-body">
+
+          <div class="objective-helper-band">
+            A single sentence describing what this project is trying to achieve.
+            <strong>Agents working on tasks under this project receive this as runtime context</strong> to keep their actions focused on the outcome.
+          </div>
+
+          <div class="field">
+            <textarea
+              class="form-textarea objective-textarea"
+              id="objective-textarea"
+              rows="3"
+              oninput="updateObjectiveCount()"
+              placeholder="e.g. Generate 30 qualified meetings with mid-market SaaS companies in the EU by end of Q1 through personalised outbound."
+            >Generate 30 qualified meetings with mid-market SaaS companies in the EU region by end of Q1 by personalised outbound across LinkedIn, email, and warm referrals from existing customers.</textarea>
+          </div>
+
+          <div class="objective-meta-row">
+            <span class="objective-tip">
+              Aim for one focused sentence. This is injected into every agent prompt for tasks under this project, so brevity matters.
+            </span>
+            <span class="objective-count" id="objective-count">184 chars</span>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <button class="examples-toggle" id="examples-toggle" onclick="toggleExamples()">
+              <span class="chevron">&#9658;</span>
+              Show example objectives
+            </button>
+            <div class="examples-panel" id="examples-panel">
+              <div class="examples-panel-title">Example objectives (click to use)</div>
+              <div class="example-item" onclick="useExample(this)">Reduce customer churn by 25% through proactive health check campaigns and at-risk-account interventions by end of Q2.</div>
+              <div class="example-item" onclick="useExample(this)">Launch the new pricing tier with at least 50 paying customers in the first 30 days after go-live.</div>
+              <div class="example-item" onclick="useExample(this)">Complete SOC 2 Type II certification preparation, including all evidence collection and gap remediation, before the external audit window opens.</div>
+              <div class="example-item" onclick="useExample(this)">Build a referral program that drives 15% of new sales pipeline within 6 months of launch.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- SECTION 3: Project management -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <span class="form-section-title">Project management</span>
+        </div>
+        <div class="form-section-body">
+
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label">Target date</label>
+              <input class="form-input" type="date" value="2026-03-31" oninput="markDirty()">
+            </div>
+            <div class="field">
+              <label class="field-label">Budget</label>
+              <div class="input-prefix-wrap">
+                <span class="input-prefix">$</span>
+                <input class="form-input" type="text" value="5,000" oninput="markDirty()">
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">
+              Budget warning threshold
+              <span class="field-hint" style="font-weight:400;margin-left:4px;">(alert when spend reaches this % of budget)</span>
+            </label>
+            <div class="slider-row">
+              <input type="range" class="range-slider" id="budget-slider" min="50" max="95" value="75" oninput="updateSlider(this)">
+              <span class="range-value" id="budget-value">75%</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- SECTION 4: Linked resources -->
+      <div class="form-section">
+        <div class="form-section-header">
+          <span class="form-section-title">Linked resources</span>
+        </div>
+        <div class="form-section-body">
+
+          <div class="field">
+            <label class="field-label">Repository</label>
+            <div class="repo-input-wrap">
+              <input class="form-input" type="url" value="https://github.com/acme-corp/q1-outreach" placeholder="https://github.com/..." oninput="markDirty()">
+              <button class="repo-pick-btn" onclick="showStubAction('GitHub repository picker')">
+                <svg class="github-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+                </svg>
+                Pick repo
+              </button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Linked agents</label>
+            <div class="field-hint" style="margin-bottom:4px;">Agents with access to tasks under this project. Click an agent to view its configuration.</div>
+            <div class="chip-row" id="agent-chip-row">
+              <a href="agent-edit.html" class="agent-chip" title="Edit Outreach Agent">
+                <span class="agent-chip-dot" style="background:#10b981;"></span>
+                Outreach Agent
+              </a>
+              <a href="agent-edit.html" class="agent-chip" title="Edit Lead Qualifier">
+                <span class="agent-chip-dot" style="background:#f59e0b;"></span>
+                Lead Qualifier
+              </a>
+              <a href="agent-edit.html" class="agent-chip" title="Edit Demo Scheduler">
+                <span class="agent-chip-dot" style="background:#3b82f6;"></span>
+                Demo Scheduler
+              </a>
+              <button class="add-agent-btn" onclick="showStubAction('agent selector')">+ Add agent</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- SECTION 5: Migration notice (one-time, for projects that had a goal_id) -->
+      <div class="migration-card">
+        <svg class="migration-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <div class="migration-card-body">
+          <div class="migration-card-title">Migrated from Goals</div>
+          <div class="migration-card-text">
+            This project's objective was migrated from the previous "Q1 Outreach Goal" (mission tier) on May 6, 2026.
+            The Goals subsystem has been retired in favour of per-project objectives. Review and refine the text above if needed.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /form-body -->
+
+    <!-- Footer (sticky, always visible) -->
+    <div class="form-footer" id="form-footer">
+      <div class="form-footer-inner">
+        <button class="btn btn-outline" onclick="discardChanges()">Discard</button>
+        <button class="btn btn-primary" onclick="saveProject()">Save changes</button>
+        <button class="btn-destructive" onclick="showStubAction('delete project confirmation')">Delete project</button>
+      </div>
+    </div>
+
+  </div><!-- /page-main -->
+</div><!-- /app-shell -->
+
+<!-- Toast -->
+<div id="stub-toast" style="
+  display:none;position:fixed;top:16px;right:20px;z-index:9999;
+  background:#1e293b;color:#f1f5f9;font-size:12.5px;
+  font-family:'Inter',sans-serif;padding:9px 16px;border-radius:8px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.22);pointer-events:none;
+  transition:opacity 0.3s;"></div>
+
+<script>
+/* ── Dirty state ─────────────────────────────────────────── */
+let dirty = false;
+
+function markDirty() {
+  if (dirty) return;
+  dirty = true;
+  const topbarActions = document.getElementById('topbar-actions');
+  topbarActions.innerHTML = `
+    <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:#f59e0b;font-weight:500;margin-right:4px;">
+      <span class="dirty-dot"></span> Unsaved changes
+    </span>
+  `;
+}
+
+function discardChanges() {
+  dirty = false;
+  document.getElementById('topbar-actions').innerHTML = '';
+  showToast('Changes discarded');
+}
+
+function saveProject() {
+  dirty = false;
+  document.getElementById('topbar-actions').innerHTML = '';
+  showToast('Project saved');
+}
+
+/* ── Color swatches ──────────────────────────────────────── */
+document.querySelectorAll('.color-swatch').forEach(swatch => {
+  swatch.addEventListener('click', () => {
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+    swatch.classList.add('selected');
+    document.getElementById('project-color-dot').style.background = swatch.dataset.color;
+    markDirty();
+  });
+});
+
+function applyCustomColor(color) {
+  document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+  document.getElementById('project-color-dot').style.background = color;
+  markDirty();
+}
+
+/* ── Objective counter ───────────────────────────────────── */
+function updateObjectiveCount() {
+  const ta = document.getElementById('objective-textarea');
+  const count = document.getElementById('objective-count');
+  const len = ta.value.length;
+  count.textContent = len + ' chars';
+  count.className = 'objective-count' + (len > 220 ? ' warn' : '');
+  markDirty();
+}
+
+/* ── Examples toggle ─────────────────────────────────────── */
+function toggleExamples() {
+  const panel = document.getElementById('examples-panel');
+  const btn = document.getElementById('examples-toggle');
+  const open = panel.classList.toggle('visible');
+  btn.classList.toggle('open', open);
+}
+
+function useExample(el) {
+  const text = el.textContent.trim();
+  const ta = document.getElementById('objective-textarea');
+  ta.value = text;
+  updateObjectiveCount();
+  markDirty();
+  // close panel
+  document.getElementById('examples-panel').classList.remove('visible');
+  document.getElementById('examples-toggle').classList.remove('open');
+  showToast('Example objective applied');
+}
+
+/* ── Budget slider ───────────────────────────────────────── */
+function updateSlider(el) {
+  const val = el.value;
+  document.getElementById('budget-value').textContent = val + '%';
+  const pct = ((val - 50) / 45) * 100;
+  el.style.background = `linear-gradient(to right, #6366f1 ${pct}%, #e2e8f0 ${pct}%)`;
+  markDirty();
+}
+
+/* ── Stub action toast ───────────────────────────────────── */
+function showStubAction(label) {
+  showToast(label + ' saved');
+}
+
+/* ── Toast helper ────────────────────────────────────────── */
+function showToast(msg) {
+  const t = document.getElementById('stub-toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  t.style.opacity = '1';
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    t.style.opacity = '0';
+    setTimeout(() => { t.style.display = 'none'; }, 320);
+  }, 2200);
+}
+
+// Init count
+updateObjectiveCount();
+</script>
+</body>
+</html>

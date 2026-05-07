@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Automations (3 separate pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+
+.three-col {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;
+  padding: 24px; max-width: 1360px; margin: 0 auto;
+}
+
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 10px; min-width: 70px; }
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.mini-btn-danger { background: white; border: 1px solid #fca5a5; color: var(--red-600); }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.mini-table th { background: var(--slate-50); padding: 5px 8px; font-weight: 600; font-size: 10px; text-align: left; border-bottom: 1px solid var(--border); color: var(--slate-600); }
+.mini-table td { padding: 5px 8px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); vertical-align: middle; }
+.mini-table tr:last-child td { border-bottom: none; }
+.note-box {
+  background: var(--slate-50); border: 1px solid var(--border); border-radius: 4px;
+  padding: 6px 10px; font-size: 10px; color: var(--slate-500); margin-top: 8px;
+}
+
+/* Section label above each column */
+.col-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--slate-500); margin-bottom: 6px; padding: 0 2px;
+}
+
+/* Problems box */
+.problems-wrap {
+  max-width: 1360px; margin: 0 auto; padding: 0 24px 32px;
+}
+.problems-box {
+  background: white; border: 1px solid #fca5a5; border-radius: 8px;
+  padding: 18px 22px;
+}
+.problems-box h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin-bottom: 12px; }
+.problems-list { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.problems-list li {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12.5px; color: var(--slate-700); line-height: 1.5;
+}
+.problems-list li::before {
+  content: ''; display: block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red-400); flex-shrink: 0; margin-top: 6px;
+}
+
+/* Impact summary */
+.impact-wrap {
+  max-width: 1360px; margin: 0 auto; padding: 0 24px 20px;
+}
+.impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.impact-item { text-align: center; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 14px 12px; }
+.impact-item .big { font-size: 24px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 16px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 20px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>BEFORE: Three separate top-level pages</span>
+  <span style="font-weight:400;">Workflows, Automations, and Triggers each had their own nav item and route. Consolidated into one Automations page (Round 7b-6).</span>
+  <a href="automations.html">View consolidated page &rarr;</a>
+</div>
+
+<!-- Three-column layout: Workflows | Automations | Triggers -->
+<div class="three-col">
+
+  <!-- ─── Column 1: WorkflowsLibraryPage ─────────────────── -->
+  <div>
+    <div class="col-label">Separate nav item 1 of 3</div>
+    <div class="page-mockup">
+      <div class="page-mockup-header">
+        WorkflowsLibraryPage
+        <span class="route">/workflows</span>
+      </div>
+      <div class="page-inner">
+        <div class="mini-topbar">
+          <h3>Workflows</h3>
+          <span class="mini-btn mini-btn-primary">New workflow</span>
+        </div>
+
+        <!-- workflow card stubs -->
+        <div style="display:flex;flex-direction:column;gap:7px;">
+
+          <div style="border:1px solid var(--border);border-radius:5px;padding:7px 9px;">
+            <div style="font-size:11.5px;font-weight:600;color:var(--slate-800);margin-bottom:2px;">New lead onboarding</div>
+            <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">Enriches a new lead and schedules an intro call</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span class="badge badge-slate" style="font-size:9px;">7 steps</span>
+              <span class="badge badge-green" style="font-size:9px;">Active</span>
+              <span style="font-size:10px;color:var(--slate-400);margin-left:auto;">2h ago</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--border);border-radius:5px;padding:7px 9px;">
+            <div style="font-size:11.5px;font-weight:600;color:var(--slate-800);margin-bottom:2px;">Invoice processing</div>
+            <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">Extracts line items and posts to billing system</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span class="badge badge-slate" style="font-size:9px;">5 steps</span>
+              <span class="badge badge-green" style="font-size:9px;">Active</span>
+              <span style="font-size:10px;color:var(--slate-400);margin-left:auto;">6h ago</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--border);border-radius:5px;padding:7px 9px;">
+            <div style="font-size:11.5px;font-weight:600;color:var(--slate-800);margin-bottom:2px;">Customer health check</div>
+            <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">Scores customers on engagement and usage</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span class="badge badge-slate" style="font-size:9px;">6 steps</span>
+              <span class="badge badge-red" style="font-size:9px;">Failed</span>
+              <span style="font-size:10px;color:var(--slate-400);margin-left:auto;">1d ago</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--border);border-radius:5px;padding:7px 9px;">
+            <div style="font-size:11.5px;font-weight:600;color:var(--slate-800);margin-bottom:2px;">Churn risk escalation</div>
+            <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">Routes high-risk accounts to success reps</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span class="badge badge-slate" style="font-size:9px;">5 steps</span>
+              <span class="badge badge-green" style="font-size:9px;">Active</span>
+              <span style="font-size:10px;color:var(--slate-400);margin-left:auto;">3h ago</span>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--border);border-radius:5px;padding:7px 9px;">
+            <div style="font-size:11.5px;font-weight:600;color:var(--slate-800);margin-bottom:2px;">Support ticket triage</div>
+            <div style="font-size:10px;color:var(--slate-500);margin-bottom:5px;">Classifies and routes incoming support tickets</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span class="badge badge-slate" style="font-size:9px;">5 steps</span>
+              <span class="badge badge-green" style="font-size:9px;">Active</span>
+              <span style="font-size:10px;color:var(--slate-400);margin-left:auto;">45m ago</span>
+            </div>
+          </div>
+
+        </div><!-- /cards -->
+
+        <div class="note-box">
+          Workflows are internal multi-step flows. Operator cannot see triggers that fire them here. Must navigate to a separate Triggers page to find the trigger for any workflow.
+        </div>
+      </div>
+    </div>
+  </div><!-- /col 1 -->
+
+  <!-- ─── Column 2: AutomationsPage + AdminAutomationsPage ── -->
+  <div>
+    <div class="col-label">Separate nav item 2 of 3 (operator) + separate admin route</div>
+    <div class="page-mockup">
+      <div class="page-mockup-header">
+        AutomationsPage + AdminAutomationsPage
+        <span class="route">/automations &amp; /admin/automations</span>
+      </div>
+      <div class="page-inner">
+        <div class="mini-topbar">
+          <h3>Automations</h3>
+          <span class="mini-btn mini-btn-primary">New automation</span>
+        </div>
+        <div style="display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap;">
+          <input style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:10px;flex:1;min-width:60px;" placeholder="Search..." readonly>
+          <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Status</option></select>
+          <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 6px;"><option>Tag</option></select>
+        </div>
+        <table class="mini-table">
+          <thead>
+            <tr><th>Name</th><th>Engine</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>HubSpot contact sync</td>
+              <td><span class="badge badge-indigo" style="font-size:9px;">n8n</span></td>
+              <td><span class="badge badge-green" style="font-size:9px;">Active</span></td>
+              <td style="display:flex;gap:3px;"><span class="mini-btn mini-btn-secondary" style="font-size:9px;">Pause</span><span class="mini-btn mini-btn-danger" style="font-size:9px;">Delete</span></td>
+            </tr>
+            <tr>
+              <td>Stripe charge hook</td>
+              <td><span class="badge badge-violet" style="font-size:9px;">Make</span></td>
+              <td><span class="badge badge-green" style="font-size:9px;">Active</span></td>
+              <td style="display:flex;gap:3px;"><span class="mini-btn mini-btn-secondary" style="font-size:9px;">Pause</span><span class="mini-btn mini-btn-danger" style="font-size:9px;">Delete</span></td>
+            </tr>
+            <tr>
+              <td>Invoice reminder</td>
+              <td><span class="badge badge-violet" style="font-size:9px;">Make</span></td>
+              <td><span class="badge badge-slate" style="font-size:9px;">Paused</span></td>
+              <td style="display:flex;gap:3px;"><span class="mini-btn mini-btn-primary" style="font-size:9px;">Activate</span><span class="mini-btn mini-btn-danger" style="font-size:9px;">Delete</span></td>
+            </tr>
+            <tr>
+              <td>Lead score update</td>
+              <td><span class="badge badge-sky" style="font-size:9px;">Zapier</span></td>
+              <td><span class="badge badge-red" style="font-size:9px;">Error</span></td>
+              <td style="display:flex;gap:3px;"><span class="mini-btn mini-btn-secondary" style="font-size:9px;">Retry</span><span class="mini-btn mini-btn-danger" style="font-size:9px;">Delete</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note-box">
+          Near-duplicate routes: operator view (/automations) and admin view (/admin/automations) show the same data. Admin view adds activate/deactivate/delete actions. Different URLs, different RBAC logic, same list. Triggers that fire these automations live on a separate page.
+        </div>
+      </div>
+    </div>
+  </div><!-- /col 2 -->
+
+  <!-- ─── Column 3: TriggersPage ──────────────────────────── -->
+  <div>
+    <div class="col-label">Separate nav item 3 of 3</div>
+    <div class="page-mockup">
+      <div class="page-mockup-header">
+        TriggersPage
+        <span class="route">/triggers</span>
+      </div>
+      <div class="page-inner">
+        <div class="mini-topbar">
+          <h3>Triggers</h3>
+          <span class="mini-btn mini-btn-primary">New trigger</span>
+        </div>
+        <table class="mini-table">
+          <thead>
+            <tr><th>Name</th><th>Source</th><th>Filter</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>HubSpot contact webhook</td>
+              <td><span style="font-size:9px;color:var(--indigo-700);">Webhook</span></td>
+              <td style="font-size:9.5px;font-family:monospace;color:var(--slate-500);">lifecycle_stage=lead</td>
+              <td><span class="badge badge-green" style="font-size:9px;">Active</span></td>
+            </tr>
+            <tr>
+              <td>Daily invoice check</td>
+              <td><span style="font-size:9px;color:var(--sky-500);">Schedule</span></td>
+              <td style="font-size:9.5px;color:var(--slate-500);">9am UTC, weekdays</td>
+              <td><span class="badge badge-slate" style="font-size:9px;">Paused</span></td>
+            </tr>
+            <tr>
+              <td>Stripe payment events</td>
+              <td><span style="font-size:9px;color:var(--violet-500);">Stripe</span></td>
+              <td style="font-size:9.5px;font-family:monospace;color:var(--slate-500);">charge.succeeded</td>
+              <td><span class="badge badge-green" style="font-size:9px;">Active</span></td>
+            </tr>
+            <tr>
+              <td>G2 review email watcher</td>
+              <td><span style="font-size:9px;color:var(--emerald-600);">Email</span></td>
+              <td style="font-size:9.5px;font-family:monospace;color:var(--slate-500);">from: @g2.com</td>
+              <td><span class="badge badge-green" style="font-size:9px;">Active</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:10px;border:1px solid var(--border);border-radius:4px;padding:7px 9px;font-size:10px;color:var(--slate-600);">
+          <div style="font-size:10px;font-weight:700;color:var(--slate-500);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Linked targets (example: HubSpot contact webhook)</div>
+          <div style="color:var(--slate-500);font-style:italic;">Fires: "HubSpot contact sync" (Automation) and "New lead onboarding" (Workflow)</div>
+          <div style="color:var(--slate-400);margin-top:3px;">To view the linked automation, operator must navigate back to /automations. To view the linked workflow, operator must navigate to /workflows. No cross-page navigation.</div>
+        </div>
+
+        <div class="note-box" style="margin-top:8px;">
+          Triggers page shows what events fire automations and workflows, but cannot link directly to them. Three separate pages mean adding one new automated process requires visiting all three pages.
+        </div>
+      </div>
+    </div>
+  </div><!-- /col 3 -->
+
+</div><!-- /three-col -->
+
+<!-- Impact summary -->
+<div class="impact-wrap">
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">3+</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Top-level nav items consolidated</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">4</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">3</div>
+      <div class="lbl">Routes (including admin dupe) collapsed to tabs</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">3 pages</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1 click</div>
+      <div class="lbl">Steps to cross-reference a trigger and its targets</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">Separate</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Tabs</div>
+      <div class="lbl">Mental model: one surface for event-driven work</div>
+    </div>
+  </div>
+</div>
+
+<!-- Problems box -->
+<div class="problems-wrap">
+  <div class="problems-box">
+    <h3>Problems with the three-page before-state</h3>
+    <ul class="problems-list">
+      <li>Three separate nav items (Workflows, Automations, Triggers) for what is conceptually one capability: event-driven automated work.</li>
+      <li>A trigger's target workflow lives on a different page; clicking a trigger chip requires navigating away and re-finding the workflow.</li>
+      <li>Creating a new automated process that needs a trigger requires switching pages mid-flow: Automations to create the recipe, then Triggers to wire the event, then Workflows if a multi-step flow is involved.</li>
+      <li>AutomationsPage and AdminAutomationsPage are near-duplicate routes showing the same data with minor permission differences, creating two separate code paths and two separate cognitive contexts for the same list.</li>
+      <li>Different visual patterns per page: Workflows uses card grid, Automations uses table, Triggers uses table with no cross-reference links. Inconsistent mental model.</li>
+      <li>An operator viewing a failed workflow has no quick path to the trigger that fired it; they must manually find it on the Triggers page by name.</li>
+    </ul>
+  </div>
+</div>
+
+</body>
+</html>

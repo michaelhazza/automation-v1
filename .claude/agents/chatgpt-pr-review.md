@@ -986,7 +986,7 @@ finalisation. A bare `no` (no rationale) is treated as missing.
   `scripts/gates/*.sh`, or `scripts/run-all-*.sh` per round, between rounds,
   or at finalization. Continuous integration runs the complete suite as a
   pre-merge gate on the PR. If a round authored a single new test file,
-  running only that file via `npx tsx <path-to-test>` to confirm it passes
+  running only that file via `npx vitest run <path-to-test>` to confirm it passes
   is allowed; running the rest of the suite is not. If ChatGPT recommends
   running gates locally, classify the finding as `defer` with reason
   "test gates are CI-only per CLAUDE.md" and log accordingly. See

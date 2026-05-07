@@ -2329,6 +2329,47 @@ Adjudication shape for these rounds: each "concern" is a verification request, n
 
 Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05T10-17-27Z.md` — 3 rounds, 15 rejections, 0 code changes, APPROVED verdict. Round 1 raised 6 generic concerns; Round 2 sharpened to 5 (3 new, 2 duplicates of R1); Round 3 dropped to 4 paranoia-level concerns. The verification trail in the log is the audit artifact, not the (empty) implementation diff.
 
+### [2026-05-06] Correction — Calendar period navigation: keep nav controls inline with the period label, not clumped with view switchers
+
+In `prototypes/consolidation-2026-05-06/calendar.html` Round 6, I placed the previous/next chevrons in the same top-right cluster as the period view selector (Week/Fortnight/Month). User flagged this as non-conventional. Standard practice (Google Calendar, Outlook, every well-designed calendar): `[Today] < period-label >` is one cluster on the LEFT inline with the calendar content, and the view switcher (Week/Fortnight/Month) is a separate cluster on the RIGHT. Period nav belongs WITH the period label it controls, not with the view selector. Lesson: when designing dense control bars, group controls by what they ACT on, not by physical proximity. View switcher acts on which view; period nav acts on the period label — different concerns, different clusters.
+
+### [2026-05-07] Pattern — Phase-0 cross-cutting frontend-primitive specs: lock contracts at the start, not during build
+
+**Date:** 2026-05-07
+**Source:** chatgpt-spec-review on `tasks/builds/consolidation-foundation/spec.md` (3 rounds, APPROVED verdict).
+
+When a programme decomposes into N parallel feature specs (here: A/B/C consuming the same primitives), a Phase-0 spec that ships the cross-cutting primitives MUST lock the contract surface BEFORE downstream specs draft. The natural lock surfaces, learned across this review:
+
+1. **Sort comparator semantics** — comparator algorithm per type (`localeCompare { sensitivity: 'base' }`, numeric subtraction, NaN→string fallback), null handling (always bottom regardless of direction), mixed-type fallback rules, stability as a contract (not implementation detail).
+2. **Filter identity** — deterministic key derivation (`String(getValue(row) ?? '__NULL__::${column.key}')`), with a column-scoped sentinel to avoid both real-data collision and cross-column option overlap.
+3. **Persistence-key versioning** — namespaced + versioned prefix (`<scope>:v1:<key>`); component owns the version, callers pass the unversioned identifier.
+4. **Overlay z-index ladder** — layer constants (Modal 1000, Drawer 900, backdrop -1, nested +10) so stacking is predictable.
+5. **Scroll-lock ownership** — mount-counter + deferred restore so closing one of two stacked overlays does not leak `overflow: auto` while the other is still mounted.
+6. **Hook-owned illegal-transition handling** — when N consumers would each implement the same edge case (e.g. `setViewMode('workspace')` with no active client), the hook returns `boolean` + an optional callback (`onRequireClientSelection`); consumers do not detect rejection by reading state.
+7. **Spacing contract at the page-shell level** — `<PageShell bottomPadding={N}>` instead of relying on per-page bottom-padding comments; the primitive that USES the contract (FormFooter) does NOT inject its own spacer.
+
+**The shape of a good Phase-0 review:** ChatGPT round 1 surfaced 9 of these 7 surfaces; rounds 2-3 tightened the rest (NaN guard, sentinel collision, padding default, persistence versioning, sort stability, scroll-lock ownership). Each round was APPROVED with tightenings — meaning every surface was a real ambiguity, not a stylistic preference. **If a Phase-0 spec for cross-cutting primitives does not surface findings on these areas, the review is not done.**
+
+### [2026-05-07] Pattern — Versioned localStorage key prefix for component-owned persistence
+
+**Date:** 2026-05-07
+**Source:** Same review session, finding F18 (round 3).
+
+Format: `<scope>:v<N>:<key>` (e.g. `table:v1:spending-ledger`). The version segment is owned by the component, not the caller. Callers pass an unversioned, unscoped identifier; the component prepends both. When the persisted shape (e.g. sort tuple, filter selections, column-key set) changes incompatibly, bump `v1` → `v2`; the old keys become absent rather than corrupted state. Zero migration cost; zero risk of de-serialisation crashes when an old client meets a new schema.
+
+The pattern generalises to any component that owns localStorage state with a non-trivial shape: list-view toggles, column-visibility prefs, collapsed-section state, draft autosave. Without versioning, the first incompatible shape change either corrupts state silently or forces consumer migrations.
+
+### [2026-05-07] Pattern — Hook-owned illegal-transition handling instead of consumer-side guards
+
+**Date:** 2026-05-07
+**Source:** Same review session, finding F3 (round 1) + F15 (round 2).
+
+When a state-transition hook serves multiple consumers, illegal-transition handling MUST live in the hook, not in each consumer. Shape: `setViewMode(next): boolean` returns `true`/`false` for the transition outcome, with an optional `onRequireClientSelection` callback (configured at hook construction) invoked for the specific failure case (`'workspace'` with no `activeClient`). The hook also publishes a locked side-effect table (`'org'` clears `activeClient`; `'system'` enables override flag; etc.) as a refactor invariant.
+
+Before: each of three consumers (Layout, sidebar, badge) would implement the same "no active client → open picker" branch. After: one consumer (Layout) wires `onRequireClientSelection`; the others consume `setViewMode` and react to the boolean. The pattern prevents 3 divergent implementations and centralises the rule for future maintainers.
+
+Generalises to any state-transition hook with N>1 consumers: workspace switching, mode switches, draft saves with conflict resolution, optimistic-update rollbacks. The signal that you need it: when the same edge-case branch starts appearing in multiple consumers, the hook is the right owner.
+
 ### 2026-05-05 Pattern — Branded type with single-constructor invariant beats grep gates for input-normalisation enforcement
 
 **Date:** 2026-05-05
@@ -2596,3 +2637,239 @@ Don't over-engineer a grep gate to chase aliasing. Document, review, and accept 
 
 ### [2026-05-06] Correction — Synthetos is not agency-only; sub-account is a standalone product surface
 When framing product strategy or recommendations, do not default to "agency operator looking down at clients." The three-tier structure (system / org / sub-account) is deliberate: a sub-account can be sold standalone to an end-client (SMB, solo operator) with no agency above them, and the product must self-contain at that level. Agency-resold sub-accounts are one go-to-market, not the only one. When discussing operator-facing surfaces (Pulse, supervision home, watchers, proactive nudges, calibration), cover both lenses: (a) the agency operator managing many sub-accounts and (b) the end operator running their own business directly inside one sub-account. The video's "my mom" archetype maps to lens (b), not (a).
+
+
+### [2026-05-07] Spec authoring — cursor pagination contract (4 invariants every paginated API spec must state) (seen 2 times)
+
+When speccing a cursor-paginated endpoint, always state four things explicitly or ChatGPT/reviewers will flag it:
+
+1. **Encoding:** cursor encodes `(sortKeyValue, id)` in the **effective sort order** (see #4) — the id tiebreaker makes ordering deterministic. SQL: `ORDER BY <sortKey> <dir>, id <dir>`.
+2. **Invalidation:** cursor is invalidated when `sortKey`, `sortDir`, or any filter changes between pages. Server ignores/resets on mismatch.
+3. **Stability:** every sort order must include `id` as a secondary key (prevents row flickering across pages).
+4. **Tiebreaker direction symmetry:** the `id` tiebreaker direction MUST follow the primary sort direction (`ORDER BY confidence ASC, id ASC` — never `ASC, id DESC`). Mixing directions produces skip/duplicate rows when paginating ASC. (Added in consolidation-govern round 2 — round 1 spec said "always end with id DESC" which was wrong for ASC sorts.)
+
+Missing any one of these causes non-deterministic pagination (duplicate rows or skipped rows under concurrent writes, sort/filter changes, or ASC overrides).
+
+### [2026-05-07] Spec authoring — filterOptions count semantics (faceted search rule) (seen 2 times)
+
+For APIs that return `filterOptions` alongside paginated results: always state that counts are computed against the **full result set** (current scope + q), **ignoring pagination**, but **respecting active filters except the dimension being counted**. This is the standard "faceted search" rule. Without it, a user filtering by `type=email.sent` would see 0 counts on the `type` dimension — which is misleading.
+
+Two operational invariants to add (consolidation-govern rounds 2 + 3):
+
+- **Same-snapshot:** counts MUST be computed from the same base-query snapshot as the row results (single SQL statement / CTE) so counts and rows cannot diverge under concurrent writes.
+- **SQL ordering:** sort `filterOptions` (typically `count DESC, value ASC`) in SQL, not via post-query JavaScript. Same-snapshot ordering avoids drift if the route ever splits the query and JS orders separately.
+
+### [2026-05-07] Spec authoring — masking/redaction token contract
+
+When speccing role-aware masking on a backend projection:
+
+1. Lock the exact redaction token as a string constant: `"<redacted>"` — never `null`, never omit the field.
+2. Truncated fields (e.g. first 200 chars of a result body) must include `truncated: true` so the renderer knows without inspecting string length.
+3. These two rules prevent frontend branching creep (renderer never needs to branch on field presence or null-check mask values).
+
+### [2026-05-07] Spec authoring — per-user localStorage key scoping
+
+When a dismissal/seen flag is stored in localStorage (e.g. `somethingSeen=1`), add a userId prefix: `somethingSeen:{userId}`. Without it, the flag is shared across users in a shared-browser environment (kiosk, shared login), silently suppressing the UI for subsequent users.
+
+### [2026-05-07] Gotcha — PostgreSQL `READ COMMITTED` snapshot is **per-statement**, not transaction-scoped
+
+Common mis-citation in specs and code: "we use a single transaction so counts are snapshot-consistent under READ COMMITTED". Wrong. PostgreSQL's `READ COMMITTED` (the default) takes a fresh snapshot at the start of each statement — multiple statements in the same transaction can each see a different snapshot if other writers commit between them. Transaction-scoped snapshot consistency requires `REPEATABLE READ` (or `SERIALIZABLE`).
+
+Practical rule for cross-table aggregators that want mutual count consistency:
+
+- **Preferred:** issue a single SQL statement (a CTE that joins / unions the sources). Default `READ COMMITTED` is sufficient because the per-statement snapshot covers all sources in one shot.
+- **Acceptable:** if multiple statements are required, escalate isolation to `REPEATABLE READ` and accept the extra overhead (no concurrent updates can change the view between statements).
+- **Wrong:** "use a transaction with READ COMMITTED" — provides no extra consistency over not-using-a-transaction.
+
+Caught in consolidation-govern round 2 — round 1 wording mis-cited READ COMMITTED as transaction-scoped.
+
+### [2026-05-07] Spec authoring — external-call timeout determinism (3 invariants)
+
+When a backend route makes an outbound network call with a stated timeout, the spec MUST lock three things or implementations will silently honour the timeout symbolically while violating it operationally:
+
+1. **Monotonic clock:** measure the budget against a monotonic clock (`process.hrtime.bigint()` in Node) — never wall clock. NTP jumps and clock skew must NOT extend or shorten the window.
+2. **Inclusive scope:** the clock starts immediately before the outbound call — DNS, TCP, TLS, and HTTP all count against the budget, not just the HTTP response wait.
+3. **Bounded SDK retries:** any HTTP client, OAuth SDK, or provider SDK on the call path MUST disable internal retries (or bound them within the same envelope). A 10s spec-stated timeout that hides 60s of internal SDK retry storms violates the contract while technically "respecting" it.
+
+Caught in consolidation-govern round 2 (connection-test endpoint).
+
+### [2026-05-07] Spec authoring — body hash canonicalisation must include Unicode NFC
+
+When using a body hash for idempotency keys (`UNIQUE(parent_id, body_hash)`), canonicalise in this order before hashing:
+
+1. **Unicode NFC normalisation** — visually-identical strings can have different byte representations (composed vs decomposed accents, ligatures). Without NFC, a user pasting the same text from two sources can produce two different hashes.
+2. Whitespace canonicalisation: trim ends, collapse internal runs to single spaces.
+3. Decide and document case-sensitivity (case-sensitive for human-authored override text in our spec; case-insensitive for canonical identifiers).
+4. Hash function: SHA-256, hex-encoded, lower-case (deterministic encoding).
+
+Skipping NFC produces long-tail duplicate revision bugs that are nearly impossible to reproduce. Caught in consolidation-govern round 2.
+
+### [2026-05-07] Pattern — Drawer / Modal focus-trap escape recovery
+
+**Date:** 2026-05-07
+**Source:** finalisation-coordinator finalisation pass on PR #270 (slug: consolidation-foundation), chatgpt-pr-review Round 1 finding F1.
+**Pattern:** A standard Tab-cycle focus trap (first ↔ last focusable inside the panel) handles the "Tab past last" and "Shift+Tab before first" cases — but it misses the case where focus has already escaped the panel entirely (devtools, programmatic focus calls into a different region, browser chrome handing focus back to the document body). On the next Tab inside the panel handler, `document.activeElement` is neither the first nor the last focusable, so the standard branches do not match and the trap is a no-op. Add a guard before the first/last comparisons: if `document.activeElement` is not contained in the panel ref, pull focus back to the first focusable. Three-line addition; closes the only realistic escape route.
+**Why it matters:** Accessibility-grade overlay components are expected to keep keyboard focus inside the overlay until it closes. The "trap" is incomplete without the escape-recovery branch — and the failure is invisible in normal manual testing because escape requires a side-channel focus shift.
+
+### [2026-05-07] Pattern — Visibility helper: `offsetWidth || offsetHeight || getClientRects().length`, not `offsetParent !== null`
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F2.
+**Pattern:** When determining "is this element visible enough to receive focus" inside a focus-trap or any DOM walker that filters out hidden nodes, do NOT use `offsetParent !== null`. That predicate returns `null` for any `position: fixed` element regardless of visibility — meaning fixed-position focusable elements (sticky toolbars inside drawers, floating action buttons) are silently excluded from the trap and the visible-focusables walker. Use the jQuery-style `el.offsetWidth || el.offsetHeight || el.getClientRects().length > 0` instead — visible iff any of width/height/client-rect exists. Standard a11y-library shape.
+**Why it matters:** Common a11y trap. Modal/Drawer code that uses `offsetParent` will skip fixed-position children, so Tab order silently drops them and screen-reader walks of "focusable elements in this region" exclude them. The bug surfaces only when fixed-position content is added inside an overlay months after the trap shipped.
+
+### [2026-05-07] Pattern — Shared CSS keyframes belong in `index.css`, not inline `<style>` blocks per component instance
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F3 (also flagged by pr-reviewer N3).
+**Pattern:** When a component injects its own animation via `<style>{`@keyframes drawer-fade-in {...}`}</style>` inside its render output, every mounted instance writes a duplicate `<style>` element into `<head>` (or inline). For an overlay primitive that may render multiple times across a page (open/close cycles, unmounted-then-remounted nested overlays), this leaks duplicate keyframe definitions and pays parse cost on every render. Move shared keyframes to `client/src/index.css` once, reference by name from the component. Trade-off: the keyframe name becomes a global contract, so prefix it with the owning-primitive name (`drawer-fade-in`, `drawer-slide-in-right`) to prevent cross-component collisions.
+**Why it matters:** DOM hygiene. The pattern is invisible in dev — animations work fine — but `<head>` accumulates `<style>` duplicates over a long-running session. Lighthouse a11y/CSS audits flag it; production performance audits flag it.
+
+### [2026-05-07] Pattern — `import.meta.env.DEV` for Vite client code (NOT `process.env.NODE_ENV`); requires `client/src/vite-env.d.ts`
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F4.
+**Pattern:** Inside any code that ships through Vite to the browser bundle, gate dev-only branches with `import.meta.env.DEV` (boolean, true in dev / false in production). Do NOT use `process.env.NODE_ENV === 'development'` — `process` is a Node.js global, not present in the browser, and Vite doesn't shim it; the comparison silently returns `false` in production AND in dev (because `process.env.NODE_ENV` is `undefined`), so the dev-only branch never fires. For TypeScript to resolve `import.meta.env`, the project must include a triple-slash reference: create `client/src/vite-env.d.ts` containing `/// <reference types="vite/client" />`. One-time setup; thereafter every `.tsx`/`.ts` file in `client/src` resolves the type without further imports.
+**Why it matters:** Dev-only code paths (extra logging, prop-validation warnings, "this should never happen" assertions, error-state stack traces) are a primary debugging surface. If they silently never fire because the gate is `process.env.NODE_ENV`-shaped, you ship blind. The fix is mechanical, but the verification — actually confirm the dev branch fires in dev and is dead-code-eliminated in production — is not, so it usually slips past.
+
+### [2026-05-07] Pattern — `aria-labelledby` + `useId` for dialog/drawer accessible names when a visible title exists
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F5.
+**Pattern:** When an overlay (Modal, Drawer) renders a visible title, the accessible name should come from `aria-labelledby={titleId}` (pointing at the rendered heading), NOT a hand-typed `aria-label="Drawer"`. Screen readers announce the actual visible heading rather than a generic role. Generate the id with React's `useId()` so it's stable across renders and unique per instance. Fall back to `aria-label` only when no visible title is rendered. Apply both attributes pattern: `{title ? { 'aria-labelledby': titleId } : { 'aria-label': fallback }}`.
+**Why it matters:** WCAG 2.1 AA expects the accessible name to match the visible label when one exists. A static `aria-label="Drawer"` overrides the visible heading for screen-reader users — they hear "Drawer" instead of "Edit Client" — and fails name-from-content auditing.
+
+### [2026-05-07] Pattern — Document JS-engine assumptions when pure helpers depend on ES spec guarantees
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F7.
+**Pattern:** When a pure helper relies on a JS-engine guarantee that is technically a runtime-environment assumption (e.g. `Array.prototype.sort` is stable per ES2019+, all modern engines comply), document it in the file-level JSDoc as a "Runtime invariant" paragraph. Note the assumption (stable sort), the path forward if the helper is ever ported to a non-compliant engine (add an explicit insertion-index tiebreaker to the comparator), and the pure tests that pin the invariant. Tests alone do NOT communicate the assumption to the next author — the JSDoc does.
+**Why it matters:** Stability of sort is an unspoken default assumption. A future port to a constrained runtime (an embedded engine, a polyfilled environment, an old node target) will silently violate the assumption — sort still works, but tiebreaker order changes, and any consumer relying on insertion order for equal keys gets nondeterministic UI. The JSDoc is the only place this assumption surfaces in time to prevent the regression.
+
+### [2026-05-07] Pattern — Reference-counted scroll-lock singleton with `Symbol.for(...)` HMR-safe key
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern from build (chunks involving Modal + Drawer overlay coordination, encoded in `client/src/components/overlayScrollLock.ts`).
+**Pattern:** When two overlay primitives (Modal, Drawer) both want to lock body scroll while open, naive per-component `useEffect(() => { document.body.style.overflow = 'hidden'; return () => { ... = ''; } }, [open])` produces a leak: closing one overlay restores `overflow: ''` even though the other is still mounted. Solution: a reference-counted singleton helper (`acquireScrollLock()` / `releaseScrollLock()`) that increments a shared mount counter and only restores the original `overflow` value when the counter returns to zero. The original value is captured on first acquire (deferred restore). To survive HMR (hot module reload during dev — multiple module copies attaching their own counter), key the singleton with `Symbol.for('app.overlay.scroll-lock')` on `globalThis` so all module copies converge on the same counter object.
+**Why it matters:** Cross-overlay scroll-state coordination is a well-known overlay-system trap. The reference count handles concurrent stacked overlays (Modal opens, then Drawer opens on top, then Modal closes underneath — body must stay locked). The `Symbol.for` key handles HMR. Without both, dev shows phantom scroll-restore mid-flow that production never reproduces (or vice-versa, depending on which copy wins).
+
+### [2026-05-07] Pattern — Branded route-pattern type with `buildRoute` regex using negative lookahead `(?![A-Za-z0-9_])`
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern in `client/src/config/routes.ts`.
+**Pattern:** Centralise app-route patterns in a literal-tuple constant (`APP_ROUTE_PATTERNS = ['/agents/:id', '/agents/:idFoo/edit', ...] as const`), brand the resulting union type as `AppRoute`, and provide `buildRoute(pattern: AppRoute, params: Record<string, string>)` and `staticRoute(pattern: AppRoute)` helpers. Inside `buildRoute`, replace `:name` placeholders using a regex with a negative lookahead: `new RegExp(\`:\${param}(?![A-Za-z0-9_])\`, 'g')` — NOT `:${param}`. Without the lookahead, `:id` matches inside `:idFoo` and corrupts unrelated placeholders. The negative-lookahead version requires the placeholder to be terminated by a non-identifier character (a slash, end-of-string, etc.).
+**Why it matters:** Hand-rolled string substitution for path params is a recurring source of silent corruption. The brand type prevents path strings from leaking into `<Link to="...">` / `useNavigate(...)` outside the registry; the lookahead-regex prevents the substitution itself from corrupting prefix-overlap cases. The bug surfaces months after deployment when someone adds a new param like `:idType` next to existing `:id`.
+
+### [2026-05-07] Pattern — Co-locate React-wrapper component with pure-helper module; test the pure half via `npx tsx`
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern from `SortableTable.tsx` + `sortableTablePure.ts` (and `useViewMode.ts` + `useViewModePure.ts`).
+**Pattern:** When a UI primitive contains non-trivial logic (sorting, filtering, mode-derivation, transition rules), split into two files: `Foo.tsx` (the React wrapper — hooks, state, event handlers, render) and `fooPure.ts` (the deterministic helpers — sort comparators, filter predicates, derivation rules, transition guards). The pure module exports plain functions with explicit input/output types and zero React dependency. Tests live next to the pure module under `__tests__/fooPure.test.ts` using the existing convention: `npx tsx <test-path>` runs them in isolation, no test runner setup, fast feedback. The React wrapper's behaviour is verified by integration of the pure module's contract — the wrapper itself does not need its own unit suite if the pure module is fully covered.
+**Why it matters:** UI logic is normally locked behind component-render machinery and is hard to test deterministically. The split moves the testable surface out from under React, eliminates jsdom setup, runs in milliseconds, and produces a stable contract surface that downstream specs (Specs A/B/C consuming the same primitives) can rely on without rebuilding test infrastructure. Locks in the existing repo convention (`*Pure.ts` + `*Pure.test.ts` as the unit-test surface).
+
+### [2026-05-07] Gotcha — `agentTriggers` has no `agentId` FK; triggers are scoped through `subaccountAgents`
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`GET /api/agents/:id/full` (in `server/routes/agents/agentTabs.ts`) joins through `subaccountAgents` to get agent-scoped triggers — NOT through a direct `agentId` on `agentTriggers`. The `agentTriggers` table does not have an `agentId` foreign key; trigger rows are linked to a sub-account agent via the `subaccountAgents.agentId` join. Any query that tries to filter `agentTriggers` directly by `agentId` will return nothing silently.
+
+### [2026-05-07] Gotcha — `AgentFull.budget` fields are Phase 1 placeholders; writes accepted but not persisted
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentFull.budget` (`dailyCapUsd`, `monthlyCapUsd`, `warnThresholdPct`) are always null/zero. The `spendingBudgets` table is for agentic commerce spend (external transactions), NOT for LLM cost caps. Budget cap fields on agents have no backing schema yet — writes to the budget tab in `AgentEditPage` are accepted by the server but not persisted. This is an explicit Phase 2 deferral. Do not build features that assume these fields are live without first checking whether the backing schema has landed.
+
+### [2026-05-07] Gotcha — `WRITE_ORDER` in `AgentEditPage` intentionally excludes `schedule` and `budget` tabs
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentEditPage.tsx` defines a `WRITE_ORDER` constant that controls which tabs participate in ETag-gated saves. The `schedule` and `budget` tabs are excluded from this list. Trigger editing is done via the existing per-workspace override page (not consolidated into `AgentEditPage`). Budget caps have no backing schema yet. A future developer who sees the missing tabs should consult the ADR `docs/decisions/0007-consolidation-build-page-retirement.md` before assuming the omission is a bug.
+
+### [2026-05-07] Gotcha — `startRunAsync` in `agentExecutionService.ts` uses bare fire-and-forget (non-durable)
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`startRunAsync` is a fire-and-forget invocation — if the process crashes after the call site returns but before the run completes, the run is not recovered. This is a known PLAN_GAP documented in `tasks/builds/consolidation-build/migration-gaps.md`. Do not rely on this path for durable task execution. The durable path is through the pg-boss job queue.
+
+### [2026-05-07] Gotcha — `formatFireCondition` in `recurringTasksServicePure.ts` handles a subset of the RRULE spec
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`formatFireCondition` parses FREQ, BYDAY, BYMONTHDAY, and INTERVAL from RRULE strings and returns a human-readable label. Any RRULE pattern using other components (BYSETPOS, BYHOUR, COUNT, UNTIL, WKST, etc.) falls back to returning the literal RRULE string unchanged. This is intentional for Phase 1 — do not add a full RRULE parser unless the product requirement explicitly calls for it.
+
+### [2026-05-07] Gotcha — `PUT /api/agents/:id/triggers` rejects added triggers with 501 in Phase 1
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build dual-reviewer Codex finding F4.
+`agentService.replaceTriggers` accepts updates and soft-deletes of existing triggers but throws `{ statusCode: 501, errorCode: 'TRIGGER_ADD_NOT_SUPPORTED' }` if any new triggers are in the diff. Reason: triggers are subaccount-scoped (`subaccountAgentId` FK, not `agentId`) so an org-level insert via this route would be orphaned — the row would not appear in `getFull` (which filters by `subaccountAgentId`) and would not fire (the trigger service fires by `subaccountId`). The new tab-scoped UI Schedule tab is `readOnly={true}` in Phase 1 and `WRITE_ORDER` excludes `'schedule'`, so no caller exercises this path today. Phase 2 should resolve a default `subaccountAgentId` (e.g. via the org subaccount) and remove the 501 guard. See `tasks/builds/consolidation-build/migration-gaps.md` § "Triggers schema — no direct agentId column".
+
+### [2026-05-08] Pattern — Legacy route telemetry and deprecation tracking
+
+**Date:** 2026-05-08
+**Source:** Consolidation-build Round 2 ChatGPT tightening (task 4).
+Legacy routes from the pre-consolidation UI (`/admin/agents`, `/admin/skills`, `/admin/skill-studio`, `/system/skill-analyser`, etc.) are consolidated into `/agents`, `/recurring-tasks`, and `/projects`. Today, client-side `<Navigate>` components in `client/src/App.tsx:401-511` redirect old bookmarks silently. Future telemetry: add a middleware or custom Navigate wrapper to emit structured logs with `sourceRoute`, `destinationRoute`, `userAgent`, and `timestamp`. Monitor redirect volumes in logs; after traffic drops below a threshold for N days, routes can be retired entirely. See `docs/doc-sync.md` § Legacy Route Deprecation for the tracking process. (Phase 1: redirects active, no telemetry. Phase 2: add telemetry emit. Phase 3+: retire routes.)
+
+### [2026-05-08] Pattern — Skill Studio iframe recursion protection pattern
+
+**Date:** 2026-05-08
+**Source:** Consolidation-build Round 2 ChatGPT tightening (task 7).
+Skill Studio is no longer embedded as an iframe in the consolidation-build UI. If a future phase embeds Skill Studio (or similar recursive-openable components), apply the `embedded` prop pattern: pages accept an optional `embedded?: boolean` prop; when true, suppress recursive-open affordances (e.g., "Edit in modal", "Open in new window", "Open Skill Studio"). Example in existing codebase: `client/src/pages/AdminBoardConfigPage.tsx` and `AdminCategoriesPage.tsx` check `!embedded` before rendering navigation affordances. Pattern: wrap recursive-open buttons in `{!embedded && (<button>...</button>)}`. (Phase 1: SkillsTab uses a modal picker, not an embedded Skill Studio, so no protection needed yet. Phase 2+: if embedding is added, apply this pattern.)
+
+### [2026-05-08] Pattern — Closed-enum service-boundary mapping for typed error.code contracts
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); pr-reviewer blocker B-1 (testConnection error.code widening).
+
+When a route returns a typed error.code field whose contract is a tight closed enum (e.g. spec defines `error.code: 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR'`), the service that produces the value MUST map every internal error state — including the catch-all/unknown branch — to one of the four codes at the boundary. SDK-level error codes (`NO_CREDENTIALS`, `TOKEN_EXPIRED`, `SERVER_ERROR`, raw axios codes, etc.) MUST NOT leak into the contract value. The mapper lives in the service (e.g. `connectionTokenService.testConnection`), not in the route handler — so every caller of the service gets the same canonical mapping, and the contract is enforced at one location. Concrete shape:
+
+```ts
+// In connectionTokenService.testConnection
+function mapErrorToCode(err: unknown): 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR' {
+  if (isAbortOrTimeout(err)) return 'TIMEOUT';
+  if (isAuthFailed(err))     return 'AUTH_FAILED';
+  if (isNetworkErr(err))     return 'NETWORK_ERROR';
+  return 'PROVIDER_ERROR'; // catch-all — every unmapped class lands here
+}
+```
+
+Why it matters: the contract enum is a public commitment to the client. If the service leaks new SDK codes the moment a new SDK is added, every consumer's exhaustive switch silently breaks. Pair this rule with §8.30 in DEVELOPMENT_GUIDELINES.md (SQL CASE enum mappers use `ELSE NULL`) — same family of failure mode (unknown values silently coerced past the safety guarantee), same family of fix (force the mapping at the typed boundary, fail-closed on unknown).
+
+### [2026-05-08] Pattern — Targeted `onConflictDoNothing(target)` for partial-unique idempotency
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); pr-reviewer strong-recommendation 2 (overrideEntry onConflictDoNothing scope).
+
+`onConflictDoNothing()` without a `target:` argument silently swallows ANY unique-constraint violation on the row, including constraints unrelated to the idempotency key. For body-hash idempotency on `memory_block_versions` (partial unique on `(memory_block_id, body_hash) WHERE body_hash IS NOT NULL`), the correct shape is:
+
+```ts
+.onConflictDoNothing({ target: [memoryBlockVersions.memoryBlockId, memoryBlockVersions.bodyHash] })
+```
+
+Untargeted `.onConflictDoNothing()` would also swallow a hypothetical version-counter collision (if the schema gained one), letting the buggy state persist silently. Targeted form ensures unrelated constraint violations bubble as errors so the caller can retry. Rule: any `onConflictDoNothing` MUST name the column set whose conflict is the intended dedupe key. A bare `.onConflictDoNothing()` is a code-review blocker.
+
+### [2026-05-08] Pattern — Migration-number collision after S2 sync requires renaming on the feature branch
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); main landed `0286_consolidation_build_schema_additions` while `ui-consolidation-govern` was authoring `0286_govern_auto_update_disabled`.
+
+When the S2 sync surfaces a migration-number collision (same number, different content on both sides of the merge base), the feature branch renames its migration to the next free integer. Renaming is correct because main's migration has already shipped to production (or imminently will via the merge that's already on main); the feature branch is the side that hasn't shipped yet. The rename also cascades to:
+
+1. The migration file itself (header comment + filename)
+2. The down-migration file
+3. `architecture.md` § Key files per domain (any row referencing the migration filename)
+4. NOT plan.md — historical artefact, leave the original number for archaeology
+
+Verification after rename: `grep -rn '<old-number>_<slug>' .` should return only `tasks/builds/*/plan.md` historical references and zero hits in source / docs / migrations. Down migration MUST also be renamed in lockstep so the rollback path tracks the forward path.
+
+### [2026-05-08] Pattern — App.tsx route-handler regression after upstream page deletions during S2 sync
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); G4 regression guard caught 10 missing identifiers after S2 merged `consolidation-build` (PR #271) and `operate-stream` (PR #272) which deleted `AdminAgentsPage`, `AdminAgentEditPage`, `AdminSkillsPage`, `AdminSkillEditPage`, `SystemAgentsPage`, `GoalsPage`, `SkillStudioPage`, `SkillAnalyzerPage`, `ScheduledTasksPage`.
+
+When a parallel branch lands a UI consolidation that deletes pages, the feature branch's `client/src/App.tsx` will compile-fail post-S2 because the JSX route declarations still reference the deleted page identifiers — even after the lazy-import lines are dropped (which TypeScript checks at routine compile time). The fix pattern: for each broken route, replace the JSX element with either:
+
+- `<Navigate to="<canonical-new-path>" replace />` — for direct redirect of the old path
+- a small redirect helper (`function RedirectAgentEdit() { const { id } = useParams(); return <Navigate to={\`/agents/${id}/edit\`} replace />; }`) — for parameterised redirects where the path segment must be reshaped
+- the new page component, registered under the new canonical route — for the canonical destination itself
+
+Always cross-check against the consolidating branch's App.tsx (`git show origin/main:client/src/App.tsx`) for the canonical mapping; do not invent route names. After the rewrite, also remove any duplicate redirect elsewhere in the file (e.g. an old `<Route path="/agents" element={<Navigate to="/" />} />` that conflicts with the new canonical `<Route path="/agents" element={<AgentsListPage />} />`).

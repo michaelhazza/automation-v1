@@ -1,0 +1,2547 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT, Agent Edit (Round 7e-1a update)
+  Source pages: AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage, SkillAnalyzerPage
+
+  Tab strip (7e-1a): Configure | Behaviour | Skills | Data sources | Schedule | Budget | Runs
+  Previous tab strip (rounds 1-7d): Configure | Behaviour | Capabilities | Schedule | Budget | Runs
+
+  Round 7e-1a IA change:
+    Replaced single "Capabilities" tab with two top-level tabs:
+    - Skills (tab-skills): Enabled skills section + Add skills search library (247 skills)
+    - Data sources (tab-datasources): Enabled data sources + Add data sources search library
+
+  AdminSkillsPage / AdminSkillEditPage / SkillStudioPage / SkillAnalyzerPage:
+    KEEP: All fields folded into Skills tab and skill edit drawer
+    DROP: Top-level Skills nav item (folded into agent edit)
+    DROP: Separate SkillStudioPage / SkillAnalyzerPage routes (folded into drawer tabs)
+
+  RunCostPanel: DEFERRED (cost dashboard not primary for agent-config task)
+  PromptHistoryDialog: KEEP as expandable sub-panel under Behaviour tab
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Edit | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Single-column layout ────────────────────────────────────────── */
+  /* Agent edit is a tabbed form column with a persistent Test runner   */
+  /* card at the bottom (always visible, regardless of which tab is on).*/
+  .agent-content {
+    padding: 24px 28px 110px 28px; /* bottom pad keeps last card clear of fixed footer */
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* ── Test runner card (replaces the earlier right-rail Test panel) ── */
+  /* Lives inline at the bottom of agent-content. Always visible, all   */
+  /* viewport widths. Reuses the .section-card chrome for consistency.  */
+  .test-runner {
+    margin-top: 8px;
+  }
+  .test-runner-grid {
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    gap: 14px;
+  }
+  @media (max-width: 720px) {
+    .test-runner-grid { grid-template-columns: 1fr; }
+  }
+  .test-runner-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .test-runner-actions .meta {
+    font-size: 12px; color: var(--slate-500);
+  }
+  .test-runner-actions .view-trace {
+    margin-left: auto; font-size: 12px; font-weight: 600; color: var(--indigo-600);
+    text-decoration: none;
+  }
+  .test-runner-actions .view-trace:hover { text-decoration: underline; }
+  .test-runner-result {
+    margin-top: 14px;
+    background: var(--emerald-50);
+    border: 1px solid #a7f3d0;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .test-runner-result-head {
+    font-size: 12.5px; font-weight: 600; color: var(--emerald-700);
+    margin-bottom: 6px;
+  }
+  .test-runner-result-body {
+    font-size: 12.5px; color: var(--slate-700); line-height: 1.55;
+  }
+
+  /* ── Full-width fixed footer (same look as project-edit.html) ─────── */
+  /* Inner band has 28px horizontal padding so Discard left + Delete     */
+  /* right line up with the form column edges (matches .form-body).     */
+  .form-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid var(--border);
+    padding: 14px 0;
+    z-index: 100;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  }
+  .form-footer-inner {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 28px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .form-footer-inner .footer-delete {
+    margin-left: auto;
+  }
+
+  /* (Right-rail Test panel deprecated in round 15 — Test runner is now an
+     inline section card at the bottom of agent-content. Single column at
+     all viewport widths.) */
+
+  .section-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 14px; overflow: hidden;
+  }
+  .section-card-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .section-card-header h3 { font-size: 13px; font-weight: 600; color: var(--slate-700); }
+  .section-card-body { padding: 16px; }
+
+  .mode-card {
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    padding: 9px 12px; cursor: pointer; transition: all 0.12s;
+    margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px;
+  }
+  .mode-card.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .mode-card input[type=radio] { margin-top: 2px; flex-shrink: 0; }
+  .mode-card-label { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .mode-card-desc { font-size: 11.5px; color: var(--slate-500); margin-top: 1px; }
+
+  /* Personality tab */
+  .personality-trait {
+    padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200); background: white; cursor: pointer;
+    color: var(--slate-500); transition: all 0.12s;
+  }
+  .personality-trait:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+  .personality-trait.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* Legacy .sticky-form-footer replaced by .form-footer (fixed) above */
+
+  /* Inline tier label (replaces primary filter chips) */
+  .skill-tier-label {
+    font-size: 10px; color: var(--slate-400); font-weight: 500;
+    letter-spacing: 0.02em; margin-left: 2px;
+  }
+
+  /* Decision 3 — filter chips (local copy; shared.css candidate) */
+  .conn-chip {
+    padding: 4px 13px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--slate-200); background: white; cursor: pointer;
+    color: var(--slate-600); transition: all 0.1s;
+  }
+  .conn-chip:hover { background: var(--slate-50); }
+  .conn-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* Decision 3 — skill toggle rows */
+  .skill-toggle-list {
+    background: white; border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  .skill-group-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-100); cursor: pointer;
+    user-select: none;
+  }
+  .skill-group-label {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--slate-400); display: flex; align-items: center; gap: 6px;
+  }
+  .skill-group-caret {
+    font-size: 10px; color: var(--slate-400); transition: transform 0.15s;
+  }
+  .skill-group-caret.collapsed { transform: rotate(-90deg); }
+  .skill-group-body { }
+  .skill-toggle-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--slate-100);
+    min-height: 52px; transition: background 0.1s;
+  }
+  .skill-toggle-row:last-child { border-bottom: none; }
+  .skill-toggle-row:hover { background: var(--slate-50); }
+
+  .skill-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 12px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-100);
+    color: var(--indigo-600);
+  }
+  .skill-icon.custom { background: var(--amber-50); border-color: #fde68a; color: var(--amber-700); }
+  .skill-name { font-size: 13px; font-weight: 500; color: var(--slate-800); }
+  .skill-desc { font-size: 11.5px; color: var(--slate-400); margin-top: 1px; }
+
+  /* Toggle switch */
+  .toggle-wrap { flex-shrink: 0; display: flex; align-items: center; }
+  .toggle-input { display: none; }
+  .toggle-track {
+    width: 34px; height: 20px; border-radius: 10px;
+    background: var(--slate-200); cursor: pointer;
+    position: relative; transition: background 0.15s;
+  }
+  .toggle-input:checked + .toggle-track { background: var(--indigo-600); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: white;
+    transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-input:checked + .toggle-track::after { left: 16px; }
+
+  .overflow-dot-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--slate-400); font-size: 18px; line-height: 1;
+    padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
+  }
+  .overflow-dot-btn:hover { background: var(--slate-100); color: var(--slate-600); }
+
+  .skill-state-chip {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .chip-enabled { background: var(--emerald-50); color: var(--emerald-700); border: 1px solid #a7f3d0; }
+  .chip-unavail { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-200); }
+
+  /* Skill state classes */
+  .skill-row-broken {
+    opacity: 0.72;
+    background: var(--slate-50);
+  }
+  .skill-row-broken .skill-name { color: var(--slate-500); }
+  .skill-row-broken .skill-desc { color: var(--slate-300); }
+  .skill-row-broken .toggle-track { background: var(--indigo-200); cursor: not-allowed; }
+  .skill-row-broken .toggle-track::after { background: white; }
+
+  .skill-row-locked {
+    opacity: 0.55;
+    cursor: not-allowed !important;
+  }
+  .skill-row-locked .skill-name { color: var(--slate-400); }
+  .skill-row-locked .toggle-track { cursor: not-allowed; }
+  .skill-row-locked .btn { cursor: not-allowed; opacity: 0.6; pointer-events: none; }
+
+  .skill-row-destructive .skill-name { color: var(--slate-800); }
+
+  /* Dependency broken chip */
+  .chip-broken {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    background: #fffbeb; color: var(--amber-700); border: 1px solid #fde68a;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  /* Destructive chip */
+  .chip-destructive {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa;
+    white-space: nowrap; flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 3px;
+  }
+  /* Lock icon for locked/destructive */
+  .lock-icon {
+    color: var(--amber-500); flex-shrink: 0;
+  }
+
+  /* Destructive confirm modal */
+  .destruct-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+    z-index: 800; display: none; align-items: center; justify-content: center;
+  }
+  .destruct-modal-overlay.open { display: flex; }
+  .destruct-modal {
+    background: white; border-radius: 12px; padding: 28px 32px;
+    width: 400px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  }
+  .destruct-modal-title { font-size: 15px; font-weight: 700; color: var(--slate-900); margin-bottom: 10px; }
+  .destruct-modal-body { font-size: 13px; color: var(--slate-600); line-height: 1.6; margin-bottom: 20px; }
+  .destruct-modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* CSS tooltip */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 6px); left: 0;
+    background: var(--slate-800); color: white;
+    font-size: 11.5px; font-weight: 400; line-height: 1.4;
+    padding: 6px 10px; border-radius: 6px;
+    white-space: pre-wrap; max-width: 260px; width: max-content;
+    z-index: 9999; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  [data-tip]:hover::after { opacity: 1; }
+
+  /* Tier chips per skill row */
+  .tier-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    white-space: nowrap; flex-shrink: 0; letter-spacing: 0.02em;
+  }
+  .tier-system {
+    background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200);
+  }
+  .tier-org {
+    background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+  }
+  .tier-subaccount {
+    background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200);
+  }
+
+  /* Overflow contextual menu */
+  .skill-ctx-menu {
+    position: fixed; z-index: 9999; background: white;
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    min-width: 220px; padding: 4px 0; display: none;
+  }
+  .skill-ctx-menu.open { display: block; }
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--slate-700);
+    cursor: pointer; transition: background 0.1s; border: none;
+    background: transparent; width: 100%; text-align: left;
+  }
+  .ctx-item:hover { background: var(--slate-50); }
+  .ctx-item.ctx-danger { color: var(--red-500); }
+  .ctx-item.ctx-danger:hover { background: #fef2f2; }
+  .ctx-item.ctx-link { color: var(--indigo-600); font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
+  .ctx-separator { border: none; border-top: 1px solid var(--slate-100); margin: 3px 0; }
+
+  /* Skill context line (breadcrumb) */
+  .skill-scope-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px; background: var(--slate-50); border-bottom: 1px solid var(--slate-100);
+    font-size: 11.5px; color: var(--slate-500);
+  }
+  .skill-scope-bar strong { color: var(--slate-700); font-weight: 500; }
+
+  /* Skill creation drawer */
+  .creator-drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+    z-index: 400; display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .creator-drawer-overlay.open { display: flex; }
+  .creator-drawer {
+    width: 560px; background: white; display: flex; flex-direction: column;
+    height: 100%; overflow: hidden;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  }
+  .creator-drawer-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .creator-drawer-body {
+    flex: 1; overflow-y: auto; padding: 0;
+  }
+  .creator-drawer-footer {
+    padding: 12px 20px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; flex-wrap: wrap;
+  }
+
+  /* Parameter list (creator drawer) */
+  .param-row {
+    border: 1px solid var(--slate-200); border-radius: 8px;
+    margin-bottom: 8px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--slate-50);
+  }
+  .param-row-header {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .param-drag { cursor: grab; color: var(--slate-300); font-size: 14px; flex-shrink: 0; }
+  .param-name-input {
+    flex: 1; font-size: 13px; font-weight: 500;
+    border: none; background: transparent; outline: none;
+    color: var(--slate-800);
+  }
+  .param-type-select {
+    font-size: 11.5px; padding: 2px 6px; border-radius: 5px;
+    border: 1px solid var(--slate-200); background: white; color: var(--slate-600);
+  }
+  .param-required-toggle {
+    font-size: 11px; color: var(--slate-500); white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .param-delete-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--slate-300); font-size: 15px; padding: 0 2px;
+    line-height: 1; border-radius: 3px;
+  }
+  .param-delete-btn:hover { color: var(--red-500); background: #fef2f2; }
+  .param-desc-input {
+    font-size: 12px; color: var(--slate-500); width: 100%;
+    border: none; background: transparent; outline: none;
+    font-style: italic;
+  }
+
+  /* Scope toggle (save scope) */
+  .scope-radio-row {
+    display: flex; gap: 8px; align-items: center; margin-left: auto;
+  }
+  .scope-label {
+    font-size: 12px; color: var(--slate-500);
+  }
+  .scope-option {
+    display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer;
+    color: var(--slate-700);
+  }
+  .scope-option input { margin: 0; }
+
+  /* Scope option: disabled state (workspace-user demo) */
+  .scope-option.scope-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--slate-400);
+  }
+  .scope-option.scope-disabled input {
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Icon picker */
+  .icon-picker-grid {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+  }
+  .icon-option {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; cursor: pointer;
+    border: 2px solid transparent; transition: all 0.12s;
+    background: var(--slate-100); color: var(--slate-600);
+  }
+  .icon-option:hover { border-color: var(--indigo-300); }
+  .icon-option.selected { border-color: var(--indigo-500); background: var(--indigo-50); color: var(--indigo-700); }
+
+  /* Creator drawer tab content padding */
+  .creator-tab-panel { padding: 20px; }
+  .creator-tab-panel.hidden { display: none; }
+
+  .prompt-history-panel {
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 10px; margin-top: 14px; overflow: hidden;
+  }
+  .prompt-history-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 500;
+    color: var(--slate-700); border: none; background: transparent; width: 100%;
+    text-align: left;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (three-mode shared) -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'agent-edit.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="#" style="color:var(--slate-400);text-decoration:none;">Agents</a>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Outreach Agent</span>
+        <span class="badge badge-green" style="font-size:10px;margin-left:6px;">Active</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:var(--amber-600);background:var(--amber-50);border:1px solid #fde68a;border-radius:6px;padding:3px 8px;">Unsaved changes</span>
+      <a href="index.html" class="btn btn-sm btn-secondary" style="margin-left:8px;">&#8592; All prototypes</a>
+    </div>
+
+    <!-- Replaces callout -->
+    <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:7px 28px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Replaces 5 pages: AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage, SkillAnalyzerPage.
+      <a href="before-agent-edit.html" style="color:var(--indigo-700);font-weight:600;">View before state</a>
+    </div>
+
+    <div class="agent-content">
+
+        <!-- Tab bar -->
+        <div class="tabs" id="agent-tabs" style="margin-bottom:18px;">
+          <button class="tab-btn active" onclick="switchAgentTab('configure',this)">Configure</button>
+          <button class="tab-btn" onclick="switchAgentTab('behaviour',this)">Behaviour</button>
+          <button class="tab-btn" onclick="switchAgentTab('personality',this)">Personality</button>
+          <button class="tab-btn" onclick="switchAgentTab('skills',this)">Skills <span class="tab-count">7</span></button>
+          <button class="tab-btn" onclick="switchAgentTab('datasources',this)">Data sources <span class="tab-count">6</span></button>
+          <button class="tab-btn" onclick="switchAgentTab('schedule',this)">Schedule</button>
+          <button class="tab-btn" onclick="switchAgentTab('budget',this)">Budget</button>
+          <button class="tab-btn" onclick="switchAgentTab('runs',this)">Runs <span class="tab-count">142</span></button>
+        </div>
+
+        <!-- ── CONFIGURE TAB ──────────────────────────────────────── -->
+        <div class="tab-panel active" id="tab-configure">
+          <div class="section-card">
+            <div class="section-card-header"><h3>Identity</h3></div>
+            <div class="section-card-body">
+              <div style="display:flex;gap:14px;align-items:flex-start;">
+                <div style="width:48px;height:48px;border-radius:10px;background:var(--emerald-50);border:1px solid #a7f3d0;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:#059669;flex-shrink:0;cursor:pointer;letter-spacing:-0.5px;" title="Click to change icon">OA</div>
+                <div style="flex:1;">
+                  <div class="form-field" style="margin-bottom:12px;">
+                    <label class="form-label">Agent name</label>
+                    <input class="form-input" value="Outreach Agent">
+                  </div>
+                  <div class="form-field" style="margin-bottom:0;">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-textarea" style="min-height:60px;">Handles prospecting and sales outreach. Sends emails, monitors responses, updates CRM.</textarea>
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Role title</label>
+                  <input class="form-input" value="Sales Development Representative">
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Parent agent</label>
+                  <select class="form-select" style="width:100%;"><option selected>None (top-level)</option><option>Director Agent</option></select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-card-header"><h3>Model settings</h3></div>
+            <div class="section-card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">AI model</label>
+                  <select class="form-select" style="width:100%;">
+                    <option selected>Claude Sonnet 4.6</option>
+                    <option>Claude Opus 4.6</option>
+                    <option>Claude Haiku 4.5</option>
+                    <option>Claude Opus 4</option>
+                    <option>Claude Sonnet 4</option>
+                  </select>
+                </div>
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label">Output size</label>
+                  <select class="form-select" style="width:100%;">
+                    <option selected>Standard (default)</option>
+                    <option>Extended, longer outputs</option>
+                    <option>Maximum, large file processing</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                <input type="checkbox" id="model-override" checked style="cursor:pointer;">
+                <label for="model-override" style="font-size:13px;color:var(--slate-600);cursor:pointer;">Allow sub-accounts to override the model for this agent</label>
+              </div>
+              <div class="form-label" style="margin-bottom:8px;">Response mode</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div class="mode-card"><input type="radio" name="resp-mode"><div><div class="mode-card-label">Balanced</div><div class="mode-card-desc">Consistent and clear</div></div></div>
+                <div class="mode-card selected"><input type="radio" name="resp-mode" checked><div><div class="mode-card-label">Expressive</div><div class="mode-card-desc">Natural, varied, good for summaries</div></div></div>
+                <div class="mode-card"><input type="radio" name="resp-mode"><div><div class="mode-card-label">Precise</div><div class="mode-card-desc">Deterministic, best for data extraction</div></div></div>
+                <div class="mode-card"><input type="radio" name="resp-mode"><div><div class="mode-card-label">Highly creative</div><div class="mode-card-desc">Maximum variation, open-ended creative</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-configure -->
+
+        <!-- ── BEHAVIOUR TAB ─────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-behaviour">
+          <div class="section-card">
+            <div class="section-card-header"><h3>System prompt</h3></div>
+            <div class="section-card-body">
+              <textarea class="form-textarea" style="min-height:180px;font-family:'JetBrains Mono',monospace;font-size:12px;">You are a skilled sales development representative working on behalf of a boutique B2B agency. Your role is to handle outbound prospecting and relationship nurturing.
+
+You have access to the client CRM, communication history, and knowledge base. Always review context before drafting any communication.
+
+Tone: Professional but warm. Never use jargon. Lead with outcomes. Max 3 paragraphs per email. Sign off with first name only.
+
+Constraints: Escalate to human review for deals over $20k before sending proposals. Never make pricing commitments without approval.</textarea>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                <span style="font-size:11.5px;color:var(--slate-400);">1,840 characters</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-sm btn-secondary">Prompt Library</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-card-header">
+              <h3>Additional instructions</h3>
+              <span style="font-size:12px;color:var(--slate-400);">Appended after memory, before user message</span>
+            </div>
+            <div class="section-card-body">
+              <textarea class="form-textarea" style="min-height:80px;font-family:'JetBrains Mono',monospace;font-size:12px;">If no CRM record exists for a prospect, create one before sending any outreach.</textarea>
+            </div>
+          </div>
+
+          <!-- Prompt History sub-panel -->
+          <div class="prompt-history-panel">
+            <button class="prompt-history-toggle" onclick="togglePromptHistory()">
+              <span>Prompt history</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:12px;color:var(--slate-400);">v8 · edited May 3</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="prompt-history-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            </button>
+            <div id="prompt-history-body" style="display:none;padding:0 14px 14px;">
+              <table class="data-table" style="font-size:12px;">
+                <thead><tr><th>Version</th><th>Changed by</th><th>Date</th><th>Note</th><th></th></tr></thead>
+                <tbody>
+                  <tr><td><strong>v8</strong> <span class="badge badge-green" style="font-size:9px;">Current</span></td><td>Jordan K.</td><td>May 3</td><td>Added $20k escalation rule</td><td><button class="btn btn-xs btn-ghost" disabled>Current</button></td></tr>
+                  <tr><td>v7</td><td>Sarah L.</td><td>Apr 28</td><td>Tightened tone rules, sign-off rule</td><td><button class="btn btn-xs btn-secondary">Roll back</button></td></tr>
+                  <tr><td>v6</td><td>Jordan K.</td><td>Apr 15</td><td>Added competitor context reference</td><td><button class="btn btn-xs btn-secondary">Roll back</button></td></tr>
+                  <tr><td>v5</td><td>Jordan K.</td><td>Mar 20</td><td>Initial outreach instructions</td><td><button class="btn btn-xs btn-secondary">Roll back</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div><!-- /tab-behaviour -->
+
+        <!-- ── PERSONALITY TAB ──────────────────────────────────── -->
+        <div class="tab-panel" id="tab-personality" style="display:none;max-width:680px;">
+
+          <!-- Personality activated state (default) -->
+          <div id="personality-enabled-state">
+
+            <div class="section-card" style="margin-bottom:14px;">
+              <div class="section-card-header" style="justify-content:space-between;">
+                <div>
+                  <h3>Personality</h3>
+                  <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Gives this agent a distinctive voice across all communications.</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:12px;color:var(--emerald-600);font-weight:600;">Active</span>
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="personality-toggle" checked onchange="togglePersonality(this.checked)" style="accent-color:var(--indigo-600);width:15px;height:15px;">
+                  </label>
+                </div>
+              </div>
+              <div class="section-card-body">
+                <div class="form-field" style="margin-bottom:14px;">
+                  <label class="form-label">Personality description</label>
+                  <textarea class="form-textarea" id="personality-textarea" style="min-height:90px;font-size:13.5px;line-height:1.6;">Direct, confident, mid-Atlantic professional. Skips small talk. Uses concrete numbers when possible. Acknowledges uncertainty rather than guessing. Never oversells.</textarea>
+                  <div style="font-size:11.5px;color:var(--slate-400);margin-top:5px;">Free-form description injected before each run. Keep it under 100 words.</div>
+                </div>
+
+                <div class="form-field" style="margin-bottom:0;">
+                  <label class="form-label" style="margin-bottom:8px;">Trait emphasis</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px;" id="personality-traits">
+                    <button class="personality-trait active" data-trait="direct" onclick="toggleTrait(this)">Direct</button>
+                    <button class="personality-trait active" data-trait="confident" onclick="toggleTrait(this)">Confident</button>
+                    <button class="personality-trait" data-trait="warm" onclick="toggleTrait(this)">Warm</button>
+                    <button class="personality-trait active" data-trait="formal" onclick="toggleTrait(this)">Formal</button>
+                    <button class="personality-trait" data-trait="casual" onclick="toggleTrait(this)">Casual</button>
+                    <button class="personality-trait active" data-trait="technical" onclick="toggleTrait(this)">Technical</button>
+                    <button class="personality-trait" data-trait="empathetic" onclick="toggleTrait(this)">Empathetic</button>
+                    <button class="personality-trait" data-trait="concise" onclick="toggleTrait(this)">Concise</button>
+                  </div>
+                  <div style="font-size:11.5px;color:var(--slate-400);margin-top:7px;">Select traits that best describe this agent's communication style.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <div class="section-card-header"><h3>Voice examples</h3></div>
+              <div class="section-card-body">
+                <div style="font-size:12.5px;color:var(--slate-600);line-height:1.6;margin-bottom:12px;">Optional: provide a few example phrases or sentences in this agent's voice. These are injected as few-shot guidance.</div>
+                <textarea class="form-textarea" style="min-height:70px;font-size:13px;font-family:'JetBrains Mono',monospace;">Hi Jordan, quick update: 3 of the 12 prospects responded. Two are warm — I've drafted follow-ups for your review.
+The Q1 pipeline shows 23 active leads at various stages. No blockers to report.</textarea>
+              </div>
+            </div>
+
+          </div><!-- /personality-enabled-state -->
+
+          <!-- Personality disabled state -->
+          <div id="personality-disabled-state" style="display:none;">
+            <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:12px;padding:28px 32px;text-align:center;margin-bottom:16px;">
+              <div style="width:44px;height:44px;border-radius:10px;background:var(--slate-100);border:1px solid var(--slate-200);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--slate-400)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div style="font-size:15px;font-weight:600;color:var(--slate-700);margin-bottom:6px;">Personality is disabled</div>
+              <div style="font-size:13px;color:var(--slate-500);max-width:380px;margin:0 auto 20px;line-height:1.6;">Enable personality to give this agent a distinctive voice across all communications. When active, the personality description is injected at the start of every run.</div>
+              <button class="btn btn-primary" onclick="document.getElementById('personality-toggle-disabled').click()">Enable personality</button>
+              <input type="checkbox" id="personality-toggle-disabled" style="display:none;" onchange="togglePersonality(this.checked)">
+            </div>
+
+            <div class="section-card" style="opacity:0.45;pointer-events:none;">
+              <div class="section-card-header"><h3>Personality description</h3></div>
+              <div class="section-card-body">
+                <textarea class="form-textarea" style="min-height:90px;" disabled>Direct, confident, mid-Atlantic professional. Skips small talk...</textarea>
+                <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px;">
+                  <button class="personality-trait" disabled>Direct</button>
+                  <button class="personality-trait" disabled>Confident</button>
+                  <button class="personality-trait" disabled>Formal</button>
+                  <button class="personality-trait" disabled>Technical</button>
+                </div>
+              </div>
+            </div>
+          </div><!-- /personality-disabled-state -->
+
+        </div><!-- /tab-personality -->
+
+        <!-- ── SKILLS TAB ────────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-skills">
+
+          <!-- Section 1: Enabled skills -->
+          <div class="section-card" style="margin-bottom:18px;">
+            <div class="section-card-header" style="justify-content:space-between;">
+              <h3>Enabled skills <span style="font-weight:400;color:var(--slate-400);font-size:12px;">7</span></h3>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div class="search-wrap" style="min-width:180px;">
+                  <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="search-box" style="padding-left:28px;font-size:12px;" type="search" placeholder="Search enabled skills...">
+                </div>
+              </div>
+            </div>
+            <!-- Category filter chips -->
+            <div id="enabled-skill-filter-chips" style="padding:8px 14px;border-bottom:1px solid var(--slate-100);display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="conn-chip active" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('all',this)">All <span style="opacity:0.65;">7</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('communication',this)">Communication <span style="opacity:0.65;">3</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('data',this)">Data <span style="opacity:0.65;">2</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('analysis',this)">Analysis <span style="opacity:0.65;">1</span></button>
+              <button class="conn-chip" style="font-size:11.5px;padding:3px 10px;" onclick="setEnabledCatFilter('custom',this)">Custom <span style="opacity:0.65;">2</span></button>
+            </div>
+            <div class="skill-toggle-list" style="border:none;border-radius:0;">
+
+              <!-- Send email: Communication -->
+              <div class="skill-toggle-row" id="enabled-row-send-email" data-category="communication" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Send email</div>
+                    <span class="skill-tier-label">System</span>
+                  </div>
+                  <div class="skill-desc">Gmail · Send outreach, follow-ups, and proposal emails</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-email" checked>
+                  <label class="toggle-track" for="tog-en-email"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- Read email inbox: Communication -->
+              <div class="skill-toggle-row" data-category="communication" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07"/><path d="M2 6.92v3a2 2 0 002.18 2 19.79 19.79 0 008.63 3.07"/><path d="M22 6.92L12 13.92 2 6.92"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Read email inbox</div>
+                    <span class="skill-tier-label">System</span>
+                  </div>
+                  <div class="skill-desc">Gmail · Monitor and analyse incoming messages</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-read-email" checked>
+                  <label class="toggle-track" for="tog-en-read-email"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- HubSpot: read contacts: System -->
+              <div class="skill-toggle-row" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">HubSpot: read contacts</div>
+                    <span class="skill-tier-label">System</span>
+                  </div>
+                  <div class="skill-desc">HubSpot · Query contact records from CRM</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-hubspot-r" checked>
+                  <label class="toggle-track" for="tog-en-hubspot-r"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+              <!-- LinkedIn: post message: Communication -->
+              <div class="skill-toggle-row" data-category="communication" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">LinkedIn: post message</div>
+                    <span class="skill-tier-label">Org</span>
+                  </div>
+                  <div class="skill-desc">LinkedIn · Post connection requests and messages</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-li" checked>
+                  <label class="toggle-track" for="tog-en-li"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'org')">&#8942;</button>
+              </div>
+
+              <!-- Sentiment analysis: Analysis -->
+              <div class="skill-toggle-row" data-category="analysis" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Sentiment analysis</div>
+                    <span class="skill-tier-label">Org</span>
+                  </div>
+                  <div class="skill-desc">Classifies email and message tone as positive, neutral, or negative</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-sentiment" checked>
+                  <label class="toggle-track" for="tog-en-sentiment"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'org')">&#8942;</button>
+              </div>
+
+              <!-- Acme: Outreach scoring rubric: Custom -->
+              <div class="skill-toggle-row" data-category="custom" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Acme: Outreach scoring rubric</div>
+                    <span class="skill-tier-label">Custom</span>
+                  </div>
+                  <div class="skill-desc">Score lead quality using Acme's proprietary rubric</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-rubric" checked>
+                  <label class="toggle-track" for="tog-en-rubric"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
+              </div>
+
+              <!-- Acme: Lead qualification: Custom -->
+              <div class="skill-toggle-row" data-category="custom" onclick="openSkillDrawer()" style="cursor:pointer;">
+                <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Acme: Lead qualification</div>
+                    <span class="skill-tier-label">Custom</span>
+                  </div>
+                  <div class="skill-desc">Qualify inbound leads against Acme ICP criteria</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-leadq" checked>
+                  <label class="toggle-track" for="tog-en-leadq"></label>
+                </div>
+                <button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,'this-client')">&#8942;</button>
+              </div>
+
+              <!-- Gmail: send email -- Active but dependency broken -->
+              <div class="skill-toggle-row skill-row-broken" data-category="communication" data-tip="Gmail integration disconnected. Re-connect at Connections." style="cursor:default;" onclick="event.stopPropagation()">
+                <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div class="skill-name">Gmail: send email</div>
+                    <span class="skill-tier-label">System</span>
+                    <span class="chip-broken">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:#d97706;vertical-align:-1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      Disconnected
+                    </span>
+                  </div>
+                  <div class="skill-desc">Gmail · Skill is on but Gmail connection is broken -- will not fire</div>
+                </div>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-en-gmail-broken" checked disabled style="cursor:not-allowed;">
+                  <label class="toggle-track" for="tog-en-gmail-broken" style="cursor:not-allowed;" title="Gmail integration disconnected. Skill is preserved but will not run until reconnected."></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation();openCtxMenu(event,'system')">&#8942;</button>
+              </div>
+
+            </div>
+          </div><!-- /enabled skills -->
+
+          <!-- Section 2: Add skills -->
+          <div class="section-card">
+            <div class="section-card-header">
+              <div>
+                <h3>Add skills</h3>
+                <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Search across 247 available skills</div>
+              </div>
+              <button class="btn btn-sm btn-primary" onclick="openSkillCreator()">+ Add custom skill</button>
+            </div>
+            <div class="section-card-body" style="padding-bottom:8px;">
+              <!-- Search + filter row -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+                <div class="search-wrap" style="flex:1;min-width:220px;">
+                  <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="search-box" id="skill-library-search" style="padding-left:28px;font-size:13px;" type="search" placeholder="Search skills by name, action, or category..." oninput="filterSkillLibrary(this.value)">
+                </div>
+              </div>
+              <!-- Functional category chips (not tier chips) -->
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;" id="skill-lib-filter-chips">
+                <button class="conn-chip active" onclick="setSkillLibFilter('all',this)">All <span style="opacity:0.65;">247</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('communication',this)">Communication <span style="opacity:0.65;">82</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('data',this)">Data <span style="opacity:0.65;">95</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('analysis',this)">Analysis <span style="opacity:0.65;">52</span></button>
+                <button class="conn-chip" onclick="setSkillLibFilter('custom',this)">Custom <span style="opacity:0.65;">18</span></button>
+              </div>
+
+              <!-- Communication skills group -->
+              <div class="skill-group-header" id="lib-grp-system-header" onclick="toggleSkillGroup('lib-grp-system',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;margin-top:0;">
+                <span class="skill-group-label">
+                  <span class="skill-group-caret" id="caret-lib-grp-system">&#9660;</span>
+                  Communication <span style="font-weight:500;color:var(--slate-500);">82 skills</span>
+                </span>
+              </div>
+              <div id="lib-grp-system" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:10px;">
+
+                <!-- Twilio: send SMS -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="twilio send sms">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Twilio: send SMS</div>
+                    <div class="skill-desc">Twilio · Send text messages to contacts</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Twilio: send SMS','system')">Add</button>
+                </div>
+
+                <!-- Zoom: create meeting -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="zoom create meeting">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Zoom: create meeting</div>
+                    <div class="skill-desc">Zoom · Schedule and create video meetings</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Zoom: create meeting','system')">Add</button>
+                </div>
+
+                <!-- Calendly: list events -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="calendly list events">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Calendly: list events</div>
+                    <div class="skill-desc">Calendly · Retrieve scheduled events and availability</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Calendly: list events','system')">Add</button>
+                </div>
+
+                <!-- Airtable: append row -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="airtable append row">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Airtable: append row</div>
+                    <div class="skill-desc">Airtable · Add new records to a base table</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Airtable: append row','system')">Add</button>
+                </div>
+
+                <!-- Notion: append page -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="notion append page">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Notion: append page</div>
+                    <div class="skill-desc">Notion · Add content blocks to an existing page</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Notion: append page','system')">Add</button>
+                </div>
+
+                <!-- Stripe: create payment -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="stripe create payment">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Stripe: create payment</div>
+                    <div class="skill-desc">Stripe · Initiate payment intents and charge customers</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Stripe: create payment','system')">Add</button>
+                </div>
+
+                <!-- Stripe: list customers -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="stripe list customers">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Stripe: list customers</div>
+                    <div class="skill-desc">Stripe · Query customer records and subscription status</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Stripe: list customers','system')">Add</button>
+                </div>
+
+                <!-- Google Calendar: list events -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="google calendar list events">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Google Calendar: list events</div>
+                    <div class="skill-desc">Google · Read upcoming events from a calendar</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Google Calendar: list events','system')">Add</button>
+                </div>
+
+                <!-- Google Sheets: append row -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="google sheets append row">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Google Sheets: append row</div>
+                    <div class="skill-desc">Google · Add data rows to a spreadsheet</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Google Sheets: append row','system')">Add</button>
+                </div>
+
+                <!-- Asana: create task -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="asana create task">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Asana: create task</div>
+                    <div class="skill-desc">Asana · Create and assign tasks in a project</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Asana: create task','system')">Add</button>
+                </div>
+
+                <!-- Linear: create issue -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="linear create issue">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Linear: create issue</div>
+                    <div class="skill-desc">Linear · Log issues and feature requests in a team's backlog</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Linear: create issue','system')">Add</button>
+                </div>
+
+                <!-- GitHub: create PR -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="github create pull request pr">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">GitHub: create PR</div>
+                    <div class="skill-desc">GitHub · Open pull requests on repositories</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'GitHub: create PR','system')">Add</button>
+                </div>
+
+                <!-- Discord: send message -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="discord send message">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Discord: send message</div>
+                    <div class="skill-desc">Discord · Post messages and notifications to channels</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Discord: send message','system')">Add</button>
+                </div>
+
+                <!-- Webhook: POST -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="communication" data-name="webhook post http request">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Webhook: POST</div>
+                    <div class="skill-desc">HTTP · Send data payloads to any external endpoint</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Webhook: POST','system')">Add</button>
+                </div>
+
+                <!-- Database: query -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="database query sql read">
+                  
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Database: query</div>
+                    <div class="skill-desc">SQL · Read-only queries against connected databases</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Database: query','system')">Add</button>
+                </div>
+
+                <!-- HubSpot: create deal -- Locked (dependency missing) -->
+                <div class="skill-toggle-row skill-row-locked lib-skill-row" data-tier="system" data-category="data" data-name="hubspot create deal" data-tip="Requires HubSpot integration. Connect HubSpot at Connections to enable this skill." style="cursor:not-allowed;">
+                  <div class="skill-icon" style="background:var(--slate-50);border-color:var(--slate-200);color:var(--slate-400);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:5px;">
+                      <div class="skill-name">HubSpot: create deal</div>
+                      <svg class="lock-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                    </div>
+                    <div class="skill-desc">HubSpot · Requires HubSpot integration</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" disabled style="cursor:not-allowed;opacity:0.4;" title="Connect HubSpot first">Add</button>
+                </div>
+
+                <!-- Gmail: delete emails -- Destructive skill -->
+                <div class="skill-toggle-row skill-row-destructive lib-skill-row" data-tier="system" data-category="communication" data-name="gmail delete emails destructive" data-tip="Destructive actions are disabled by default. Click to enable for this agent.">
+                  <div class="skill-icon" style="background:#fff7ed;border-color:#fed7aa;color:#c2410c;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                      <div class="skill-name">Gmail: delete emails</div>
+                      <span class="chip-destructive">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                        Destructive
+                      </span>
+                    </div>
+                    <div class="skill-desc">Gmail · Permanently removes emails from connected Gmail accounts</div>
+                  </div>
+                  <button class="btn btn-xs" style="border:1px solid #fed7aa;background:#fff7ed;color:#c2410c;font-size:11px;padding:3px 8px;" onclick="openDestructiveConfirm('Gmail: delete emails','can permanently remove emails from connected Gmail accounts')">Enable</button>
+                </div>
+
+                <!-- Show all link -->
+                <div style="padding:10px 14px;text-align:center;">
+                  <a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Show all 180 system skills</a>
+                </div>
+              </div><!-- /lib-grp-system -->
+
+              </div><!-- /lib-grp-system show-all -->
+
+              <!-- Data skills group -->
+              <div class="skill-group-header" id="lib-grp-org-header" onclick="toggleSkillGroup('lib-grp-org',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;">
+                <span class="skill-group-label">
+                  <span class="skill-group-caret" id="caret-lib-grp-org">&#9660;</span>
+                  Data <span style="font-weight:500;color:var(--slate-500);">95 skills</span>
+                </span>
+              </div>
+              <div id="lib-grp-org" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:10px;">
+
+                <!-- HubSpot: create contact -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="hubspot create contact">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">HubSpot: create contact</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">HubSpot · Create new CRM contact records</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'HubSpot: create contact','system')">Add</button>
+                </div>
+
+                <!-- Salesforce: read records -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-category="data" data-name="salesforce read records">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Salesforce: read records</div>
+                      <span class="skill-tier-label">Org</span>
+                    </div>
+                    <div class="skill-desc">Salesforce · Query account, opportunity, and lead records</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Salesforce: read records','org')">Add</button>
+                </div>
+
+                <!-- Stripe: read payments -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="data" data-name="stripe read payments">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Stripe: read payments</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">Stripe · Query payment history and subscription data</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Stripe: read payments','system')">Add</button>
+                </div>
+
+                <!-- Acme: Vendor lookup -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="org" data-category="data" data-name="acme vendor lookup">
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Acme: Vendor lookup</div>
+                      <span class="skill-tier-label">Custom</span>
+                    </div>
+                    <div class="skill-desc">Query the Acme approved vendor registry</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Vendor lookup','org')">Add</button>
+                </div>
+
+                <!-- Show all link -->
+                <div style="padding:10px 14px;text-align:center;">
+                  <a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Show all 95 data skills</a>
+                </div>
+
+              </div><!-- /lib-grp-org -->
+
+              <!-- Analysis skills group -->
+              <div class="skill-group-header" id="lib-grp-client-header" onclick="toggleSkillGroup('lib-grp-client',this)" style="border-radius:8px 8px 0 0;border:1px solid var(--slate-200);border-bottom:none;">
+                <span class="skill-group-label">
+                  <span class="skill-group-caret" id="caret-lib-grp-client">&#9660;</span>
+                  Analysis <span style="font-weight:500;color:var(--slate-500);">52 skills</span>
+                </span>
+              </div>
+              <div id="lib-grp-client" class="skill-toggle-list" style="border-radius:0 0 8px 8px;margin-bottom:4px;">
+
+                <!-- Extract entities -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="analysis" data-name="extract entities">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Extract entities</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">Identify people, companies, dates and facts in text</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Extract entities','system')">Add</button>
+                </div>
+
+                <!-- Summarise content -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="system" data-category="analysis" data-name="summarise content">
+                  <div class="skill-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="12" y2="18"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Summarise content</div>
+                      <span class="skill-tier-label">System</span>
+                    </div>
+                    <div class="skill-desc">Generate concise summaries of documents and conversations</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Summarise content','system')">Add</button>
+                </div>
+
+                <!-- Acme: Deal stage mapping -->
+                <div class="skill-toggle-row lib-skill-row" data-tier="client" data-category="analysis" data-name="acme deal stage mapping">
+                  <div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <div class="skill-name">Acme: Deal stage mapping</div>
+                      <span class="skill-tier-label">Custom</span>
+                    </div>
+                    <div class="skill-desc">Map deal activity to Acme's pipeline stage definitions</div>
+                  </div>
+                  <button class="btn btn-xs btn-primary" onclick="addSkillToEnabled(this,'Acme: Deal stage mapping','client')">Add</button>
+                </div>
+
+                <!-- Show all link -->
+                <div style="padding:10px 14px;text-align:center;">
+                  <a href="#" style="font-size:12px;color:var(--indigo-600);font-weight:500;" onclick="return false;">Show all 52 analysis skills</a>
+                </div>
+
+              </div><!-- /lib-grp-client -->
+
+            </div><!-- /section-card-body -->
+          </div><!-- /add skills section -->
+
+        </div><!-- /tab-skills -->
+
+        <!-- ── DATA SOURCES TAB ──────────────────────────────────── -->
+        <div class="tab-panel" id="tab-datasources">
+
+          <!-- Section 1: Enabled data sources -->
+          <div class="section-card" style="margin-bottom:18px;">
+            <div class="section-card-header" style="justify-content:space-between;">
+              <h3>Enabled data sources <span style="font-weight:400;color:var(--slate-400);font-size:12px;">6</span></h3>
+              <span style="font-size:11.5px;color:var(--slate-400);">For <strong style="color:var(--slate-600);">Outreach Agent</strong> in <strong style="color:var(--slate-600);">Acme Corp</strong></span>
+            </div>
+            <div class="skill-toggle-list" style="border:none;border-radius:0;">
+
+              <!-- Acme Inc Brand Guide: Document, Org-inherited -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('doc')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme Inc Brand Guide</div>
+                  <div class="skill-desc">Document · Org-inherited · Auto-attached · Updated 2 weeks ago</div>
+                </div>
+                <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-brand" checked>
+                  <label class="toggle-track" for="tog-ds-brand"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Voice and Tone Standards: Memory block, Org tier-1, auto-attached -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('memory')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Voice and Tone Standards</div>
+                  <div class="skill-desc">Memory block · Org tier-1 · Auto-attached always in context</div>
+                </div>
+                <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-1</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-tone" checked>
+                  <label class="toggle-track" for="tog-ds-tone"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Demo collateral Q1 2026: Bundle -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('bundle')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Demo collateral Q1 2026</div>
+                  <div class="skill-desc">Bundle · 3 documents · 92% utilization · On-demand</div>
+                </div>
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-demo" checked>
+                  <label class="toggle-track" for="tog-ds-demo"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Acme HubSpot CRM: Live integration -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('live')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme HubSpot CRM</div>
+                  <div class="skill-desc">Live integration · Synced 5 min ago · On-demand lookup</div>
+                </div>
+                <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-crm" checked>
+                  <label class="toggle-track" for="tog-ds-crm"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Acme: Outreach scoring rubric: Memory block, This client, tier-3 -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('memory')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: Outreach scoring rubric</div>
+                  <div class="skill-desc">Memory block · This client tier-3 · On-demand</div>
+                </div>
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-rubric" checked>
+                  <label class="toggle-track" for="tog-ds-rubric"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+              <!-- Acme: ICP profile: Memory block, This client, tier-2 -->
+              <div class="skill-toggle-row" onclick="openDsDrawer('memory')" style="cursor:pointer;">
+                <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div class="skill-name">Acme: ICP profile</div>
+                  <div class="skill-desc">Memory block · This client tier-2 · Auto-attached</div>
+                </div>
+                <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                <div class="toggle-wrap" onclick="event.stopPropagation()">
+                  <input type="checkbox" class="toggle-input" id="tog-ds-icp" checked>
+                  <label class="toggle-track" for="tog-ds-icp"></label>
+                </div>
+                <button class="overflow-dot-btn" onclick="event.stopPropagation()">&#8942;</button>
+              </div>
+
+            </div>
+          </div><!-- /enabled data sources -->
+
+          <!-- Section 2: Add data sources -->
+          <div class="section-card">
+            <div class="section-card-header" style="justify-content:space-between;">
+              <div>
+                <h3>Add data sources</h3>
+                <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Search memory blocks, documents, bundles, and live integrations</div>
+              </div>
+              <div style="position:relative;" id="ds-add-btn-wrap">
+                <button class="btn btn-sm btn-primary" onclick="toggleDsAddMenu()">+ Add source</button>
+                <div id="ds-add-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:white;border:1px solid var(--slate-200);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);min-width:200px;padding:4px 0;z-index:200;">
+                  <button class="ctx-item" onclick="closeDsAddMenu()">New memory block</button>
+                  <button class="ctx-item" onclick="closeDsAddMenu()">Upload document</button>
+                  <button class="ctx-item" onclick="closeDsAddMenu()">Connect data source</button>
+                </div>
+              </div>
+            </div>
+            <div class="section-card-body" style="padding-bottom:8px;">
+              <!-- Search + filters -->
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                <div class="search-wrap" style="flex:1;">
+                  <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="search-box" id="ds-search" style="padding-left:28px;font-size:13px;" type="search" placeholder="Search data sources..." oninput="filterDsSources(this.value)">
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;" id="ds-filter-chips">
+                <button class="conn-chip active" onclick="setDsFilter('all',this)">All</button>
+                <button class="conn-chip" onclick="setDsFilter('memory',this)">Memory</button>
+                <button class="conn-chip" onclick="setDsFilter('document',this)">Documents</button>
+                <button class="conn-chip" onclick="setDsFilter('bundle',this)">Bundles</button>
+                <button class="conn-chip" onclick="setDsFilter('live',this)">Live integrations</button>
+              </div>
+
+              <!-- Available data source rows -->
+              <div class="skill-toggle-list" id="ds-available-list">
+
+                <!-- Sales playbook: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="sales playbook">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Sales playbook Q1 2026</div>
+                    <div class="skill-desc">Document · Org-inherited · Updated 3 weeks ago</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Sales playbook Q1 2026')">Add</button>
+                </div>
+
+                <!-- Competitor intel: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="competitor intel">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Competitor intel Q2 2026</div>
+                    <div class="skill-desc">Document · This client · Stale 6 days ago</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Competitor intel Q2 2026')">Add</button>
+                </div>
+
+                <!-- Agency best practices: Memory block, Org -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="agency best practices">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Agency best practices</div>
+                    <div class="skill-desc">Memory block · Org tier-2 · On-demand</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-2</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Agency best practices')">Add</button>
+                </div>
+
+                <!-- Pricing sheet 2026: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="pricing sheet 2026">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Pricing sheet 2026</div>
+                    <div class="skill-desc">Document · This client · Uploaded May 1</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Pricing sheet 2026')">Add</button>
+                </div>
+
+                <!-- Outreach content bundle: Bundle -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="bundle" data-dsname="outreach content bundle">
+                  <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Outreach content bundle</div>
+                    <div class="skill-desc">Bundle · 6 documents · On-demand</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Outreach content bundle')">Add</button>
+                </div>
+
+                <!-- Acme CRM export: Live integration -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="live" data-dsname="acme crm export salesforce">
+                  <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme Salesforce export</div>
+                    <div class="skill-desc">Live integration · Synced hourly · S3 bucket</div>
+                  </div>
+                  <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Acme Salesforce export')">Add</button>
+                </div>
+
+                <!-- Email corpus: Memory block -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="email corpus outreach">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Outreach email corpus</div>
+                    <div class="skill-desc">Memory block · Org tier-3 · High-performing email examples</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-3</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Outreach email corpus')">Add</button>
+                </div>
+
+                <!-- Partner pricing tiers: Document -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="document" data-dsname="partner pricing tiers">
+                  <div class="skill-icon" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Partner pricing tiers</div>
+                    <div class="skill-desc">Document · This client · Shared by Acme finance team</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Partner pricing tiers')">Add</button>
+                </div>
+
+                <!-- Legal clause library: Bundle -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="bundle" data-dsname="legal clause library">
+                  <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Legal clause library</div>
+                    <div class="skill-desc">Bundle · 12 documents · Org-inherited · NDA and contract templates</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Legal clause library')">Add</button>
+                </div>
+
+                <!-- Slack channel: Live integration -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="live" data-dsname="slack channel integration">
+                  <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme Slack workspace</div>
+                    <div class="skill-desc">Live integration · #outreach-alerts channel · Synced real-time</div>
+                  </div>
+                  <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Acme Slack workspace')">Add</button>
+                </div>
+
+                <!-- Agency onboarding: Memory block -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="agency onboarding playbook">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Agency onboarding playbook</div>
+                    <div class="skill-desc">Memory block · Org tier-1 · Client onboarding procedures</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org tier-1</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Agency onboarding playbook')">Add</button>
+                </div>
+
+                <!-- Case studies bundle: Bundle -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="bundle" data-dsname="case studies proof points">
+                  <div class="skill-icon" style="background:#fdf4ff;border-color:#e9d5ff;color:#7e22ce;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Case studies and proof points</div>
+                    <div class="skill-desc">Bundle · 8 documents · On-demand · Sales evidence library</div>
+                  </div>
+                  <span class="tier-chip tier-org" style="flex-shrink:0;">Org-inherited</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Case studies and proof points')">Add</button>
+                </div>
+
+                <!-- Google Drive: Live integration -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="live" data-dsname="google drive integration">
+                  <div class="skill-icon" style="background:var(--emerald-50);border-color:#a7f3d0;color:var(--emerald-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Acme Google Drive</div>
+                    <div class="skill-desc">Live integration · Shared drive · Synced every 30 min</div>
+                  </div>
+                  <span class="badge badge-green" style="font-size:9.5px;flex-shrink:0;">live</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Acme Google Drive')">Add</button>
+                </div>
+
+                <!-- Objection handling: Memory block -->
+                <div class="skill-toggle-row ds-avail-row" data-dstype="memory" data-dsname="objection handling responses">
+                  <div class="skill-icon" style="background:var(--violet-50);border-color:#ddd6fe;color:var(--violet-700);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div class="skill-name">Objection handling guide</div>
+                    <div class="skill-desc">Memory block · This client tier-4 · Sales objection responses</div>
+                  </div>
+                  <span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>
+                  <button class="btn btn-xs btn-primary" onclick="addDsToEnabled(this,'Objection handling guide')">Add</button>
+                </div>
+
+              </div><!-- /ds-available-list -->
+            </div><!-- /section-card-body -->
+          </div><!-- /add data sources section -->
+
+        </div><!-- /tab-datasources -->
+
+        <!-- ── SCHEDULE TAB ───────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-schedule">
+          <div class="section-card">
+            <div class="section-card-header"><h3>Heartbeat schedule</h3></div>
+            <div class="section-card-body">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                <input type="checkbox" id="heartbeat-enabled" checked>
+                <label for="heartbeat-enabled" style="font-size:13px;font-weight:500;">Heartbeat enabled</label>
+                <span style="font-size:12px;color:var(--slate-400);">Agent runs on a schedule independent of user triggers</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Interval</label><select class="form-select" style="width:100%;"><option selected>Every 24 hours</option><option>Every 12h</option><option>Every 4h</option></select></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Start hour</label><input class="form-input" value="9" type="number" min="0" max="23"></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Start minute</label><input class="form-input" value="0" type="number" min="0" max="59"></div>
+              </div>
+              <div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px 14px;">
+                <div style="font-size:11.5px;color:var(--slate-500);margin-bottom:6px;">Run preview (next 24h)</div>
+                <div style="width:100%;height:4px;background:var(--slate-200);border-radius:2px;position:relative;"><div style="position:absolute;left:37.5%;top:-4px;width:8px;height:8px;border-radius:50%;background:var(--indigo-500);"></div></div>
+                <div style="font-size:11px;color:var(--indigo-500);font-weight:500;margin-top:8px;">Runs at: 09:00</div>
+              </div>
+            </div>
+          </div>
+          <div class="section-card">
+            <div class="section-card-header"><h3>Concurrency and catch-up</h3></div>
+            <div class="section-card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Concurrency policy</label><select class="form-select" style="width:100%;"><option selected>Skip if active</option><option>Coalesce if active</option><option>Always enqueue</option></select></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Max concurrent runs</label><input class="form-input" value="1" type="number"></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Catch-up policy</label><select class="form-select" style="width:100%;"><option selected>Skip missed</option><option>Enqueue missed (with cap)</option></select></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Catch-up cap</label><input class="form-input" value="3" type="number"></div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-schedule -->
+
+        <!-- ── BUDGET TAB ─────────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-budget">
+          <div class="section-card">
+            <div class="section-card-header"><h3>Spending limits</h3></div>
+            <div class="section-card-body">
+              <p style="font-size:13px;color:var(--slate-500);margin-bottom:14px;">Set a monthly spending cap. Runs will pause when the limit is reached.</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Monthly cap (USD)</label><input class="form-input" value="25.00" type="number"></div>
+                <div class="form-field" style="margin-bottom:0;"><label class="form-label">Current month spend</label><div style="padding:8px 12px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;font-size:13px;color:var(--slate-700);font-weight:500;">$4.38 / $25.00 <span style="font-weight:400;color:var(--slate-400);font-size:12px;">(17.5%)</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /tab-budget -->
+
+        <!-- ── RUNS TAB ───────────────────────────────────────────── -->
+        <div class="tab-panel" id="tab-runs">
+          <div class="card">
+            <table class="data-table">
+              <thead><tr><th>Run type</th><th>Status</th><th>Client</th><th>Started</th><th>Duration</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><span style="font-size:12.5px;font-weight:500;">Outreach Agent</span><div style="font-size:11px;color:var(--slate-400);">heartbeat</div></td><td><span class="badge badge-green" style="font-size:10px;">completed</span></td><td style="font-size:13px;">Acme Corp</td><td style="font-size:12px;color:var(--slate-400);">May 5, 9:00am</td><td style="font-size:12px;color:var(--slate-400);">2m 14s</td><td><a href="run-trace.html" class="btn btn-xs btn-secondary">View trace</a></td></tr>
+                <tr><td><span style="font-size:12.5px;font-weight:500;">Outreach Agent</span><div style="font-size:11px;color:var(--slate-400);">heartbeat</div></td><td><span class="badge badge-green" style="font-size:10px;">completed</span></td><td style="font-size:13px;">TerraForm Partners</td><td style="font-size:12px;color:var(--slate-400);">May 4, 9:00am</td><td style="font-size:12px;color:var(--slate-400);">1m 49s</td><td><a href="run-trace.html" class="btn btn-xs btn-secondary">View trace</a></td></tr>
+                <tr><td><span style="font-size:12.5px;font-weight:500;">Outreach Agent</span><div style="font-size:11px;color:var(--slate-400);">manual trigger</div></td><td><span class="badge badge-amber" style="font-size:10px;">timeout</span></td><td style="font-size:13px;">Acme Corp</td><td style="font-size:12px;color:var(--slate-400);">May 3, 2:15pm</td><td style="font-size:12px;color:var(--slate-400);">10m 01s</td><td><a href="run-trace.html" class="btn btn-xs btn-secondary">View trace</a></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div><!-- /tab-runs -->
+
+        <!-- ── Test runner card (always visible, all tabs) ──────────── -->
+        <section class="section-card test-runner" id="test-runner-card">
+          <header class="section-card-header">
+            <h3>Test agent</h3>
+            <button type="button" class="btn btn-xs btn-ghost" onclick="document.getElementById('test-input').focus()">Try a sample input</button>
+          </header>
+          <div class="section-card-body">
+            <div class="test-runner-grid">
+              <div class="form-field" style="margin:0;">
+                <label class="form-label" for="test-input">Test input</label>
+                <textarea id="test-input" class="form-textarea" style="min-height:84px;">Draft a follow-up email for Sarah Chen about the pending proposal.</textarea>
+              </div>
+              <div class="form-field" style="margin:0;">
+                <label class="form-label" for="test-context">Workspace context</label>
+                <select id="test-context" class="form-select" style="width:100%;">
+                  <option selected>Acme Corp</option>
+                  <option>TerraForm Partners</option>
+                  <option>Revel Group</option>
+                </select>
+              </div>
+            </div>
+            <div class="test-runner-actions">
+              <button type="button" class="btn btn-primary" style="padding:8px 18px;">Run test</button>
+              <span class="meta">Last run completed in 1.4s</span>
+              <a href="run-trace.html" class="view-trace">View run trace</a>
+            </div>
+            <div class="test-runner-result">
+              <div class="test-runner-result-head">Last test passed</div>
+              <div class="test-runner-result-body">Draft email created. Subject: "Following up on your Q2 proposal review." Identified May 12 follow-up deadline and referenced it in the email body.</div>
+            </div>
+          </div>
+        </section>
+
+      </div><!-- /agent-content -->
+
+    <!-- Full-width sticky footer (fixed to bottom of viewport) -->
+    <div class="form-footer">
+      <div class="form-footer-inner">
+        <button class="btn btn-secondary" onclick="showToast('Changes discarded')">Discard</button>
+        <button class="btn btn-primary" onclick="showToast('Agent saved')">Save changes</button>
+        <button class="btn btn-secondary footer-delete" style="color:var(--red-500);border-color:var(--red-200);" onclick="showToast('Delete confirmation required')">Delete agent</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── DATA SOURCE DRAWER ─────────────────────────────────────────── -->
+<div id="ds-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:480px;">
+    <div class="drawer-header" id="ds-drawer-header">
+      <div>
+        <h2 id="ds-drawer-title">Acme Inc Brand Guide</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;" id="ds-drawer-subtitle">Document · Org-inherited</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('ds-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body" id="ds-drawer-body">
+      <!-- Content set by openDsDrawer() -->
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" style="color:var(--red-500);margin-right:auto;" onclick="document.getElementById('ds-drawer').style.display='none'">Remove from agent</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('ds-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" onclick="document.getElementById('ds-drawer').style.display='none'">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SKILL CONTEXT MENU ─────────────────────────────────────────── -->
+<div id="skill-ctx-menu" class="skill-ctx-menu" role="menu"></div>
+
+<!-- ── DESTRUCTIVE SKILL CONFIRM MODAL ───────────────────────────── -->
+<div class="destruct-modal-overlay" id="destruct-modal-overlay" onclick="if(event.target===this)closeDestructiveConfirm()">
+  <div class="destruct-modal">
+    <div class="destruct-modal-title" id="destruct-modal-title">Enable destructive action</div>
+    <div class="destruct-modal-body" id="destruct-modal-body">This skill can permanently remove emails from connected Gmail accounts. Are you sure?</div>
+    <div class="destruct-modal-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closeDestructiveConfirm()">Cancel</button>
+      <button class="btn btn-sm" style="background:#dc2626;color:white;border-color:#dc2626;" onclick="confirmDestructiveEnable()">Yes, enable</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SKILL CREATOR DRAWER ──────────────────────────────────────── -->
+<div id="skill-creator-overlay" class="creator-drawer-overlay" onclick="if(event.target===this)closeSkillCreator()">
+  <div class="creator-drawer">
+    <div class="creator-drawer-header">
+      <div>
+        <h2 style="font-size:16px;font-weight:700;color:var(--slate-800);">Create custom skill</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">New skill will be saved to: <strong id="creator-scope-label">Acme Corp workspace</strong></div>
+      </div>
+      <button class="drawer-close" onclick="closeSkillCreator()">&times;</button>
+    </div>
+    <!-- Creator tabs -->
+    <div class="tabs" id="creator-tabs" style="margin:0 20px;padding-top:12px;border-bottom:1px solid var(--slate-100);">
+      <button class="tab-btn active" onclick="switchCreatorTab('basic',this)">Basic info</button>
+      <button class="tab-btn" onclick="switchCreatorTab('parameters',this)">Parameters</button>
+      <button class="tab-btn" onclick="switchCreatorTab('implementation',this)">Implementation</button>
+      <button class="tab-btn" onclick="switchCreatorTab('test',this)">Test</button>
+    </div>
+    <div class="creator-drawer-body">
+
+      <!-- Basic info tab -->
+      <div id="creator-tab-basic" class="creator-tab-panel">
+        <div class="form-field">
+          <label class="form-label">Skill name <span style="color:var(--red-500);">*</span></label>
+          <input class="form-input" id="creator-name" placeholder="e.g. Acme: score prospect" oninput="autoSlug()">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Slug (auto-generated)</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input class="form-input" id="creator-slug" placeholder="acme-score-prospect" style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--slate-50);color:var(--slate-500);" readonly>
+            <button class="btn btn-xs btn-secondary" onclick="toggleSlugEdit()" id="slug-edit-btn">Edit</button>
+          </div>
+          <div class="form-hint">Used internally. Letters, numbers, hyphens only.</div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Description</label>
+          <textarea class="form-textarea" style="min-height:64px;" placeholder="What does this skill do? This description is shown to the agent."></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-field" style="margin-bottom:0;">
+            <label class="form-label">Category</label>
+            <select class="form-select" style="width:100%;">
+              <option value="communication">Communication</option>
+              <option value="data">Data</option>
+              <option value="analysis">Analysis</option>
+              <option value="custom" selected>Custom</option>
+            </select>
+          </div>
+          <div class="form-field" style="margin-bottom:0;">
+            <label class="form-label">Icon</label>
+            <div class="icon-picker-grid">
+              <div class="icon-option selected" onclick="selectIcon(this)" title="Pencil">A</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Data">D</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Send">S</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Link">L</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Search">Q</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Chart">C</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Filter">F</div>
+              <div class="icon-option" onclick="selectIcon(this)" title="Tag">T</div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /creator-tab-basic -->
+
+      <!-- Parameters tab -->
+      <div id="creator-tab-parameters" class="creator-tab-panel hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="font-size:13px;color:var(--slate-600);">Define the inputs this skill accepts from the agent.</div>
+          <button class="btn btn-sm btn-secondary" onclick="addCreatorParam()">+ Add parameter</button>
+        </div>
+        <div id="creator-param-list">
+          <!-- Pre-populated example parameter 1 -->
+          <div class="param-row">
+            <div class="param-row-header">
+              <span class="param-drag" title="Drag to reorder">&#9776;</span>
+              <input class="param-name-input" value="prospect_id" placeholder="parameter_name">
+              <select class="param-type-select">
+                <option value="string" selected>string</option>
+                <option value="number">number</option>
+                <option value="boolean">boolean</option>
+                <option value="enum">enum</option>
+                <option value="object">object</option>
+                <option value="array">array</option>
+              </select>
+              <label class="param-required-toggle"><input type="checkbox" checked style="margin:0;"> Required</label>
+              <button class="param-delete-btn" onclick="this.closest('.param-row').remove()" title="Remove">&times;</button>
+            </div>
+            <input class="param-desc-input form-input" style="font-size:12px;color:var(--slate-500);font-style:italic;" value="The CRM identifier of the prospect to score." placeholder="Description (optional)">
+          </div>
+          <!-- Pre-populated example parameter 2 -->
+          <div class="param-row">
+            <div class="param-row-header">
+              <span class="param-drag" title="Drag to reorder">&#9776;</span>
+              <input class="param-name-input" value="context_notes" placeholder="parameter_name">
+              <select class="param-type-select">
+                <option value="string" selected>string</option>
+                <option value="number">number</option>
+                <option value="boolean">boolean</option>
+                <option value="enum">enum</option>
+                <option value="object">object</option>
+                <option value="array">array</option>
+              </select>
+              <label class="param-required-toggle"><input type="checkbox" style="margin:0;"> Required</label>
+              <button class="param-delete-btn" onclick="this.closest('.param-row').remove()" title="Remove">&times;</button>
+            </div>
+            <input class="param-desc-input form-input" style="font-size:12px;color:var(--slate-500);font-style:italic;" value="Optional background notes for the scoring model." placeholder="Description (optional)">
+          </div>
+        </div>
+        <div style="font-size:11.5px;color:var(--slate-400);margin-top:10px;">Drag rows to reorder. Parameters render as inputs on the Test tab.</div>
+      </div><!-- /creator-tab-parameters -->
+
+      <!-- Implementation tab -->
+      <div id="creator-tab-implementation" class="creator-tab-panel hidden">
+        <div class="form-label" style="margin-bottom:8px;">Skill type</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px;">
+          <label class="mode-card selected" id="impl-builtin-card" onclick="switchImplType('builtin',this)" style="border-color:var(--indigo-500);background:var(--indigo-50);">
+            <input type="radio" name="impl-type" value="builtin" checked style="margin-top:2px;flex-shrink:0;">
+            <div><div class="mode-card-label">Built-in template</div><div class="mode-card-desc">Start from a pre-built skill template and configure parameters</div></div>
+          </label>
+          <label class="mode-card" id="impl-code-card" onclick="switchImplType('code',this)">
+            <input type="radio" name="impl-type" value="code" style="margin-top:2px;flex-shrink:0;">
+            <div><div class="mode-card-label">Custom code</div><div class="mode-card-desc">Write a JavaScript or Python handler executed server-side</div></div>
+          </label>
+          <label class="mode-card" id="impl-webhook-card" onclick="switchImplType('webhook',this)">
+            <input type="radio" name="impl-type" value="webhook" style="margin-top:2px;flex-shrink:0;">
+            <div><div class="mode-card-label">External webhook</div><div class="mode-card-desc">POST to an external URL and parse the response</div></div>
+          </label>
+        </div>
+        <!-- Built-in panel -->
+        <div id="impl-panel-builtin">
+          <div class="form-field"><label class="form-label">Template</label>
+            <select class="form-select" style="width:100%;" onchange="showTemplateConfig(this)">
+              <option value="">Select a template...</option>
+              <option value="http-get">HTTP GET request</option>
+              <option value="db-query">Database query (read-only)</option>
+              <option value="transform">Data transform / mapping</option>
+              <option value="score">Scoring model (rule-based)</option>
+            </select>
+          </div>
+          <div id="template-config" style="font-size:13px;color:var(--slate-400);padding:12px;background:var(--slate-50);border-radius:8px;border:1px solid var(--slate-200);">Select a template to see its configuration options.</div>
+        </div>
+        <!-- Code panel (hidden by default) -->
+        <div id="impl-panel-code" style="display:none;">
+          <div class="form-field">
+            <label class="form-label">Handler code</label>
+            <div style="border:1px solid var(--slate-200);border-radius:8px;background:var(--slate-800);padding:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#94a3b8;min-height:160px;position:relative;">
+              <div style="color:#6ee7b7;">// Code editor uses CodeMirror in production</div>
+              <textarea style="width:100%;background:transparent;border:none;outline:none;color:#e2e8f0;font-family:'JetBrains Mono',monospace;font-size:12px;min-height:120px;resize:vertical;margin-top:8px;" placeholder="async function handler({ prospect_id, context_notes }) {&#10;  // your logic here&#10;  return { score: 0.87, label: 'hot' };&#10;}"></textarea>
+            </div>
+          </div>
+          <div class="form-field"><label class="form-label">Runtime</label>
+            <select class="form-select" style="width:200px;"><option>Node.js 20 (default)</option><option>Python 3.11</option></select>
+          </div>
+        </div>
+        <!-- Webhook panel (hidden by default) -->
+        <div id="impl-panel-webhook" style="display:none;">
+          <div class="form-field"><label class="form-label">Endpoint URL <span style="color:var(--red-500);">*</span></label><input class="form-input" placeholder="https://hooks.example.com/skill-handler"></div>
+          <div class="form-field">
+            <label class="form-label">Auth header</label>
+            <div style="display:grid;grid-template-columns:140px 1fr;gap:8px;">
+              <input class="form-input" placeholder="Header name" value="Authorization">
+              <input class="form-input" placeholder="Bearer sk-..." type="password">
+            </div>
+          </div>
+          <div class="form-field"><label class="form-label">Expected response schema</label>
+            <textarea class="form-textarea" style="font-family:'JetBrains Mono',monospace;font-size:12px;min-height:80px;" placeholder='{ "score": number, "label": string }'></textarea>
+            <div class="form-hint">JSON schema snippet. Used to validate and parse the response.</div>
+          </div>
+        </div>
+      </div><!-- /creator-tab-implementation -->
+
+      <!-- Test tab -->
+      <div id="creator-tab-test" class="creator-tab-panel hidden">
+        <div style="font-size:13px;color:var(--slate-500);margin-bottom:14px;">Run a test call with sample parameter values to verify the skill works correctly.</div>
+        <div id="creator-test-inputs">
+          <div class="form-field"><label class="form-label">prospect_id</label><input class="form-input" value="cid_8842" placeholder="string"></div>
+          <div class="form-field"><label class="form-label">context_notes</label><textarea class="form-textarea" style="min-height:52px;" placeholder="Optional (not required)"></textarea></div>
+        </div>
+        <button class="btn btn-primary" style="margin-bottom:14px;" onclick="runCreatorTest()">Run test</button>
+        <div id="creator-test-result" style="display:none;background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:12px;font-size:12px;color:var(--slate-700);">
+          <div style="font-weight:600;color:var(--emerald-700);margin-bottom:6px;">Success in 0.6s</div>
+          <pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{ "score": 0.87, "label": "hot", "confidence": 0.91 }</pre>
+        </div>
+      </div><!-- /creator-tab-test -->
+
+    </div><!-- /creator-drawer-body -->
+
+    <!-- ── Demo controls (scope permission demo) ──────────────────── -->
+    <div id="creator-demo-controls" style="background:#f8fafc;border-top:1px solid var(--slate-100);padding:8px 20px;">
+      <button
+        id="creator-demo-toggle-btn"
+        onclick="toggleCreatorDemoControls()"
+        style="display:flex;align-items:center;gap:5px;background:none;border:none;padding:0;cursor:pointer;font-size:11px;font-weight:600;color:var(--slate-400);letter-spacing:0.02em;"
+      >
+        <svg id="creator-demo-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="6 9 12 15 18 9"/></svg>
+        Demo controls
+      </button>
+      <div id="creator-demo-inner" style="display:none;margin-top:8px;">
+        <div style="font-size:11px;color:var(--slate-500);margin-bottom:6px;">Simulate scope permission profile:</div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;color:var(--slate-600);cursor:pointer;">
+            <input type="radio" name="creator-scope-demo" value="org-admin" checked onchange="applyCreatorScopeDemo(this.value)"> Org admin
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;color:var(--slate-600);cursor:pointer;">
+            <input type="radio" name="creator-scope-demo" value="workspace-user" onchange="applyCreatorScopeDemo(this.value)"> Workspace user
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="creator-drawer-footer">
+      <!-- Scope toggle (Org admin state: both options enabled) -->
+      <div id="creator-scope-row" style="display:flex;align-items:center;gap:6px;margin-right:auto;font-size:12px;color:var(--slate-500);">
+        <span>Save to:</span>
+        <label class="scope-option" id="scope-client-label">
+          <input type="radio" name="creator-scope" id="scope-client-radio" value="client" checked> This client
+        </label>
+        <label class="scope-option" id="scope-org-label" title="">
+          <input type="radio" name="creator-scope" id="scope-org-radio" value="org">
+          <span id="scope-org-lock-icon" style="display:none;margin-right:2px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--slate-400);vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </span>
+          Organisation
+        </label>
+      </div>
+      <!-- Workspace-user fallback: static label (shown only when scope demo = workspace-user) -->
+      <div id="creator-scope-static" style="display:none;margin-right:auto;font-size:12px;color:var(--slate-500);">
+        Saved to: <strong style="color:var(--slate-700);">This client</strong>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="closeSkillCreator()">Cancel</button>
+      <button class="btn btn-secondary btn-sm" onclick="saveSkillDraft()">Save as draft</button>
+      <button class="btn btn-primary btn-sm" onclick="saveAndEnableSkill()">Save and enable</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SKILL EDIT DRAWER ──────────────────────────────────────────── -->
+<div id="skill-edit-drawer" class="drawer-overlay" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="drawer" style="width:500px;">
+    <div class="drawer-header">
+      <div>
+        <h2>Send email (Gmail)</h2>
+        <div style="font-size:12px;color:var(--slate-500);margin-top:2px;">Communication · Built-in skill</div>
+      </div>
+      <button class="drawer-close" onclick="document.getElementById('skill-edit-drawer').style.display='none'">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="tabs" id="skill-drawer-tabs" style="margin-bottom:16px;">
+        <button class="tab-btn active" onclick="switchSkillTab('details',this)">Details</button>
+        <button class="tab-btn" onclick="switchSkillTab('parameters',this)">Parameters</button>
+        <button class="tab-btn" onclick="switchSkillTab('test',this)">Test</button>
+        <button class="tab-btn" onclick="switchSkillTab('analyzer',this)">Analyzer</button>
+      </div>
+      <!-- Details panel -->
+      <div id="skill-tab-details">
+      <div class="form-field"><label class="form-label">Skill name</label><input class="form-input" value="Send email"></div>
+      <div class="form-field"><label class="form-label">Description (shown to agent)</label><textarea class="form-textarea">Send an email via Gmail to one or more recipients. Use for outreach, follow-ups, proposals, and confirmations. Always check the approval threshold before calling this skill for deal-related emails.</textarea></div>
+      <div class="form-field"><label class="form-label">Connected credential</label><select class="form-select" style="width:100%;"><option selected>agency-gmail@example.com (connected, valid)</option><option>outreach@client.com (connected, valid)</option></select></div>
+      <div class="form-field"><label class="form-label">Max calls per run</label><input class="form-input" value="5" type="number"><div class="form-hint">Limit emails this agent can send in a single run</div></div>
+      <div class="form-field" style="margin-bottom:0;">
+        <label class="form-label">Client visibility</label>
+        <div style="display:flex;flex-direction:column;gap:7px;margin-top:6px;">
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:9px 12px;border-radius:8px;border:1px solid var(--indigo-300);background:var(--indigo-50);">
+            <input type="radio" name="skill-visibility" value="hidden" checked style="margin-top:2px;flex-shrink:0;">
+            <div>
+              <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Hidden</div>
+              <div style="font-size:11.5px;color:var(--slate-500);margin-top:1px;">Skill not surfaced to the client-facing portal at all</div>
+            </div>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:9px 12px;border-radius:8px;border:1px solid var(--slate-200);background:white;" id="vis-visible-card">
+            <input type="radio" name="skill-visibility" value="visible" style="margin-top:2px;flex-shrink:0;" onchange="selectVisCard(this)" >
+            <div>
+              <div style="font-size:13px;font-weight:500;color:var(--slate-800);">Visible</div>
+              <div style="font-size:11.5px;color:var(--slate-500);margin-top:1px;">Skill name and description surfaced to the client portal</div>
+            </div>
+          </label>
+        </div>
+      </div>
+      </div><!-- /skill-tab-details -->
+      <!-- Parameters panel -->
+      <div id="skill-tab-parameters" style="display:none;">
+        <div style="font-size:13px;color:var(--slate-500);padding:12px 0;">Configure parameter overrides passed to this skill on each invocation.</div>
+        <div class="form-field"><label class="form-label">Default recipient</label><input class="form-input" value=""></div>
+        <div class="form-field"><label class="form-label">From alias</label><input class="form-input" placeholder="Optional override"></div>
+        <div class="form-field"><label class="form-label">Reply-to</label><input class="form-input" placeholder="Optional override"></div>
+      </div>
+      <!-- Test panel -->
+      <div id="skill-tab-test" style="display:none;">
+        <div style="font-size:13px;color:var(--slate-500);padding-bottom:12px;">Send a test invocation with sample input to verify the skill is connected and configured correctly.</div>
+        <div class="form-field"><label class="form-label">Test input (JSON)</label><textarea class="form-textarea" style="font-family:'JetBrains Mono',monospace;font-size:12px;min-height:100px;">{"to": "test@example.com", "subject": "Test", "body": "Hello"}</textarea></div>
+        <button class="btn btn-primary" style="margin-bottom:12px;">Run test call</button>
+        <div style="background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:12px;font-size:12px;color:var(--slate-700);">
+          <div style="font-weight:600;color:var(--emerald-700);margin-bottom:4px;">Success in 0.9s</div>
+          Email delivered to test@example.com. Message ID: msg_01Jxyz…
+        </div>
+      </div>
+      <!-- Analyzer panel -->
+      <div id="skill-tab-analyzer" style="display:none;">
+        <div style="font-size:13px;color:var(--slate-500);padding-bottom:12px;">Recent calls made by this agent using this skill.</div>
+        <table class="data-table" style="font-size:12px;">
+          <thead><tr><th>Date</th><th>Run</th><th>Result</th><th>Tokens</th></tr></thead>
+          <tbody>
+            <tr><td>May 5</td><td>heartbeat</td><td><span class="badge badge-green" style="font-size:10px;">ok</span></td><td>1,204</td></tr>
+            <tr><td>May 4</td><td>heartbeat</td><td><span class="badge badge-green" style="font-size:10px;">ok</span></td><td>980</td></tr>
+            <tr><td>May 3</td><td>manual</td><td><span class="badge badge-amber" style="font-size:10px;">timeout</span></td><td>2,100</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" style="color:var(--red-500);margin-right:auto;">Remove from kit</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('skill-edit-drawer').style.display='none'">Cancel</button>
+      <button class="btn btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchAgentTab(id, btn) {
+  document.querySelectorAll('#agent-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.remove('active');
+    if (p.id !== 'tab-' + id) p.style.display = 'none';
+  });
+  var target = document.getElementById('tab-' + id);
+  if (target) { target.classList.add('active'); target.style.display = ''; }
+}
+function togglePersonality(checked) {
+  document.getElementById('personality-enabled-state').style.display = checked ? '' : 'none';
+  document.getElementById('personality-disabled-state').style.display = checked ? 'none' : '';
+  var toggle = document.getElementById('personality-toggle');
+  if (toggle) toggle.checked = checked;
+  var toggleDisabled = document.getElementById('personality-toggle-disabled');
+  if (toggleDisabled) toggleDisabled.checked = checked;
+}
+function toggleTrait(btn) {
+  btn.classList.toggle('active');
+}
+function togglePromptHistory() {
+  var body = document.getElementById('prompt-history-body');
+  var chevron = document.getElementById('prompt-history-chevron');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    chevron.style.transform = 'rotate(180deg)';
+  } else {
+    body.style.display = 'none';
+    chevron.style.transform = '';
+  }
+}
+function switchSkillTab(id, btn) {
+  document.querySelectorAll('#skill-drawer-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['details','parameters','test','analyzer'].forEach(function(name) {
+    var el = document.getElementById('skill-tab-' + name);
+    if (el) el.style.display = (name === id) ? '' : 'none';
+  });
+}
+function toggleSkillGroup(id, header) {
+  var body = document.getElementById(id);
+  var caretId = 'caret-' + id;
+  var caret = document.getElementById(caretId);
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    if (caret) caret.classList.remove('collapsed');
+  } else {
+    body.style.display = 'none';
+    if (caret) caret.classList.add('collapsed');
+  }
+}
+function setSkillFilter(filter, el) {
+  document.querySelectorAll('#skill-filter-chips .conn-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  var rows = document.querySelectorAll('.skill-toggle-row');
+  rows.forEach(function(row) {
+    if (filter === 'all') {
+      row.style.display = '';
+    } else if (filter === 'enabled') {
+      var tog = row.querySelector('.toggle-input');
+      row.style.display = (tog && tog.checked) ? '' : 'none';
+    } else {
+      var df = row.getAttribute('data-filter');
+      row.style.display = (df === filter) ? '' : 'none';
+    }
+  });
+}
+function openSkillDrawer() {
+  var drawer = document.getElementById('skill-edit-drawer');
+  drawer.style.display = 'flex';
+}
+
+/* ── Skills tab: library search + filter ── */
+function filterSkillLibrary(query) {
+  var q = query.toLowerCase().trim();
+  document.querySelectorAll('.lib-skill-row').forEach(function(row) {
+    var name = (row.getAttribute('data-name') || '').toLowerCase();
+    row.style.display = (!q || name.indexOf(q) > -1) ? '' : 'none';
+  });
+}
+function setSkillLibFilter(cat, el) {
+  document.querySelectorAll('#skill-lib-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.lib-skill-row').forEach(function(row) {
+    if (cat === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.getAttribute('data-category') === cat) ? '' : 'none';
+    }
+  });
+  // Show/hide group headers based on category filter
+  var groupMap = { 'system': 'communication', 'org': 'data', 'client': 'analysis' };
+  ['system','org','client'].forEach(function(g) {
+    var hdr = document.getElementById('lib-grp-' + g + '-header');
+    var body = document.getElementById('lib-grp-' + g);
+    var grpCat = groupMap[g];
+    var show = (cat === 'all' || cat === grpCat || cat === 'custom');
+    if (hdr) hdr.style.display = show ? '' : 'none';
+    if (body) body.style.display = show ? '' : 'none';
+  });
+}
+function setEnabledCatFilter(cat, el) {
+  document.querySelectorAll('#enabled-skill-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.skill-toggle-list .skill-toggle-row').forEach(function(row) {
+    if (cat === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.getAttribute('data-category') === cat) ? '' : 'none';
+    }
+  });
+}
+function addSkillToEnabled(btn, name, tier) {
+  // Mark as enabled in library
+  btn.textContent = 'Enabled';
+  btn.disabled = true;
+  btn.className = 'btn btn-xs btn-ghost';
+  btn.style.color = 'var(--slate-400)';
+  // Add row to enabled section
+  var enabledList = document.querySelector('#tab-skills .skill-toggle-list');
+  var row = document.createElement('div');
+  row.className = 'skill-toggle-row';
+  var tierClass = tier === 'system' ? 'tier-system' : (tier === 'org' ? 'tier-org' : 'tier-subaccount');
+  var tierLabel = tier === 'system' ? 'System' : (tier === 'org' ? 'Org' : 'This client');
+  var togId = 'tog-new-' + Date.now();
+  row.innerHTML = '<span class="tier-chip ' + tierClass + '" style="flex-shrink:0;">' + tierLabel + '</span>'
+    + '<div class="skill-icon' + (tier === 'client' ? ' custom' : '') + '"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>'
+    + '<div style="flex:1;min-width:0;"><div class="skill-name">' + name + '</div><div class="skill-desc">Just added</div></div>'
+    + '<div class="toggle-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="toggle-input" id="' + togId + '" checked><label class="toggle-track" for="' + togId + '"></label></div>'
+    + '<button class="overflow-dot-btn" onclick="event.stopPropagation();openCtxMenu(event,\'' + tier + '\')">&#8942;</button>';
+  row.style.animation = 'fadeIn 0.2s';
+  enabledList.insertBefore(row, enabledList.firstChild);
+  showToast('Added: ' + name);
+}
+
+/* ── Data sources tab ── */
+var dsDrawerContents = {
+  'doc': {
+    title: 'Acme Inc Brand Guide',
+    subtitle: 'Document · Org-inherited · Auto-attached',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Document</div></div>'
+      + '<div><div class="form-label">Scope</div><div style="font-size:13px;"><span class="tier-chip tier-org">Org-inherited</span></div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">Auto-attached</div></div>'
+      + '<div><div class="form-label">Last updated</div><div style="font-size:13px;">Apr 22, 2026</div></div>'
+      + '<div><div class="form-label">Version</div><div style="font-size:13px;">v3</div></div>'
+      + '<div><div class="form-label">File size</div><div style="font-size:13px;">84 KB</div></div>'
+      + '</div>'
+      + '<div style="margin-bottom:14px;"><div class="form-label" style="margin-bottom:6px;">Preview</div>'
+      + '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">'
+      + 'Acme Inc Brand Guide v3. Our brand voice is direct, confident, and approachable. We lead with outcomes, avoid jargon, and never use passive voice. Primary colour: #4F46E5...'
+      + '</div></div>'
+      + '<a href="knowledge.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">View full document in Knowledge</a>'
+  },
+  'memory': {
+    title: 'Voice and Tone Standards',
+    subtitle: 'Memory block · Org tier-1 · Auto-attached',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Memory block</div></div>'
+      + '<div><div class="form-label">Tier</div><div style="font-size:13px;">Org tier-1</div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">Auto-attached</div></div>'
+      + '<div><div class="form-label">Last edited</div><div style="font-size:13px;">Apr 18, 2026</div></div>'
+      + '<div><div class="form-label">Tokens</div><div style="font-size:13px;">~620 tokens</div></div>'
+      + '<div><div class="form-label">Usage</div><div style="font-size:13px;">142 runs this month</div></div>'
+      + '</div>'
+      + '<div style="margin-bottom:14px;"><div class="form-label" style="margin-bottom:6px;">Content preview</div>'
+      + '<div style="background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;padding:12px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">'
+      + 'Tone: Professional but warm. Lead with outcomes. Max 3 paragraphs per email. Avoid jargon. Sign off with first name only. Never use passive voice...'
+      + '</div></div>'
+      + '<a href="knowledge.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">Edit in Knowledge</a>'
+  },
+  'bundle': {
+    title: 'Demo collateral Q1 2026',
+    subtitle: 'Bundle · 3 documents · This client',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Bundle</div></div>'
+      + '<div><div class="form-label">Scope</div><div style="font-size:13px;"><span class="tier-chip tier-subaccount">This client</span></div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">On-demand</div></div>'
+      + '<div><div class="form-label">Utilization</div><div style="font-size:13px;">92% (Sonnet)</div></div>'
+      + '</div>'
+      + '<div style="margin-bottom:14px;"><div class="form-label" style="margin-bottom:6px;">Documents in bundle</div>'
+      + '<div class="skill-toggle-list" style="font-size:12.5px;">'
+      + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Acme Demo Script Q1.pdf</span><span style="margin-left:auto;color:var(--slate-400);">48 KB</span></div>'
+      + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Product Overview Slides.pdf</span><span style="margin-left:auto;color:var(--slate-400);">210 KB</span></div>'
+      + '<div class="skill-toggle-row" style="min-height:36px;padding:8px 12px;border-bottom:none;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="margin-left:8px;">Pricing One-Pager.pdf</span><span style="margin-left:auto;color:var(--slate-400);">22 KB</span></div>'
+      + '</div></div>'
+      + '<a href="knowledge.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">Edit bundle in Knowledge</a>'
+  },
+  'live': {
+    title: 'Acme HubSpot CRM',
+    subtitle: 'Live integration · Synced 5 min ago',
+    body: '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div><div class="form-label">Type</div><div style="font-size:13px;">Live integration</div></div>'
+      + '<div><div class="form-label">Sync status</div><div style="font-size:13px;"><span class="badge badge-green" style="font-size:10px;">ok · 5 min ago</span></div></div>'
+      + '<div><div class="form-label">Attachment mode</div><div style="font-size:13px;">On-demand lookup</div></div>'
+      + '<div><div class="form-label">Sync interval</div><div style="font-size:13px;">Every 15 min</div></div>'
+      + '<div><div class="form-label">Records cached</div><div style="font-size:13px;">4,218 contacts</div></div>'
+      + '<div><div class="form-label">Credential</div><div style="font-size:13px;">HubSpot key (valid)</div></div>'
+      + '</div>'
+      + '<div style="background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--slate-600);">'
+      + 'Connection healthy. Last sync completed in 1.2s. No errors in last 48 hours.'
+      + '</div>'
+      + '<a href="integrations.html" style="font-size:12px;color:var(--indigo-600);font-weight:500;">Configure connection in Integrations</a>'
+  }
+};
+function openDsDrawer(type) {
+  var c = dsDrawerContents[type] || dsDrawerContents['doc'];
+  document.getElementById('ds-drawer-title').textContent = c.title;
+  document.getElementById('ds-drawer-subtitle').textContent = c.subtitle;
+  document.getElementById('ds-drawer-body').innerHTML = c.body;
+  document.getElementById('ds-drawer').style.display = 'flex';
+}
+function filterDsSources(query) {
+  var q = query.toLowerCase().trim();
+  document.querySelectorAll('.ds-avail-row').forEach(function(row) {
+    var name = (row.getAttribute('data-dsname') || '').toLowerCase();
+    row.style.display = (!q || name.indexOf(q) > -1) ? '' : 'none';
+  });
+}
+function setDsFilter(type, el) {
+  document.querySelectorAll('#ds-filter-chips .conn-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.ds-avail-row').forEach(function(row) {
+    if (type === 'all') {
+      row.style.display = '';
+    } else {
+      row.style.display = (row.getAttribute('data-dstype') === type) ? '' : 'none';
+    }
+  });
+}
+function addDsToEnabled(btn, name) {
+  btn.textContent = 'Added';
+  btn.disabled = true;
+  btn.className = 'btn btn-xs btn-ghost';
+  btn.style.color = 'var(--slate-400)';
+  showToast('Added: ' + name);
+}
+function toggleDsAddMenu() {
+  var m = document.getElementById('ds-add-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function closeDsAddMenu() {
+  document.getElementById('ds-add-menu').style.display = 'none';
+}
+document.addEventListener('click', function(e) {
+  var wrap = document.getElementById('ds-add-btn-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    var m = document.getElementById('ds-add-menu');
+    if (m) m.style.display = 'none';
+  }
+});
+
+/* ── Inheritance-aware context menu ── */
+var ctxMenuOpen = false;
+function openCtxMenu(evt, tier) {
+  evt.stopPropagation();
+  var menu = document.getElementById('skill-ctx-menu');
+  var items = '';
+  if (tier === 'system') {
+    items = [
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> View source</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg> Configure for this agent</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Disable for this agent</button>',
+      '<div style="padding:5px 14px 3px;font-size:10.5px;color:var(--slate-400);">System skills cannot be edited or deleted.</div>'
+    ].join('');
+  } else if (tier === 'org') {
+    items = [
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> View source</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg> Configure for this agent</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Override locally for this client</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Disable for this agent</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item ctx-link" onclick="closeCtxMenu()"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Edit at organisation level</button>'
+    ].join('');
+  } else if (tier === 'this-client') {
+    items = [
+      '<button class="ctx-item" onclick="openSkillDrawer();closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit skill</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 00-14.14 14.14"/></svg> Configure for this agent</button>',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> View parameters</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item" onclick="closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Disable for this agent</button>',
+      '<hr class="ctx-separator">',
+      '<button class="ctx-item ctx-danger" onclick="confirmDeleteSkill();closeCtxMenu()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg> Delete skill</button>'
+    ].join('');
+  }
+  menu.innerHTML = items;
+  var rect = evt.currentTarget.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.right = (window.innerWidth - rect.right) + 'px';
+  menu.style.left = 'auto';
+  menu.classList.add('open');
+  ctxMenuOpen = true;
+}
+function closeCtxMenu() {
+  var menu = document.getElementById('skill-ctx-menu');
+  menu.classList.remove('open');
+  ctxMenuOpen = false;
+}
+document.addEventListener('click', function(e) {
+  if (ctxMenuOpen && !e.target.closest('#skill-ctx-menu') && !e.target.closest('.overflow-dot-btn')) {
+    closeCtxMenu();
+  }
+});
+function confirmDeleteSkill() {
+  if (confirm('Delete this skill? This cannot be undone.')) {
+    showToast('Skill deleted');
+  }
+}
+
+/* ── Skill creator drawer ── */
+function openSkillCreator() {
+  document.getElementById('skill-creator-overlay').classList.add('open');
+}
+function closeSkillCreator() {
+  document.getElementById('skill-creator-overlay').classList.remove('open');
+}
+
+/* Demo: scope permission controls ------------------------------------ */
+function toggleCreatorDemoControls() {
+  var inner = document.getElementById('creator-demo-inner');
+  var caret = document.getElementById('creator-demo-caret');
+  var isOpen = inner.style.display !== 'none';
+  inner.style.display = isOpen ? 'none' : 'block';
+  caret.style.transform = isOpen ? '' : 'rotate(-90deg)';
+}
+
+function applyCreatorScopeDemo(profile) {
+  var orgLabel  = document.getElementById('scope-org-label');
+  var orgRadio  = document.getElementById('scope-org-radio');
+  var clientRadio = document.getElementById('scope-client-radio');
+  var lockIcon  = document.getElementById('scope-org-lock-icon');
+  var scopeRow  = document.getElementById('creator-scope-row');
+  var scopeStatic = document.getElementById('creator-scope-static');
+  var headerLabel = document.getElementById('creator-scope-label');
+
+  if (profile === 'workspace-user') {
+    // Disable org scope: grey out, add lock icon, force client selection, show static label
+    orgLabel.classList.add('scope-disabled');
+    orgLabel.title = 'Requires org admin permission to save skills at the organisation level';
+    orgRadio.disabled = true;
+    clientRadio.checked = true;
+    lockIcon.style.display = 'inline';
+    // Swap radio row for static label
+    scopeRow.style.display = 'none';
+    scopeStatic.style.display = 'flex';
+    if (headerLabel) headerLabel.textContent = 'Acme Corp workspace';
+  } else {
+    // Org admin: restore both options
+    orgLabel.classList.remove('scope-disabled');
+    orgLabel.title = '';
+    orgRadio.disabled = false;
+    lockIcon.style.display = 'none';
+    scopeRow.style.display = 'flex';
+    scopeStatic.style.display = 'none';
+    if (headerLabel) headerLabel.textContent = 'Acme Corp workspace';
+  }
+}
+
+function switchCreatorTab(id, btn) {
+  document.querySelectorAll('#creator-tabs .tab-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  ['basic','parameters','implementation','test'].forEach(function(name) {
+    var el = document.getElementById('creator-tab-' + name);
+    if (el) el.classList.toggle('hidden', name !== id);
+  });
+}
+function autoSlug() {
+  var name = document.getElementById('creator-name').value;
+  var slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('creator-slug').value = slug;
+}
+function toggleSlugEdit() {
+  var input = document.getElementById('creator-slug');
+  var btn = document.getElementById('slug-edit-btn');
+  input.readOnly = !input.readOnly;
+  input.style.background = input.readOnly ? 'var(--slate-50)' : '';
+  input.style.color = input.readOnly ? 'var(--slate-500)' : '';
+  btn.textContent = input.readOnly ? 'Edit' : 'Lock';
+  if (!input.readOnly) input.focus();
+}
+function selectIcon(el) {
+  document.querySelectorAll('.icon-option').forEach(function(o){ o.classList.remove('selected'); });
+  el.classList.add('selected');
+}
+function addCreatorParam() {
+  var list = document.getElementById('creator-param-list');
+  var row = document.createElement('div');
+  row.className = 'param-row';
+  row.innerHTML = '<div class="param-row-header"><span class="param-drag" title="Drag to reorder">&#9776;</span><input class="param-name-input" placeholder="parameter_name"><select class="param-type-select"><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option><option value="enum">enum</option><option value="object">object</option><option value="array">array</option></select><label class="param-required-toggle"><input type="checkbox" style="margin:0;"> Required</label><button class="param-delete-btn" onclick="this.closest(\'.param-row\').remove()" title="Remove">&times;</button></div><input class="param-desc-input form-input" style="font-size:12px;color:var(--slate-500);font-style:italic;" placeholder="Description (optional)">';
+  list.appendChild(row);
+  row.querySelector('.param-name-input').focus();
+}
+function switchImplType(type, labelEl) {
+  document.querySelectorAll('[name="impl-type"]').forEach(function(r) {
+    var card = r.closest('label');
+    if (r.value === type) {
+      r.checked = true;
+      card.style.borderColor = 'var(--indigo-500)';
+      card.style.background = 'var(--indigo-50)';
+    } else {
+      card.style.borderColor = 'var(--slate-200)';
+      card.style.background = 'white';
+    }
+  });
+  ['builtin','code','webhook'].forEach(function(t) {
+    var panel = document.getElementById('impl-panel-' + t);
+    if (panel) panel.style.display = (t === type) ? '' : 'none';
+  });
+}
+function showTemplateConfig(sel) {
+  var cfg = document.getElementById('template-config');
+  var configs = {
+    'http-get': 'Configure: Base URL, path template, query params, response JSONPath.',
+    'db-query': 'Configure: Connection (uses Connections tab), SQL template with named params, result limit.',
+    'transform': 'Configure: Input mapping rules, output schema, transformation logic (JSONata or simple JS).',
+    'score': 'Configure: Scoring criteria (key/weight pairs), threshold for each label (hot/warm/cold).'
+  };
+  cfg.textContent = configs[sel.value] || 'Select a template to see its configuration options.';
+  cfg.style.color = sel.value ? 'var(--slate-600)' : 'var(--slate-400)';
+}
+function runCreatorTest() {
+  var result = document.getElementById('creator-test-result');
+  result.style.display = 'block';
+  result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function saveAndEnableSkill() {
+  var name = document.getElementById('creator-name').value.trim() || 'New custom skill';
+  closeSkillCreator();
+  addNewSkillRow(name);
+  showToast('Skill created and enabled: ' + name);
+}
+function saveSkillDraft() {
+  var name = document.getElementById('creator-name').value.trim() || 'New custom skill';
+  closeSkillCreator();
+  showToast('Skill saved as draft: ' + name);
+}
+function addNewSkillRow(name) {
+  var enabledList = document.querySelector('#tab-skills .skill-toggle-list');
+  var row = document.createElement('div');
+  row.className = 'skill-toggle-row';
+  var togId = 'tog-new-' + Date.now();
+  row.innerHTML = '<span class="tier-chip tier-subaccount" style="flex-shrink:0;">This client</span>'
+    + '<div class="skill-icon custom"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>'
+    + '<div style="flex:1;min-width:0;">'
+    + '<div class="skill-name">' + name + '</div>'
+    + '<div class="skill-desc">Custom · Just created</div>'
+    + '</div>'
+    + '<div class="toggle-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="toggle-input" id="' + togId + '" checked><label class="toggle-track" for="' + togId + '"></label></div>'
+    + '<button class="overflow-dot-btn" title="Options" onclick="event.stopPropagation();openCtxMenu(event,\'this-client\')">&#8942;</button>';
+  if (enabledList) enabledList.insertBefore(row, enabledList.firstChild);
+}
+function showToast(msg) {
+  var t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--slate-800);color:white;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500;z-index:9999;pointer-events:none;opacity:1;transition:opacity 0.3s;';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 300); }, 2500);
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeCtxMenu();
+    closeSkillCreator();
+    document.getElementById('skill-edit-drawer').style.display = 'none';
+    document.getElementById('ds-drawer').style.display = 'none';
+    closeDsAddMenu();
+  }
+});
+
+function selectVisCard(radio) {
+  var hidden = document.querySelector('label[for="vis-hidden-card"]');
+  var visible = document.getElementById('vis-visible-card');
+  document.querySelectorAll('[name="skill-visibility"]').forEach(function(r) {
+    var card = r.closest('label');
+    if (r.checked) {
+      card.style.borderColor = 'var(--indigo-300)';
+      card.style.background = 'var(--indigo-50)';
+    } else {
+      card.style.borderColor = 'var(--slate-200)';
+      card.style.background = 'white';
+    }
+  });
+}
+// attach to hidden radio too
+document.querySelectorAll('[name="skill-visibility"]').forEach(function(r) {
+  r.addEventListener('change', function() { selectVisCard(r); });
+});
+
+// ---- Destructive skill confirm ----
+var destructiveTargetBtn = null;
+function openDestructiveConfirm(skillName, sideEffect) {
+  document.getElementById('destruct-modal-title').textContent = 'Enable destructive action: ' + skillName;
+  document.getElementById('destruct-modal-body').textContent = skillName + ' ' + sideEffect + '. Are you sure?';
+  document.getElementById('destruct-modal-overlay').classList.add('open');
+}
+function closeDestructiveConfirm() {
+  document.getElementById('destruct-modal-overlay').classList.remove('open');
+}
+function confirmDestructiveEnable() {
+  closeDestructiveConfirm();
+  // In prototype: just close modal -- in production would enable the skill
+  alert('Skill enabled. In production this would add it to the Enabled section with a Destructive badge.');
+}
+</script>
+</body>
+</html>

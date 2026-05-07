@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Manage Org (OrgSettingsPage)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  padding: 24px; max-width: 1400px; margin: 0 auto;
+}
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-tabs-wrap {
+  display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px;
+}
+.mini-tab {
+  padding: 5px 10px; font-size: 11px; color: var(--slate-500); cursor: default;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mini-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 10px; min-width: 80px; }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.admin-section {
+  border: 1px solid var(--amber-200); background: var(--amber-50); border-radius: 4px;
+  padding: 6px 8px; margin: 6px 0;
+}
+.admin-section .hdr {
+  font-size: 9px; font-weight: 700; color: var(--amber-700); text-transform: uppercase; margin-bottom: 4px;
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  border-radius: 12px; padding: 2px 8px; font-size: 10px; font-weight: 500; margin: 2px;
+}
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.impact-table th { background: var(--slate-50); padding: 6px 10px; font-weight: 600; text-align: left; border: 1px solid var(--border); color: var(--slate-600); }
+.impact-table td { padding: 6px 10px; border: 1px solid var(--border); color: var(--slate-700); }
+.impact-table tr:nth-child(even) td { background: var(--slate-50); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>CURRENT STATE</span>
+  <span style="font-weight:400;">OrgSettingsPage (multi-tab, imports 5 sub-pages) replaced by Manage Org</span>
+  <a href="manage-org.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- OrgSettingsPage: General tab (admin only) -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      OrgSettingsPage: General tab
+      <span class="route">/org-settings?tab=general (admin only)</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Org settings</h3>
+        <span class="badge badge-amber" style="font-size:9px">Admin only</span>
+      </div>
+      <div class="mini-tabs-wrap">
+        <div class="mini-tab active">General</div>
+        <div class="mini-tab">Board</div>
+        <div class="mini-tab">Categories</div>
+        <div class="mini-tab">Engines</div>
+        <div class="mini-tab">Memory</div>
+        <div class="mini-tab">Integrations</div>
+        <div class="mini-tab">Permissions</div>
+      </div>
+      <div class="admin-section">
+        <div class="hdr">System admin fields</div>
+        <div class="mini-row"><span class="label">Org name</span><input style="border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;flex:1" value="Acme Automation Co" readonly></div>
+        <div class="mini-row"><span class="label">Plan</span><input style="border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;flex:1" value="Enterprise" readonly></div>
+        <div class="mini-row"><span class="label">Status</span><input style="border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;flex:1" value="Active" readonly></div>
+      </div>
+      <div class="mini-row"><span class="label">Timezone</span><input style="border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;flex:1" value="America/New_York" readonly></div>
+      <div class="mini-row"><span class="label">Currency</span><input style="border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;flex:1" value="USD" readonly></div>
+      <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+        <span class="mini-btn mini-btn-primary">Save changes</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- OrgSettingsPage: Board + Categories tabs -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      OrgSettingsPage: Board and Categories tabs
+      <span class="route">/org-settings?tab=board | categories</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Org settings</h3>
+      </div>
+      <div class="mini-tabs-wrap">
+        <div class="mini-tab active">Board</div>
+        <div class="mini-tab">Categories</div>
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+      </div>
+      <div style="font-size:10px;color:var(--slate-500);margin-bottom:6px;">Renders AdminBoardConfigPage inline</div>
+      <div class="mini-section-hdr">Board columns</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">
+        <span class="chip" style="background:#ede9fe;color:#5b21b6;">New</span>
+        <span class="chip" style="background:#dbeafe;color:#1e40af;">In progress</span>
+        <span class="chip" style="background:#d1fae5;color:#065f46;">Review</span>
+        <span class="chip" style="background:#fef3c7;color:#92400e;">On hold</span>
+        <span class="chip" style="background:#f1f5f9;color:#475569;">Done</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">+ Add column</span>
+      </div>
+      <div class="mini-section-hdr">Categories (AdminCategoriesPage)</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <span class="chip" style="background:#fee2e2;color:#991b1b;">Marketing</span>
+        <span class="chip" style="background:#fce7f3;color:#9d174d;">Sales</span>
+        <span class="chip" style="background:#dbeafe;color:#1e40af;">Operations</span>
+        <span class="chip" style="background:#d1fae5;color:#065f46;">Finance</span>
+        <span class="chip" style="background:#e0e7ff;color:#3730a3;">HR</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">+ Add</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- OrgSettingsPage: Engines tab -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      OrgSettingsPage: Engines tab
+      <span class="route">/org-settings?tab=engines</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Org settings</h3>
+      </div>
+      <div class="mini-tabs-wrap">
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+        <div class="mini-tab active">Engines</div>
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+      </div>
+      <div style="font-size:10px;color:var(--slate-500);margin-bottom:6px;">Renders AdminEnginesPage inline</div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">n8n</span>
+        <span class="badge badge-green" style="font-size:9px">Connected</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">Make (Integromat)</span>
+        <span class="badge badge-green" style="font-size:9px">Connected</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">Zapier</span>
+        <span class="badge badge-slate" style="font-size:9px">Not connected</span>
+        <span class="mini-btn mini-btn-primary" style="font-size:9px">Connect</span>
+      </div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">Custom webhook</span>
+        <span class="badge badge-green" style="font-size:9px">Connected</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- OrgSettingsPage: Memory tab -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      OrgSettingsPage: Memory tab
+      <span class="route">/org-settings?tab=memory</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Org settings</h3>
+      </div>
+      <div class="mini-tabs-wrap">
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+        <div class="mini-tab active">Memory</div>
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+      </div>
+      <div style="background:var(--amber-50);border:1px solid var(--amber-200);border-radius:4px;padding:6px;font-size:10px;color:var(--amber-700);margin-bottom:8px;">
+        Renders OrgMemoryPage (same as Knowledge nav item) inline inside Org Settings. Creates a duplicate surface.
+      </div>
+      <div class="mini-section-hdr">Org-level memory summary</div>
+      <div class="mini-row"><span class="label">Total entries</span><span>1,240</span></div>
+      <div class="mini-row"><span class="label">Memory blocks</span><span>48</span></div>
+      <div class="mini-row"><span class="label">Last regen</span><span>2h ago</span></div>
+      <div class="mini-section-hdr">Retention settings</div>
+      <div class="mini-row"><span class="label">TTL (days)</span><input style="border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;width:50px;" value="90" readonly></div>
+      <div style="margin-top:6px;font-size:10px;color:var(--slate-500);">Note: this is the same data as Knowledge page. Redundant surface.</div>
+    </div>
+  </div>
+
+  <!-- OrgSettingsPage: Integrations tab -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      OrgSettingsPage: Integrations tab
+      <span class="route">/org-settings?tab=integrations</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Org settings</h3>
+      </div>
+      <div class="mini-tabs-wrap">
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+        <div class="mini-tab active">Integrations</div>
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+      </div>
+      <div style="background:var(--amber-50);border:1px solid var(--amber-200);border-radius:4px;padding:6px;font-size:10px;color:var(--amber-700);margin-bottom:8px;">
+        Renders IntegrationsAndCredentialsPage inline inside Org Settings. Same as Connections nav item. Duplicate surface.
+      </div>
+      <div class="mini-row">
+        <div style="width:20px;height:20px;background:var(--slate-100);border-radius:3px;font-size:9px;display:flex;align-items:center;justify-content:center;color:var(--slate-500)">GM</div>
+        <span style="flex:1">Gmail SMTP</span>
+        <span class="badge badge-green" style="font-size:9px">Valid</span>
+      </div>
+      <div class="mini-row">
+        <div style="width:20px;height:20px;background:var(--slate-100);border-radius:3px;font-size:9px;display:flex;align-items:center;justify-content:center;color:var(--slate-500)">SF</div>
+        <span style="flex:1">Salesforce</span>
+        <span class="badge badge-green" style="font-size:9px">Valid</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- OrgSettingsPage: Permissions tab (admin only) -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      OrgSettingsPage: Permissions tab
+      <span class="route">/org-settings?tab=permissions (admin only)</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Org settings</h3>
+        <span class="badge badge-amber" style="font-size:9px">Admin only</span>
+      </div>
+      <div class="mini-tabs-wrap">
+        <div class="mini-tab" style="color:var(--slate-300)">...</div>
+        <div class="mini-tab active">Permissions</div>
+      </div>
+      <div class="mini-section-hdr">Permission sets</div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">Operator</span>
+        <span class="badge badge-slate" style="font-size:9px">Default</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">Viewer</span>
+        <span class="badge badge-slate" style="font-size:9px">Default</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit</span>
+      </div>
+      <div class="mini-row">
+        <span style="flex:1;font-weight:600">Admin</span>
+        <span class="badge badge-indigo" style="font-size:9px">System</span>
+        <span class="mini-btn mini-btn-secondary" style="font-size:9px">View</span>
+      </div>
+      <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+        <span class="mini-btn mini-btn-primary">New permission set</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav-impact">
+  <h3>Tab-to-tab duplicate mapping in OrgSettingsPage</h3>
+  <table class="impact-table">
+    <thead>
+      <tr>
+        <th>OrgSettingsPage tab</th>
+        <th>Imported component</th>
+        <th>Also exists as</th>
+        <th>Action in Manage Org</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>General</td>
+        <td>Inline fields</td>
+        <td>No duplicate</td>
+        <td>Kept as General tab (admin-bordered fields)</td>
+      </tr>
+      <tr>
+        <td>Board</td>
+        <td>AdminBoardConfigPage</td>
+        <td>No duplicate</td>
+        <td>Board Templates tab</td>
+      </tr>
+      <tr>
+        <td>Categories</td>
+        <td>AdminCategoriesPage</td>
+        <td>No duplicate</td>
+        <td>Tags tab (renamed for operator clarity)</td>
+      </tr>
+      <tr>
+        <td>Engines</td>
+        <td>AdminEnginesPage</td>
+        <td>No duplicate</td>
+        <td>Engines tab</td>
+      </tr>
+      <tr>
+        <td>Memory</td>
+        <td>OrgMemoryPage</td>
+        <td>Knowledge nav item (same data)</td>
+        <td>Removed from Manage Org. Nav item links to Knowledge.</td>
+      </tr>
+      <tr>
+        <td>Integrations</td>
+        <td>IntegrationsAndCredentialsPage</td>
+        <td>Connections nav item (same data)</td>
+        <td>Removed from Manage Org. Nav item links to Connections.</td>
+      </tr>
+      <tr>
+        <td>Permissions</td>
+        <td>Inline</td>
+        <td>No duplicate</td>
+        <td>Permission Sets tab</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
+    The Memory and Integrations tabs in OrgSettingsPage render entire pages that already have dedicated nav items. Manage Org removes these duplicate tabs and replaces them with descriptive links to the standalone pages. This removes 2 duplicate surfaces without losing functionality.
+  </p>
+</div>
+
+</body>
+</html>

@@ -20,7 +20,9 @@ This file replaces ~10 duplicated copies of the same rule across the agent fleet
 - `npm run lint`.
 - `npm run typecheck` (or the dual-tsconfig form per `replit.md`).
 - `npm run build:server` / `npm run build:client` when the change touches the build surface.
-- **Targeted execution of unit tests authored for THIS change** — a single test file via `npx tsx <path-to-test>`. Confirm the new test runs and passes. Not to re-run anything else.
+- **Targeted execution of unit tests authored for THIS change** — a single test file via `npx vitest run <path-to-test>`. Confirm the new test runs and passes. Not to re-run anything else.
+
+**Runner: Vitest 2.x.** Unit tests live at `**/__tests__/*.test.ts`, import `test`/`expect` from `vitest`, and run via `npx vitest run <path>`. Do NOT author tests with `node:test`, `node:assert`, handwritten harnesses, `process.exit` exit-codes, or `npx tsx`-runnable shapes — `scripts/verify-test-quality.sh` rejects them and CI will fail the PR. See `docs/testing-conventions.md` for the canonical pattern. The one carve-out: `scripts/__tests__/*.test.ts` are script-helper checks (not unit tests) and run via `npx tsx` per `scripts/README.md`.
 
 Authoring tests and gates is encouraged. Running the full battery of them locally is not. CI handles that.
 
