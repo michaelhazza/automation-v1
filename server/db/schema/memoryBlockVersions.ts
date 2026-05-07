@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, timestamp, index, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, index, unique, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { memoryBlocks } from './memoryBlocks';
 
 /**
@@ -26,6 +27,10 @@ export const memoryBlockVersions = pgTable(
       'manual_edit' | 'seed' | 'reset_to_canonical' | 'auto_synthesis' | 'workflow_upsert'
     >(),
     notes: text('notes'),
+    // Consolidation C — Govern (migration 0286, spec §6) — SHA-256 of override
+    // body. Drives key-based idempotency via partial unique index below. Nullable
+    // so legacy rows are non-blocking; new override rows always populate it.
+    bodyHash: text('body_hash'),
   },
   (table) => ({
     blockVersionUniq: unique('memory_block_versions_block_version_uq').on(
@@ -36,6 +41,9 @@ export const memoryBlockVersions = pgTable(
       table.memoryBlockId,
       table.version,
     ),
+    blockBodyHashUniq: uniqueIndex('memory_block_versions_block_body_hash_uq')
+      .on(table.memoryBlockId, table.bodyHash)
+      .where(sql`${table.bodyHash} IS NOT NULL`),
   }),
 );
 
