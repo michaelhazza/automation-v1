@@ -91,7 +91,7 @@ Final verdict: APPROVED with tightenings. No blockers. Apply red items before bu
 | F7 — Type sidebar `to` field with AppRoute union / central route map | technical | apply | auto (apply) | medium | Internal type tightening; no runtime behaviour change. Adds compile-time safety for A/B/C nav edits. |
 | F8 — FormFooter spacing contract via PageShell bottomPadding (Option A) | technical | apply | auto (apply) | medium | Internal layout contract; explicit at page level prevents forgotten bottom-padding UX bug. |
 | F9 — Namespace persistKey as `table:${persistKey}` in localStorage | technical | apply | auto (apply) | low | Internal localStorage key prefix; prevents cross-component collisions. |
-| F10 — Formalize /dev/primitives playground route in §5/§7 | technical | defer | defer | low | Spec already permits an optional dev demo (§7 C3); formalizing the route expands Phase 0 scope. Defer routed to tasks/todo.md so it can be reconsidered if A/B/C iteration friction becomes real. ESCALATED per defer carveout. |
+| F10 — Formalize /dev/primitives playground route in §5/§7 | technical | defer | user (defer, as recommended) | low | Spec already permits an optional dev demo (§7 C3); formalizing the route expands Phase 0 scope. Routed to tasks/todo.md at finalisation so it can be reconsidered if A/B/C iteration friction becomes real. ESCALATED per defer carveout; operator confirmed "as recommended". |
 | F11 — Extract deterministic colorHash util to client/src/lib/colorHash.ts | technical | apply | auto (apply) | low | Reusable util extraction; no behaviour change. Pre-empts duplication. |
 | F12 — PageShell explicit max-width default (1280px) | technical | apply | auto (apply) | low | Locks default; prevents A/B/C consumers picking divergent widths. |
 
