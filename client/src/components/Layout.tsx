@@ -607,7 +607,6 @@ export default function Layout({ user, children }: LayoutProps) {
     hasOrgContext,
     hasAnyOrgPerm,
     activeClientId,
-    activeClientName,
     hasOrgPerm,
     hasClientPerm,
     hasSidebarItem,
@@ -646,6 +645,7 @@ export default function Layout({ user, children }: LayoutProps) {
       if (spec.key === 'new-task') {
         return (
           <button
+            type="button"
             key={spec.key}
             onClick={spec.onClick}
             className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
@@ -659,6 +659,7 @@ export default function Layout({ user, children }: LayoutProps) {
       if (spec.key === 'sign-out') {
         return (
           <button
+            type="button"
             key={spec.key}
             onClick={spec.onClick}
             className="flex items-center gap-[9px] px-3 py-[7px] w-[calc(100%-12px)] mx-1.5 my-px border-none cursor-pointer rounded-[7px] bg-transparent text-slate-600 text-[13px] font-medium [font-family:inherit] transition-[color,background] duration-100 hover:text-slate-100 hover:bg-white/[0.04]"
@@ -696,7 +697,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
   /** Resolve an iconKey string to the appropriate React node. */
   function resolveIcon(iconKey: string | undefined): React.ReactNode {
-    if (!iconKey) return <Icons.inbox />;
+    if (!iconKey) return null;
     if (iconKey.startsWith('emoji:')) {
       const emoji = iconKey.slice('emoji:'.length);
       return <span className="text-[13px] shrink-0 leading-none">{emoji}</span>;
@@ -705,8 +706,14 @@ export default function Layout({ user, children }: LayoutProps) {
       const color = iconKey.slice('project-dot:'.length);
       return <span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: color }} />;
     }
-    const icon = Icons[iconKey as keyof typeof Icons];
-    return icon ? icon() : <Icons.inbox />;
+    const icon = (Icons as Record<string, () => React.ReactNode>)[iconKey];
+    if (!icon) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('resolveIcon: unknown icon key', iconKey);
+      }
+      return null;
+    }
+    return icon();
   }
 
   return (

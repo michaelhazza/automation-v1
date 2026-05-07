@@ -10,7 +10,6 @@
 // Reordering this union (or sorting the output by anything other than this
 // sequence) is a visual regression.
 
-import type { ReactNode } from 'react';
 import { buildRoute, staticRoute } from './routes.js';
 import type { AppRoute } from './routes.js';
 
@@ -37,9 +36,6 @@ export interface NavItemSpec {
   exact?: boolean;
   manageTo?: AppRoute;
   onClick?: () => void;
-  permission?: string;
-  viewModes?: ReadonlyArray<'workspace' | 'org' | 'system'>;
-  iconNode?: ReactNode;
 }
 
 export interface NavContext {
@@ -47,7 +43,6 @@ export interface NavContext {
   hasOrgContext: boolean;
   hasAnyOrgPerm: boolean;
   activeClientId: string | null;
-  activeClientName: string | null;
   hasOrgPerm: (key: string) => boolean;
   hasClientPerm: (key: string) => boolean;
   hasSidebarItem: (slug: string) => boolean;
@@ -73,7 +68,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   const {
     isSystemAdmin, hasOrgContext, hasAnyOrgPerm,
     activeClientId, hasOrgPerm, hasClientPerm, hasSidebarItem,
-    navProjects, navAgents,
+    viewMode, navProjects, navAgents,
     reviewCount, liveAgentCount, incidentCount,
     onCreateProject, onCreateAgent, onOpenNewBrief, onLogout,
     onOpenConfigAssistant,
@@ -115,7 +110,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   }
 
   // ── work group — only in workspace mode ─────────────────────────────────
-  if (hasOrgContext && activeClientId && ctx.viewMode === 'workspace') {
+  if (hasOrgContext && activeClientId && viewMode === 'workspace') {
     items.push({ group: 'work', kind: 'section-header', key: 'work-header', label: 'Work' });
 
     if (hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) {
@@ -201,7 +196,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   }
 
   // ── projects group — only in workspace mode ──────────────────────────────
-  if (hasOrgContext && activeClientId && ctx.viewMode === 'workspace') {
+  if (hasOrgContext && activeClientId && viewMode === 'workspace') {
     items.push({
       group: 'projects',
       kind: 'section-header',
@@ -226,7 +221,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   }
 
   // ── agents group — only in workspace mode ────────────────────────────────
-  if (hasOrgContext && activeClientId && ctx.viewMode === 'workspace') {
+  if (hasOrgContext && activeClientId && viewMode === 'workspace') {
     items.push({
       group: 'agents',
       kind: 'section-header',
@@ -254,7 +249,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   }
 
   // ── company group — only in workspace mode ───────────────────────────────
-  if (hasOrgContext && activeClientId && ctx.viewMode === 'workspace') {
+  if (hasOrgContext && activeClientId && viewMode === 'workspace') {
     items.push({ group: 'company', kind: 'section-header', key: 'company-header', label: 'Company' });
 
     if (hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) {

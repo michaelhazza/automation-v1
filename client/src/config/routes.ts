@@ -82,12 +82,11 @@ export function buildRoute<P extends AppRoutePattern>(
   let out: string = pattern;
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      out = out.replace(`:${k}`, encodeURIComponent(v));
+      out = out.replace(new RegExp(`:${k}(?![A-Za-z0-9_])`, 'g'), encodeURIComponent(v));
     }
   }
   // Dev-only guard: surface unresolved `:param` segments early.
   if (process.env.NODE_ENV !== 'production' && /(?:^|\/):[A-Za-z_][A-Za-z0-9_]*/.test(out)) {
-    // eslint-disable-next-line no-console
     console.warn('buildRoute: unresolved params in pattern', { pattern, params, result: out });
   }
   return out as AppRoute;

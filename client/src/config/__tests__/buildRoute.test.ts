@@ -52,6 +52,30 @@ import { buildRoute, staticRoute } from '../routes.js';
   assert.equal(result, '/', 'pattern with no params passes through unchanged');
 }
 
+// Duplicate occurrences of the same param are all replaced (global flag)
+// We test this by using a pattern that repeats the same :id segment.
+// Note: no such pattern exists in APP_ROUTE_PATTERNS, but the function
+// must handle it correctly to be safe for future patterns.
+{
+  // Manually call buildRoute with a pattern that has two :id segments.
+  // We cast to satisfy the type; the runtime behaviour is what we are testing.
+  const result = buildRoute('/a/:id/b/:id' as Parameters<typeof buildRoute>[0], { id: 'x' });
+  assert.equal(result, '/a/x/b/x', 'duplicate param occurrences are all substituted');
+}
+
+// Negative lookahead: :id must not match the start of :idFoo
+{
+  const result = buildRoute(
+    '/admin/subaccounts/:subaccountId/agents/:agentSubaccountId/manage' as Parameters<typeof buildRoute>[0],
+    { subaccountId: 'sub-1', agentSubaccountId: 'agent-99' },
+  );
+  assert.equal(
+    result,
+    '/admin/subaccounts/sub-1/agents/agent-99/manage',
+    'negative lookahead prevents :subaccountId from matching inside :agentSubaccountId',
+  );
+}
+
 // ── staticRoute ───────────────────────────────────────────────────────────
 
 {

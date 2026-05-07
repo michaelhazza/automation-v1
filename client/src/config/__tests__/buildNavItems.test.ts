@@ -17,7 +17,6 @@ function baseCtx(overrides: Partial<NavContext> = {}): NavContext {
     hasOrgContext: false,
     hasAnyOrgPerm: false,
     activeClientId: null,
-    activeClientName: null,
     hasOrgPerm: () => false,
     hasClientPerm: () => false,
     hasSidebarItem: () => false,
@@ -152,6 +151,68 @@ function groups(ctx: NavContext) {
     false,
     'viewMode=org with activeClientId: agents group suppressed',
   );
+}
+
+// ── Test 6: empty-hint emitted when navProjects/navAgents are empty ──────
+{
+  const ctx = baseCtx({
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-789',
+    viewMode: 'workspace',
+    hasOrgPerm: () => true,
+    hasClientPerm: () => true,
+    hasSidebarItem: () => true,
+    navProjects: [],
+    navAgents: [],
+  });
+  const items = buildNavItems(ctx);
+  const projectsEmpty = items.find((i) => i.key === 'projects-empty');
+  const agentsEmpty = items.find((i) => i.key === 'agents-empty');
+  assert.ok(projectsEmpty, 'empty navProjects emits projects-empty hint');
+  assert.equal(projectsEmpty?.kind, 'empty-hint', 'projects-empty has kind empty-hint');
+  assert.ok(agentsEmpty, 'empty navAgents emits agents-empty hint');
+  assert.equal(agentsEmpty?.kind, 'empty-hint', 'agents-empty has kind empty-hint');
+}
+
+// ── Test 7: group emission order matches canonical sequence ───────────────
+// With a fully-populated non-system-admin context in workspace mode, the
+// groups should appear in order: top → work → projects → agents → company
+// → clientpulse → organisation → footer  (no platform group — not sysadmin).
+{
+  const ctx = baseCtx({
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-order',
+    viewMode: 'workspace',
+    hasOrgPerm: () => true,
+    hasClientPerm: () => true,
+    hasSidebarItem: () => true,
+    navProjects: [{ id: 'p1', name: 'P1', color: '#f00', status: 'active' }],
+    navAgents: [{ id: 'a1', agentId: 'ag1', name: 'A1', icon: null }],
+    liveAgentCount: 1,
+  });
+  const items = buildNavItems(ctx);
+
+  // Build the ordered unique group sequence from the output.
+  const seen: string[] = [];
+  for (const item of items) {
+    if (seen.length === 0 || seen[seen.length - 1] !== item.group) {
+      seen.push(item.group);
+    }
+  }
+
+  const expectedOrder = ['top', 'work', 'projects', 'agents', 'company', 'clientpulse', 'organisation', 'footer'];
+  // Every expected group must appear and in order (some may be missing if perms don't apply,
+  // but no group may appear BEFORE an earlier group in the canonical sequence).
+  let lastIdx = -1;
+  for (const group of seen) {
+    const idx = expectedOrder.indexOf(group);
+    assert.ok(idx !== -1, `group '${group}' is in the canonical order list`);
+    assert.ok(idx > lastIdx, `group '${group}' appears after all earlier groups (lastIdx=${lastIdx})`);
+    lastIdx = idx;
+  }
+  assert.ok(!seen.includes('platform'), 'non-sysadmin: platform group absent');
 }
 
 console.log('buildNavItems: all tests passed');
