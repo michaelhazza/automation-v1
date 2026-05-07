@@ -1,10 +1,8 @@
 import React from 'react';
-import type { AgentFull, TriggerBindingPayload } from '../../../../../../shared/types/build';
+import type { AgentFull } from '../../../../../../shared/types/build';
 
 interface ScheduleTabProps {
   data: AgentFull['triggers'];
-  onChange: (triggers: TriggerBindingPayload[]) => void;
-  pending: TriggerBindingPayload[] | undefined;
   agentId: string;
   readOnly: boolean;
 }

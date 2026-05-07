@@ -45,6 +45,10 @@ export interface AgentFull {
   triggers: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>;
   budget: { dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number };
   runs: { last5: AgentRunPreview[]; total30d: number; cost30d: number };
+  /** Minimum 1. Agents with no revision history return 1 (not 0). */
+  agentRevisionCount: number;
+  lastRevisionEditedAt: string | null;
+  lastRevisionAuthor: string | null;
 }
 
 export interface AgentPersonality {

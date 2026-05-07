@@ -64,6 +64,10 @@ export interface AgentFull {
   triggers: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>;
   budget: { dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number };
   runs: { last5: AgentRunPreview[]; total30d: number; cost30d: number };
+  /** Minimum 1. Agents with no revision history return 1 (not 0). */
+  agentRevisionCount: number;
+  lastRevisionEditedAt: string | null;
+  lastRevisionAuthor: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1915,6 +1919,27 @@ export const agentService = {
       warnThresholdPct: 0,
     };
 
+    // ── Revision stats ────────────────────────────────────────────────────────
+    const revisionStats = await db
+      .select({
+        count: drizzleSql<number>`COUNT(*)::int`,
+        lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
+        lastAuthorId: drizzleSql<string>`(ARRAY_AGG(${agentPromptRevisions.changedBy} ORDER BY ${agentPromptRevisions.createdAt} DESC))[1]`,
+      })
+      .from(agentPromptRevisions)
+      .where(and(eq(agentPromptRevisions.agentId, agentId), eq(agentPromptRevisions.organisationId, orgId)));
+
+    const revStat = revisionStats[0];
+    let revisionAuthor: string | null = null;
+    if (revStat?.lastAuthorId) {
+      const authorRows = await db
+        .select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users)
+        .where(eq(users.id, revStat.lastAuthorId))
+        .limit(1);
+      revisionAuthor = authorRows.map(u => `${u.firstName} ${u.lastName}`.trim())[0] ?? null;
+    }
+
     // ── Personality ───────────────────────────────────────────────────────────
     const rawPersonality = (rawAgent as unknown as { personality?: unknown }).personality;
     const personality: AgentPersonality = rawPersonality && typeof rawPersonality === 'object'
@@ -1982,6 +2007,9 @@ export const agentService = {
         total30d: Number(stats30d?.total ?? 0),
         cost30d: Number(stats30d?.costUsd ?? 0),
       },
+      agentRevisionCount: revStat?.count ?? 1,
+      lastRevisionEditedAt: revStat?.lastEditedAt ?? null,
+      lastRevisionAuthor: revisionAuthor,
     };
   },
 

@@ -1,15 +1,13 @@
 import React from 'react';
-import type { AgentFull, AgentBudgetPatch } from '../../../../../../shared/types/build';
+import type { AgentFull } from '../../../../../../shared/types/build';
 
 interface BudgetTabProps {
   data: AgentFull['budget'];
-  onChange: (patch: AgentBudgetPatch) => void;
-  pending: AgentBudgetPatch | undefined;
   readOnly: boolean;
 }
 
-export default function BudgetTab({ data, pending, readOnly: _readOnly }: BudgetTabProps) {
-  const merged = { ...data, ...pending };
+export default function BudgetTab({ data, readOnly: _readOnly }: BudgetTabProps) {
+  const merged = { ...data };
 
   return (
     <div className="space-y-5 max-w-2xl">

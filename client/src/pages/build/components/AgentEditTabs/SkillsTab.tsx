@@ -8,6 +8,7 @@ interface SkillsTabProps {
   pending: SkillBindingPayload[] | undefined;
   agentId: string;
   readOnly: boolean;
+  isOrgAdmin: boolean;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -15,7 +16,7 @@ const STATUS_STYLES: Record<string, string> = {
   disabled: 'bg-slate-100 text-slate-500',
 };
 
-export default function SkillsTab({ data, onChange, pending, agentId: _agentId, readOnly }: SkillsTabProps) {
+export default function SkillsTab({ data, onChange, pending, agentId: _agentId, readOnly, isOrgAdmin }: SkillsTabProps) {
   const [showPicker, setShowPicker] = useState(false);
 
   // Use pending if set, else fall back to server data
@@ -67,7 +68,7 @@ export default function SkillsTab({ data, onChange, pending, agentId: _agentId, 
               <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLES[skill.status ?? 'enabled']}`}>
                 {skill.status ?? 'enabled'}
               </span>
-              {!readOnly && (
+              {!readOnly && isOrgAdmin && (
                 <button
                   className="text-xs text-red-500 hover:text-red-700 ml-2 flex-shrink-0"
                   onClick={() => handleRemove(skill.id)}

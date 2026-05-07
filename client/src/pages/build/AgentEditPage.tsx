@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { buildApi, EtagMismatchError } from '../../lib/api/build';
+import api from '../../lib/api';
+import { getUserRole } from '../../lib/auth';
 import { PageShell } from '../../components/PageShell';
 import { FormFooter } from '../../components/FormFooter';
 import type {
@@ -64,9 +66,13 @@ export default function AgentEditPage() {
 
   const [pendingPatches, setPendingPatches] = useState<TabPatchMap>({});
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [etagMismatch, setEtagMismatch] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const userRole = getUserRole();
+  const isOrgAdmin = userRole === 'admin' || userRole === 'system_admin';
 
   const loadAgent = useCallback(async () => {
     if (!id) return;
@@ -153,10 +159,10 @@ export default function AgentEditPage() {
   const handleDeleteConfirm = useCallback(async () => {
     if (!id) return;
     try {
-      await (import('../../lib/api').then(m => m.default.delete(`/api/agents/${id}`)));
+      await api.delete(`/api/agents/${id}`);
       navigate('/build/agents');
     } catch {
-      // Swallow; user stays on page
+      setDeleteError('Failed to delete agent. Please try again.');
     }
   }, [id, navigate]);
 
@@ -183,7 +189,11 @@ export default function AgentEditPage() {
       header={
         <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100">
           <h1 className="text-lg font-semibold text-slate-800 truncate">{data.configure.name}</h1>
-          <AgentVersionChip count={0} editedAt={null} author={null} />
+          <AgentVersionChip
+            count={data.agentRevisionCount}
+            editedAt={data.lastRevisionEditedAt}
+            author={data.lastRevisionAuthor}
+          />
           {isReadOnly && (
             <span className="text-xs text-slate-500 ml-2">System agent (read-only)</span>
           )}
@@ -193,7 +203,7 @@ export default function AgentEditPage() {
     >
       {/* ETag mismatch banner */}
       {etagMismatch && (
-        <div className="m-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-sm">
+        <div role="alert" className="m-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-sm">
           <span className="text-amber-700">
             This agent was changed by someone else. Reload to get the latest version.
           </span>
@@ -205,10 +215,19 @@ export default function AgentEditPage() {
           </button>
           <button
             onClick={() => setEtagMismatch(false)}
+            aria-label="Dismiss conflict warning"
             className="btn btn-ghost text-xs ml-auto"
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {/* Delete error banner */}
+      {deleteError && (
+        <div role="alert" className="m-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center">
+          {deleteError}
+          <button onClick={() => setDeleteError(null)} className="ml-auto text-xs underline">Dismiss</button>
         </div>
       )}
 
@@ -270,6 +289,7 @@ export default function AgentEditPage() {
             pending={pendingPatches.skills}
             agentId={id!}
             readOnly={isReadOnly}
+            isOrgAdmin={isOrgAdmin}
           />
         )}
         {activeTab === 'data-sources' && (
@@ -284,18 +304,14 @@ export default function AgentEditPage() {
         {activeTab === 'schedule' && (
           <ScheduleTab
             data={data.triggers}
-            onChange={p => patchTab('schedule', p)}
-            pending={pendingPatches.schedule}
             agentId={id!}
-            readOnly={isReadOnly}
+            readOnly={true}
           />
         )}
         {activeTab === 'budget' && (
           <BudgetTab
             data={data.budget}
-            onChange={p => patchTab('budget', p)}
-            pending={pendingPatches.budget}
-            readOnly={isReadOnly}
+            readOnly={true}
           />
         )}
         {activeTab === 'runs' && (
@@ -320,12 +336,14 @@ export default function AgentEditPage() {
           >
             {saving ? 'Saving...' : 'Save changes'}
           </button>
-          <button
-            onClick={() => setShowDeleteDialog(true)}
-            className="btn btn-danger ml-auto"
-          >
-            Delete agent
-          </button>
+          {isOrgAdmin && (
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="btn btn-danger ml-auto"
+            >
+              Delete agent
+            </button>
+          )}
         </FormFooter>
       )}
 
