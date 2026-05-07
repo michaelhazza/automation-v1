@@ -107,7 +107,7 @@ interface ActivityListQuery {
 
 **Cursor invariant:**
 - Cursor encodes `(sortKeyValue, id)` — the sort always includes `id` as a deterministic tiebreaker (e.g. `ORDER BY createdAt DESC, id DESC`).
-- Cursor is invalidated if `sortKey`, `sortDir`, or any filter changes between requests. Server must ignore or reject a cursor whose encoded context does not match the current request parameters; on mismatch, respond as if `cursor` was absent (restart from page 1).
+- Cursor is invalidated if `sortKey`, `sortDir`, or any filter changes between requests. Server must **always ignore** a cursor whose encoded context does not match the current request parameters (never return an error for cursor mismatch); on mismatch, respond as if `cursor` was absent (restart from page 1). Uniform ignore-and-restart avoids client branching and keeps infinite-scroll UX smooth.
 
 **Sort stability:** every sort order must include `id` as a secondary key to prevent flickering rows across pages.
 
@@ -127,6 +127,8 @@ interface ActivityListResponse {
 ```
 
 **filterOptions count semantics (faceted search rule):** counts are computed against the full result set for the current `scope` and `q`, ignoring pagination but respecting all active filters *except* the dimension being counted. This prevents misleading zero-counts for a dimension the user is currently filtering on.
+
+**filterOptions scaling note:** if the result set for a scope exceeds ~50k rows, the implementation may use cached or approximate counts for filterOptions rather than re-running full aggregations per request. Cached counts should be refreshed on write or on a short TTL. This is not a Phase 1 requirement — note it here so a future "why is Activity slow?" diagnosis has a known fix path.
 
 interface ActivityItem {
   id: string;
@@ -249,6 +251,7 @@ Backend determines masking and emits the appropriate fields; the frontend never 
 - The exact mask token string is `"<redacted>"` — no other string, no `null`, no omission.
 - Masked fields must always be present in the response (never absent); the renderer must never need to branch on field presence.
 - Truncated fields (e.g. tool-call result first 200 chars) must include `truncated: true` alongside the value so the renderer can show a "truncated" indicator without inspecting string length.
+- **Masking takes precedence over truncation:** if a field is both masked and would be truncated, return `"<redacted>"` with no `truncated` flag. The `truncated` flag is only present when the field is visible but partial.
 
 ### 4.9 Activity / Run-trace event metadata depth
 

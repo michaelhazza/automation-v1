@@ -6,7 +6,7 @@
 - PR: #268 — https://github.com/michaelhazza/automation-v1/pull/268
 - Mode: manual
 - Started: 2026-05-07T08:00:00Z
-- **Verdict:** APPROVED (round 1, build-ready after tightenings applied)
+- **Verdict:** APPROVED — BUILD WITH CONFIDENCE (2 rounds; all findings applied)
 
 ---
 
@@ -82,6 +82,43 @@ ChatGPT confirmed these are correct decisions. No action required.
 None. All 10 findings accepted and applied.
 
 ### Post-round verdict
-All 6 tightenings applied cleanly. All 4 minor improvements accepted. ChatGPT verdict was APPROVE after fixes; no further round required.
+All 6 tightenings applied cleanly. All 4 minor improvements accepted. ChatGPT verdict was APPROVE after fixes.
 
-**Session verdict: APPROVED — build-ready.**
+---
+
+## Round 2 — 2026-05-07T08:30:00Z
+
+### ChatGPT Feedback (raw)
+
+Executive summary: clean, deterministic, build-ready. No blockers, no required changes. 3 micro-observations (optional, non-blocking).
+
+Verdict: APPROVED — BUILD WITH CONFIDENCE
+
+### Triage
+
+#### Micro 1 — Cursor invalidation: "ignore vs reject" ambiguity [ACCEPTED]
+**Finding:** "ignore or reject" allows mixed server behaviour; recommend always-ignore for UX smoothness.
+**Action:** Tightened §4.1 cursor invariant to "always ignore" (never error on mismatch); added rationale (avoids client branching, smooth infinite-scroll).
+**Rationale:** One-word change; eliminates a client-side branching requirement.
+
+#### Micro 2 — filterOptions performance guard [ACCEPTED]
+**Finding:** No guidance for large-dataset scenarios; faceted counts can become expensive at scale.
+**Action:** Added scaling note to §4.1 filterOptions block: if result set > ~50k rows, implementation may use cached/approximate counts with short TTL. Marked as not a Phase 1 requirement.
+**Rationale:** Non-prescriptive guard; prevents a future "why is Activity slow?" incident with a known fix path already in the spec.
+
+#### Micro 3 — Masking + truncation interaction [ACCEPTED]
+**Finding:** Edge case undefined: what if a field is both masked and would be truncated?
+**Action:** Added precedence rule to §4.8 redaction contract: masking takes precedence; `truncated: true` is not returned on masked fields.
+**Rationale:** One sentence; prevents a renderer edge-case branch.
+
+### Things called out as correct
+- "Frontend never decides masking. Backend is SoT." — confirmed production-grade design decision.
+- No spec gaps, no hidden race conditions, no pagination ambiguity, no masking inconsistencies.
+
+### Deferred Items
+None. All 3 micro-observations accepted and applied.
+
+### Post-round verdict
+All 3 micro-observations applied. ChatGPT verdict: APPROVED — BUILD WITH CONFIDENCE. No further spec rounds needed unless scope expands or another stream introduces shared coupling.
+
+**Session verdict: APPROVED — BUILD WITH CONFIDENCE.**
