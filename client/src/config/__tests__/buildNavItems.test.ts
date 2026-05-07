@@ -151,6 +151,7 @@ function groups(ctx: NavContext) {
     false,
     'viewMode=org with activeClientId: agents group suppressed',
   );
+  assert.equal(items.some(i => i.group === 'company'), false, 'viewMode=org with activeClientId: company group suppressed');
 }
 
 // ── Test 6: empty-hint emitted when navProjects/navAgents are empty ──────

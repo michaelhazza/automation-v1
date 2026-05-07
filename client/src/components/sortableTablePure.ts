@@ -36,6 +36,13 @@ export interface ColumnDef<Row> {
  *   'number'  — Number(a) - Number(b); NaN falls back to localeCompare(String(a), String(b)).
  *   'string'  — localeCompare with sensitivity:'base'.
  *
+ * Mixed-type inputs (spec "mixed types" semantic): when hint='number' and either value
+ * coerces to NaN (e.g. a string in a predominantly-numeric column), the NaN guard falls
+ * through to localeCompare(String(a), String(b), undefined, { sensitivity: 'base' }).
+ * This preserves the mixed-types ordering behaviour without requiring a separate 'mixed'
+ * hint — the NaN rescue path IS the mixed-types implementation. The hint union therefore
+ * has no 'mixed' member; callers pass 'number' and the rescue handles it automatically.
+ *
  * null / undefined handling: callers in applySortAndFilters handle null/undefined BEFORE
  * calling compareForSort, so this function should never receive them in practice. If it
  * does receive them, it treats them as the string 'null'/'undefined' — callers bear

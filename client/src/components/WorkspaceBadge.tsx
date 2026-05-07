@@ -30,7 +30,8 @@ function resolveColorStyle(colorName: string): { background: string; color: stri
 }
 
 function isOrgAdmin(): boolean {
-  return getUserRole() === 'org_admin';
+  const role = getUserRole();
+  return role === 'org_admin' || role === 'system_admin';
 }
 
 export function WorkspaceBadge({
@@ -58,7 +59,7 @@ export function WorkspaceBadge({
     return (
       <span
         style={{ color }}
-        title={label}
+        title={effectiveClickable ? `Switch to ${label} workspace` : label}
         onClick={effectiveClickable ? handleClick : undefined}
         role={effectiveClickable ? 'button' : undefined}
         tabIndex={effectiveClickable ? 0 : undefined}

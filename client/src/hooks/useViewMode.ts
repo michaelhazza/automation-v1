@@ -122,7 +122,7 @@ export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn {
       setTick((t) => t + 1);
       return true;
     },
-    [tick],
+    [],
   );
 
   return { viewMode, availableModes, setViewMode };
