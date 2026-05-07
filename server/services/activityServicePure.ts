@@ -4,6 +4,15 @@
  *
  * Task 1.3 — Activity service additive fields + deterministic sort tiebreaker
  * + partial-failure resilience.
+ *
+ * C1 (ui-consolidation-operate) — Activity API extension
+ * Adds: aggregateFilterOptions — faceted-search semantics per spec §4.1.
+ *
+ * INVARIANT (C1): filterOptions counts are computed from the FILTERED result set
+ * BEFORE pagination/cursor slicing. The aggregator runs over the already-RLS-filtered
+ * + cross-source-merged set — after each per-source fetcher has applied its tenancy/
+ * permission predicates and after the merge step has reconciled duplicates. It MUST NOT
+ * count rows directly off raw per-source fetches.
  */
 
 // ---------------------------------------------------------------------------
@@ -55,6 +64,9 @@ export function addNullAdditiveFields(): {
   triggeredByUserId: null;
   triggeredByUserName: null;
   triggerType: null;
+  /** C1 (ui-consolidation-operate): new spec name for triggerType. Emitted alongside
+   *  triggerType; triggerType deprecated and will be removed after consumers migrate. */
+  triggerSource: null;
   durationMs: null;
   runId: null;
 } {
@@ -62,6 +74,7 @@ export function addNullAdditiveFields(): {
     triggeredByUserId: null,
     triggeredByUserName: null,
     triggerType: null,
+    triggerSource: null,
     durationMs: null,
     runId: null,
   };
@@ -103,6 +116,137 @@ function idAsc(a: SortableItem, b: SortableItem): number {
   if (a.id < b.id) return -1;
   if (a.id > b.id) return 1;
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// FilterOptions aggregator — spec §4.1 faceted-search semantics
+//
+// INVARIANT (C1): When counting values for dimension D, ignore the active filter
+// on D but respect all other active filters. This means the counts for the `type`
+// facet ignore any active `type` filter, but still respect any active `actor`,
+// `subaccount`, `status`, `q`, and `scope` filters. The aggregator runs over the
+// FILTERED result set BEFORE pagination — it is called on the merged+filtered set
+// used to derive `items` for page 1, NOT on the post-cursor slice.
+// ---------------------------------------------------------------------------
+
+export type FilterOptionEntry = {
+  value: string;
+  label: string;
+  count: number;
+};
+
+export type FilterOptionsResult = {
+  type: FilterOptionEntry[];
+  status: FilterOptionEntry[];
+  actor: FilterOptionEntry[];
+  subaccount: FilterOptionEntry[];
+};
+
+/**
+ * Minimal shape required from an item for filter-option aggregation.
+ * A subset of ActivityItem — the aggregator does not need sort/severity fields.
+ */
+export type AggregableItem = {
+  id: string;
+  type: string;
+  status: string;
+  actor: string;
+  subaccountId: string | null;
+  subaccountName: string | null;
+  triggerType?: string | null;
+};
+
+export type AggregateFilters = {
+  type?: string[];
+  status?: string[];
+  actor?: string[];
+  subaccount?: string[];
+};
+
+/**
+ * Counts items by a key-extractor, returning entries sorted by count DESC then
+ * key ASC for stability.
+ */
+function countBy(items: AggregableItem[], key: (item: AggregableItem) => string): FilterOptionEntry[] {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const k = key(item);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([value, count]) => ({ value, label: value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+/**
+ * Apply every dimension filter EXCEPT the one named in `excludeDimension`.
+ * Used to implement faceted-search semantics: counts for dimension D are taken
+ * over items that pass all OTHER active dimension filters.
+ *
+ * Within each dimension, multiple selected values are OR'd.
+ * Across dimensions, conditions are AND'd.
+ */
+function applyFiltersExcluding(
+  items: AggregableItem[],
+  filters: AggregateFilters,
+  excludeDimension: keyof AggregateFilters,
+): AggregableItem[] {
+  return items.filter((item) => {
+    if (excludeDimension !== 'type' && filters.type?.length) {
+      if (!filters.type.includes(item.type)) return false;
+    }
+    if (excludeDimension !== 'status' && filters.status?.length) {
+      if (!filters.status.includes(item.status)) return false;
+    }
+    if (excludeDimension !== 'actor' && filters.actor?.length) {
+      if (!filters.actor.includes(item.actor)) return false;
+    }
+    if (excludeDimension !== 'subaccount' && filters.subaccount?.length) {
+      const sid = item.subaccountId ?? 'unknown';
+      if (!filters.subaccount.includes(sid)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * aggregateFilterOptions — compute spec §4.1 filterOptions from the merged,
+ * RLS-filtered, pre-pagination item set.
+ *
+ * INVARIANT (C1): Faceted-search semantics. Counts for dimension D are computed
+ * over the subset of items that pass ALL active filters EXCEPT the filter on D.
+ * This means the user always sees non-zero counts for their currently-selected
+ * values (they can un-select) and counts that reflect what they'd get if they
+ * changed only that one dimension.
+ *
+ * @param items  The merged, RLS-filtered, pre-pagination item set.
+ * @param activeFilters  The dimension filters currently in effect (type, status, actor, subaccount).
+ */
+export function aggregateFilterOptions(
+  items: AggregableItem[],
+  activeFilters: AggregateFilters,
+): FilterOptionsResult {
+  const forType = applyFiltersExcluding(items, activeFilters, 'type');
+  const forStatus = applyFiltersExcluding(items, activeFilters, 'status');
+  const forActor = applyFiltersExcluding(items, activeFilters, 'actor');
+  const forSubaccount = applyFiltersExcluding(items, activeFilters, 'subaccount');
+
+  return {
+    type: countBy(forType, (i) => i.type),
+    status: countBy(forStatus, (i) => i.status),
+    actor: countBy(forActor, (i) => i.actor),
+    subaccount: countBy(forSubaccount, (i) => {
+      // Resolve subaccount identifier: prefer ID, fall back to 'unknown'
+      return i.subaccountId ?? 'unknown';
+    }).map((entry) => {
+      // Resolve a human-readable label: find the first item matching this subaccountId
+      const match = forSubaccount.find((i) => (i.subaccountId ?? 'unknown') === entry.value);
+      return {
+        ...entry,
+        label: match?.subaccountName ?? entry.value,
+      };
+    }),
+  };
 }
 
 export function sortActivityItems<T extends SortableItem>(

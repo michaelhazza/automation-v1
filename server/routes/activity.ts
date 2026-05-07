@@ -40,6 +40,15 @@ function parseFilters(query: Record<string, unknown>): ActivityFilters {
     return undefined;
   };
 
+  // C1 (ui-consolidation-operate): sortKey/sortDir take precedence over legacy `sort` enum.
+  // If both arrive, sortKey/sortDir wins per spec §4.1.
+  const sortKey = (['createdAt', 'updatedAt', 'severity'].includes(query.sortKey as string)
+    ? (query.sortKey as ActivityFilters['sortKey'])
+    : undefined);
+  const sortDir = (['asc', 'desc'].includes(query.sortDir as string)
+    ? (query.sortDir as ActivityFilters['sortDir'])
+    : undefined);
+
   return {
     type: asStringArray(query.type),
     status: asStringArray(query.status),
@@ -47,12 +56,19 @@ function parseFilters(query: Record<string, unknown>): ActivityFilters {
     to: typeof query.to === 'string' ? query.to : undefined,
     agentId: typeof query.agentId === 'string' ? query.agentId : undefined,
     actorId: typeof query.actorId === 'string' ? query.actorId : undefined,
+    // C1: multi-select actor display-name filter (spec §4.1)
+    actor: asStringArray(query.actor),
+    // C1: multi-select subaccount ID filter (spec §4.1)
+    subaccount: asStringArray(query.subaccount),
     severity: asStringArray(query.severity),
     assignee: typeof query.assignee === 'string' ? query.assignee : undefined,
     q: typeof query.q === 'string' ? query.q : undefined,
-    sort: (['newest', 'oldest', 'severity', 'attention_first'].includes(query.sort as string)
+    // Legacy sort enum kept for backward compat; sortKey/sortDir wins when both present
+    sort: (!sortKey && ['newest', 'oldest', 'severity', 'attention_first'].includes(query.sort as string)
       ? (query.sort as ActivityFilters['sort'])
       : undefined),
+    sortKey,
+    sortDir,
     limit: typeof query.limit === 'string' ? Math.max(1, Math.min(200, parseInt(query.limit, 10) || 50)) : undefined,
     cursor: decodeCursor(query.cursor),
   };
@@ -73,8 +89,12 @@ router.get(
 
     const filters = parseFilters(req.query as Record<string, unknown>);
     const scope: ActivityScope = { type: 'subaccount', subaccountId, orgId: organisationId };
-    const { items, nextCursor } = await listActivityItems(filters, scope);
-    res.json({ items, nextCursor: encodeCursor(nextCursor) });
+    const { items, nextCursor, filterOptions } = await listActivityItems(filters, scope);
+    // C1 INVARIANT: Activity data is user-scoped + RLS-filtered — MUST NOT be shared-cached.
+    // Never add public or s-maxage here. This prevents future infra changes (CDN, proxy cache)
+    // from leaking user-specific data across sessions.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ items, nextCursor: encodeCursor(nextCursor), filterOptions });
   }),
 );
 
@@ -91,8 +111,12 @@ router.get(
     const filters = parseFilters(req.query as Record<string, unknown>);
     const subaccountId = typeof req.query.subaccountId === 'string' ? req.query.subaccountId : undefined;
     const scope: ActivityScope = { type: 'org', orgId: organisationId, subaccountId };
-    const { items, nextCursor } = await listActivityItems(filters, scope);
-    res.json({ data: { items, nextCursor: encodeCursor(nextCursor) }, serverTimestamp: new Date().toISOString() });
+    const { items, nextCursor, filterOptions } = await listActivityItems(filters, scope);
+    // C1 INVARIANT: Activity data is user-scoped + RLS-filtered — MUST NOT be shared-cached.
+    // Never add public or s-maxage here. This prevents future infra changes (CDN, proxy cache)
+    // from leaking user-specific data across sessions.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ data: { items, nextCursor: encodeCursor(nextCursor), filterOptions }, serverTimestamp: new Date().toISOString() });
   }),
 );
 
@@ -108,8 +132,12 @@ router.get(
     const filters = parseFilters(req.query as Record<string, unknown>);
     const organisationId = typeof req.query.organisationId === 'string' ? req.query.organisationId : undefined;
     const scope: ActivityScope = { type: 'system', organisationId };
-    const { items, nextCursor } = await listActivityItems(filters, scope);
-    res.json({ items, nextCursor: encodeCursor(nextCursor) });
+    const { items, nextCursor, filterOptions } = await listActivityItems(filters, scope);
+    // C1 INVARIANT: Activity data is user-scoped + RLS-filtered — MUST NOT be shared-cached.
+    // Never add public or s-maxage here. This prevents future infra changes (CDN, proxy cache)
+    // from leaking user-specific data across sessions.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ items, nextCursor: encodeCursor(nextCursor), filterOptions });
   }),
 );
 
