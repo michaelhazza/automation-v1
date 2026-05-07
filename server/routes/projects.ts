@@ -6,8 +6,35 @@ import { eq, and, isNull, desc, count, inArray } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
+import { projectService } from '../services/projectService.js';
 
 const router = Router();
+
+/**
+ * GET /api/projects/:id
+ * Get a single project by ID (org-scoped).
+ */
+router.get(
+  '/api/projects/:id',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const project = await projectService.getById(req.orgId!, req.params.id);
+    res.json(project);
+  })
+);
+
+/**
+ * PATCH /api/projects/:id
+ * Update a project (org-scoped). Supports spec fields including linkedAgents.
+ */
+router.patch(
+  '/api/projects/:id',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const project = await projectService.patch(req.orgId!, req.params.id, req.body);
+    res.json(project);
+  })
+);
 
 /**
  * GET /api/subaccounts/:subaccountId/projects
@@ -98,7 +125,7 @@ router.patch(
     const { name, description, status, color, repoUrl, githubConnectionId, targetDate, budgetCents, budgetWarningPercent, goalId } = req.body as {
       name?: string;
       description?: string;
-      status?: 'active' | 'completed' | 'archived';
+      status?: 'active' | 'paused' | 'completed' | 'archived';
       color?: string;
       repoUrl?: string;
       githubConnectionId?: string | null;

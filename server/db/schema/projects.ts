@@ -18,7 +18,7 @@ export const projects = pgTable(
       .references(() => subaccounts.id),
     name: text('name').notNull(),
     description: text('description'),
-    status: text('status').notNull().default('active').$type<'active' | 'completed' | 'archived'>(),
+    status: text('status').notNull().default('active').$type<'active' | 'paused' | 'completed' | 'archived'>(),
     color: text('color').notNull().default('#6366f1'),
 
     // ── Project management ─────────────────────────────────────────────
