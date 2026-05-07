@@ -90,7 +90,9 @@ export interface ActivityQuery {
   from?: string;
   to?: string;
   agentId?: string;
+  /** Single actor ID filter (server lookup by id). */
   actorId?: string;
+  /** Multi-select actor display-name filter (spec §4.1). Comma-separated on the wire. */
   actor?: string[];
   subaccount?: string[];
   severity?: string[];

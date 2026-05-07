@@ -161,16 +161,10 @@ export const inboxArchive = (
 
 /**
  * Fetch the run trace for a given agent run.
- * The run trace data is embedded in the agent-run detail response (toolCallsLog).
- * This wrapper fetches the full run detail and returns the trace events shape
- * expected by RunTraceEvent consumers.
+ * C5b will wire up the real role-aware projection endpoint.
+ * toolCallsLog entries have a different shape from RunTraceEvent and must not be cast.
  */
 export const fetchRunTrace = (
-  runId: string,
+  _runId: string,
 ): Promise<{ events: RunTraceEvent[] }> =>
-  api.get(`/api/agent-runs/${runId}`).then(r => {
-    const events: RunTraceEvent[] = Array.isArray(r.data?.toolCallsLog)
-      ? (r.data.toolCallsLog as RunTraceEvent[])
-      : [];
-    return { events };
-  });
+  Promise.resolve({ events: [] as RunTraceEvent[] });
