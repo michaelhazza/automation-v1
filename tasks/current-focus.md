@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/consolidation-foundation/spec.md
-active_plan: tasks/builds/consolidation-foundation/plan.md
-build_slug: consolidation-foundation
-branch: claude/learn-harbour-ui-B4k7a
-status: BUILDING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-07
+last_merge_ready_pr: #270
+last_merge_ready_slug: consolidation-foundation
+last_merge_ready_branch: claude/consolidation-foundation
 last_merged_pr: #267
 last_merged_slug: pre-launch-phase-3-deferred-backlog
 last_merged_branch: claude/pre-launch-phase-3
@@ -24,10 +27,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/consolidation-foundation/spec.md`
-**Active plan:** `tasks/builds/consolidation-foundation/plan.md` (will be produced by feature-coordinator → architect)
-**Active build slug:** `consolidation-foundation`
-**Status:** **BUILDING** — Phase 1 complete via manual chatgpt-spec-review workflow (spec finalised in commit `649f94be`; rounds 1-3 in commits `e71760c5`, `b87091dd`, `eee9967d`, `94752162`). Phase 1 handoff at `tasks/builds/consolidation-foundation/handoff.md` (written retrospectively at Phase 2 launch). chatgpt-spec-review log at `tasks/review-logs/chatgpt-spec-review-consolidation-foundation-2026-05-07T02-35-29Z.md`. Next step: feature-coordinator → architect → plan gate.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Status:** **MERGE_READY** — PR #270 (`consolidation-foundation`) labelled `ready-to-merge` at 2026-05-07T08:32:57Z. CI is running G5 (full lint + typecheck + tests). Phase 3 finalisation complete. When CI is green and the operator says "merge", follow the post-merge sequence in the end-of-phase prompt: update this file on the feature branch first (clear `last_merge_ready_*`, set `last_merged_*`, status → `NONE`), commit + push, then `gh pr merge 270 --squash --delete-branch`.
+
+**Merge-ready:** PR #270 — `consolidation-foundation`. Phase 0 cross-cutting frontend primitives extracted from the broader consolidation prototype set. Ships shared `PageShell` / `Drawer` / `Modal` / `SortableTable` / `FormFooter` / `SearchBox` / `EmptyState` / `ErrorState` / `WorkspaceBadge` / `ViewModeSwitcher` primitives, route registry (`client/src/config/routes.ts` with branded `AppRoute` type, `APP_ROUTE_PATTERNS` literal-tuple, `buildRoute` helper using a negative-lookahead regex to prevent `:id` matching inside `:idFoo`), sidebar config (`client/src/config/sidebar.ts` with `buildNavItems` factory + `NavGroup` types), Layout refactor consuming the new config, helpers (`colorHash` deterministic FNV-1a, `workspace.switchWorkspace` as the only allowed reload call site, `useViewMode` + `useViewModePure`), reference-counted scroll-lock singleton (`overlayScrollLock.ts`) keyed via `Symbol.for(...)` for HMR-safe coordination across stacked overlays. Pure-helper convention extended with `sortableTablePure.ts` + `useViewModePure.ts` + tests under `__tests__/*Pure.test.ts`. CSS keyframes consolidated to `index.css`. Pipeline: per-chunk pr-reviewer + dual-reviewer + adversarial-reviewer rounds → branch-level chatgpt-pr-review (2 rounds APPROVED) → S2 merge of origin/main with three resolved conflicts (spec.md / plan.md kept HEAD; tasks/todo.md union-merged) → G4 regression guard clean (lint 0 errors, typecheck clean, build:client 3.75s, all targeted pure-helper tests green) → doc-sync sweep complete (architecture.md updated in-build; 9 KNOWLEDGE.md patterns appended in Phase 3) → ready-to-merge labelled. 6 items deferred (CONSOL-FND-DEF-1..6 in `tasks/todo.md`): cross-tab `storage` listener for `useViewMode`, server-side `X-Organisation-Id` JWT-claim re-validation, `useMemo` on `applySortAndFilters`, empty-string `activeClientId` test, central overlay manager, CSS injection vector audit on `projects.color`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T08-15-18Z.md`. Phase 3 handoff: `tasks/builds/consolidation-foundation/handoff.md § Phase 3 (FINALISATION) — complete`. **Manual G2 still owed by operator (not finalisation-coordinator scope):** visual diff of Layout sidebar across user shapes; ViewModeSwitcher transitions; SortableTable filter dropdown select-all; direct-URL nav to `/clientpulse` for a non-system-admin without that module.
 
 **Just merged:** PR #265 — `baseline-capture` (`claude/baseline-capture`, MERGED 2026-05-05T10:16:56Z). F3 opening-state baseline capture at sub-account onboarding. All 12 plan chunks built, spec-conformance CONFORMANT (re-run), pr-reviewer APPROVED after fix-loop, adversarial-reviewer ALL_CLOSED. 3 migrations (0280/0281/0282), partial UNIQUE index, FORCE RLS on both tables, FK-walked policy on the child table, 9 telemetry events. Phase 3 handoff at `tasks/builds/baseline-capture/handoff.md`. Dual-reviewer skipped (Codex unavailable); chatgpt-pr-review covered the second-opinion pass.
 
@@ -69,7 +74,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-06T14:15:00Z
+**Last updated:** 2026-05-07T08:32:57Z
 
 ---
 

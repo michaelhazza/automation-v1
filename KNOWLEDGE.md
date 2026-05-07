@@ -2703,3 +2703,66 @@ When using a body hash for idempotency keys (`UNIQUE(parent_id, body_hash)`), ca
 4. Hash function: SHA-256, hex-encoded, lower-case (deterministic encoding).
 
 Skipping NFC produces long-tail duplicate revision bugs that are nearly impossible to reproduce. Caught in consolidation-govern round 2.
+
+### [2026-05-07] Pattern — Drawer / Modal focus-trap escape recovery
+
+**Date:** 2026-05-07
+**Source:** finalisation-coordinator finalisation pass on PR #270 (slug: consolidation-foundation), chatgpt-pr-review Round 1 finding F1.
+**Pattern:** A standard Tab-cycle focus trap (first ↔ last focusable inside the panel) handles the "Tab past last" and "Shift+Tab before first" cases — but it misses the case where focus has already escaped the panel entirely (devtools, programmatic focus calls into a different region, browser chrome handing focus back to the document body). On the next Tab inside the panel handler, `document.activeElement` is neither the first nor the last focusable, so the standard branches do not match and the trap is a no-op. Add a guard before the first/last comparisons: if `document.activeElement` is not contained in the panel ref, pull focus back to the first focusable. Three-line addition; closes the only realistic escape route.
+**Why it matters:** Accessibility-grade overlay components are expected to keep keyboard focus inside the overlay until it closes. The "trap" is incomplete without the escape-recovery branch — and the failure is invisible in normal manual testing because escape requires a side-channel focus shift.
+
+### [2026-05-07] Pattern — Visibility helper: `offsetWidth || offsetHeight || getClientRects().length`, not `offsetParent !== null`
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F2.
+**Pattern:** When determining "is this element visible enough to receive focus" inside a focus-trap or any DOM walker that filters out hidden nodes, do NOT use `offsetParent !== null`. That predicate returns `null` for any `position: fixed` element regardless of visibility — meaning fixed-position focusable elements (sticky toolbars inside drawers, floating action buttons) are silently excluded from the trap and the visible-focusables walker. Use the jQuery-style `el.offsetWidth || el.offsetHeight || el.getClientRects().length > 0` instead — visible iff any of width/height/client-rect exists. Standard a11y-library shape.
+**Why it matters:** Common a11y trap. Modal/Drawer code that uses `offsetParent` will skip fixed-position children, so Tab order silently drops them and screen-reader walks of "focusable elements in this region" exclude them. The bug surfaces only when fixed-position content is added inside an overlay months after the trap shipped.
+
+### [2026-05-07] Pattern — Shared CSS keyframes belong in `index.css`, not inline `<style>` blocks per component instance
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F3 (also flagged by pr-reviewer N3).
+**Pattern:** When a component injects its own animation via `<style>{`@keyframes drawer-fade-in {...}`}</style>` inside its render output, every mounted instance writes a duplicate `<style>` element into `<head>` (or inline). For an overlay primitive that may render multiple times across a page (open/close cycles, unmounted-then-remounted nested overlays), this leaks duplicate keyframe definitions and pays parse cost on every render. Move shared keyframes to `client/src/index.css` once, reference by name from the component. Trade-off: the keyframe name becomes a global contract, so prefix it with the owning-primitive name (`drawer-fade-in`, `drawer-slide-in-right`) to prevent cross-component collisions.
+**Why it matters:** DOM hygiene. The pattern is invisible in dev — animations work fine — but `<head>` accumulates `<style>` duplicates over a long-running session. Lighthouse a11y/CSS audits flag it; production performance audits flag it.
+
+### [2026-05-07] Pattern — `import.meta.env.DEV` for Vite client code (NOT `process.env.NODE_ENV`); requires `client/src/vite-env.d.ts`
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F4.
+**Pattern:** Inside any code that ships through Vite to the browser bundle, gate dev-only branches with `import.meta.env.DEV` (boolean, true in dev / false in production). Do NOT use `process.env.NODE_ENV === 'development'` — `process` is a Node.js global, not present in the browser, and Vite doesn't shim it; the comparison silently returns `false` in production AND in dev (because `process.env.NODE_ENV` is `undefined`), so the dev-only branch never fires. For TypeScript to resolve `import.meta.env`, the project must include a triple-slash reference: create `client/src/vite-env.d.ts` containing `/// <reference types="vite/client" />`. One-time setup; thereafter every `.tsx`/`.ts` file in `client/src` resolves the type without further imports.
+**Why it matters:** Dev-only code paths (extra logging, prop-validation warnings, "this should never happen" assertions, error-state stack traces) are a primary debugging surface. If they silently never fire because the gate is `process.env.NODE_ENV`-shaped, you ship blind. The fix is mechanical, but the verification — actually confirm the dev branch fires in dev and is dead-code-eliminated in production — is not, so it usually slips past.
+
+### [2026-05-07] Pattern — `aria-labelledby` + `useId` for dialog/drawer accessible names when a visible title exists
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F5.
+**Pattern:** When an overlay (Modal, Drawer) renders a visible title, the accessible name should come from `aria-labelledby={titleId}` (pointing at the rendered heading), NOT a hand-typed `aria-label="Drawer"`. Screen readers announce the actual visible heading rather than a generic role. Generate the id with React's `useId()` so it's stable across renders and unique per instance. Fall back to `aria-label` only when no visible title is rendered. Apply both attributes pattern: `{title ? { 'aria-labelledby': titleId } : { 'aria-label': fallback }}`.
+**Why it matters:** WCAG 2.1 AA expects the accessible name to match the visible label when one exists. A static `aria-label="Drawer"` overrides the visible heading for screen-reader users — they hear "Drawer" instead of "Edit Client" — and fails name-from-content auditing.
+
+### [2026-05-07] Pattern — Document JS-engine assumptions when pure helpers depend on ES spec guarantees
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F7.
+**Pattern:** When a pure helper relies on a JS-engine guarantee that is technically a runtime-environment assumption (e.g. `Array.prototype.sort` is stable per ES2019+, all modern engines comply), document it in the file-level JSDoc as a "Runtime invariant" paragraph. Note the assumption (stable sort), the path forward if the helper is ever ported to a non-compliant engine (add an explicit insertion-index tiebreaker to the comparator), and the pure tests that pin the invariant. Tests alone do NOT communicate the assumption to the next author — the JSDoc does.
+**Why it matters:** Stability of sort is an unspoken default assumption. A future port to a constrained runtime (an embedded engine, a polyfilled environment, an old node target) will silently violate the assumption — sort still works, but tiebreaker order changes, and any consumer relying on insertion order for equal keys gets nondeterministic UI. The JSDoc is the only place this assumption surfaces in time to prevent the regression.
+
+### [2026-05-07] Pattern — Reference-counted scroll-lock singleton with `Symbol.for(...)` HMR-safe key
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern from build (chunks involving Modal + Drawer overlay coordination, encoded in `client/src/components/overlayScrollLock.ts`).
+**Pattern:** When two overlay primitives (Modal, Drawer) both want to lock body scroll while open, naive per-component `useEffect(() => { document.body.style.overflow = 'hidden'; return () => { ... = ''; } }, [open])` produces a leak: closing one overlay restores `overflow: ''` even though the other is still mounted. Solution: a reference-counted singleton helper (`acquireScrollLock()` / `releaseScrollLock()`) that increments a shared mount counter and only restores the original `overflow` value when the counter returns to zero. The original value is captured on first acquire (deferred restore). To survive HMR (hot module reload during dev — multiple module copies attaching their own counter), key the singleton with `Symbol.for('app.overlay.scroll-lock')` on `globalThis` so all module copies converge on the same counter object.
+**Why it matters:** Cross-overlay scroll-state coordination is a well-known overlay-system trap. The reference count handles concurrent stacked overlays (Modal opens, then Drawer opens on top, then Modal closes underneath — body must stay locked). The `Symbol.for` key handles HMR. Without both, dev shows phantom scroll-restore mid-flow that production never reproduces (or vice-versa, depending on which copy wins).
+
+### [2026-05-07] Pattern — Branded route-pattern type with `buildRoute` regex using negative lookahead `(?![A-Za-z0-9_])`
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern in `client/src/config/routes.ts`.
+**Pattern:** Centralise app-route patterns in a literal-tuple constant (`APP_ROUTE_PATTERNS = ['/agents/:id', '/agents/:idFoo/edit', ...] as const`), brand the resulting union type as `AppRoute`, and provide `buildRoute(pattern: AppRoute, params: Record<string, string>)` and `staticRoute(pattern: AppRoute)` helpers. Inside `buildRoute`, replace `:name` placeholders using a regex with a negative lookahead: `new RegExp(\`:\${param}(?![A-Za-z0-9_])\`, 'g')` — NOT `:${param}`. Without the lookahead, `:id` matches inside `:idFoo` and corrupts unrelated placeholders. The negative-lookahead version requires the placeholder to be terminated by a non-identifier character (a slash, end-of-string, etc.).
+**Why it matters:** Hand-rolled string substitution for path params is a recurring source of silent corruption. The brand type prevents path strings from leaking into `<Link to="...">` / `useNavigate(...)` outside the registry; the lookahead-regex prevents the substitution itself from corrupting prefix-overlap cases. The bug surfaces months after deployment when someone adds a new param like `:idType` next to existing `:id`.
+
+### [2026-05-07] Pattern — Co-locate React-wrapper component with pure-helper module; test the pure half via `npx tsx`
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern from `SortableTable.tsx` + `sortableTablePure.ts` (and `useViewMode.ts` + `useViewModePure.ts`).
+**Pattern:** When a UI primitive contains non-trivial logic (sorting, filtering, mode-derivation, transition rules), split into two files: `Foo.tsx` (the React wrapper — hooks, state, event handlers, render) and `fooPure.ts` (the deterministic helpers — sort comparators, filter predicates, derivation rules, transition guards). The pure module exports plain functions with explicit input/output types and zero React dependency. Tests live next to the pure module under `__tests__/fooPure.test.ts` using the existing convention: `npx tsx <test-path>` runs them in isolation, no test runner setup, fast feedback. The React wrapper's behaviour is verified by integration of the pure module's contract — the wrapper itself does not need its own unit suite if the pure module is fully covered.
+**Why it matters:** UI logic is normally locked behind component-render machinery and is hard to test deterministically. The split moves the testable surface out from under React, eliminates jsdom setup, runs in milliseconds, and produces a stable contract surface that downstream specs (Specs A/B/C consuming the same primitives) can rely on without rebuilding test infrastructure. Locks in the existing repo convention (`*Pure.ts` + `*Pure.test.ts` as the unit-test surface).
