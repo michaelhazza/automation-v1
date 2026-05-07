@@ -118,7 +118,13 @@ export function useViewMode(options?: UseViewModeOptions): UseViewModeReturn {
           optionsRef.current?.onClientCleared?.();
           break;
         case 'workspace':
-          // No identity mutation needed — activeClient is already set (legality guard above)
+          // activeClient is already set (legality guard above). Disable the
+          // system override if it was set: without this, deriveViewMode keeps
+          // returning 'system' (priority rule) and the transition is a no-op
+          // for system admins coming from System mode.
+          if (currentCtx.hasSystemOverride) {
+            setSystemAdminOrgOverride(false);
+          }
           break;
         case 'system':
           // Enable system override

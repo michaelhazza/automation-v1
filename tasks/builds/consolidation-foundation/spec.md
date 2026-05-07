@@ -371,7 +371,7 @@ Transition rules and side effects (locked):
 | Call | Precondition | Side effects | Return |
 |---|---|---|---|
 | `setViewMode('org')` | always allowed for users with org-admin permission | Clears `activeClient`. Disables `system_admin_org_override` if previously set. | `true` |
-| `setViewMode('workspace')` | `activeClient` is set | No mutation to identity state; mode flips to `workspace`. | `true` |
+| `setViewMode('workspace')` | `activeClient` is set | Disables `system_admin_org_override` if previously set (without this, the priority rule keeps deriveViewMode returning `system`). Otherwise no mutation; mode flips to `workspace`. | `true` |
 | `setViewMode('workspace')` | NO `activeClient` | No mutation. Invokes `options.onRequireClientSelection?.()`. | `false` |
 | `setViewMode('system')` | user has `system_admin` permission | Enables `system_admin_org_override`. | `true` |
 | `setViewMode('system')` | user lacks `system_admin` | No mutation. | `false` |
