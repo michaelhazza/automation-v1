@@ -32,7 +32,11 @@
 }
 .search-box {
   position: relative;
-  flex: 0 0 260px;
+  flex: 0 0 500px;
+  min-width: 480px;
+}
+@media (max-width: 768px) {
+  .search-box { flex: 1 1 100%; min-width: 0; width: 100%; }
 }
 .search-box input {
   width: 100%;
@@ -506,7 +510,7 @@ td.actions-cell { position: relative; }
         <span class="chip" data-filter="error">Error (1)</span>
       </div>
       <!-- Search moved into filter bar (right side) -->
-      <div class="search-box" style="flex:0 0 240px;">
+      <div class="search-box" style="min-width:480px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         <input type="text" id="search-input" placeholder="Search tasks..." oninput="applyAllFilters()">
       </div>

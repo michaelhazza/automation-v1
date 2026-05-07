@@ -411,6 +411,109 @@
 .sa-terra   { background: #f59e0b; }
 .sa-revel   { background: #ef4444; }
 .sa-globex  { background: #10b981; }
+.sa-other   { background: #94a3b8; }
+
+/* ── Insight cards row (ledger tab, org view only) ──────────────────── */
+.insight-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.insight-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.insight-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--slate-400);
+  margin-bottom: 8px;
+}
+.insight-primary {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--slate-900);
+  margin-bottom: 3px;
+  line-height: 1.3;
+}
+.insight-secondary {
+  font-size: 12px;
+  color: var(--slate-500);
+  margin-bottom: 4px;
+}
+.insight-delta {
+  font-size: 11.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.insight-delta.up   { color: var(--emerald-600); }
+.insight-delta.down { color: var(--red-600); }
+.insight-detail {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  margin-top: 2px;
+}
+
+/* ── Caps tab: split layout ─────────────────────────────────────────── */
+.caps-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.chart-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+.chart-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-700);
+  margin-bottom: 4px;
+}
+.chart-card-sub {
+  font-size: 11.5px;
+  color: var(--slate-400);
+  margin-bottom: 14px;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--slate-600);
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chart-svg-wrap {
+  overflow: visible;
+}
+/* Org-only visibility */
+body[data-view="workspace"] .insight-row,
+body[data-view="workspace"] .caps-row.org-only,
+body[data-view="workspace"] #org-spend-chart-card,
+body[data-view="workspace"] #trend-charts-row { display: none; }
 
 /* ── Workspace-view: hide org-only columns ──────────────────────────── */
 body[data-view="workspace"] [data-view-org-only] { display: none; }
@@ -568,28 +671,214 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
       <!-- ── TAB: Caps & budgets ───────────────────────────────────── -->
       <div class="tab-panel active" id="panel-caps">
 
-        <!-- Org-level cap card -->
-        <div class="org-cap-card" id="org-cap-card">
-          <div class="org-cap-header">
-            <h3 id="cap-card-title">Organisation monthly cap</h3>
-            <span id="cap-card-action"><a class="org-cap-link" onclick="openOrgCapModal()">Edit org cap</a></span>
-          </div>
-          <div class="org-cap-big" id="cap-card-amount">$5,000 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ month</span></div>
-          <div class="org-cap-sub" id="cap-card-sub">Budget for all client workspaces combined</div>
-          <!-- Progress bar with pace line -->
-          <div class="org-cap-bar-wrap">
-            <div class="org-cap-bar-fill" style="width:25.7%"></div>
-            <!-- Pace line: day 6 of 31 = 19.4% elapsed -->
-            <div class="pace-line" style="left:19.4%"></div>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <div class="org-cap-meta">
-              $1,283 used &middot; 25.7% &middot;
-              <span class="over-pace">on pace for $4,920 this month</span>
+        <!-- TOP ROW: Org cap card (left) + Org spend chart (right) — org only -->
+        <div class="caps-row org-only" data-view-org-only id="caps-top-row">
+
+          <!-- Left: Org monthly cap card -->
+          <div class="org-cap-card" id="org-cap-card" style="margin-bottom:0;">
+            <div class="org-cap-header">
+              <h3 id="cap-card-title">Organisation monthly cap</h3>
+              <span id="cap-card-action"><a class="org-cap-link" onclick="openOrgCapModal()">Edit org cap</a></span>
             </div>
-            <div style="font-size:12px;color:var(--slate-400)">Day 6 of 31</div>
+            <div class="org-cap-big" id="cap-card-amount">$5,000 <span style="font-size:18px;font-weight:500;color:var(--slate-400)">/ month</span></div>
+            <div class="org-cap-sub" id="cap-card-sub">Budget for all client workspaces combined</div>
+            <div class="org-cap-bar-wrap">
+              <div class="org-cap-bar-fill" style="width:25.7%"></div>
+              <div class="pace-line" style="left:19.4%"></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div class="org-cap-meta">
+                $1,283 used &middot; 25.7% &middot;
+                <span class="over-pace">on pace for $4,920 this month</span>
+              </div>
+              <div style="font-size:12px;color:var(--slate-400)">Day 6 of 31</div>
+            </div>
           </div>
-        </div>
+
+          <!-- Right: Org spend this month — bar chart by workspace -->
+          <div class="chart-card" id="org-spend-chart-card">
+            <div class="chart-card-title">Org spend this month</div>
+            <div class="chart-card-sub">MTD spend by workspace ($1,283 total)</div>
+            <!-- Inline SVG bar chart -->
+            <svg width="100%" height="140" viewBox="0 0 340 140" class="chart-svg-wrap">
+              <!-- Bars: Acme $312 (24.3%), TerraForm $1247 wait — use correct MTD values -->
+              <!-- MTD values per brief: Acme $1,180, TerraForm $1,247, Globex $1,043, Revel $612, Other $185 -->
+              <!-- Total = 4,267. Proportional bar heights (max bar = 130px for TerraForm) -->
+              <!-- Scale: max value 1247, chart height 110px  -->
+              <!-- x positions: 5 bars, width 52, gap 14 -->
+              <!-- Bar heights: Acme=104.6, Terra=110, Globex=92.3, Revel=54.1, Other=16.4 -->
+              <g>
+                <!-- Y-axis labels -->
+                <text x="0" y="12" font-size="9" fill="#94a3b8">$1,400</text>
+                <text x="0" y="42" font-size="9" fill="#94a3b8">$1,050</text>
+                <text x="0" y="72" font-size="9" fill="#94a3b8">$700</text>
+                <text x="0" y="102" font-size="9" fill="#94a3b8">$350</text>
+                <!-- Gridlines -->
+                <line x1="28" y1="8" x2="340" y2="8" stroke="#e2e8f0" stroke-width="1"/>
+                <line x1="28" y1="38" x2="340" y2="38" stroke="#e2e8f0" stroke-width="1"/>
+                <line x1="28" y1="68" x2="340" y2="68" stroke="#e2e8f0" stroke-width="1"/>
+                <line x1="28" y1="98" x2="340" y2="98" stroke="#e2e8f0" stroke-width="1"/>
+                <!-- Acme Corp: $1,180 → height=103.3 → y=116-103.3=12.7 ~ x=38 -->
+                <rect x="38" y="14" width="46" height="104" rx="3" fill="#6366f1"/>
+                <text x="61" y="128" font-size="9" fill="#64748b" text-anchor="middle">Acme</text>
+                <!-- TerraForm: $1,247 → height=109 → y=116-109=7 ~ x=100 -->
+                <rect x="100" y="9" width="46" height="109" rx="3" fill="#f59e0b"/>
+                <text x="123" y="128" font-size="9" fill="#64748b" text-anchor="middle">TerraForm</text>
+                <!-- Globex: $1,043 → height=91.4 → y=116-91.4=24.6 ~ x=162 -->
+                <rect x="162" y="27" width="46" height="91" rx="3" fill="#10b981"/>
+                <text x="185" y="128" font-size="9" fill="#64748b" text-anchor="middle">Globex</text>
+                <!-- Revel: $612 → height=53.6 → y=116-53.6=62.4 ~ x=224 -->
+                <rect x="224" y="65" width="46" height="53" rx="3" fill="#ef4444"/>
+                <text x="247" y="128" font-size="9" fill="#64748b" text-anchor="middle">Revel</text>
+                <!-- Other: $185 → height=16.2 → y=116-16.2=99.8 ~ x=286 -->
+                <rect x="286" y="102" width="46" height="16" rx="3" fill="#94a3b8"/>
+                <text x="309" y="128" font-size="9" fill="#64748b" text-anchor="middle">Other</text>
+                <!-- Value labels above bars -->
+                <text x="61" y="11" font-size="8.5" fill="#6366f1" text-anchor="middle" font-weight="600">$1,180</text>
+                <text x="123" y="6" font-size="8.5" fill="#f59e0b" text-anchor="middle" font-weight="600">$1,247</text>
+                <text x="185" y="24" font-size="8.5" fill="#10b981" text-anchor="middle" font-weight="600">$1,043</text>
+                <text x="247" y="62" font-size="8.5" fill="#ef4444" text-anchor="middle" font-weight="600">$612</text>
+                <text x="309" y="99" font-size="8.5" fill="#94a3b8" text-anchor="middle" font-weight="600">$185</text>
+              </g>
+              <!-- Baseline -->
+              <line x1="28" y1="118" x2="340" y2="118" stroke="#cbd5e1" stroke-width="1"/>
+            </svg>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Acme Corp</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>TerraForm</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Globex</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Revel Group</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Other</div>
+            </div>
+          </div>
+        </div><!-- /caps-top-row -->
+
+        <!-- SECOND ROW: Trend charts — org only -->
+        <div class="caps-row org-only" data-view-org-only id="trend-charts-row">
+
+          <!-- Left: Spend trend by workspace (last 6 months) -->
+          <div class="chart-card">
+            <div class="chart-card-title">Spend trend by workspace (last 6 months)</div>
+            <div class="chart-card-sub">Apr 2026 to current month</div>
+            <!-- Inline SVG line chart — 340x140 viewBox, 6 x-points -->
+            <!-- X positions: 35, 95, 155, 215, 275, 335 (6 months) -->
+            <!-- Y scale: 0–1500, chart area 10–120px from top (110px range) -->
+            <!-- y = 120 - (val/1500)*110 -->
+            <!-- Acme: 720,810,890,940,1020,1180 -->
+            <!-- Terra: 890,1050,1180,1310,1440,1247 -->
+            <!-- Globex: 310,380,470,560,710,1043 -->
+            <!-- Revel: 480,510,550,530,570,612 -->
+            <!-- Other: 120,140,160,150,170,185 -->
+            <svg width="100%" height="150" viewBox="0 0 360 150" class="chart-svg-wrap">
+              <!-- Gridlines -->
+              <line x1="30" y1="10" x2="360" y2="10" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="37" x2="360" y2="37" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="64" x2="360" y2="64" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="91" x2="360" y2="91" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="118" x2="360" y2="118" stroke="#e2e8f0" stroke-width="1"/>
+              <!-- Y-axis labels -->
+              <text x="0" y="13" font-size="8.5" fill="#94a3b8">$1,500</text>
+              <text x="0" y="40" font-size="8.5" fill="#94a3b8">$1,125</text>
+              <text x="0" y="67" font-size="8.5" fill="#94a3b8">$750</text>
+              <text x="0" y="94" font-size="8.5" fill="#94a3b8">$375</text>
+              <text x="4" y="121" font-size="8.5" fill="#94a3b8">$0</text>
+              <!-- X-axis months -->
+              <text x="35" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Apr</text>
+              <text x="95" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">May</text>
+              <text x="155" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Jun</text>
+              <text x="215" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Jul</text>
+              <text x="275" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Aug</text>
+              <text x="335" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Sep</text>
+              <!-- Acme: 720→67.3, 810→59.7, 890→53.0, 940→48.7, 1020→42.1, 1180→29.5 -->
+              <polyline points="35,67 95,60 155,53 215,49 275,42 335,30" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- TerraForm: 890→53.0, 1050→39.5, 1180→29.5, 1310→18.7, 1440→8.4, 1247→25.8 -->
+              <polyline points="35,53 95,40 155,30 215,19 275,9 335,26" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Globex: 310→92.3, 380→86.4, 470→79.0, 560→71.4, 710→59.7, 1043→31.8 -->
+              <polyline points="35,92 95,87 155,79 215,71 275,60 335,32" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Revel: 480→78.2, 510→75.7, 550→72.3, 530→73.9, 570→70.7, 612→67.2 -->
+              <polyline points="35,78 95,76 155,72 215,74 275,71 335,67" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Other: 120→111, 140→109.4, 160→107.7, 150→108.5, 170→106.8, 185→105.6 -->
+              <polyline points="35,111 95,109 155,108 215,109 275,107 335,106" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Highlight current month dots -->
+              <circle cx="335" cy="30" r="3" fill="#6366f1"/>
+              <circle cx="335" cy="26" r="3" fill="#f59e0b"/>
+              <circle cx="335" cy="32" r="4" fill="#10b981"/> <!-- Globex bigger — notable spike -->
+              <circle cx="335" cy="67" r="3" fill="#ef4444"/>
+              <circle cx="335" cy="106" r="3" fill="#94a3b8"/>
+            </svg>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Acme Corp</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>TerraForm</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Globex</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Revel Group</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Other</div>
+            </div>
+          </div>
+
+          <!-- Right: Cap utilisation trend (last 6 months) -->
+          <div class="chart-card">
+            <div class="chart-card-title">Cap utilisation trend</div>
+            <div class="chart-card-sub">% of monthly cap used per workspace, last 6 months</div>
+            <!-- Y scale: 0–120%, chart area 10–118px (108px range). y = 118 - (pct/120)*108 -->
+            <!-- Acme: 36,41,45,47,51,59 -->
+            <!-- Terra: 59,70,79,87,96,83 -->
+            <!-- Globex: 31,38,47,56,71,104 (over 100 last point = red) -->
+            <!-- Revel: 48,51,55,53,57,61 -->
+            <!-- Other: 12,14,16,15,17,19 -->
+            <svg width="100%" height="150" viewBox="0 0 360 150" class="chart-svg-wrap">
+              <!-- Gridlines -->
+              <line x1="30" y1="10" x2="360" y2="10" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="37" x2="360" y2="37" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="64" x2="360" y2="64" stroke="#e2e8f0" stroke-width="1"/>
+              <!-- 100% cap line — prominent dashed -->
+              <line x1="30" y1="28" x2="360" y2="28" stroke="#fca5a5" stroke-width="1.5" stroke-dasharray="4,3"/>
+              <text x="32" y="26" font-size="8.5" fill="#ef4444" font-weight="600">100% cap</text>
+              <line x1="30" y1="91" x2="360" y2="91" stroke="#e2e8f0" stroke-width="1"/>
+              <line x1="30" y1="118" x2="360" y2="118" stroke="#e2e8f0" stroke-width="1"/>
+              <!-- Y-axis labels -->
+              <text x="0" y="13" font-size="8.5" fill="#94a3b8">120%</text>
+              <text x="2" y="40" font-size="8.5" fill="#94a3b8">90%</text>
+              <text x="2" y="67" font-size="8.5" fill="#94a3b8">60%</text>
+              <text x="2" y="94" font-size="8.5" fill="#94a3b8">30%</text>
+              <text x="4" y="121" font-size="8.5" fill="#94a3b8">0%</text>
+              <!-- X-axis months -->
+              <text x="35" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Apr</text>
+              <text x="95" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">May</text>
+              <text x="155" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Jun</text>
+              <text x="215" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Jul</text>
+              <text x="275" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Aug</text>
+              <text x="335" y="138" font-size="8.5" fill="#94a3b8" text-anchor="middle">Sep</text>
+              <!-- Acme: 36→85.6, 41→81.3, 45→77.5, 47→75.6, 51→72.1, 59→65.1 -->
+              <polyline points="35,86 95,81 155,78 215,76 275,72 335,65" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Terra: 59→65.1, 70→55.8, 79→48.2, 87→41.4, 96→33.6, 83→44.3 -->
+              <polyline points="35,65 95,56 155,48 215,41 275,34 335,44" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Globex (normal segment): 31→90.1, 38→84.2, 47→76.5, 56→68.8, 71→55.8 -->
+              <polyline points="35,90 95,84 155,77 215,69 275,56" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Globex (over-cap segment 71% → 104%): dashed red from last normal point to over-cap -->
+              <polyline points="275,56 335,24" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="5,3" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Globex over-cap dot (red) -->
+              <circle cx="335" cy="24" r="4" fill="#ef4444"/>
+              <text x="335" y="21" font-size="8" fill="#ef4444" text-anchor="middle" font-weight="700">104%</text>
+              <!-- Revel: 48→75.4, 51→72.9, 55→69.5, 53→71.2, 57→67.8, 61→64.4 -->
+              <polyline points="35,75 95,73 155,70 215,71 275,68 335,64" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Other: 12→107.2, 14→105.5, 16→103.8, 15→104.6, 17→102.9, 19→101.3 -->
+              <polyline points="35,107 95,106 155,104 215,105 275,103 335,101" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- End dots for non-Globex lines -->
+              <circle cx="335" cy="65" r="3" fill="#6366f1"/>
+              <circle cx="335" cy="44" r="3" fill="#f59e0b"/>
+              <circle cx="335" cy="64" r="3" fill="#ef4444"/>
+              <circle cx="335" cy="101" r="3" fill="#94a3b8"/>
+            </svg>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Acme Corp</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>TerraForm</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Globex</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Revel Group</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Other</div>
+            </div>
+          </div>
+
+        </div><!-- /trend-charts-row -->
 
         <!-- Per-subaccount caps table -->
         <div id="per-workspace-section">
@@ -906,6 +1195,31 @@ body[data-view="workspace"] [data-view-org-only] { display: none; }
             <option value="subaccount" id="groupby-opt-subaccount">Group by: Subaccount</option>
             <option value="agent">Group by: Agent</option>
           </select>
+        </div>
+
+        <!-- Insight cards — org view only -->
+        <div class="insight-row" data-view-org-only>
+          <!-- Top spender -->
+          <div class="insight-card">
+            <div class="insight-label">Top spender</div>
+            <div class="insight-primary">TerraForm</div>
+            <div class="insight-secondary">$1,247 MTD &middot; 38% of org total</div>
+            <div class="insight-delta up">&#9650; 12% vs last month</div>
+          </div>
+          <!-- Fastest grower -->
+          <div class="insight-card">
+            <div class="insight-label">Fastest grower</div>
+            <div class="insight-primary">Globex</div>
+            <div class="insight-secondary">MTD spend up sharply</div>
+            <div class="insight-delta up">&#9650; 47% vs last month</div>
+          </div>
+          <!-- Most active agent -->
+          <div class="insight-card">
+            <div class="insight-label">Most active agent</div>
+            <div class="insight-primary">Outreach Agent</div>
+            <div class="insight-secondary">142 runs this month</div>
+            <div class="insight-detail" style="color:var(--slate-400);">Acme Corp workspace</div>
+          </div>
         </div>
 
         <!-- KPI strip -->

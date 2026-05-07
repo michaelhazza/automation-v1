@@ -518,7 +518,32 @@ html {
   flex-shrink: 0;
 }
 
-/* ── STICKY FORM FOOTER ───────────────────────────────────────────── */
+/* ── FIXED FORM FOOTER (edit pages: project-edit, agent-edit) ─────── */
+/* Always visible at bottom of viewport. Button group aligns to form    */
+/* column (max-width 720px, centered). Discard left, Delete right.      */
+.form-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-top: 1px solid var(--border);
+  padding: 14px 28px;
+  z-index: 100;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+}
+.form-footer-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.form-footer-inner .footer-delete {
+  margin-left: auto;
+}
+
+/* Legacy sticky variant (kept for backward compat) */
 .form-footer-sticky {
   position: sticky;
   bottom: 0;

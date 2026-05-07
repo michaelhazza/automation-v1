@@ -54,6 +54,14 @@
   .overflow-item:hover { background: var(--slate-50); }
   .overflow-item.danger { color: #dc2626; }
   .overflow-item.danger:hover { background: #fef2f2; }
+  .menu-item-hint {
+    padding: 0 14px 8px;
+    font-size: 11px;
+    color: var(--slate-400);
+    line-height: 1.45;
+    white-space: normal;
+    max-width: 220px;
+  }
 
   .conf-bar-wrap { display: flex; align-items: center; gap: 6px; }
   .conf-bar-bg { width: 60px; height: 5px; background: var(--slate-200); border-radius: 3px; flex-shrink: 0; }
@@ -379,7 +387,8 @@
             <div class="overflow-menu-wrap">
               <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-oa3')">&#8942;</button>
               <div class="overflow-panel" id="om-oa3">
-                <span class="overflow-item">Edit and take ownership</span>
+                <span class="overflow-item">Edit and override</span>
+                <div class="menu-item-hint">Disconnects this entry from auto-updates. Future memory extractions won't change it.</div>
                 <span class="overflow-item danger">Reject</span>
               </div>
             </div>
@@ -403,7 +412,8 @@
             <div class="overflow-menu-wrap">
               <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-oa4')">&#8942;</button>
               <div class="overflow-panel" id="om-oa4">
-                <span class="overflow-item">Edit and take ownership</span>
+                <span class="overflow-item">Edit and override</span>
+                <div class="menu-item-hint">Disconnects this entry from auto-updates. Future memory extractions won't change it.</div>
                 <span class="overflow-item danger">Reject</span>
               </div>
             </div>

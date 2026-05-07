@@ -24,6 +24,7 @@
   .page-main {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden; /* prevent phantom horizontal scrollbar from fixed footer */
     background: var(--slate-50, #f8fafc);
   }
 
@@ -122,7 +123,7 @@
   .form-body {
     max-width: 720px;
     margin: 0 auto;
-    padding: 28px 28px 32px;
+    padding: 28px 28px 100px; /* bottom: leave room above fixed footer */
     display: flex;
     flex-direction: column;
     gap: 24px;
@@ -426,16 +427,20 @@
     font-size: 12px; color: #1e40af; line-height: 1.55;
   }
 
-  /* ── Footer actions ──────────────────────────────────────── */
+  /* ── Footer actions (fixed to bottom of viewport, always visible) ── */
   .form-footer {
-    position: sticky;
+    position: fixed;
     bottom: 0;
+    left: 0;
+    right: 0;
     background: white;
     border-top: 1px solid var(--border, #e2e8f0);
     padding: 14px 28px;
-    z-index: 10;
+    z-index: 20;
     box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
   }
+  /* Align button group to the form column width (max-width: 720px centered).
+     Discard on the left, Save next to it, Delete project pushed to the right. */
   .form-footer-inner {
     max-width: 720px;
     margin: 0 auto;

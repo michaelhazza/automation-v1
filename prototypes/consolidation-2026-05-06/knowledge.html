@@ -105,6 +105,14 @@
   .overflow-item:hover { background: var(--slate-50); }
   .overflow-item.danger { color: #dc2626; }
   .overflow-item.danger:hover { background: #fef2f2; }
+  .menu-item-hint {
+    padding: 0 14px 8px;
+    font-size: 11px;
+    color: var(--slate-400);
+    line-height: 1.45;
+    white-space: normal;
+    max-width: 220px;
+  }
 
   /* ---- Confidence bar ---- */
   .conf-bar-wrap { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -880,7 +888,8 @@
             <div class="overflow-menu-wrap">
               <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-a9')">&#8942;</button>
               <div class="overflow-panel" id="om-a9">
-                <span class="overflow-item" onclick="alert('Moved to Authored memory')">Edit and take ownership</span>
+                <span class="overflow-item" onclick="alert('Moved to Authored memory')">Edit and override</span>
+                <div class="menu-item-hint">Disconnects this entry from auto-updates. Future memory extractions won't change it.</div>
                 <span class="overflow-item danger" onclick="closeOverflow('om-a9')">Reject</span>
               </div>
             </div>
@@ -908,7 +917,8 @@
             <div class="overflow-menu-wrap">
               <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-a10')">&#8942;</button>
               <div class="overflow-panel" id="om-a10">
-                <span class="overflow-item" onclick="alert('Moved to Authored memory')">Edit and take ownership</span>
+                <span class="overflow-item" onclick="alert('Moved to Authored memory')">Edit and override</span>
+                <div class="menu-item-hint">Disconnects this entry from auto-updates. Future memory extractions won't change it.</div>
                 <span class="overflow-item danger" onclick="closeOverflow('om-a10')">Reject</span>
               </div>
             </div>
