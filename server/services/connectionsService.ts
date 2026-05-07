@@ -202,7 +202,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
       sa.name AS subaccount_name,
       c.organisation_id::text AS organisation_id
     FROM derived c
-    LEFT JOIN subaccounts sa ON sa.id = c.subaccount_id
+    LEFT JOIN subaccounts sa ON sa.id = c.subaccount_id AND sa.deleted_at IS NULL
     WHERE 1=1
     ${providerFilter}
     ${authMethodFilter}
@@ -352,6 +352,7 @@ export async function getConnectionUsage(
     JOIN agents a ON a.id = ads.agent_id
     WHERE ads.connection_id = ${connectionId}::uuid
       AND a.organisation_id = ${organisationId}::uuid
+      AND a.deleted_at IS NULL
     ORDER BY a.name ASC
   `)];
 
@@ -362,6 +363,7 @@ export async function getConnectionUsage(
     JOIN automations au ON au.id = acm.process_id
     WHERE acm.connection_id = ${connectionId}::uuid
       AND acm.organisation_id = ${organisationId}::uuid
+      AND au.deleted_at IS NULL
     ORDER BY au.name ASC
   `)];
 

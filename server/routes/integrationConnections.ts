@@ -242,6 +242,7 @@ router.get(
       subaccountId: z.string().uuid().optional(),
       authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie']).optional(),
       status: z.enum(['connected', 'expired', 'failed', 'pending']).optional(),
+      q: z.string().trim().min(1).max(200).optional(),
     }).refine(
       (q) => q.scope !== 'workspace' || !!q.subaccountId,
       { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
@@ -251,6 +252,7 @@ router.get(
       subaccountId: req.query.subaccountId,
       authMethod: req.query.authMethod,
       status: req.query.status,
+      q: req.query.q,
     });
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid query parameter', details: parsed.error.flatten().fieldErrors });
@@ -265,7 +267,7 @@ router.get(
       provider: req.query.provider as string | undefined,
       authMethod: parsed.data.authMethod,
       status: parsed.data.status,
-      q: req.query.q as string | undefined,
+      q: parsed.data.q,
       cursor: (req.query.cursor as string) || null,
       limit,
       sortDir: req.query.sortDir === 'asc' ? 'asc' : 'desc',
@@ -321,6 +323,10 @@ router.post(
       id: req.params.id,
       organisationId: req.orgId!,
     });
+    if ('notFound' in result) {
+      res.status(404).json({ error: 'Connection not found' });
+      return;
+    }
     res.status(200).json(result);
   })
 );

@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-05-05 (§8.27 leftJoin / `isActive` ON-vs-WHERE; §8.28 JWT `iat` second-precision alignment; §8.29 per-route body-size cap before the global parser — pre-launch-phase-2 hardening pass)
+**Last updated:** 2026-05-08 (§8.30 SQL CASE enum mappers use ELSE NULL — govern surface review)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -224,6 +224,10 @@ JWT `iat` is second-precision (`iat * 1000` is whole-second × 1000). Any state 
 ### 8.29 Per-route body-size caps install BEFORE the global JSON parser
 
 Routes that need a tighter body cap than the global `express.json({ limit: '10mb' })` (audit endpoints, abuse-prone reporting endpoints, anything where authenticated abuse can inflate downstream layers) install a path-scoped `express.json({ limit: '<smaller>' })` BEFORE the global parser. Once `req._body` is populated by the tight parser, the global parser short-circuits — oversized payloads return 413 from the path-scoped parser. Reverse order silently lets oversized bodies through.
+
+### 8.30 SQL CASE enum mappers use `ELSE NULL`, never a fallback string
+
+When a SQL `CASE` expression maps a DB enum column to a typed value for consumption by a TypeScript fail-closed mapper, write `ELSE NULL` — not `ELSE '<default>'`. Unknown enum values must propagate as `NULL` to the TypeScript layer, which throws `UnknownEnumValueError`; a string fallback silently coerces the unknown value and bypasses the safety guarantee.
 
 ---
 

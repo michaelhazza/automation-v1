@@ -140,7 +140,7 @@ const ledgerQuery = z.object({
   ]).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-  q: z.string().optional(),
+  q: z.string().trim().min(1).max(200).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(50).optional().default(25),
   sortKey: z.enum(['timestamp', 'workspace', 'agent', 'type', 'tokens', 'cost']).optional().default('timestamp'),

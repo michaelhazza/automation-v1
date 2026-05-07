@@ -52,7 +52,7 @@ export async function getSpendTrends(input: GetSpendTrendsInput): Promise<Trends
        + EXTRACT(MONTH FROM age(DATE_TRUNC('month', NOW()), DATE_TRUNC('month', ac.created_at))))::int AS months_ago,
       COALESCE(SUM(ac.amount_minor), 0)::bigint AS spend_cents
     FROM agent_charges ac
-    LEFT JOIN subaccounts sa ON sa.id = ac.subaccount_id
+    LEFT JOIN subaccounts sa ON sa.id = ac.subaccount_id AND sa.deleted_at IS NULL
     WHERE ac.organisation_id = ${input.organisationId}::uuid
       AND ac.subaccount_id IS NOT NULL
       AND ac.created_at >= ${windowStart.toISOString()}::timestamptz
@@ -68,6 +68,7 @@ export async function getSpendTrends(input: GetSpendTrendsInput): Promise<Trends
     FROM workspace_limits wl
     INNER JOIN subaccounts sa ON sa.id = wl.subaccount_id
     WHERE sa.organisation_id = ${input.organisationId}::uuid
+      AND sa.deleted_at IS NULL
   `);
 
   // Query current MTD spend for ranking

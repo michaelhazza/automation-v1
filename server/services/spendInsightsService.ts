@@ -40,7 +40,7 @@ export async function getSpendInsights(input: GetSpendInsightsInput): Promise<Sp
         COALESCE(sa.name, 'Unknown') AS workspace_name,
         COALESCE(SUM(ac.amount_minor), 0)::bigint AS mtd_cents
       FROM agent_charges ac
-      LEFT JOIN subaccounts sa ON sa.id = ac.subaccount_id
+      LEFT JOIN subaccounts sa ON sa.id = ac.subaccount_id AND sa.deleted_at IS NULL
       WHERE ac.organisation_id = ${input.organisationId}::uuid
         AND ac.subaccount_id IS NOT NULL
         AND ac.created_at >= ${currentMonthStart.toISOString()}::timestamptz
@@ -77,8 +77,8 @@ export async function getSpendInsights(input: GetSpendInsightsInput): Promise<Sp
       COALESCE(sa.name, 'Unknown') AS workspace_name,
       COUNT(*)::int AS runs_30d
     FROM agent_runs ar
-    LEFT JOIN agents a ON a.id = ar.agent_id
-    LEFT JOIN subaccounts sa ON sa.id = ar.subaccount_id
+    LEFT JOIN agents a ON a.id = ar.agent_id AND a.deleted_at IS NULL
+    LEFT JOIN subaccounts sa ON sa.id = ar.subaccount_id AND sa.deleted_at IS NULL
     WHERE ar.organisation_id = ${input.organisationId}::uuid
       AND ar.subaccount_id IS NOT NULL
       AND ar.created_at >= ${thirtyDaysAgo.toISOString()}::timestamptz

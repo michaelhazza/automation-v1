@@ -123,8 +123,8 @@ export async function listLedger(input: LedgerListInput): Promise<LedgerListResu
         COALESCE(ac.merchant_descriptor, 'unknown') AS provider,
         ac.amount_minor
       FROM agent_charges ac
-      LEFT JOIN subaccounts sa ON sa.id = ac.subaccount_id
-      LEFT JOIN agents a ON a.id = ac.agent_id
+      LEFT JOIN subaccounts sa ON sa.id = ac.subaccount_id AND sa.deleted_at IS NULL
+      LEFT JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL
       WHERE ac.organisation_id = ${input.organisationId}::uuid
         ${scopeFilter}
         ${workspaceFilter}

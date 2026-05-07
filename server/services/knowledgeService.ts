@@ -620,7 +620,7 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
         mb.last_edited_by_agent_id::text AS last_edited_agent_id,
         mb.source_run_id::text AS source_run_id
       FROM memory_blocks mb
-      LEFT JOIN subaccounts sa ON sa.id = mb.subaccount_id
+      LEFT JOIN subaccounts sa ON sa.id = mb.subaccount_id AND sa.deleted_at IS NULL
       WHERE mb.organisation_id = ${query.organisationId}::uuid
         AND mb.deleted_at IS NULL
         ${query.scope === 'workspace' && query.subaccountId
@@ -793,7 +793,10 @@ export async function overrideEntry(opts: {
       return { ok: false, reason: 'etag_mismatch' as const, currentEtag };
     }
 
-    // Insert version row; idempotent via partial unique index on (memory_block_id, body_hash)
+    // Insert version row; idempotent via partial unique index on (memory_block_id, body_hash).
+    // Target the body-hash conflict explicitly so an unrelated (memory_block_id, version)
+    // unique violation under concurrent overrides is NOT silently swallowed — let it bubble
+    // and be retried by the caller.
     const inserted = await tx
       .insert(memoryBlockVersions)
       .values({
@@ -804,21 +807,29 @@ export async function overrideEntry(opts: {
         changeSource: 'manual_edit',
         bodyHash,
       })
-      .onConflictDoNothing()
+      .onConflictDoNothing({ target: [memoryBlockVersions.memoryBlockId, memoryBlockVersions.bodyHash] })
       .returning({ id: memoryBlockVersions.id });
 
     const created = inserted.length > 0;
 
+    // Defence-in-depth: filter UPDATE on (id, organisationId) even though the SELECT above
+    // already verified the org. Belt-and-braces per DEVELOPMENT_GUIDELINES §1.
     const [updated] = created
       ? await tx
           .update(memoryBlocks)
           .set({ content: canonical, autoUpdateDisabled: true, updatedAt: new Date() })
-          .where(eq(memoryBlocks.id, opts.blockId))
+          .where(and(
+            eq(memoryBlocks.id, opts.blockId),
+            eq(memoryBlocks.organisationId, opts.organisationId),
+          ))
           .returning({ updatedAt: memoryBlocks.updatedAt })
       : await tx
           .update(memoryBlocks)
           .set({ autoUpdateDisabled: true, updatedAt: new Date() })
-          .where(eq(memoryBlocks.id, opts.blockId))
+          .where(and(
+            eq(memoryBlocks.id, opts.blockId),
+            eq(memoryBlocks.organisationId, opts.organisationId),
+          ))
           .returning({ updatedAt: memoryBlocks.updatedAt });
 
     return {

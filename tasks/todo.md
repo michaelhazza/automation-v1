@@ -3346,3 +3346,23 @@ These items require operator action outside the file system (repo/GitHub setting
   - Spec section: §4.10
   - Gap: Spec wants `"Disconnect <providerName>? <N> agents, <M> recurring tasks, and <K> workflows use this connection. They will fail until reconnected."` as a single sentence. Implementation breaks counts into separate divs and uses different verbs.
   - Suggested approach: Render the spec sentence verbatim in a single `<p>` when impact > 0; collapse the multi-div layout. Keep the "Type 'disconnect'" gate.
+
+## Deferred from adversarial-reviewer — consolidation-govern (2026-05-08)
+
+Three findings — two in pre-existing code, one in new code — surfaced during the consolidation-govern adversarial review. All defence-in-depth or reliability hygiene; none block this branch.
+
+- [ ] **CONSOL-GOV-DEF-17 — `demoteBlockToReference` UPDATE unscoped by organisationId.**
+  - File: `server/services/knowledgeService.ts:492-495` (PRE-EXISTING, not new in this branch)
+  - Gap: Soft-delete UPDATE filters only on `blockId`; prior SELECT verifies org, RLS protects in practice, but DEVELOPMENT_GUIDELINES §1 mandates explicit org filter on every by-id mutation.
+  - Suggested approach: Add `eq(memoryBlocks.organisationId, organisationId)` to the UPDATE WHERE, matching the pattern in `overrideEntry`.
+
+- [ ] **CONSOL-GOV-DEF-18 — `overrideEntry` version-counter race can throw raw 500 under concurrency.**
+  - File: `server/services/knowledgeService.ts:766-811` (NEW in this branch)
+  - Gap: Version increment uses `MAX(version) + 1` in a sub-select. Two concurrent overrides with different bodies and identical ETag both pass the ETag check, both compute the same `MAX(version)`, both attempt INSERT with `version = N+1`. `onConflictDoNothing` is correctly targeted at `(memoryBlockId, bodyHash)` only, so the `(memoryBlockId, version)` collision bubbles as a raw 23505 (constraint name leaked in 500).
+  - Suggested approach: Acquire `pg_advisory_xact_lock(hashtextextended(blockId, 0))` at the start of the transaction so concurrent overrides serialise. Alternative: catch 23505 specifically and retry once.
+
+- [ ] **CONSOL-GOV-DEF-19 — `PATCH /api/subaccounts/:subaccountId/connections/:id` accepts arbitrary `connectionStatus` strings.**
+  - File: `server/routes/integrationConnections.ts:123` (PRE-EXISTING route, not new in this branch)
+  - Gap: `req.body.connectionStatus` flows straight into the column with no enum validation; a malformed value crashes every subsequent `GET /api/connections` response (UnknownEnumValueError throws). Self-inflicted DoS by an authorised CONNECTIONS_MANAGE user.
+  - Suggested approach: Add Zod enum validation to the PATCH body (`connectionStatus: z.enum(['active','revoked','error']).optional()`); follow up with a Postgres CHECK constraint migration.
+
