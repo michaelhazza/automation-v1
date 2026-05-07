@@ -27,7 +27,9 @@ import DeleteAgentDialog from './components/DeleteAgentDialog';
 type TabKey = 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
 
 const TAB_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
-const WRITE_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget'];
+// Note: 'budget' excluded from WRITE_ORDER - Phase 1 budget schema gap (see migration-gaps.md)
+// Note: 'schedule' excluded - org-level trigger editing not in Phase 1 scope (see spec §4.2 Q5)
+const WRITE_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources'];
 
 const TAB_LABELS: Record<TabKey, string> = {
   configure: 'Configure',

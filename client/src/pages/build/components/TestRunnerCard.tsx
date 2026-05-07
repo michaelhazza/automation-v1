@@ -13,27 +13,36 @@ export function TestRunnerCard({ agentId }: TestRunnerCardProps) {
   const [result, setResult] = useState<AgentTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stoppedRef = useRef(false);
 
-  // Poll for result while status is 'running'
+  // Poll for result while status is 'running'. Only depends on runId to avoid
+  // duplicate setTimeout scheduling under React 18 concurrent mode.
   useEffect(() => {
     if (!runId) return;
-    if (result?.status !== 'running' && result !== null) return;
+    stoppedRef.current = false;
+    setResult(null);
 
     const poll = async () => {
+      if (stoppedRef.current) return;
       try {
         const r = await buildApi.getAgentRunForTest(runId);
         setResult(r);
-        if (r.status === 'running') {
+        if (r.status === 'running' && !stoppedRef.current) {
           pollRef.current = setTimeout(poll, 1500);
         }
       } catch {
+        // Stop polling on error
         setError('Failed to fetch test result.');
       }
     };
 
-    pollRef.current = setTimeout(poll, 1500);
-    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
-  }, [runId, result]);
+    void poll();
+
+    return () => {
+      stoppedRef.current = true;
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [runId]); // Only depends on runId, not result
 
   const inFlight = !!runId && (!result || result.status === 'running');
 
@@ -41,7 +50,6 @@ export function TestRunnerCard({ agentId }: TestRunnerCardProps) {
     if (!input.trim() || inFlight) return;
     setError(null);
     setResult(null);
-    setRunId(null);
     try {
       const idempotencyKey = crypto.randomUUID();
       const res = await buildApi.testRun(agentId, {
@@ -49,9 +57,7 @@ export function TestRunnerCard({ agentId }: TestRunnerCardProps) {
         workspaceContextId: getActiveClientId() ?? '',
         idempotencyKey,
       });
-      setRunId(res.runId);
-      // Seed initial running state so the effect starts polling
-      setResult({ runId: res.runId, status: 'running', durationMs: null, resultPreview: null, traceUrl: null });
+      setRunId(res.runId); // triggers the effect
     } catch {
       setError('Failed to start test run.');
     }
