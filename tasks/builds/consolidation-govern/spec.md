@@ -1,6 +1,6 @@
-**Status:** draft
+**Status:** approved-for-build
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07 (chatgpt-spec-review round 2 — cursor invariant under sort overrides, override pre-condition, zero-cap "unbounded" semantics + capUsage6mo nullable type, timeout monotonic-clock + SDK-retry bound, snapshot wording corrected to single-statement CTE, body-hash NFC normalisation, filterOptions same-snapshot invariant; round 1 invariants retained; all 12 sections complete)
+**Last updated:** 2026-05-07 (chatgpt-spec-review round 3 — `filterOptions` ordering pinned to SQL; round 1 + round 2 invariants retained; APPROVED for build)
 **Author:** michael
 **Build slug:** consolidation-govern
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
@@ -96,7 +96,7 @@ These invariants apply to every list endpoint in §4 (Knowledge §4.1, Spend Led
   Under sort overrides via `sortKey` / `sortDir`, the `id` tiebreaker direction MUST follow the primary sort direction (e.g. `ORDER BY confidence ASC, id ASC` — never mix `confidence ASC, id DESC`). The `cursor` value encodes both `(primarySortValue, id)` in the effective sort order, so pagination is stable across rows with identical sort values, across concurrent updates, AND across ASC/DESC overrides.
 - **Max page size:** `limit` MUST be ≤ 50; requests with `limit > 50` are silently clamped to 50.
 - **`q` semantics:** Case-insensitive partial substring match against the fields named per endpoint. No stemming, no fuzzy match. Empty `q` is a no-op (not an empty-result filter). `q` composes with structured filters via AND.
-- **`filterOptions`:** Returned per `<SortableTable>` contract (foundation §4.3). Counts are computed AFTER RLS scoping but BEFORE applying the caller's filter selection so users see how many rows each filter value would yield. Counts MUST be computed from the same base-query snapshot as the row results (single SQL statement or CTE) so counts and rows cannot diverge under concurrent writes. Options sort by descending count, then ascending value. Zero-count options are included so previously-selected filters remain visible after they no longer match any row.
+- **`filterOptions`:** Returned per `<SortableTable>` contract (foundation §4.3). Counts are computed AFTER RLS scoping but BEFORE applying the caller's filter selection so users see how many rows each filter value would yield. Counts MUST be computed from the same base-query snapshot as the row results (single SQL statement or CTE) so counts and rows cannot diverge under concurrent writes. Options sort by descending count, then ascending value, **and that sort MUST happen in SQL (`ORDER BY count DESC, value ASC`), not via post-query JavaScript** — same-snapshot ordering avoids drift if the route ever splits the query and the JS ordering. Zero-count options are included so previously-selected filters remain visible after they no longer match any row.
 
 ### 4.1 Knowledge entries — list + Edit-and-override
 

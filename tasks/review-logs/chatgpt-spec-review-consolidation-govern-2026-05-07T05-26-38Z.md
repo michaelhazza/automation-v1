@@ -6,6 +6,7 @@
 - PR: #268 — https://github.com/michaelhazza/automation-v1/pull/268
 - Mode: manual
 - Started: 2026-05-07T05:26:38Z
+- **Verdict:** APPROVED (3 rounds — ChatGPT explicit "ship it" verdict after round 3)
 
 ---
 
@@ -190,3 +191,72 @@ Strong areas now: override precedence semantics, deterministic pagination, close
 ### Top themes
 
 Hardening pass on round 1's invariants — pagination tiebreaker direction made explicit, snapshot wording corrected to PostgreSQL-accurate single-CTE semantics, timeout envelope made monotonic and SDK-retry-resistant, zero-cap semantics resolved as "unbounded / no cap configured" with consequent type widening of `capUsage6mo`, override action gated to `in_use` only, body hash made Unicode-stable. No structural changes; chunk plan unchanged.
+
+---
+
+## Round 3 — 2026-05-07T (round 3)
+
+### ChatGPT Feedback (raw)
+
+No meaningful issues left. This is in the "ship it" category now. Two ultra-minor optional observations:
+
+1. `filterOptions` SQL ordering invariant. ORDER BY count DESC, value ASC already specified, but if implemented via JS post-processing instead of SQL ordering, future drift could occur. Optional invariant: `filterOptions` ordering MUST happen in SQL, not post-query JS sorting, so pagination + counts + ordering all derive from the same snapshot. Future-proofing guard.
+
+2. `buildNavItems` deterministic ordering pattern. Already locked visual ordering with the invariant. Tiny optional tightening: explicitly forbid `.sort()` on the final emitted array. INVARIANT: buildNavItems output order is declarative and MUST NOT be post-processed via Array.sort(). Why: future refactors often introduce "cleanup sorting".
+
+What stands out as unusually good: override semantics (status stays in_use, override is orthogonal state, auto pipeline skips both update + version insert, ETag guarded, canonicalised hashing, NFC normalization) — closes almost every subtle consistency hole. Cursor invariants — fixed the classic ASC/DESC cursor bug properly. Spend trends semantics — zero cap = unbounded, not blown is now fully deterministic; synthetic '__other__' rules fully specified. Timeout contract — monotonic-clock + bounded SDK retries removes hidden retry amplification risk completely.
+
+Final verdict: APPROVED. Ready for build. No blockers. No hidden invariant gaps found. Additional review rounds would now produce duplicates / stylistic opinions / hallucinated concerns. Crossed the threshold where execution quality matters more than spec review.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F1 | `filterOptions` ordering MUST happen in SQL, not post-query JS | technical | apply | auto (apply) | low | Future-proofing guard against split-query JS-ordering drift. |
+| F2 | `buildNavItems` MUST NOT call `Array.sort()` on emitted output | technical | reject | auto (reject) | low | Out of scope — `buildNavItems` and the sidebar ordering primitive live in the Foundation spec, not Govern. Govern only consumes `client/src/config/sidebar.ts` to add three rows; the ordering invariant belongs in the Foundation spec's pre-review checklist. |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] **§4.0 filterOptions:** ordering pinned to SQL (`ORDER BY count DESC, value ASC`); post-query JavaScript sorting forbidden.
+- [auto] **Header `Status` and `Last updated`:** Status moved from `draft` to `approved-for-build`; `Last updated` reflects round 3.
+
+### Integrity check
+
+- Forward references: none introduced this round.
+- Contradictions: none. SQL-ordering rule extends the existing same-snapshot invariant rather than contradicting it.
+- Missing inputs/outputs: rule applies to existing `filterOptions` output.
+- Issues found this round: 0.
+
+### Top themes
+
+Final hardening micro-pass + scope discipline (rejected an out-of-scope buildNavItems finding). ChatGPT explicit "ship it / no further review rounds add value" verdict.
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 17 applied | 1 rejected | 0 deferred
+- User-decided:              3 applied  | 0 rejected | 1 deferred
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § Spec Review deferred items / consolidation-govern:
+  - [user] Empty-state copy guidelines per list page (Knowledge / Ledger / Connections) — defer to mockup-designer iteration during build; spec already names `<EmptyState>` primitive and "Clear filters" action.
+- Implementation readiness checklist:
+  - All inputs defined: yes (every endpoint declares request shape; aggregator inputs are existing tables)
+  - All outputs defined: yes (TypeScript interfaces for KnowledgeEntry / LedgerRow / CapsResponse / SpendInsights / SpendTrends / Connection / ConnectionUsage / ConnectionTestResponse)
+  - Failure modes covered: yes (409 invalid_state_transition for override; 409 ETag mismatch; 429 rate-limit; structured 4-code error enum on connection test; null cap = unbounded; previous-month-zero deltaPct = null)
+  - Ordering guarantees explicit: yes (cursor + tiebreaker direction; SQL filterOptions ordering; UTC time windows)
+  - No unresolved forward references: yes (greps for stale `overridden`, `single read transaction` returned only intentional explanatory mentions)
+- KNOWLEDGE.md updated: yes (5 entries) — 2 updated existing (cursor pagination contract → 4 invariants seen 2x; filterOptions count semantics → +same-snapshot +SQL-ordering seen 2x), 3 new (PostgreSQL READ COMMITTED snapshot per-statement gotcha; external-call timeout determinism 3 invariants; body hash NFC canonicalisation rule)
+- architecture.md updated: no — spec is pre-build; consolidation-govern routes/services/components do not yet exist in the codebase. architecture.md "Key files per domain" updates land at finalisation of the build itself per chunk C13 in §7. Grep terms checked: spendInsightsService, spendTrendsService, KnowledgePage, ConnectionsPage, auto_update_disabled — zero current references.
+- capabilities.md updated: no — UI consolidation only; no product capability add/remove/rename. Knowledge / Spending / Connections all already exist as user-visible capabilities.
+- integration-reference.md updated: no — no new scope/skill/status/write/provider/preset/slug/alias; the new `/test` and `/usage` HTTP routes wrap existing integration capabilities without changing their behaviour. Grep terms checked: connection-test, connection-usage — zero current references.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — no new project-wide convention. Spec uses existing patterns (state-based + key-based idempotency, ETag concurrency, RLS via `RLS_PROTECTED_TABLES` manifest, micro-USD storage). Local invariants (NFC body hash, cursor tiebreaker symmetry) are spec-scoped, not codebase-wide.
+- spec-context.md updated: no — spec consumes existing framing (`testing_posture: static_gates_primary`, `runtime_tests: pure_function_only`, `frontend_tests: none_for_now`, `accepted_primitives` covers withBackoff / RLS_PROTECTED_TABLES / etc). `last_reviewed_at: 2026-05-05` is fresh (2 days old, well under 60-day stale threshold).
+- frontend-design-principles.md updated: no — spec consumes foundation primitives (`<SortableTable>`, `<Modal>`, `<ViewModeSwitcher>`, `<PageShell>`) only; no new pattern, hard rule, or worked example introduced.
+- PR: #268 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/268
+
+### Consistency check across rounds
+
+- §4.10 snapshot wording: round 1 introduced "READ COMMITTED + transaction-start snapshot" which mis-cited PostgreSQL semantics. Round 2 corrected to "single SQL statement / CTE under default READ COMMITTED". Resolution: round 2 wording is technically accurate and lands in the final spec. No semantic conflict between rounds — round 2 fixed an unintended mis-citation rather than overturning a deliberate decision.
+- No other cross-round contradictions.

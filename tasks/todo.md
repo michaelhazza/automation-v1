@@ -2457,6 +2457,10 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 
 - [ ] Formalize `/dev/primitives` playground route as a Phase-0 deliverable (Modal sizes, Drawer, SortableTable filters/edge cases, ViewModeSwitcher states) — ChatGPT R1 F10 + R3 re-raise. Spec §7 C3 already permits an inline dev demo if helpful; formalizing as a deliverable expands Phase-0 scope by ~half a chunk for marginal A/B/C velocity benefit. Reconsider if real iteration friction shows up during A/B/C build. [user]
 
+### consolidation-govern (2026-05-07)
+
+- [ ] Empty-state copy guidelines per list page (Knowledge / Ledger / Connections) — defer to mockup-designer iteration during build. Spec already names the `<EmptyState>` foundation primitive and the "Clear filters" action; final user-visible copy should land alongside mockups rather than be over-specified pre-build. Source: chatgpt-spec-review round 1 finding F13. [user]
+
 ### pre-launch-phase-3-deferred-backlog (2026-05-05)
 
 - [ ] CI gate: "no raw DB writes outside transaction helpers" — Phase 4 candidate. Source: chatgpt-spec-review round 1 finding F6. Forbids `db.insert/update/delete` outside `withOrgTx` / explicit `db.transaction(...)` blocks. Allowlist for system bootstrap, migrations, RLS policy enforcement queries, admin tooling. Aligns with org-scoping invariants but outside Phase 3's deferred-backlog charter. Co-locate with R3-2 `AppError` taxonomy backfill (also Phase 4) — both items "tighten the write surface." [user]
