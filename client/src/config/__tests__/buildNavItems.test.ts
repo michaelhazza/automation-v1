@@ -156,6 +156,71 @@ test('empty navProjects/navAgents emit empty-hint items', () => {
   expect(agentsEmpty?.kind).toBe('empty-hint');
 });
 
+// ── Test 8: workspace user with no projects/agents — empty-hint only ──
+test('workspace user with no projects or agents sees empty-hint items in both sections', () => {
+  const ctx = baseCtx({
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-empty',
+    viewMode: 'workspace',
+    hasOrgPerm: () => true,
+    hasClientPerm: () => true,
+    hasSidebarItem: () => true,
+    navProjects: [],
+    navAgents: [],
+  });
+  const items = buildNavItems(ctx);
+  const projectItems = items.filter((i) => i.group === 'projects');
+  const agentItems = items.filter((i) => i.group === 'agents');
+  // Only header + empty-hint
+  expect(projectItems.some((i) => i.kind === 'empty-hint')).toBe(true);
+  expect(projectItems.every((i) => i.kind === 'section-header' || i.kind === 'empty-hint')).toBe(true);
+  expect(agentItems.some((i) => i.kind === 'empty-hint')).toBe(true);
+  expect(agentItems.every((i) => i.kind === 'section-header' || i.kind === 'empty-hint')).toBe(true);
+});
+
+// ── Test 9: org admin in system view — no Build group rows ──
+test('org admin in org viewMode sees no workspace-only groups', () => {
+  const ctx = baseCtx({
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-sys',
+    viewMode: 'org',
+    hasOrgPerm: (key) => ['org.agents.view', 'org.subaccounts.view', 'org.workspace.view'].includes(key),
+    hasClientPerm: () => false,
+    hasSidebarItem: () => true,
+  });
+  const g = groups(ctx);
+  expect(g.has('work')).toBe(false);
+  expect(g.has('projects')).toBe(false);
+  expect(g.has('agents')).toBe(false);
+  expect(g.has('company')).toBe(false);
+  expect(g.has('organisation')).toBe(true);
+});
+
+// ── Test 10: system admin in workspace mode of a specific client ──
+test('system admin in workspace mode sees platform group alongside workspace groups', () => {
+  const ctx = baseCtx({
+    isSystemAdmin: true,
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-xyz',
+    viewMode: 'workspace',
+    hasOrgPerm: () => true,
+    hasClientPerm: () => true,
+    hasSidebarItem: () => true,
+    navProjects: [{ id: 'p1', name: 'Project A', color: '#abc', status: 'active' }],
+    navAgents: [{ id: 'a1', agentId: 'agent-x', name: 'Agent X', icon: null }],
+  });
+  const g = groups(ctx);
+  expect(g.has('work')).toBe(true);
+  expect(g.has('projects')).toBe(true);
+  expect(g.has('agents')).toBe(true);
+  expect(g.has('company')).toBe(true);
+  expect(g.has('platform')).toBe(true);
+  expect(g.has('organisation')).toBe(true);
+});
+
 // ── Test 7: group emission order matches canonical sequence ──
 test('group emission order: top → work → projects → agents → company → clientpulse → organisation → footer (no platform for non-sysadmin)', () => {
   const ctx = baseCtx({

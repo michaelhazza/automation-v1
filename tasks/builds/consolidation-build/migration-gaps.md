@@ -25,6 +25,34 @@ Phase 1 returns `{ dailyCapUsd: null, monthlyCapUsd: null, warnThresholdPct: 0 }
 Phase 2 should add `daily_cap_usd`, `monthly_cap_usd`, `warn_threshold_pct` columns
 to `agents` and implement the read/write path.
 
+## PLAN_GAP: GoalsPage features not replicated
+
+**Chunk:** C10
+**Status:** Route redirects to home; features deferred
+
+`GoalsPage` (deleted in C10) supported hierarchical goal management (mission / objective / key result tree), create/delete goals, and level/status tagging. These features are not present in `ProjectEditPage` or `RecurringTasksPage`. The `/admin/subaccounts/:subaccountId/goals` route now redirects to `/`. If goal management is needed in Phase 2, it should be integrated into `ProjectEditPage` or a dedicated `GoalsPage` under the new build route structure.
+
+## PLAN_GAP: ScheduledTasksPage subaccount context not in RecurringTasksPage
+
+**Chunk:** C10
+**Status:** Accepted for Phase 1
+
+`ScheduledTasksPage` was scoped to a specific subaccount (via `:subaccountId` param) and listed tasks for that workspace. The new `RecurringTasksPage` uses `useViewMode` to scope by org/system view. The subaccount-scoped detail page (`ScheduledTaskDetailPage`) is retained. Old bookmarks to `/admin/subaccounts/:subaccountId/scheduled-tasks` now redirect to `/recurring-tasks`.
+
+## PLAN_GAP: SystemAgentsPage list view not replicated
+
+**Chunk:** C10
+**Status:** Mitigated via viewMode in AgentsListPage
+
+`SystemAgentsPage` (deleted) was a system-admin-specific agent list. `AgentsListPage` handles the system view via `viewMode === 'system'` (from `useViewMode`). The `sys-agents` sidebar entry now points to `/agents`. System admin can filter by viewMode using the existing scope selector in `AgentsListPage`. Verified that `AgentsListPage` accepts `scope: viewMode` in its API call.
+
+## PLAN_GAP: SkillStudioPage and SkillAnalyzerPage features not replicated
+
+**Chunk:** C10
+**Status:** Routes redirect to /agents; features deferred
+
+`SkillStudioPage` and `SkillAnalyzerPage` are deleted. The plan consolidates skill management into `AgentEditPage > Skills tab`. Any standalone skill authoring or analysis workflows previously accessed at `/admin/skill-studio`, `/system/skill-studio`, and `/system/skill-analyser` are now redirected to `/agents`. Phase 2 should assess whether dedicated skill authoring surfaces are needed.
+
 ## PLAN_GAP: startRunAsync — non-durable fire-and-forget
 
 **Chunk:** C2

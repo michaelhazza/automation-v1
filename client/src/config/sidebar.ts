@@ -143,16 +143,6 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'automations',
       });
     }
-    if (hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) {
-      items.push({
-        group: 'work',
-        kind: 'link',
-        key: 'scheduled',
-        label: 'Scheduled',
-        to: buildRoute('/admin/subaccounts/:subaccountId/scheduled-tasks', { subaccountId: activeClientId }),
-        iconKey: 'scheduled',
-      });
-    }
     if (hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) {
       items.push({
         group: 'work',
@@ -171,16 +161,6 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         label: 'Sites',
         to: buildRoute('/admin/subaccounts/:subaccountId/page-projects', { subaccountId: activeClientId }),
         iconKey: 'portal',
-      });
-    }
-    if (hasOrgPerm('org.agents.view')) {
-      items.push({
-        group: 'work',
-        kind: 'link',
-        key: 'triggers',
-        label: 'Triggers',
-        to: buildRoute('/admin/subaccounts/:subaccountId/triggers', { subaccountId: activeClientId }),
-        iconKey: 'scheduled',
       });
     }
     if (hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) {
@@ -240,10 +220,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         label: a.name,
         to: buildRoute('/agents/:agentId', { agentId: a.agentId }),
         iconKey: a.icon ? `emoji:${a.icon}` : 'agents',
-        manageTo: buildRoute('/admin/subaccounts/:subaccountId/agents/:agentSubaccountId/manage', {
-          subaccountId: activeClientId,
-          agentSubaccountId: a.id,
-        }),
+        manageTo: buildRoute('/agents/:id/edit', { id: a.agentId }),
       });
     }
   }
@@ -370,8 +347,16 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         kind: 'link',
         key: 'admin-agents',
         label: 'Agents',
-        to: staticRoute('/admin/agents'),
+        to: staticRoute('/agents'),
         iconKey: 'agents',
+      });
+      items.push({
+        group: 'organisation',
+        kind: 'link',
+        key: 'recurring-tasks',
+        label: 'Recurring tasks',
+        to: staticRoute('/recurring-tasks'),
+        iconKey: 'scheduled',
       });
     }
     if (hasOrgPerm('org.agents.view')) {
@@ -392,16 +377,6 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         label: 'Automations',
         to: staticRoute('/admin/automations'),
         iconKey: 'automations',
-      });
-    }
-    if (hasSidebarItem('skills')) {
-      items.push({
-        group: 'organisation',
-        kind: 'link',
-        key: 'admin-skills',
-        label: 'Skills',
-        to: staticRoute('/admin/skills'),
-        iconKey: 'skills',
       });
     }
     if (hasSidebarItem('team') && hasOrgPerm('org.users.view')) {
@@ -473,7 +448,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   if (isSystemAdmin) {
     items.push({ group: 'platform', kind: 'section-header', key: 'platform-header', label: 'Platform' });
     items.push({ group: 'platform', kind: 'link', key: 'sys-orgs', label: 'Organisations', to: staticRoute('/system/organisations'), iconKey: 'orgs' });
-    items.push({ group: 'platform', kind: 'link', key: 'sys-agents', label: 'Agents', to: staticRoute('/system/agents'), iconKey: 'agents' });
+    items.push({ group: 'platform', kind: 'link', key: 'sys-agents', label: 'Agents', to: staticRoute('/agents'), iconKey: 'agents' });
     items.push({ group: 'platform', kind: 'link', key: 'sys-skills', label: 'Skills', to: staticRoute('/system/skills'), iconKey: 'skills' });
     items.push({ group: 'platform', kind: 'link', key: 'sys-workflow-studio', label: 'Workflow Studio', to: staticRoute('/system/workflow-studio'), iconKey: 'automations' });
     items.push({ group: 'platform', kind: 'link', key: 'sys-automations', label: 'Automations', to: staticRoute('/system/automations'), iconKey: 'automations' });
