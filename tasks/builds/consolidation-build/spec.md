@@ -108,8 +108,8 @@ interface AgentListItem {
   parentAgentId: string | null;
   parentAgentName: string | null;
   lastRunAt: string | null;
-  runs30d: number;
-  cost30d: number;
+  runs30d: number;    // sourced from agent_runs aggregation; eventually consistent, may lag up to 60 seconds
+  cost30d: number;    // sourced from agent_runs aggregation; eventually consistent, may lag up to 60 seconds
   subaccount: { id: string; name: string } | null;
 }
 ```
@@ -125,6 +125,7 @@ The agent-edit page is tabbed; each tab persists independently.
 ```ts
 interface AgentFull {
   id: string;
+  etag: string;                    // sha256 of canonical JSON (stable key order); global per agent, not per tab
   // Configure
   name: string; description: string;
   roleTitle: string; parentAgentId: string | null;
@@ -148,20 +149,22 @@ interface AgentFull {
 }
 ```
 
-**Tab-scoped PATCH endpoints** (each idempotent; partial updates):
+**Tab-scoped PATCH endpoints** (each idempotent; partial updates). All write endpoints require `If-Match: <etag>` header — server rejects mismatches with `409 Conflict` and returns the current ETag so the client can re-fetch. A successful write returns the new ETag in the response:
 - `PATCH /api/agents/:id/configure` — body: `Pick<AgentFull, 'name'|'description'|'roleTitle'|'parentAgentId'|'model'|'outputSize'|'allowSubaccountModelOverride'|'responseMode'>`
 - `PATCH /api/agents/:id/behaviour`
 - `PATCH /api/agents/:id/personality`
 - `PUT /api/agents/:id/skills` — full replacement of skill bindings (atomic)
 - `PUT /api/agents/:id/data-sources` — full replacement
 - `PUT /api/agents/:id/triggers` — full replacement (delegates to existing trigger service)
+
+**Full-replacement safeguard:** `PUT /skills`, `PUT /data-sources`, and `PUT /triggers` MUST reject payloads that omit previously persisted items unless `force=true` is passed as a query parameter. Default behaviour: compare existing vs incoming set; if a deletion is detected, return `409 Conflict` with the current set. The confirmation flows in §4.11 (skill remove, trigger pause/resume) are responsible for passing `force=true` when the user has explicitly confirmed the removal.
 - `PATCH /api/agents/:id/budget`
 
-**Idempotency:** key-based via the agent id + `If-Match` ETag returned by `GET /full`. Concurrent edits return `409 conflict` with the current ETag; client re-fetches and surfaces a "another user changed this; reload?" banner. (See `architecture.md § Idempotency Keys` for the existing pattern.)
+**ETag contract:** ETag is agent-global (not per-tab). Generated as sha256 of the canonical JSON representation of the full agent record (stable key order). Concurrent edits from different tabs or sessions return `409 Conflict`; client re-fetches and surfaces "Another user changed this — reload?" banner. (See `architecture.md § Idempotency Keys` for the existing pattern.)
 
 ### 4.3 Agent test-run — inline Test runner
 
-`POST /api/agents/:id/test` (extends existing test-fixture service):
+`POST /api/agents/:id/test` (extends existing test-fixture service). **Execution model: strictly async** — the endpoint always returns 202 immediately; the client polls for the result.
 
 ```ts
 interface AgentTestRequest {
@@ -170,16 +173,23 @@ interface AgentTestRequest {
   idempotencyKey: string;         // client-generated UUID
 }
 
-interface AgentTestResponse {
+// POST → 202 Accepted (always immediate)
+interface AgentTestAccepted {
+  runId: string;
+  status: 'running';
+}
+
+// GET /api/agent-runs/:runId → poll until status is terminal
+interface AgentTestResult {
   runId: string;
   status: 'running' | 'completed' | 'failed';
-  durationMs: number | null;
-  resultPreview: string;          // ~200-char summary; full output via run-trace
-  traceUrl: string;               // → /run-trace/:runId
+  durationMs: number | null;      // null while running
+  resultPreview: string | null;   // ~200-char summary; null while running; full output via run-trace
+  traceUrl: string | null;        // → /run-trace/:runId; null while running
 }
 ```
 
-**Idempotency:** key-based per `server/lib/testRunIdempotency.ts`. Re-submitting the same `idempotencyKey` returns the existing run (no duplicate execution).
+**Idempotency:** key-based per `server/lib/testRunIdempotency.ts`. Re-submitting the same `idempotencyKey` returns 200 with the existing run's current state (no duplicate execution).
 
 ### 4.4 Recurring tasks — aggregated list
 
@@ -214,6 +224,13 @@ interface RecurringTask {
 
 Producer: new `server/services/recurringTasksService.ts` that unions over `agent_triggers`, heartbeats, and manual run history. Consumer: `RecurringTasksPage`. **Source-of-truth precedence:** the underlying records (triggers / heartbeats / runs) are the SoT; the recurring-tasks list is a read-only projection. Mutations (pause / resume / edit) flow back to the underlying record's existing endpoint.
 
+**Source precedence within the aggregator:**
+1. `agent_triggers` — source of truth for scheduled and event-fired tasks
+2. Heartbeat-derived tasks — secondary
+3. Manual runs — always independent (never deduplicated against other sources)
+
+Tasks are uniquely identified by `(agentId + triggerId)` for trigger/heartbeat rows, or `(agentId + runId)` for manual rows. No cross-source deduplication is attempted.
+
 ### 4.5 Projects — edit endpoint
 
 `PATCH /api/projects/:id` (existing route extended):
@@ -247,10 +264,10 @@ Per prototype round 15, the Test runner is an inline `<section class="section-ca
 
 Agents list and Recurring tasks list each render `<SearchBox>` (foundation §4.9, debounced 200ms) wired to a `q` query parameter:
 
-- **Agents list** `q` searches `name + description + parentAgentName`.
-- **Recurring tasks list** `q` searches `name + fireCondition + action`.
-- **Skill picker modal** `q` searches the skill registry by `name + key + description`.
-- **Data source picker** `q` searches the connection list (cross-stream — reads from Spec C's connections endpoint).
+- **Agents list** `q` searches `name + description + parentAgentName` (case-insensitive, partial match, no stemming).
+- **Recurring tasks list** `q` searches `name + fireCondition + action` (case-insensitive, partial match, no stemming).
+- **Skill picker modal** `q` searches the skill registry by `name + key + description` (case-insensitive, partial match, no stemming).
+- **Data source picker** `q` searches the connection list (cross-stream — reads from Spec C's connections endpoint; case-insensitive, partial match, no stemming).
 
 Empty results render `<EmptyState>` with a "Clear search and filters" action. Page list errors render `<ErrorState>` with a retry button.
 
@@ -264,13 +281,21 @@ The Recurring tasks `fireCondition` field (`§4.4 RecurringTask`) is computed se
 
 Producer: new pure helper `server/services/recurringTasksServicePure.ts > formatFireCondition(triggerSpec)`. No client-side library; the server emits the string. Test cases for the helper colocated.
 
+**Formatting contract:**
+- All times rendered in UTC
+- Output is deterministic for identical trigger specs (same input → same string, always)
+- No localisation in Phase 1 (UTC only)
+- Max output length: 80 characters
+
 ### 4.10 Agent versioning indicator
 
 Agents list shows a small version chip next to each agent name: `v<N>` where `N` is the count of `agent_prompt_revisions` rows for that agent. Tooltip: `"Deployed revision · last edited <relative time> by <user>"`. **No rollback UI in this stream** — the chip is read-only awareness; rollback flows are deferred per §10.
 
-Add `agent_revision_count` to `AgentListItem` (§4.1).
+Add `agent_revision_count` to `AgentListItem` (§4.1). **Fallback:** if no revisions exist for an agent, display `v1`.
 
 ### 4.11 Confirmation dialogs on destructive actions
+
+All destructive confirmation dialogs must be non-blocking async — the dialog remains interactive and the UI does not freeze during the API call. Show an inline loading state on the confirm button; surface errors inline without closing the dialog.
 
 - **Delete agent**: `<ConfirmDialog>` with copy `"Deleting <name>. Active runs will continue but no new runs will start. This cannot be undone."`. Type-to-confirm input (`<name>`) for additional friction on production agents.
 - **Delete project**: `<ConfirmDialog>` with copy mentioning linked agents (`"<N> linked agents will be unlinked."`). Type-to-confirm if linked agents > 0.
