@@ -20,11 +20,11 @@
 
 ## 1. Branch state — read this first
 
-**The branch is 27 commits ahead of `origin/main` and has NOT been pushed.**
+**The branch is 28 commits ahead of `origin/main` and HAS been pushed** (dual-reviewer + Phase 2 close commits pushed at end of this Phase 2 session per the explicit operator opt-in for review-agent and Phase 2 boundary auto-pushes).
 
-Branch HEAD at handoff: see latest dual-reviewer auto-commit (the dual-review log + App.tsx redirect fix). All Phase 2 artefacts (progress.md, handoff.md, dual-review log, current-focus.md update) are committed and pushed by the auto-commit at Phase 2 close (see `tasks/builds/consolidation-operate/progress.md § 2 Per-chunk commit map` for the full commit chain).
+Branch HEAD at handoff: `d0db0152` (Phase 2 close commit — handoff + progress + current-focus REVIEWING). The full commit chain is in `tasks/builds/consolidation-operate/progress.md § 2 Per-chunk commit map`. The dual-reviewer commit `ad6c498d` precedes it (App.tsx scope-preserving redirect + log).
 
-**finalisation-coordinator must push the branch** before opening the PR — `git push -u origin ui-consolidation-operate` is the first remote-mutating step of Phase 3.
+**No remote PR exists yet.** finalisation-coordinator opens the PR via `gh pr create` as the first PR-mutating step of Phase 3 — the branch is already on origin and ready. S2 sync (merge of latest `origin/main`) still runs first per the Phase 3 contract.
 
 Working tree is clean. `npm run lint` is at 0 errors / 865 pre-existing warnings (matches `main` baseline). `npm run typecheck` is clean. Build artefacts (lint/typecheck) are deterministic on the integrated branch state.
 
@@ -64,7 +64,7 @@ When `launch finalisation` is invoked in a fresh session, the finalisation-coord
 1. **Context loading + handoff read** — load CLAUDE.md, architecture.md, DEVELOPMENT_GUIDELINES.md, this handoff, and the spec.
 2. **S2 sync** — `git fetch origin`, rebase / merge `main` into `ui-consolidation-operate`. Resolve conflicts; pause for operator on non-trivial code-area conflicts. The auto-resolve rules from PR #270 apply (append-only artefact files take HEAD or union; tasks/todo.md union-merge; spec.md/plan.md HEAD).
 3. **G4 regression guard** — `npm run lint && npm run typecheck` after merge. Cap 3 fix attempts; escalate if regressions surface from main.
-4. **Push branch** — `git push -u origin ui-consolidation-operate`. This is the first remote-mutating step.
+4. **Push merged state** — `git push` (branch is already tracked at origin/ui-consolidation-operate from Phase 2 close; this push delivers the post-S2-sync state).
 5. **Open PR** — `gh pr create` against `main`. Title and body cite the spec, the chunks built, the deferred items, and the dual-reviewer outcome. Use the `feat(consolidation):` prefix consistent with PR #270.
 6. **Launch chatgpt-pr-review** — operator invocation, NOT inline (see § 5 callout below).
 7. **Apply chatgpt-pr-review verdicts** — each round's `[ACCEPT]` decisions get applied, deferrals routed to `tasks/todo.md` with `CHATGPT-` prefix. Loop until CLOSED or 3 rounds.
