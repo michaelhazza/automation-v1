@@ -87,6 +87,29 @@ test('system admin with override active → system', () => {
   assert.equal(deriveViewMode(systemAdminWithOverride()), 'system');
 });
 
+test('stale override flag without isSystemAdmin → workspace (no inconsistent system mode)', () => {
+  // Regression: a downgraded user with a leftover systemAdminOrgOverride flag in
+  // localStorage must not derive into 'system' — that combination would render a
+  // sidebar with no active switcher segment and hidden workspace items.
+  const downgraded: ViewModeContext = {
+    hasActiveClient: true,
+    hasSystemOverride: true,
+    isOrgAdmin: true,
+    isSystemAdmin: false,
+  };
+  assert.equal(deriveViewMode(downgraded), 'workspace');
+});
+
+test('stale override flag without isSystemAdmin and no client → org (org admin path)', () => {
+  const downgraded: ViewModeContext = {
+    hasActiveClient: false,
+    hasSystemOverride: true,
+    isOrgAdmin: true,
+    isSystemAdmin: false,
+  };
+  assert.equal(deriveViewMode(downgraded), 'org');
+});
+
 // ---------------------------------------------------------------------------
 // deriveAvailableModes
 // ---------------------------------------------------------------------------

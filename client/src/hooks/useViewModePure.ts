@@ -23,12 +23,17 @@ export interface ViewModeContext {
  * Derive the current ViewMode from identity context.
  *
  * Priority order (highest wins):
- *   1. System override active → 'system'
+ *   1. System override active AND user is currently a system admin → 'system'
  *   2. No active client AND user is org admin → 'org'
  *   3. Otherwise → 'workspace'
+ *
+ * The `isSystemAdmin` guard on rule 1 prevents a stale `systemAdminOrgOverride`
+ * flag in localStorage from putting a downgraded user into a 'system' mode that
+ * `deriveAvailableModes` excludes — that combination produces a sidebar with no
+ * active switcher segment and hidden workspace items.
  */
 export function deriveViewMode(ctx: ViewModeContext): ViewMode {
-  if (ctx.hasSystemOverride) return 'system';
+  if (ctx.hasSystemOverride && ctx.isSystemAdmin) return 'system';
   if (!ctx.hasActiveClient && ctx.isOrgAdmin) return 'org';
   return 'workspace';
 }

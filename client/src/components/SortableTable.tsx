@@ -125,9 +125,19 @@ function FilterDropdown({ columnKey, options, active, onApply, isFiltered }: Fil
   }, [active]);
 
   const handleApply = useCallback(() => {
-    onApply(new Set(pending));
+    // Normalise "all selected" to an empty Set — the canonical no-filter
+    // representation. Storing every current option as the filter would (a)
+    // silently exclude any new value that appears later, (b) cause the caret
+    // (size < options.length) and the Clear-filters button (size > 0) to
+    // disagree about whether a filter is active, and (c) re-apply the same
+    // exclusion after a persisted-state reload against changed rows.
+    const allSelected =
+      options.length > 0 &&
+      pending.size === options.length &&
+      options.every((o) => pending.has(o.value));
+    onApply(allSelected ? new Set<string>() : new Set(pending));
     setOpen(false);
-  }, [onApply, pending]);
+  }, [onApply, pending, options]);
 
   const handleCancel = useCallback(() => {
     setPending(new Set(snapshotRef.current));
