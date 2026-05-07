@@ -191,9 +191,10 @@
   <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'calendar.html');</script>
 
   <div class="main">
-    <div style="background:var(--indigo-50);border-bottom:1px solid var(--indigo-200);padding:8px 24px;font-size:12px;color:var(--indigo-700);display:flex;align-items:center;gap:8px;">
+    <!-- Subtle replaces banner: narrow single-line, slate bg, unobtrusive -->
+    <div style="background:var(--slate-100);border-bottom:1px solid var(--border);padding:6px 24px;font-size:11.5px;color:var(--slate-500);display:flex;align-items:center;gap:6px;">
       Replaces 2 pages:
-      <a href="before-calendar.html" style="color:var(--indigo-600);font-weight:600;">ScheduleCalendarPage + SubaccountScheduleCalendarPage (before)</a>
+      <a href="before-calendar.html" style="color:var(--slate-600);font-weight:600;">ScheduleCalendarPage + SubaccountScheduleCalendarPage</a>
     </div>
     <div class="topbar">
       <div class="topbar-breadcrumb">
@@ -204,14 +205,15 @@
     </div>
 
     <div class="page-body">
-      <div class="page-header" style="margin-bottom:16px;">
-        <h1>Calendar</h1>
-        <p>Scheduled agent runs and workflow executions across your clients.</p>
+
+      <!-- Title row -->
+      <div style="margin-bottom:20px;">
+        <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;margin:0 0 4px;">Calendar</h1>
+        <p style="font-size:13px;color:var(--slate-500);margin:0;">Scheduled agent runs and workflow executions across your clients.</p>
       </div>
 
-      <!-- Scope filter row -->
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-        <span style="font-size:12px;color:var(--slate-500);font-weight:500;">Scope:</span>
+      <!-- Scope row -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:18px;flex-wrap:wrap;">
         <button class="scope-pill active" onclick="setScope('all',this)">
           <span class="scope-dot" style="background:var(--slate-400);"></span>
           All clients
@@ -230,8 +232,11 @@
         </button>
       </div>
 
-      <!-- Period nav + view switcher — left-aligned, single row, below scope -->
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+      <!-- Thin divider -->
+      <div style="height:1px;background:var(--slate-200);margin-bottom:18px;"></div>
+
+      <!-- Period nav row: Today + arrows + label + divider + view switcher -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
         <!-- Today button -->
         <button id="today-btn" onclick="resetToToday()" style="height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--slate-300);background:white;color:var(--slate-700);font-size:12.5px;font-weight:500;cursor:pointer;transition:all 0.12s;white-space:nowrap;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">Today</button>
         <!-- Prev arrow -->
@@ -241,7 +246,7 @@
         <!-- Next arrow -->
         <button onclick="shiftPeriod(1)" title="Next period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
         <!-- Divider -->
-        <div style="width:1px;height:20px;background:var(--slate-300);margin:0 4px;"></div>
+        <div style="width:1px;height:20px;background:var(--slate-200);margin:0 6px;"></div>
         <!-- View switcher -->
         <div style="display:flex;gap:2px;background:var(--slate-100);padding:3px;border-radius:8px;">
           <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)" style="border-radius:6px;">Week</button>
@@ -250,34 +255,39 @@
         </div>
       </div>
 
-      <!-- Legend -->
-      <div style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:50%;background:#3b82f6;"></div>
+      <!-- Thin divider -->
+      <div style="height:1px;background:var(--slate-200);margin-bottom:16px;"></div>
+
+      <!-- Color key row -->
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);">Legend:</span>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#3b82f6;flex-shrink:0;"></div>
           Acme Corp
         </div>
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:50%;background:#10b981;"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#10b981;flex-shrink:0;"></div>
           Beta Industries
         </div>
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:50%;background:#f59e0b;"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></div>
           Gamma Holdings
         </div>
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:50%;background:#7c3aed;"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#7c3aed;flex-shrink:0;"></div>
           Nova Agency
         </div>
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:3px;background:var(--indigo-100);border:1.5px solid var(--indigo-300);"></div>
+        <div style="width:1px;height:14px;background:var(--slate-200);"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:2px;background:var(--indigo-100);border:1.5px solid var(--indigo-300);flex-shrink:0;"></div>
           Scheduled task
         </div>
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:3px;background:#eff6ff;border:1.5px solid #bfdbfe;"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:2px;background:#eff6ff;border:1.5px solid #bfdbfe;flex-shrink:0;"></div>
           Workflow
         </div>
-        <div class="legend-item">
-          <div style="width:10px;height:10px;border-radius:3px;background:#f0fdf4;border:1.5px solid #a7f3d0;"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:2px;background:#f0fdf4;border:1.5px solid #a7f3d0;flex-shrink:0;"></div>
           Agent heartbeat
         </div>
       </div>

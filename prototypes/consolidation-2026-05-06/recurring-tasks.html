@@ -369,27 +369,55 @@
 /* Overflow button cell */
 td.actions-cell { position: relative; }
 
-/* ── Scope / project filter row ─────────────────────────────── */
-.scope-filter-row {
-  padding: 12px 32px;
-  background: white;
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+/* ── Column sort / filter header ─────────────────────────────── */
+.col-sortable { cursor: pointer; user-select: none; }
+.col-sortable:hover { color: var(--slate-700); }
+.col-sort-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.sort-arrow { font-size: 9px; color: var(--indigo-500); flex-shrink: 0; }
+.col-filter-wrap { display: inline-flex; align-items: center; gap: 3px; position: relative; }
+.col-filter-caret {
+  background: none; border: none; cursor: pointer; padding: 1px 3px;
+  color: var(--slate-400); font-size: 10px; line-height: 1;
+  border-radius: 3px; transition: all 0.1s;
 }
-.scope-filter-label {
-  font-size: 12.5px; font-weight: 600; color: var(--slate-600);
-  white-space: nowrap;
+.col-filter-caret:hover { background: var(--indigo-50); color: var(--indigo-500); }
+.col-filter-caret.active { color: var(--indigo-600); background: var(--indigo-50); }
+
+/* Checkbox filter dropdown */
+.col-filter-dropdown {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  background: white; border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12); z-index: 200;
+  min-width: 180px; padding: 6px 0;
+  display: none;
 }
-.scope-filter-select {
-  padding: 5px 28px 5px 10px; border: 1px solid var(--border);
-  border-radius: 7px; font-size: 12.5px; font-family: inherit;
-  color: var(--slate-800); background: white; cursor: pointer;
-  outline: none; appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 8px center;
-  transition: border-color 0.12s;
+.col-filter-dropdown.open { display: block; }
+.col-filter-dropdown-head {
+  padding: 6px 12px 4px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100); margin-bottom: 4px;
 }
-.scope-filter-select:focus { border-color: var(--indigo-400); }
+.col-filter-dropdown-head a {
+  font-size: 11px; color: var(--indigo-600); font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+.col-filter-dropdown-head a:hover { text-decoration: underline; }
+.col-filter-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px; font-size: 12.5px; color: var(--slate-700);
+  cursor: pointer; transition: background 0.08s;
+}
+.col-filter-option:hover { background: var(--slate-50); }
+.col-filter-option input[type="checkbox"] { accent-color: var(--indigo-500); cursor: pointer; }
+.col-filter-apply {
+  margin: 6px 10px 4px;
+  padding: 5px 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 600;
+  background: var(--indigo-600); color: white; border: none;
+  cursor: pointer; width: calc(100% - 20px);
+  transition: background 0.12s;
+}
+.col-filter-apply:hover { background: var(--indigo-700); }
 
 /* ── Run now button (inline on manual rows) ──────────────────── */
 .run-now-btn {
@@ -450,13 +478,18 @@ td.actions-cell { position: relative; }
   <!-- Main content -->
   <main class="page-main">
 
-    <!-- Header -->
+    <!-- Header: title left, search + actions right -->
     <div class="page-header">
       <div class="page-header-left">
         <h1 class="page-title">Recurring tasks</h1>
         <p class="page-subtitle">Acme Corp &middot; 14 active tasks &middot; 3 paused</p>
       </div>
       <div class="page-header-actions">
+        <!-- Search input moved to right of header -->
+        <div class="search-box" style="flex:0 0 280px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="search-input" placeholder="Search tasks by name, agent, brief..." oninput="applyAllFilters()">
+        </div>
         <button class="btn btn-outline" onclick="openOneoffModal()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Run a one-off task
@@ -468,35 +501,8 @@ td.actions-cell { position: relative; }
       </div>
     </div>
 
-    <!-- Scope / Project filter row -->
-    <div class="scope-filter-row" id="scope-filter-row">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span class="scope-filter-label">Scope:</span>
-        <select class="scope-filter-select" id="scope-select" onchange="onScopeChange(this.value)">
-          <option value="workspace">This workspace (Acme Corp)</option>
-          <option value="org">Organisation-wide</option>
-          <option value="acme">Acme Corp</option>
-          <option value="maple">Maple Digital</option>
-          <option value="northbridge">Northbridge Media</option>
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span class="scope-filter-label">Project:</span>
-        <select class="scope-filter-select" id="project-select" onchange="onProjectChange(this.value)">
-          <option value="">All projects</option>
-          <option value="q1-outreach">Q1 Outreach Campaign</option>
-          <option value="customer-health">Customer Health Q2</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- Filter bar -->
+    <!-- Filter bar (quick-access chips only -- scope/project are now table columns) -->
     <div class="filter-bar">
-      <div class="search-box">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input type="text" placeholder="Search tasks...">
-      </div>
-      <div class="chip-divider"></div>
       <div class="filter-chips" id="filter-chips">
         <span class="chip active" data-filter="all">All (17)</span>
         <span class="chip" data-filter="schedule">Schedule-fired (8)</span>
@@ -514,14 +520,105 @@ td.actions-cell { position: relative; }
       <table class="data-table" id="tasks-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Fire condition</th>
-            <th>Action</th>
-            <th class="project-col" style="display:none;">Project</th>
-            <th>Status</th>
-            <th>Last fired</th>
-            <th>Fires / 30d</th>
-            <th>Next fire</th>
+            <th onclick="sortByColumn('name')" class="col-sortable" id="col-name">
+              <span class="col-sort-wrap">Name <span class="sort-arrow" id="arr-name"></span></span>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('fire')" class="col-sort-wrap" style="cursor:pointer;">Fire condition <span class="sort-arrow" id="arr-fire"></span></span>
+                <button class="col-filter-caret" id="fc-btn-fire" onclick="toggleFilterDropdown('fire', event)" title="Filter by fire condition">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-fire">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('fire')">All</a>
+                    <a onclick="clearFilter('fire')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="schedule" checked> Schedule-fired</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="event" checked> Event-fired</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="fire" value="manual" checked> Manual</label>
+                  <button class="col-filter-apply" onclick="applyColumnFilter('fire')">Apply</button>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('agent')" class="col-sort-wrap" style="cursor:pointer;">Action <span class="sort-arrow" id="arr-agent"></span></span>
+                <button class="col-filter-caret" id="fc-btn-agent" onclick="toggleFilterDropdown('agent', event)" title="Filter by agent">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-agent">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('agent')">All</a>
+                    <a onclick="clearFilter('agent')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Account Health Agent" checked> Account Health Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Reporting Agent" checked> Reporting Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Billing Agent" checked> Billing Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Survey Agent" checked> Survey Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="CRM Sync Agent" checked> CRM Sync Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Outreach Agent" checked> Outreach Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Maintenance Agent" checked> Maintenance Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Internal Escalation" checked> Internal Escalation</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Onboarding Agent" checked> Onboarding Agent</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="agent" value="Compliance Prefilter" checked> Compliance Prefilter</label>
+                  <button class="col-filter-apply" onclick="applyColumnFilter('agent')">Apply</button>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('scope')" class="col-sort-wrap" style="cursor:pointer;">Scope <span class="sort-arrow" id="arr-scope"></span></span>
+                <button class="col-filter-caret" id="fc-btn-scope" onclick="toggleFilterDropdown('scope', event)" title="Filter by scope">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-scope">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('scope')">All</a>
+                    <a onclick="clearFilter('scope')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="scope" value="Acme Corp" checked> Acme Corp</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="scope" value="Organisation" checked> Organisation</label>
+                  <button class="col-filter-apply" onclick="applyColumnFilter('scope')">Apply</button>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('project')" class="col-sort-wrap" style="cursor:pointer;">Project <span class="sort-arrow" id="arr-project"></span></span>
+                <button class="col-filter-caret" id="fc-btn-project" onclick="toggleFilterDropdown('project', event)" title="Filter by project">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-project">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('project')">All</a>
+                    <a onclick="clearFilter('project')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Q1 Outreach Campaign" checked> Q1 Outreach Campaign</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Customer Health Q2" checked> Customer Health Q2</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="Compliance Audit 2026" checked> Compliance Audit 2026</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="project" value="" checked> (None)</label>
+                  <button class="col-filter-apply" onclick="applyColumnFilter('project')">Apply</button>
+                </div>
+              </div>
+            </th>
+            <th>
+              <div class="col-filter-wrap" style="position:relative;">
+                <span onclick="sortByColumn('status')" class="col-sort-wrap" style="cursor:pointer;">Status <span class="sort-arrow" id="arr-status"></span></span>
+                <button class="col-filter-caret" id="fc-btn-status" onclick="toggleFilterDropdown('status', event)" title="Filter by status">&#9660;</button>
+                <div class="col-filter-dropdown" id="fc-drop-status">
+                  <div class="col-filter-dropdown-head">
+                    <a onclick="selectAllFilter('status')">All</a>
+                    <a onclick="clearFilter('status')">Clear</a>
+                  </div>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="status" value="active" checked> Active</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="status" value="paused" checked> Paused</label>
+                  <label class="col-filter-option"><input type="checkbox" data-filter="status" value="error" checked> Error</label>
+                  <button class="col-filter-apply" onclick="applyColumnFilter('status')">Apply</button>
+                </div>
+              </div>
+            </th>
+            <th onclick="sortByColumn('lastFired')" class="col-sortable" id="col-lastFired">
+              <span class="col-sort-wrap">Last fired <span class="sort-arrow" id="arr-lastFired"></span></span>
+            </th>
+            <th onclick="sortByColumn('fires30')" class="col-sortable" id="col-fires30">
+              <span class="col-sort-wrap">Fires / 30d <span class="sort-arrow" id="arr-fires30"></span></span>
+            </th>
+            <th onclick="sortByColumn('nextFire')" class="col-sortable" id="col-nextFire">
+              <span class="col-sort-wrap">Next fire <span class="sort-arrow" id="arr-nextFire"></span></span>
+            </th>
             <th></th>
           </tr>
         </thead>
@@ -870,41 +967,106 @@ type=lead</textarea>
 renderSidebar('workspace', 'recurring-tasks.html');
 
 /* ── Task data ─────────────────────────────────────────────────── */
-/* project: null means no project. Projects: 'q1-outreach', 'customer-health' */
+/* scope: subaccount name or 'Organisation' for org-wide tasks.
+   project: project label or null. */
 const TASKS = [
   // Schedule-fired (8)
-  { id:1,  name:'Daily morning briefing',    type:'schedule', detail:'Daily 9am UTC',      agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'Today 9:00am',     fires30:30,  nextFire:'Tomorrow 9:00am',      project:'customer-health' },
-  { id:2,  name:'Weekly pipeline report',    type:'schedule', detail:'Weekly Mon 8am UTC', agent:'Reporting Agent',      workflow:'Weekly digest',    status:'active',  lastFired:'Last Monday',      fires30:4,   nextFire:'Next Monday 8:00am',   project:null },
-  { id:3,  name:'Monthly invoice generation',type:'schedule', detail:'Monthly 1st 00:00',  agent:'Billing Agent',        workflow:null,               status:'active',  lastFired:'May 1',            fires30:1,   nextFire:'Jun 1 00:00',          project:null },
-  { id:4,  name:'Quarterly customer survey', type:'schedule', detail:'Quarterly Apr 1',    agent:'Survey Agent',         workflow:null,               status:'active',  lastFired:'Apr 1',            fires30:1,   nextFire:'Jul 1',                project:'customer-health' },
-  { id:5,  name:'Hourly CRM sync',           type:'schedule', detail:'Every hour',         agent:'CRM Sync Agent',       workflow:null,               status:'active',  lastFired:'23 min ago',       fires30:720, nextFire:'37 min from now',      project:null },
-  { id:6,  name:'End-of-day summary',        type:'schedule', detail:'Daily 6pm UTC',      agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Yesterday 6:00pm', fires30:30,  nextFire:'Today 6:00pm',         project:'q1-outreach' },
-  { id:7,  name:'Sunday data cleanup',       type:'schedule', detail:'Weekly Sun 2am UTC', agent:'Maintenance Agent',    workflow:'Cleanup workflow', status:'active',  lastFired:'Last Sunday',      fires30:4,   nextFire:'Next Sunday 2:00am',   project:null },
-  { id:8,  name:'Old contact archive',       type:'schedule', detail:'Monthly 15th 03:00', agent:'CRM Sync Agent',       workflow:null,               status:'paused',  lastFired:'Apr 15',           fires30:1,   nextFire:'Paused',               project:null },
+  { id:1,  name:'Daily morning briefing',    type:'schedule', detail:'Daily 9am UTC',      agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'Today 9:00am',     fires30:30,  nextFire:'Tomorrow 9:00am',    scope:'Acme Corp',    project:'Customer Health Q2' },
+  { id:2,  name:'Weekly pipeline report',    type:'schedule', detail:'Weekly Mon 8am UTC', agent:'Reporting Agent',      workflow:'Weekly digest',    status:'active',  lastFired:'Last Monday',      fires30:4,   nextFire:'Next Monday 8:00am', scope:'Acme Corp',    project:null },
+  { id:3,  name:'Monthly invoice generation',type:'schedule', detail:'Monthly 1st 00:00',  agent:'Billing Agent',        workflow:null,               status:'active',  lastFired:'May 1',            fires30:1,   nextFire:'Jun 1 00:00',        scope:'Organisation', project:null },
+  { id:4,  name:'Quarterly customer survey', type:'schedule', detail:'Quarterly Apr 1',    agent:'Survey Agent',         workflow:null,               status:'active',  lastFired:'Apr 1',            fires30:1,   nextFire:'Jul 1',              scope:'Acme Corp',    project:'Customer Health Q2' },
+  { id:5,  name:'Hourly CRM sync',           type:'schedule', detail:'Every hour',         agent:'CRM Sync Agent',       workflow:null,               status:'active',  lastFired:'23 min ago',       fires30:720, nextFire:'37 min from now',    scope:'Acme Corp',    project:null },
+  { id:6,  name:'End-of-day summary',        type:'schedule', detail:'Daily 6pm UTC',      agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Yesterday 6:00pm', fires30:30,  nextFire:'Today 6:00pm',       scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:7,  name:'Sunday data cleanup',       type:'schedule', detail:'Weekly Sun 2am UTC', agent:'Maintenance Agent',    workflow:'Cleanup workflow', status:'active',  lastFired:'Last Sunday',      fires30:4,   nextFire:'Next Sunday 2:00am', scope:'Organisation', project:null },
+  { id:8,  name:'Old contact archive',       type:'schedule', detail:'Monthly 15th 03:00', agent:'CRM Sync Agent',       workflow:null,               status:'paused',  lastFired:'Apr 15',           fires30:1,   nextFire:'Paused',             scope:'Acme Corp',    project:null },
   // Event-fired (6)
-  { id:9,  name:'Welcome new lead',          type:'event',    detail:'On task_created',    agent:'Outreach Agent',       workflow:'Welcome sequence', status:'active',  lastFired:'5 min ago',        fires30:47,  nextFire:null,                   project:'q1-outreach' },
-  { id:10, name:'Risky deal escalation',     type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'2 hours ago',      fires30:12,  nextFire:null,                   project:'customer-health' },
-  { id:11, name:'Failed sync notification',  type:'event',    detail:'On agent_completed', agent:'Internal Escalation',  workflow:null,               status:'active',  lastFired:'Yesterday',        fires30:8,   nextFire:null,                   project:null },
-  { id:12, name:'New customer onboarding',   type:'event',    detail:'On task_moved',      agent:'Onboarding Agent',     workflow:'Onboarding flow',  status:'active',  lastFired:'3 days ago',       fires30:5,   nextFire:null,                   project:null },
-  { id:13, name:'Demo follow-up',            type:'event',    detail:'On task_completed',  agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Today 11:00am',    fires30:18,  nextFire:null,                   project:'q1-outreach' },
-  { id:14, name:'Churn risk monitor',        type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',      fires30:3,   nextFire:null,  error:'HubSpot connection expired', project:'customer-health' },
+  { id:9,  name:'Welcome new lead',          type:'event',    detail:'On task_created',    agent:'Outreach Agent',       workflow:'Welcome sequence', status:'active',  lastFired:'5 min ago',        fires30:47,  nextFire:null,                 scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:10, name:'Risky deal escalation',     type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'active',  lastFired:'2 hours ago',      fires30:12,  nextFire:null,                 scope:'Acme Corp',    project:'Customer Health Q2' },
+  { id:11, name:'Failed sync notification',  type:'event',    detail:'On agent_completed', agent:'Internal Escalation',  workflow:null,               status:'active',  lastFired:'Yesterday',        fires30:8,   nextFire:null,                 scope:'Organisation', project:null },
+  { id:12, name:'New customer onboarding',   type:'event',    detail:'On task_moved',      agent:'Onboarding Agent',     workflow:'Onboarding flow',  status:'active',  lastFired:'3 days ago',       fires30:5,   nextFire:null,                 scope:'Acme Corp',    project:null },
+  { id:13, name:'Demo follow-up',            type:'event',    detail:'On task_completed',  agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'Today 11:00am',    fires30:18,  nextFire:null,                 scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:14, name:'Churn risk monitor',        type:'event',    detail:'On agent_completed', agent:'Account Health Agent', workflow:null,               status:'error',   lastFired:'6 hours ago',      fires30:3,   nextFire:null,  error:'HubSpot connection expired', scope:'Acme Corp', project:'Customer Health Q2' },
   // Manual (3)
-  { id:15, name:'Quarterly business review', type:'manual',   detail:'Manual only',        agent:'Reporting Agent',      workflow:'QBR workflow',     status:'active',  lastFired:'Apr 30',           fires30:1,   nextFire:null,                   project:null },
-  { id:16, name:'Custom outreach blast',     type:'manual',   detail:'Manual only',        agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'2 weeks ago',      fires30:1,   nextFire:null,                   project:'q1-outreach' },
-  { id:17, name:'Compliance audit',          type:'manual',   detail:'Manual only',        agent:'Compliance Prefilter', workflow:null,               status:'paused',  lastFired:'Mar 1',            fires30:0,   nextFire:null,                   project:null },
+  { id:15, name:'Quarterly business review', type:'manual',   detail:'Manual only',        agent:'Reporting Agent',      workflow:'QBR workflow',     status:'active',  lastFired:'Apr 30',           fires30:1,   nextFire:null,                 scope:'Organisation', project:null },
+  { id:16, name:'Custom outreach blast',     type:'manual',   detail:'Manual only',        agent:'Outreach Agent',       workflow:null,               status:'active',  lastFired:'2 weeks ago',      fires30:1,   nextFire:null,                 scope:'Acme Corp',    project:'Q1 Outreach Campaign' },
+  { id:17, name:'Compliance audit',          type:'manual',   detail:'Manual only',        agent:'Compliance Prefilter', workflow:null,               status:'paused',  lastFired:'Mar 1',            fires30:0,   nextFire:null,                 scope:'Acme Corp',    project:'Compliance Audit 2026' },
 ];
 
-const PROJECT_LABELS = {
-  'q1-outreach':    'Q1 Outreach Campaign',
-  'customer-health':'Customer Health Q2',
-};
-
-const TYPE_LABELS = { schedule:'Schedule-fired', event:'Event-fired', manual:'Manual' };
+const TYPE_LABELS   = { schedule:'Schedule-fired', event:'Event-fired', manual:'Manual' };
 const STATUS_LABELS = { active:'Active', paused:'Paused', error:'Error' };
 
-let showProjectCol = false;
+/* ── Sort + filter state ──────────────────────────────────────── */
+let sortCol = null;      // current sort column key
+let sortDir = 1;         // 1 = asc, -1 = desc
 
-function renderRows(tasks) {
+/* Active column filters: map of filterKey -> Set of allowed values */
+const colFilters = {
+  fire:    new Set(['schedule','event','manual']),
+  agent:   new Set(['Account Health Agent','Reporting Agent','Billing Agent','Survey Agent',
+                    'CRM Sync Agent','Outreach Agent','Maintenance Agent','Internal Escalation',
+                    'Onboarding Agent','Compliance Prefilter']),
+  scope:   new Set(['Acme Corp','Organisation']),
+  project: new Set(['Q1 Outreach Campaign','Customer Health Q2','Compliance Audit 2026','']),
+  status:  new Set(['active','paused','error']),
+};
+
+/* quick-access chip filter key */
+let chipFilter = 'all';
+
+function getTaskSortKey(t, col) {
+  switch(col) {
+    case 'name':      return t.name.toLowerCase();
+    case 'fire':      return t.type;
+    case 'agent':     return t.agent.toLowerCase();
+    case 'scope':     return t.scope.toLowerCase();
+    case 'project':   return (t.project || '').toLowerCase();
+    case 'status':    return t.status;
+    case 'lastFired': return t.lastFired.toLowerCase();
+    case 'fires30':   return t.fires30;
+    case 'nextFire':  return (t.nextFire || 'zzz').toLowerCase();
+    default:          return '';
+  }
+}
+
+function taskPassesFilters(t) {
+  /* chip filter */
+  if (chipFilter !== 'all') {
+    if (['schedule','event','manual'].includes(chipFilter) && t.type !== chipFilter) return false;
+    if (['active','paused','error'].includes(chipFilter) && t.status !== chipFilter) return false;
+  }
+  /* column filters */
+  if (!colFilters.fire.has(t.type)) return false;
+  if (!colFilters.agent.has(t.agent)) return false;
+  if (!colFilters.scope.has(t.scope)) return false;
+  if (!colFilters.project.has(t.project || '')) return false;
+  if (!colFilters.status.has(t.status)) return false;
+  /* search */
+  const q = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
+  if (q) {
+    const hay = `${t.name} ${t.agent} ${t.detail} ${t.scope} ${t.project || ''}`.toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function renderRows() {
+  let tasks = TASKS.filter(taskPassesFilters);
+
+  if (sortCol) {
+    tasks = tasks.slice().sort((a,b) => {
+      const ka = getTaskSortKey(a, sortCol);
+      const kb = getTaskSortKey(b, sortCol);
+      if (typeof ka === 'number' && typeof kb === 'number') return (ka - kb) * sortDir;
+      return ka < kb ? -sortDir : ka > kb ? sortDir : 0;
+    });
+  }
+
+  /* update sort arrows */
+  ['name','fire','agent','scope','project','status','lastFired','fires30','nextFire'].forEach(c => {
+    const el = document.getElementById('arr-' + c);
+    if (el) el.textContent = sortCol === c ? (sortDir === 1 ? ' ↑' : ' ↓') : '';
+  });
+
   const tbody = document.getElementById('tasks-tbody');
   tbody.innerHTML = tasks.map(t => {
     const fireBadge = `<span class="fire-badge ${t.type}">${TYPE_LABELS[t.type]}</span>
@@ -913,17 +1075,21 @@ function renderRows(tasks) {
     const actionCell = `<div class="action-agent">${escHtml(t.agent)}</div>
       ${t.workflow ? `<div><span class="workflow-chip"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${escHtml(t.workflow)}</span></div>` : ''}`;
 
+    const scopeColor = t.scope === 'Organisation'
+      ? 'background:#f5f3ff;color:#5b21b6;border-color:#ddd6fe;'
+      : 'background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;';
+    const scopeCell = `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;border:1px solid;${scopeColor}">${escHtml(t.scope)}</span>`;
+
+    const projColor = 'background:var(--slate-50);color:var(--slate-600);border:1px solid var(--slate-200);';
+    const projectCell = t.project
+      ? `<span style="font-size:11px;font-weight:500;padding:2px 7px;border-radius:4px;${projColor}">${escHtml(t.project)}</span>`
+      : `<span class="muted">-</span>`;
+
     const statusBadge = `<span class="status-badge ${t.status}">${STATUS_LABELS[t.status]}</span>
       ${t.error ? `<div class="error-inline" style="margin-top:4px;font-size:11px;">${escHtml(t.error)}</div>` : ''}`;
 
     const nextCell = t.nextFire ? `<span class="next-fire">${escHtml(t.nextFire)}</span>` : '<span class="muted">-</span>';
 
-    const projectLabel = t.project ? PROJECT_LABELS[t.project] : null;
-    const projectCell = projectLabel
-      ? `<span style="font-size:11.5px;background:var(--indigo-50);color:var(--indigo-700);border:1px solid var(--indigo-200);padding:1px 7px;border-radius:4px;font-weight:600;">${escHtml(projectLabel)}</span>`
-      : `<span class="muted">-</span>`;
-
-    /* Run now button for manual rows; overflow-menu "Run now" for all */
     const runNowBtn = t.type === 'manual'
       ? `<button class="run-now-btn" onclick="event.stopPropagation();confirmRunNow(${t.id})">
           <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -931,11 +1097,12 @@ function renderRows(tasks) {
         </button>`
       : '';
 
-    return `<tr onclick="openDrawer(${t.id})" data-id="${t.id}" data-type="${t.type}" data-status="${t.status}" data-project="${t.project || ''}">
+    return `<tr onclick="openDrawer(${t.id})" data-id="${t.id}" data-type="${t.type}" data-status="${t.status}">
       <td><span class="task-name">${escHtml(t.name)}</span></td>
       <td>${fireBadge}</td>
       <td>${actionCell}</td>
-      <td class="project-col" style="display:${showProjectCol ? 'table-cell' : 'none'};">${projectCell}</td>
+      <td>${scopeCell}</td>
+      <td>${projectCell}</td>
       <td>${statusBadge}</td>
       <td><span class="muted">${escHtml(t.lastFired)}</span></td>
       <td><span class="fire-count">${t.fires30}</span></td>
@@ -953,7 +1120,7 @@ function renderRows(tasks) {
         </div>
       </td>
     </tr>`;
-  }).join('');
+  }).join('') || '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--slate-400);font-size:13px;">No tasks match these filters.</td></tr>';
 }
 
 function escHtml(str) {
@@ -961,27 +1128,58 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-renderRows(TASKS);
+/* ── Sort ─────────────────────────────────────────────────────── */
+function sortByColumn(col) {
+  if (sortCol === col) sortDir = -sortDir;
+  else { sortCol = col; sortDir = 1; }
+  renderRows();
+}
 
-/* ── Filter chips ──────────────────────────────────────────────── */
+/* ── Column filter dropdown toggle ───────────────────────────── */
+function toggleFilterDropdown(col, e) {
+  e.stopPropagation();
+  const drop = document.getElementById('fc-drop-' + col);
+  const isOpen = drop.classList.contains('open');
+  closeAllFilterDropdowns();
+  if (!isOpen) drop.classList.add('open');
+}
+
+function closeAllFilterDropdowns() {
+  document.querySelectorAll('.col-filter-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+document.addEventListener('click', closeAllFilterDropdowns);
+
+function selectAllFilter(col) {
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => cb.checked = true);
+}
+function clearFilter(col) {
+  document.querySelectorAll(`input[data-filter="${col}"]`).forEach(cb => cb.checked = false);
+}
+
+function applyColumnFilter(col) {
+  const checked = new Set();
+  document.querySelectorAll(`input[data-filter="${col}"]:checked`).forEach(cb => checked.add(cb.value));
+  colFilters[col] = checked;
+  /* highlight caret when filter is narrowed */
+  const allVals = Array.from(document.querySelectorAll(`input[data-filter="${col}"]`));
+  const isFiltered = checked.size < allVals.length;
+  const btn = document.getElementById('fc-btn-' + col);
+  if (btn) btn.classList.toggle('active', isFiltered);
+  closeAllFilterDropdowns();
+  renderRows();
+}
+
+function applyAllFilters() {
+  renderRows();
+}
+
+/* ── Quick-access chip filter ─────────────────────────────────── */
 document.querySelectorAll('#filter-chips .chip').forEach(chip => {
   chip.addEventListener('click', function() {
     document.querySelectorAll('#filter-chips .chip').forEach(c => c.classList.remove('active'));
     this.classList.add('active');
-    const filter = this.dataset.filter;
-    const rows = document.querySelectorAll('#tasks-tbody tr');
-    rows.forEach(row => {
-      const type   = row.dataset.type;
-      const status = row.dataset.status;
-      let show = true;
-      if (filter === 'schedule') show = type === 'schedule';
-      else if (filter === 'event') show = type === 'event';
-      else if (filter === 'manual') show = type === 'manual';
-      else if (filter === 'active') show = status === 'active';
-      else if (filter === 'paused') show = status === 'paused';
-      else if (filter === 'error') show = status === 'error';
-      row.style.display = show ? '' : 'none';
-    });
+    chipFilter = this.dataset.filter;
+    renderRows();
   });
 });
 
@@ -1073,30 +1271,7 @@ function runTest() {
   result.classList.add('show');
 }
 
-/* ── Scope / project filter handlers ──────────────────────────── */
-function onScopeChange(val) {
-  /* In proto, just re-render all rows regardless of scope (no per-scope data) */
-  renderRows(TASKS);
-  /* Keep project filter consistent */
-  onProjectChange(document.getElementById('project-select').value);
-}
-
-function onProjectChange(projectVal) {
-  showProjectCol = !!projectVal;
-  /* Show/hide project column header */
-  document.querySelectorAll('.project-col').forEach(el => {
-    el.style.display = projectVal ? 'table-cell' : 'none';
-  });
-  /* Filter rows */
-  document.querySelectorAll('#tasks-tbody tr').forEach(row => {
-    const rowProject = row.dataset.project || '';
-    if (!projectVal) {
-      row.style.display = '';
-    } else {
-      row.style.display = (rowProject === projectVal) ? '' : 'none';
-    }
-  });
-}
+/* scope/project filters removed: now handled as sortable/filterable table columns */
 
 /* ── Run now confirmation ────────────────────────────────────────── */
 let runNowTarget = null;
@@ -1132,6 +1307,9 @@ function fireOneoff() {
   closeOneoffModal();
   showToast('One-off run started · <a href="run-trace.html">view in run trace</a>');
 }
+
+/* ── Initial render ─────────────────────────────────────────────── */
+renderRows();
 
 /* ── Toast ─────────────────────────────────────────────────────── */
 function showToast(msg) {

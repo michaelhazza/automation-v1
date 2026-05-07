@@ -1498,3 +1498,70 @@ _sidebar.js (Change 7):
 - `prototypes/consolidation-2026-05-06/manage-org.html`
 - `prototypes/consolidation-2026-05-06/spending.html`
 - `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)
+
+## Round 9 — 2026-05-07 (three focused changes: home layout, calendar header, recurring-tasks columns)
+
+**Operator feedback:**
+1. home.html: layout looks horrible, spacing wrong, box heights don't align. Recent runs + Recent activity are too similar, confusing. Consolidate into ONE Recent activity widget.
+2. calendar.html: clunky top area with duplicate "Calendar" heading, scope + period selector + legend all squished.
+3. recurring-tasks.html: scope and project filters at top should be columns in the table (sortable + filterable). Move search to top-right.
+
+**Changes made:**
+
+home.html layout consolidation:
+- Added `.home-card-uniform { min-height: 400px; }` class applied to all 4 widget/card elements in rows 1 and 2 (Inbox preview, Active agents, Runs sparkline, Spend and cap). Changed `.home-2col { align-items: stretch }` so grid rows match height.
+- Removed "Recent runs" widget entirely (was the left card in row 3). No separate widget remains for agent-run-specific list.
+- Row 3 restructured: single full-width "Recent activity" card spanning both columns (plain div direct child of flex container, no CSS grid tricks needed).
+- Recent activity table: added Run column between Actor and Type. 12 rows (up from 9). 8 rows have a run link (href="run-trace.html"), 4 rows show dash for activities without a run.
+- Updated activity rows per spec: added actor "you" (direct user action), added Outreach Agent/CRM Sync Agent/System as actors where run-related. Added run names: "Outreach run #4827", "CRM sync #4801", "Outreach run #4795", "CRM sync #4789", "Research run #4780", "Workflow run #4775", "Lead score #4771", "Research run #4761".
+- run-link click uses event.stopPropagation() so row click and run link are independent.
+- Updated replaces banner text to reflect Round 9 changes.
+
+calendar.html header polish:
+- Replaces banner changed from indigo (prominent) to slate-100 background, slate-500 text (subtle single line).
+- Removed the `.page-header` div containing `<h1>Calendar</h1>` + subtitle (was duplicating the topbar "Calendar" breadcrumb). Replaced with a standalone title+subtitle block that uses consistent typography but sits cleanly below topbar without the `.page-header` class styling.
+- Scope filter row: removed "Scope:" label prefix (pills are self-descriptive). Added 18px bottom margin.
+- Added two thin 1px `var(--slate-200)` dividers: one between scope row and period nav row, one between period nav row and legend row. Each divider has 18px margins above and below.
+- Period nav row margin increased, font-size of period label confirmed at 15px font-weight 600.
+- Legend row: added "Legend:" uppercase label prefix at 11px slate-400, reduced dot size to 9x9px, added a 1px vertical separator between client dots and event type shapes, set all legend item font to 11.5px slate-500. Bottom margin 20px before calendar grid.
+
+recurring-tasks.html sortable/filterable columns:
+- Removed `.scope-filter-row` HTML block entirely (Scope and Project dropdown selectors gone from above table).
+- Removed old scope/project filter handler JS functions (onScopeChange, onProjectChange).
+- Page header restructured: search input moved to right side of header alongside action buttons. Input is 280px wide, placeholder "Search tasks by name, agent, brief...", oninput="applyAllFilters()".
+- Filter bar simplified: no search box in filter bar now. Quick-access chips remain (Schedule-fired / Event-fired / Manual / Active / Paused / Error / All).
+- Table: added Scope and Project as new columns (replacing the old toggled hidden Project column). Column count is now 10 (Name, Fire condition, Action, Scope, Project, Status, Last fired, Fires/30d, Next fire, Actions).
+- Each of 5 key column headers (Fire condition, Action/agent, Scope, Project, Status) has: sort arrow + small caret button that opens a checkbox dropdown. Click caret opens dropdown with "All / Clear" links + per-value checkboxes + Apply button. Active filter indicated by blue caret. Dropdown positioned absolute relative to column header cell.
+- Each of remaining numeric/text columns (Name, Last fired, Fires/30d, Next fire) has sort arrow only (no dropdown filter).
+- Sort state: `sortCol` + `sortDir` vars. `sortByColumn(col)` toggles asc/desc on repeated click.
+- Column filter state: `colFilters` object with Set per key (fire, agent, scope, project, status).
+- `taskPassesFilters(t)`: combines chipFilter + all colFilters + search input.
+- `renderRows()`: filters then sorts TASKS, renders tbody, updates sort arrows.
+- TASKS data: all 17 rows now have `scope` (Acme Corp or Organisation) and `project` (project name or null). Distribution: 13 Acme Corp / 4 Organisation; 5 have a project (Q1 Outreach Campaign x4, Customer Health Q2 x3, Compliance Audit 2026 x1).
+- Scope badge: indigo for Acme Corp, violet for Organisation.
+- Project badge: neutral slate chip.
+- `closeAllFilterDropdowns()`: registered on `document.addEventListener('click')` so dropdowns auto-close on outside click. Dropdown stop-propagation handled on caret button and dropdown itself.
+- Empty state row when no tasks match filters.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes -- home.html primary task is daily orientation; recent activity now serves both "what ran" and "what else happened" in one widget. calendar.html primary task is "see what's scheduled"; cleaner header removes noise without adding clicks. recurring-tasks.html primary task is "find and manage a recurring task"; column filters replace the scope/project dropdowns with a more standard spreadsheet-style pattern.
+- Default to hidden: yes -- column filter dropdowns are hidden until caret click. Run column shows link only when applicable (dash otherwise). Legend label on calendar is visually muted (uppercase slate-400). No KPI tiles added.
+- One primary action: yes -- home.html primary action is "New agent" (topbar). calendar.html no primary action changed. recurring-tasks.html primary action is still "+ New recurring task".
+- Inline state: yes -- home.html run links inline in activity table. calendar.html legend inline below period nav. recurring-tasks.html Scope and Project inline in table rows.
+- Re-check passed: yes -- home.html: non-technical operator sees one unified activity list with a Run column to drill into runs. calendar.html: header is now a clean title > scope > period nav > legend stack with clear breathing room. recurring-tasks.html: operator can sort by Scope or Project by clicking the header, or filter to a specific scope/project via the caret dropdown, without separate top-of-page filter UI cluttering the view.
+
+**Rule violations flagged:** none
+
+**Completion check results:**
+- `grep -E "Recent runs" home.html | head -3`: only in HTML comments and replaces banner (no widget heading) -- pass
+- `grep -cE "Recent activity" home.html`: 8 -- pass (>= 1)
+- `grep -cE "min-height|home-card-uniform" home.html`: 8 -- pass (>= 1)
+- `grep -cE "Color key|Legend:" calendar.html`: 2 -- pass (>= 1)
+- `grep -cE "sortColumn|filterColumn|col-filter-dropdown|sortByColumn|applyColumnFilter" recurring-tasks.html`: 32 -- pass (>= 2)
+- `grep -E "scope-filter-row" recurring-tasks.html`: empty -- pass (filter row removed)
+
+**Files modified:**
+- `prototypes/consolidation-2026-05-06/home.html`
+- `prototypes/consolidation-2026-05-06/calendar.html`
+- `prototypes/consolidation-2026-05-06/recurring-tasks.html`
+- `tasks/builds/consolidation-2026-05-06/mockup-log.md` (this entry)

@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 <!--
-  Round 8a redesign: 2-column layout, drop Today's schedule.
-  Row 1: Inbox preview (left) + Active agents (right) -- full 2-column
-  Row 2: Runs widget with timeframe selector (left) + Spend & cap (right)
-  Row 3: Recent runs TABLE (left) + Recent activity TABLE (right)
-  Timeframe selector: Today / This week / This month / This quarter (JS wired)
-  Recent runs table columns: description/agent, subaccount, project, actor, status, time
-  Recent activity table columns: description, subaccount, actor, type chip, time
-  Footer links: "View all runs" -> activity.html?scope=subaccount&type=agent_run
-               "View all activity" -> activity.html?scope=subaccount
-  Today's schedule widget removed entirely.
+  Round 9 redesign:
+  - All cards get uniform min-height (~400px) for visual grid alignment.
+  - Recent runs widget removed entirely.
+  - Row 3 is now: Recent activity (full-width left cell) + empty right (absent).
+  - Recent activity has new Run column (links to run-trace.html when applicable, dash when not).
+  - 12 activity rows, 8 with run links.
+  Row 1: Inbox preview (left) + Active agents (right)
+  Row 2: Runs sparkline (left) + Spend & cap (right)
+  Row 3: Recent activity (full row, 2-col span)
 -->
 <html lang="en">
 <head>
@@ -27,7 +26,14 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
-  align-items: start;
+  align-items: stretch; /* stretch so all cards in a row match height */
+}
+
+/* ── Uniform card height ───────────────────────────── */
+/* All direct card children of home-2col get the same min-height so
+   the grid rows align visually even when content is short. */
+.home-card-uniform {
+  min-height: 400px;
 }
 
 /* ── Greeting ──────────────────────────────────────── */
@@ -188,7 +194,7 @@
 .inbox-preview-title { font-size: 12px; font-weight: 600; color: var(--slate-800); line-height: 1.4; }
 .inbox-preview-sub { font-size: 11px; color: var(--slate-400); margin-top: 1px; }
 
-/* ── Recent runs + Recent activity table cards ─────── */
+/* ── Recent activity table card ────────────────────── */
 .list-card {
   background: white; border: 1px solid var(--border);
   border-radius: 12px; overflow: hidden;
@@ -201,7 +207,8 @@
   border-bottom: 1px solid var(--slate-100);
 }
 .list-card-title { font-size: 12.5px; font-weight: 700; color: var(--slate-700); }
-.list-card-body { flex: 1; overflow-x: auto; max-height: 380px; overflow-y: auto; }
+/* Recent activity spans full 2-col so we let it grow naturally */
+.list-card-body { flex: 1; overflow-x: auto; overflow-y: auto; }
 .list-card-footer {
   padding: 8px 16px;
   border-top: 1px solid var(--slate-100);
@@ -209,6 +216,11 @@
 }
 .list-card-footer a { color: var(--indigo-600); font-weight: 600; text-decoration: none; }
 .list-card-footer a:hover { text-decoration: underline; }
+
+/* Run link cell */
+.run-link { font-size: 11px; color: var(--indigo-600); font-weight: 500; text-decoration: none; white-space: nowrap; }
+.run-link:hover { text-decoration: underline; }
+.run-dash { color: var(--slate-300); font-size: 11px; }
 
 /* Mini table inside card */
 .mini-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -300,7 +312,7 @@
 
       <div class="replaces-banner">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span><strong>Round 6 redesign:</strong> Dropped "Needs your attention" central section (duplicated Inbox). Replaced with 4-widget dashboard grid.
+        <span><strong>Round 9:</strong> Uniform card heights. Recent runs removed and consolidated into single Recent activity widget with Run column.
         <a href="before-home.html" style="color:#b45309;font-weight:700;margin-left:6px;">View before (DashboardPage)</a></span>
       </div>
 
@@ -308,7 +320,7 @@
       <div class="greeting-row">
         <div>
           <div class="greeting-name">Good morning, Sarah</div>
-          <div class="greeting-sub">3 agents active, 18 total. 7 items need attention in your inbox.</div>
+          <div class="greeting-sub">3 agents running now, 18 total. 7 items in your inbox need attention.</div>
         </div>
       </div>
 
@@ -318,7 +330,7 @@
         <div class="home-2col">
 
           <!-- Inbox preview widget -->
-          <div class="inbox-card">
+          <div class="inbox-card home-card-uniform">
             <div class="inbox-card-head">
               <span class="inbox-card-title">
                 Inbox
@@ -355,7 +367,7 @@
           </div>
 
           <!-- Active agents widget -->
-          <div class="widget">
+          <div class="widget home-card-uniform">
             <div class="widget-head">
               <span class="widget-title">Active agents</span>
               <a class="widget-link" href="agents.html">All agents</a>
@@ -398,7 +410,7 @@
         <div class="home-2col">
 
           <!-- Runs widget with timeframe selector -->
-          <div class="widget">
+          <div class="widget home-card-uniform">
             <div class="widget-head">
               <span class="widget-title">Runs</span>
               <div class="timeframe-pills">
@@ -432,7 +444,7 @@
                 Actual $325 is $35 over pace (~12% over) => amber projection
                 Pace line position = 19.4% of bar width
             -->
-            <div class="widget" id="spend-widget" style="cursor:pointer;" onclick="openSpendDrawer()">
+            <div class="widget home-card-uniform" id="spend-widget" style="cursor:pointer;" onclick="openSpendDrawer()">
               <div class="widget-head">
                 <span class="widget-title">Spend &amp; cap</span>
                 <span class="widget-link" style="cursor:pointer;">Details</span>
@@ -482,193 +494,139 @@
 
         </div><!-- /row 2 -->
 
-        <!-- Row 3: Recent runs table (left) + Recent activity table (right) -->
-        <div class="home-2col">
-
-            <!-- Recent runs table -->
-            <div class="list-card">
-              <div class="list-card-head">
-                <span class="list-card-title">Recent runs</span>
-              </div>
-              <div class="list-card-body">
-                <table class="mini-table">
-                  <thead>
-                    <tr>
-                      <th>Run</th>
-                      <th>Subaccount</th>
-                      <th>Actor</th>
-                      <th>Status</th>
-                      <th>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Outreach Agent</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Schedule</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-blue dot-pulse"></div><span style="color:var(--indigo-600);">Running</span></div></td>
-                      <td><span class="time-cell">2 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">CRM Sync Agent</a></td>
-                      <td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td>
-                      <td><span class="actor-text">Schedule</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-green"></div><span style="color:var(--emerald-600);">Completed</span></div></td>
-                      <td><span class="time-cell">5 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Lead Qualifier</a></td>
-                      <td><span class="sub-badge" style="background:#fff7ed;color:#9a3412;">Revel Group</span></td>
-                      <td><span class="actor-text">Sarah M.</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-red"></div><span style="color:var(--red-500);">Failed</span></div></td>
-                      <td><span class="time-cell">12 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Demo Scheduler</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Trigger</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-green"></div><span style="color:var(--emerald-600);">Completed</span></div></td>
-                      <td><span class="time-cell">18 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Account Health</a></td>
-                      <td><span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex</span></td>
-                      <td><span class="actor-text">Schedule</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-green"></div><span style="color:var(--emerald-600);">Completed</span></div></td>
-                      <td><span class="time-cell">31 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Research Agent</a></td>
-                      <td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td>
-                      <td><span class="actor-text">Outreach Manager</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot" style="background:var(--slate-300);"></div><span style="color:var(--slate-400);">Cancelled</span></div></td>
-                      <td><span class="time-cell">44 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Outreach Agent</a></td>
-                      <td><span class="sub-badge" style="background:#fff7ed;color:#9a3412;">Revel Group</span></td>
-                      <td><span class="actor-text">Schedule</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-green"></div><span style="color:var(--emerald-600);">Completed</span></div></td>
-                      <td><span class="time-cell">1h 2m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">CRM Sync Agent</a></td>
-                      <td><span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex</span></td>
-                      <td><span class="actor-text">Trigger</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-red"></div><span style="color:var(--red-500);">Failed</span></div></td>
-                      <td><span class="time-cell">1h 18m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='run-trace.html'">
-                      <td><a href="run-trace.html" style="color:var(--indigo-600);font-weight:600;text-decoration:none;">Lead Qualifier</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Sarah M.</span></td>
-                      <td><div class="run-status-cell"><div class="status-dot dot-green"></div><span style="color:var(--emerald-600);">Completed</span></div></td>
-                      <td><span class="time-cell">2h 5m ago</span></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="list-card-footer">
-                <a href="activity.html?scope=subaccount&type=agent_run">View all runs</a>
-              </div>
+        <!-- Row 3: Recent activity (full width) -->
+        <div>
+          <div class="list-card">
+            <div class="list-card-head">
+              <span class="list-card-title">Recent activity</span>
+              <a href="activity.html?scope=subaccount" class="widget-link">View all activity</a>
             </div>
-
-            <!-- Recent activity table -->
-            <div class="list-card">
-              <div class="list-card-head">
-                <span class="list-card-title">Recent activity</span>
-              </div>
-              <div class="list-card-body">
-                <table class="mini-table">
-                  <thead>
-                    <tr>
-                      <th>Activity</th>
-                      <th>Subaccount</th>
-                      <th>Actor</th>
-                      <th>Type</th>
-                      <th>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Run completed: Outreach Agent</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Schedule</span></td>
-                      <td><span class="type-chip type-chip-run">Agent run</span></td>
-                      <td><span class="time-cell">2 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Memory block updated: Acme Voice Standards</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Sarah M.</span></td>
-                      <td><span class="type-chip type-chip-memory">Memory</span></td>
-                      <td><span class="time-cell">14 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Skill enabled: Sentiment analysis</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Sarah M.</span></td>
-                      <td><span class="type-chip type-chip-skill">Skill</span></td>
-                      <td><span class="time-cell">28 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">HubSpot sync: 47 contacts pulled</a></td>
-                      <td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td>
-                      <td><span class="actor-text">CRM Sync Agent</span></td>
-                      <td><span class="type-chip type-chip-integ">Integration</span></td>
-                      <td><span class="time-cell">42 min ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Document uploaded: Sales playbook v3.pdf</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Sarah M.</span></td>
-                      <td><span class="type-chip type-chip-doc">Document</span></td>
-                      <td><span class="time-cell">1h 5m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Approval resolved: sent draft email</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">Sarah M.</span></td>
-                      <td><span class="type-chip type-chip-inbox">Inbox</span></td>
-                      <td><span class="time-cell">1h 22m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Run failed: CRM Sync Agent</a></td>
-                      <td><span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex</span></td>
-                      <td><span class="actor-text">System</span></td>
-                      <td><span class="type-chip type-chip-fail">Failure</span></td>
-                      <td><span class="time-cell">2h 11m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Memory proposal: competitor pricing update</a></td>
-                      <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
-                      <td><span class="actor-text">System</span></td>
-                      <td><span class="type-chip type-chip-memory">Memory</span></td>
-                      <td><span class="time-cell">3h 40m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Workflow completed: Demo follow-up</a></td>
-                      <td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td>
-                      <td><span class="actor-text">Outreach Manager</span></td>
-                      <td><span class="type-chip type-chip-workflow">Workflow</span></td>
-                      <td><span class="time-cell">5h 18m ago</span></td>
-                    </tr>
-                    <tr onclick="window.location='activity.html'">
-                      <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">New team member onboarded</a></td>
-                      <td><span style="color:var(--slate-300);font-size:11px;">-</span></td>
-                      <td><span class="actor-text">System</span></td>
-                      <td><span class="type-chip type-chip-identity">Identity</span></td>
-                      <td><span class="time-cell">1 day ago</span></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="list-card-footer">
-                <a href="activity.html?scope=subaccount">View all activity</a>
-              </div>
+            <div class="list-card-body">
+              <table class="mini-table">
+                <thead>
+                  <tr>
+                    <th>Activity</th>
+                    <th>Subaccount</th>
+                    <th>Actor</th>
+                    <th>Run</th>
+                    <th>Type</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Row 1: agent run with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Run completed: Outreach Agent</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">Schedule</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">Outreach run #4827</a></td>
+                    <td><span class="type-chip type-chip-run">Agent run</span></td>
+                    <td><span class="time-cell">2 min ago</span></td>
+                  </tr>
+                  <!-- Row 2: memory update, no run -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Memory block updated: Acme Voice Standards</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">you</span></td>
+                    <td><span class="run-dash">-</span></td>
+                    <td><span class="type-chip type-chip-memory">Memory</span></td>
+                    <td><span class="time-cell">14 min ago</span></td>
+                  </tr>
+                  <!-- Row 3: skill enabled, no run -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Skill enabled: Sentiment analysis</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">you</span></td>
+                    <td><span class="run-dash">-</span></td>
+                    <td><span class="type-chip type-chip-skill">Skill</span></td>
+                    <td><span class="time-cell">28 min ago</span></td>
+                  </tr>
+                  <!-- Row 4: integration sync with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">HubSpot sync: 47 contacts pulled</a></td>
+                    <td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td>
+                    <td><span class="actor-text">CRM Sync Agent</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">CRM sync #4801</a></td>
+                    <td><span class="type-chip type-chip-integ">Integration</span></td>
+                    <td><span class="time-cell">42 min ago</span></td>
+                  </tr>
+                  <!-- Row 5: document uploaded, no run -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Document uploaded: Sales playbook v3.pdf</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">you</span></td>
+                    <td><span class="run-dash">-</span></td>
+                    <td><span class="type-chip type-chip-doc">Document</span></td>
+                    <td><span class="time-cell">1h 5m ago</span></td>
+                  </tr>
+                  <!-- Row 6: inbox approval with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Approval resolved: sent draft email</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">Outreach Agent</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">Outreach run #4795</a></td>
+                    <td><span class="type-chip type-chip-inbox">Inbox</span></td>
+                    <td><span class="time-cell">1h 22m ago</span></td>
+                  </tr>
+                  <!-- Row 7: run failed with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Run failed: CRM Sync Agent</a></td>
+                    <td><span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex</span></td>
+                    <td><span class="actor-text">System</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">CRM sync #4789</a></td>
+                    <td><span class="type-chip type-chip-fail">Failure</span></td>
+                    <td><span class="time-cell">2h 11m ago</span></td>
+                  </tr>
+                  <!-- Row 8: memory proposal with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Memory proposal: competitor pricing update</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">System</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">Research run #4780</a></td>
+                    <td><span class="type-chip type-chip-memory">Memory</span></td>
+                    <td><span class="time-cell">3h 40m ago</span></td>
+                  </tr>
+                  <!-- Row 9: workflow with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Workflow completed: Demo follow-up</a></td>
+                    <td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td>
+                    <td><span class="actor-text">Outreach Manager</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">Workflow run #4775</a></td>
+                    <td><span class="type-chip type-chip-workflow">Workflow</span></td>
+                    <td><span class="time-cell">5h 18m ago</span></td>
+                  </tr>
+                  <!-- Row 10: agent run with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Run completed: Lead Scoring Agent</a></td>
+                    <td><span class="sub-badge" style="background:#fff7ed;color:#9a3412;">Revel Group</span></td>
+                    <td><span class="actor-text">Schedule</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">Lead score #4771</a></td>
+                    <td><span class="type-chip type-chip-run">Agent run</span></td>
+                    <td><span class="time-cell">7h 3m ago</span></td>
+                  </tr>
+                  <!-- Row 11: identity, no run -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">New team member onboarded</a></td>
+                    <td><span style="color:var(--slate-300);font-size:11px;">-</span></td>
+                    <td><span class="actor-text">System</span></td>
+                    <td><span class="run-dash">-</span></td>
+                    <td><span class="type-chip type-chip-identity">Identity</span></td>
+                    <td><span class="time-cell">1 day ago</span></td>
+                  </tr>
+                  <!-- Row 12: run completed with run link -->
+                  <tr onclick="window.location='activity.html'">
+                    <td><a href="activity.html" class="act-desc" style="color:var(--indigo-600);text-decoration:none;font-weight:600;">Run completed: Research Agent</a></td>
+                    <td><span class="sub-badge" style="background:#eff6ff;color:#1d4ed8;">Acme Corp</span></td>
+                    <td><span class="actor-text">Outreach Manager</span></td>
+                    <td><a href="run-trace.html" class="run-link" onclick="event.stopPropagation()">Research run #4761</a></td>
+                    <td><span class="type-chip type-chip-run">Agent run</span></td>
+                    <td><span class="time-cell">1 day ago</span></td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-
-          </div><!-- /row 3 -->
+          </div>
+        </div><!-- /row 3 -->
 
       </div><!-- /home-rows -->
     </div><!-- /page-body -->
