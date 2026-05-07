@@ -1,0 +1,340 @@
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { buildApi, EtagMismatchError } from '../../lib/api/build';
+import { PageShell } from '../../components/PageShell';
+import { FormFooter } from '../../components/FormFooter';
+import type {
+  AgentFull,
+  AgentConfigurePatch,
+  AgentBehaviourPatch,
+  AgentPersonalityPatch,
+  AgentBudgetPatch,
+  SkillBindingPayload,
+  DataSourceBindingPayload,
+  TriggerBindingPayload,
+} from '../../../../shared/types/build';
+import ConfigureTab from './components/AgentEditTabs/ConfigureTab';
+import BehaviourTab from './components/AgentEditTabs/BehaviourTab';
+import PersonalityTab from './components/AgentEditTabs/PersonalityTab';
+import SkillsTab from './components/AgentEditTabs/SkillsTab';
+import DataSourcesTab from './components/AgentEditTabs/DataSourcesTab';
+import ScheduleTab from './components/AgentEditTabs/ScheduleTab';
+import BudgetTab from './components/AgentEditTabs/BudgetTab';
+import RunsTab from './components/AgentEditTabs/RunsTab';
+import AgentVersionChip from './components/AgentVersionChip';
+import DeleteAgentDialog from './components/DeleteAgentDialog';
+
+type TabKey = 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
+
+const TAB_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
+const WRITE_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget'];
+
+const TAB_LABELS: Record<TabKey, string> = {
+  configure: 'Configure',
+  behaviour: 'Behaviour',
+  personality: 'Personality',
+  skills: 'Skills',
+  'data-sources': 'Data sources',
+  schedule: 'Schedule',
+  budget: 'Budget',
+  runs: 'Runs',
+};
+
+type TabPatchMap = {
+  configure?: AgentConfigurePatch;
+  behaviour?: AgentBehaviourPatch;
+  personality?: AgentPersonalityPatch;
+  skills?: SkillBindingPayload[];
+  'data-sources'?: DataSourceBindingPayload[];
+  schedule?: TriggerBindingPayload[];
+  budget?: AgentBudgetPatch;
+};
+
+export default function AgentEditPage() {
+  const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const activeTab = (searchParams.get('tab') ?? 'configure') as TabKey;
+
+  const [data, setData] = useState<AgentFull | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [pendingPatches, setPendingPatches] = useState<TabPatchMap>({});
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [etagMismatch, setEtagMismatch] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const loadAgent = useCallback(async () => {
+    if (!id) return;
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const agent = await buildApi.getAgentFull(id);
+      setData(agent);
+    } catch {
+      setLoadError('Failed to load agent.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { void loadAgent(); }, [loadAgent]);
+
+  const dirtyTabs = useMemo(() => new Set(Object.keys(pendingPatches) as TabKey[]), [pendingPatches]);
+
+  const patchTab = useCallback(<K extends keyof TabPatchMap>(tab: K, patch: TabPatchMap[K]) => {
+    setPendingPatches(prev => ({ ...prev, [tab]: patch }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!data || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    let etag = data.etag;
+
+    for (const tab of WRITE_ORDER) {
+      if (!dirtyTabs.has(tab)) continue;
+      try {
+        let updated: AgentFull;
+        const patch = pendingPatches[tab as keyof TabPatchMap];
+        switch (tab) {
+          case 'configure':
+            updated = await buildApi.patchAgentConfigure(id!, patch as AgentConfigurePatch, etag);
+            break;
+          case 'behaviour':
+            updated = await buildApi.patchAgentBehaviour(id!, patch as AgentBehaviourPatch, etag);
+            break;
+          case 'personality':
+            updated = await buildApi.patchAgentPersonality(id!, patch as AgentPersonalityPatch, etag);
+            break;
+          case 'skills':
+            updated = await buildApi.putAgentSkills(id!, patch as SkillBindingPayload[], etag);
+            break;
+          case 'data-sources':
+            updated = await buildApi.putAgentDataSources(id!, patch as DataSourceBindingPayload[], etag);
+            break;
+          case 'schedule':
+            updated = await buildApi.putAgentTriggers(id!, patch as TriggerBindingPayload[], etag);
+            break;
+          case 'budget':
+            updated = await buildApi.patchAgentBudget(id!, patch as AgentBudgetPatch, etag);
+            break;
+          default:
+            continue;
+        }
+        etag = updated.etag;
+        setPendingPatches(prev => {
+          const next = { ...prev };
+          delete next[tab as keyof TabPatchMap];
+          return next;
+        });
+      } catch (err) {
+        if (err instanceof EtagMismatchError) {
+          setEtagMismatch(true);
+          setSaving(false);
+          return;
+        }
+        setSaveError('Save failed. Please try again.');
+        setSaving(false);
+        return;
+      }
+    }
+
+    setSaving(false);
+    void loadAgent();
+  }, [data, dirtyTabs, pendingPatches, id, loadAgent, saving]);
+
+  const handleDiscard = useCallback(() => setPendingPatches({}), []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!id) return;
+    try {
+      await (import('../../lib/api').then(m => m.default.delete(`/api/agents/${id}`)));
+      navigate('/build/agents');
+    } catch {
+      // Swallow; user stays on page
+    }
+  }, [id, navigate]);
+
+  if (isLoading) {
+    return (
+      <PageShell>
+        <div className="p-8 text-slate-400 text-sm">Loading...</div>
+      </PageShell>
+    );
+  }
+
+  if (loadError || !data) {
+    return (
+      <PageShell>
+        <div className="p-8 text-red-500 text-sm">{loadError ?? 'Agent not found.'}</div>
+      </PageShell>
+    );
+  }
+
+  const isReadOnly = data.isSystemManaged;
+
+  return (
+    <PageShell
+      header={
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100">
+          <h1 className="text-lg font-semibold text-slate-800 truncate">{data.configure.name}</h1>
+          <AgentVersionChip count={0} editedAt={null} author={null} />
+          {isReadOnly && (
+            <span className="text-xs text-slate-500 ml-2">System agent (read-only)</span>
+          )}
+        </div>
+      }
+      bottomPadding={isReadOnly ? 0 : 100}
+    >
+      {/* ETag mismatch banner */}
+      {etagMismatch && (
+        <div className="m-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-sm">
+          <span className="text-amber-700">
+            This agent was changed by someone else. Reload to get the latest version.
+          </span>
+          <button
+            onClick={() => { setEtagMismatch(false); void loadAgent(); }}
+            className="btn btn-secondary text-xs"
+          >
+            Reload
+          </button>
+          <button
+            onClick={() => setEtagMismatch(false)}
+            className="btn btn-ghost text-xs ml-auto"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="mx-4 mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {saveError}
+        </div>
+      )}
+
+      {/* Tab bar */}
+      <div className="flex gap-1 px-6 pt-4 border-b border-slate-100 overflow-x-auto">
+        {TAB_ORDER.map(tab => (
+          <button
+            key={tab}
+            onClick={() => setSearchParams({ tab })}
+            className={[
+              'px-4 py-2 text-sm font-medium rounded-t transition-colors whitespace-nowrap',
+              activeTab === tab
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50'
+                : 'text-slate-500 hover:text-slate-700',
+              dirtyTabs.has(tab) ? 'after:content-["•"] after:ml-1 after:text-amber-500' : '',
+            ].join(' ')}
+          >
+            {TAB_LABELS[tab]}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="px-6 py-4">
+        {activeTab === 'configure' && (
+          <ConfigureTab
+            data={data.configure}
+            onChange={p => patchTab('configure', p)}
+            pending={pendingPatches.configure}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'behaviour' && (
+          <BehaviourTab
+            data={data.behaviour}
+            onChange={p => patchTab('behaviour', p)}
+            pending={pendingPatches.behaviour}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'personality' && (
+          <PersonalityTab
+            data={data.personality}
+            onChange={p => patchTab('personality', p)}
+            pending={pendingPatches.personality}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'skills' && (
+          <SkillsTab
+            data={data.skills}
+            onChange={p => patchTab('skills', p)}
+            pending={pendingPatches.skills}
+            agentId={id!}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'data-sources' && (
+          <DataSourcesTab
+            data={data.dataSources}
+            onChange={p => patchTab('data-sources', p)}
+            pending={pendingPatches['data-sources']}
+            agentId={id!}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'schedule' && (
+          <ScheduleTab
+            data={data.triggers}
+            onChange={p => patchTab('schedule', p)}
+            pending={pendingPatches.schedule}
+            agentId={id!}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'budget' && (
+          <BudgetTab
+            data={data.budget}
+            onChange={p => patchTab('budget', p)}
+            pending={pendingPatches.budget}
+            readOnly={isReadOnly}
+          />
+        )}
+        {activeTab === 'runs' && (
+          <RunsTab agentId={id!} runs={data.runs} />
+        )}
+      </div>
+
+      {/* Footer */}
+      {!isReadOnly && (
+        <FormFooter>
+          <button
+            onClick={handleDiscard}
+            disabled={dirtyTabs.size === 0}
+            className="btn btn-secondary"
+          >
+            Discard
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={dirtyTabs.size === 0 || saving}
+            className="btn btn-primary"
+          >
+            {saving ? 'Saving...' : 'Save changes'}
+          </button>
+          <button
+            onClick={() => setShowDeleteDialog(true)}
+            className="btn btn-danger ml-auto"
+          >
+            Delete agent
+          </button>
+        </FormFooter>
+      )}
+
+      {showDeleteDialog && (
+        <DeleteAgentDialog
+          agentId={id!}
+          agentName={data.configure.name}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setShowDeleteDialog(false)}
+        />
+      )}
+    </PageShell>
+  );
+}
