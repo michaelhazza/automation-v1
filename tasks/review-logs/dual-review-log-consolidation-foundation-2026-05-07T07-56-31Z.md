@@ -113,4 +113,7 @@ Adjudication did, however, narrow scope on iteration 1 finding #2 (system overri
 
 **Verdict:** APPROVED (3 iterations, 6 fixes applied, 0 rejected)
 
-**Commit at finish:** _to be filled by the auto-commit-and-push step_
+**Commits:**
+- `b53fe9f5` — iter1 fixes (Layout state sync, system override clear, SearchBox stale debounce)
+- `c34c19b0` — iter2 fixes (workspace transition clears system override; spec table corrected)
+- `ca1ac9f4` — iter3 fixes + this log (FilterDropdown normalisation, deriveViewMode isSystemAdmin guard)
