@@ -56,6 +56,12 @@ interface SortableTableProps<Row> {
    * identifier. localStorage key format: `table:v1:<persistKey>`.
    */
   persistKey?: string;
+  /**
+   * When true (default), renders a "Clear filters" button above the table
+   * whenever any column filter is active. Clicking resets all filters without
+   * touching sort state. Set to false to suppress the control entirely.
+   */
+  showClearFilters?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +304,7 @@ export function SortableTable<Row>({
   emptyState,
   onRowClick,
   persistKey,
+  showClearFilters = true,
 }: SortableTableProps<Row>): React.ReactElement {
   // -- State initialisation --
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(() => {
@@ -388,74 +395,119 @@ export function SortableTable<Row>({
     });
   };
 
+  // -- Clear all filters handler --
+  const handleClearAllFilters = useCallback(() => {
+    setFilters((prev) => {
+      const next: Record<string, Set<string>> = {};
+      for (const k of Object.keys(prev)) {
+        next[k] = new Set<string>();
+      }
+      schedulePersist(sort, next);
+      return next;
+    });
+  }, [sort, schedulePersist]);
+
+  // -- Derive active filter columns (non-empty Sets) --
+  const activeFilterColumns = Object.entries(filters)
+    .filter(([, s]) => s.size > 0)
+    .map(([k]) => k);
+
   // -- Derive displayed rows --
   const displayedRows = applySortAndFilters(rows, sort, filters, columns);
 
+  // Track which column indices are filtered so we can place AND tags between them
+  const filteredColIndexSet = new Set(activeFilterColumns);
+
   return (
-    <div className="w-full overflow-x-auto">
-      <table className="w-full text-sm text-left border-collapse">
-        <thead>
-          <tr className="border-b border-slate-200">
-            {columns.map((col) => {
-              // Compute filter options for filterable columns
-              const filterOptions =
-                col.filterable && col.getValue
-                  ? col.getFilterOptions
-                    ? col.getFilterOptions(rows)
-                    : Array.from(
-                        new Map(
-                          rows.map((r) => {
-                            const raw = col.getValue!(r);
-                            const fk = deriveFilterKey(raw, col.key);
-                            const label = raw === null || raw === undefined ? '(empty)' : String(raw);
-                            return [fk, { value: fk, label }] as const;
-                          }),
-                        ).values(),
-                      ).sort((a, b) => a.label.localeCompare(b.label))
-                  : [];
+    <>
+      {showClearFilters && activeFilterColumns.length > 0 && (
+        <div className="flex items-center justify-end mb-1">
+          <button
+            type="button"
+            className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline focus:outline-none"
+            onClick={handleClearAllFilters}
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
+      <div className="w-full overflow-x-auto">
+        <table className="w-full text-sm text-left border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200">
+              {columns.map((col, colIdx) => {
+                // Compute filter options for filterable columns
+                const filterOptions =
+                  col.filterable && col.getValue
+                    ? col.getFilterOptions
+                      ? col.getFilterOptions(rows)
+                      : Array.from(
+                          new Map(
+                            rows.map((r) => {
+                              const raw = col.getValue!(r);
+                              const fk = deriveFilterKey(raw, col.key);
+                              const label = raw === null || raw === undefined ? '(empty)' : String(raw);
+                              return [fk, { value: fk, label }] as const;
+                            }),
+                          ).values(),
+                        ).sort((a, b) => a.label.localeCompare(b.label))
+                    : [];
 
-              const activeFilter = filters[col.key] ?? new Set<string>();
-              const isFiltered = activeFilter.size > 0 && activeFilter.size < filterOptions.length;
+                const activeFilter = filters[col.key] ?? new Set<string>();
+                const isFiltered = activeFilter.size > 0 && activeFilter.size < filterOptions.length;
 
-              return (
-                <th
-                  key={col.key}
-                  className={`px-3 py-2 font-medium text-slate-600 whitespace-nowrap ${
-                    col.align === 'right'
-                      ? 'text-right'
-                      : col.align === 'center'
-                        ? 'text-center'
-                        : 'text-left'
-                  }`}
-                  style={col.width ? { width: col.width } : undefined}
-                >
-                  <div className="inline-flex items-center gap-0.5">
-                    {col.sortable ? (
-                      <button
-                        type="button"
-                        className="inline-flex items-center hover:text-slate-900 focus:outline-none"
-                        onClick={() => handleSortClick(col.key)}
-                      >
-                        {col.label}
-                        <SortIndicator colKey={col.key} sort={sort} />
-                      </button>
-                    ) : (
-                      <span>{col.label}</span>
-                    )}
+                // AND tag: show after a filtered column when another filtered column follows
+                const isThisColFiltered = filteredColIndexSet.has(col.key);
+                const hasNextFilteredCol =
+                  activeFilterColumns.length > 1 &&
+                  isThisColFiltered &&
+                  columns
+                    .slice(colIdx + 1)
+                    .some((c) => filteredColIndexSet.has(c.key));
 
-                    {col.filterable && filterOptions.length > 0 && (
-                      <FilterDropdown
-                        columnKey={col.key}
-                        options={filterOptions}
-                        active={activeFilter}
-                        onApply={(selected) => handleFilterApply(col.key, selected)}
-                        isFiltered={isFiltered}
-                      />
-                    )}
-                  </div>
-                </th>
-              );
-            })}
+                return (
+                  <th
+                    key={col.key}
+                    className={`px-3 py-2 font-medium text-slate-600 whitespace-nowrap ${
+                      col.align === 'right'
+                        ? 'text-right'
+                        : col.align === 'center'
+                          ? 'text-center'
+                          : 'text-left'
+                    }`}
+                    style={col.width ? { width: col.width } : undefined}
+                  >
+                    <div className="inline-flex items-center gap-0.5">
+                      {col.sortable ? (
+                        <button
+                          type="button"
+                          className="inline-flex items-center hover:text-slate-900 focus:outline-none"
+                          onClick={() => handleSortClick(col.key)}
+                        >
+                          {col.label}
+                          <SortIndicator colKey={col.key} sort={sort} />
+                        </button>
+                      ) : (
+                        <span>{col.label}</span>
+                      )}
+
+                      {col.filterable && filterOptions.length > 0 && (
+                        <FilterDropdown
+                          columnKey={col.key}
+                          options={filterOptions}
+                          active={activeFilter}
+                          onApply={(selected) => handleFilterApply(col.key, selected)}
+                          isFiltered={isFiltered}
+                        />
+                      )}
+
+                      {hasNextFilteredCol && (
+                        <span className="text-xs text-slate-400 mx-1">AND</span>
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
           </tr>
         </thead>
         <tbody>
@@ -506,6 +558,7 @@ export function SortableTable<Row>({
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
