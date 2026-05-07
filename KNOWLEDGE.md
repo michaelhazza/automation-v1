@@ -2637,3 +2637,69 @@ Don't over-engineer a grep gate to chase aliasing. Document, review, and accept 
 
 ### [2026-05-06] Correction — Synthetos is not agency-only; sub-account is a standalone product surface
 When framing product strategy or recommendations, do not default to "agency operator looking down at clients." The three-tier structure (system / org / sub-account) is deliberate: a sub-account can be sold standalone to an end-client (SMB, solo operator) with no agency above them, and the product must self-contain at that level. Agency-resold sub-accounts are one go-to-market, not the only one. When discussing operator-facing surfaces (Pulse, supervision home, watchers, proactive nudges, calibration), cover both lenses: (a) the agency operator managing many sub-accounts and (b) the end operator running their own business directly inside one sub-account. The video's "my mom" archetype maps to lens (b), not (a).
+
+
+### [2026-05-07] Spec authoring — cursor pagination contract (4 invariants every paginated API spec must state) (seen 2 times)
+
+When speccing a cursor-paginated endpoint, always state four things explicitly or ChatGPT/reviewers will flag it:
+
+1. **Encoding:** cursor encodes `(sortKeyValue, id)` in the **effective sort order** (see #4) — the id tiebreaker makes ordering deterministic. SQL: `ORDER BY <sortKey> <dir>, id <dir>`.
+2. **Invalidation:** cursor is invalidated when `sortKey`, `sortDir`, or any filter changes between pages. Server ignores/resets on mismatch.
+3. **Stability:** every sort order must include `id` as a secondary key (prevents row flickering across pages).
+4. **Tiebreaker direction symmetry:** the `id` tiebreaker direction MUST follow the primary sort direction (`ORDER BY confidence ASC, id ASC` — never `ASC, id DESC`). Mixing directions produces skip/duplicate rows when paginating ASC. (Added in consolidation-govern round 2 — round 1 spec said "always end with id DESC" which was wrong for ASC sorts.)
+
+Missing any one of these causes non-deterministic pagination (duplicate rows or skipped rows under concurrent writes, sort/filter changes, or ASC overrides).
+
+### [2026-05-07] Spec authoring — filterOptions count semantics (faceted search rule) (seen 2 times)
+
+For APIs that return `filterOptions` alongside paginated results: always state that counts are computed against the **full result set** (current scope + q), **ignoring pagination**, but **respecting active filters except the dimension being counted**. This is the standard "faceted search" rule. Without it, a user filtering by `type=email.sent` would see 0 counts on the `type` dimension — which is misleading.
+
+Two operational invariants to add (consolidation-govern rounds 2 + 3):
+
+- **Same-snapshot:** counts MUST be computed from the same base-query snapshot as the row results (single SQL statement / CTE) so counts and rows cannot diverge under concurrent writes.
+- **SQL ordering:** sort `filterOptions` (typically `count DESC, value ASC`) in SQL, not via post-query JavaScript. Same-snapshot ordering avoids drift if the route ever splits the query and JS orders separately.
+
+### [2026-05-07] Spec authoring — masking/redaction token contract
+
+When speccing role-aware masking on a backend projection:
+
+1. Lock the exact redaction token as a string constant: `"<redacted>"` — never `null`, never omit the field.
+2. Truncated fields (e.g. first 200 chars of a result body) must include `truncated: true` so the renderer knows without inspecting string length.
+3. These two rules prevent frontend branching creep (renderer never needs to branch on field presence or null-check mask values).
+
+### [2026-05-07] Spec authoring — per-user localStorage key scoping
+
+When a dismissal/seen flag is stored in localStorage (e.g. `somethingSeen=1`), add a userId prefix: `somethingSeen:{userId}`. Without it, the flag is shared across users in a shared-browser environment (kiosk, shared login), silently suppressing the UI for subsequent users.
+
+### [2026-05-07] Gotcha — PostgreSQL `READ COMMITTED` snapshot is **per-statement**, not transaction-scoped
+
+Common mis-citation in specs and code: "we use a single transaction so counts are snapshot-consistent under READ COMMITTED". Wrong. PostgreSQL's `READ COMMITTED` (the default) takes a fresh snapshot at the start of each statement — multiple statements in the same transaction can each see a different snapshot if other writers commit between them. Transaction-scoped snapshot consistency requires `REPEATABLE READ` (or `SERIALIZABLE`).
+
+Practical rule for cross-table aggregators that want mutual count consistency:
+
+- **Preferred:** issue a single SQL statement (a CTE that joins / unions the sources). Default `READ COMMITTED` is sufficient because the per-statement snapshot covers all sources in one shot.
+- **Acceptable:** if multiple statements are required, escalate isolation to `REPEATABLE READ` and accept the extra overhead (no concurrent updates can change the view between statements).
+- **Wrong:** "use a transaction with READ COMMITTED" — provides no extra consistency over not-using-a-transaction.
+
+Caught in consolidation-govern round 2 — round 1 wording mis-cited READ COMMITTED as transaction-scoped.
+
+### [2026-05-07] Spec authoring — external-call timeout determinism (3 invariants)
+
+When a backend route makes an outbound network call with a stated timeout, the spec MUST lock three things or implementations will silently honour the timeout symbolically while violating it operationally:
+
+1. **Monotonic clock:** measure the budget against a monotonic clock (`process.hrtime.bigint()` in Node) — never wall clock. NTP jumps and clock skew must NOT extend or shorten the window.
+2. **Inclusive scope:** the clock starts immediately before the outbound call — DNS, TCP, TLS, and HTTP all count against the budget, not just the HTTP response wait.
+3. **Bounded SDK retries:** any HTTP client, OAuth SDK, or provider SDK on the call path MUST disable internal retries (or bound them within the same envelope). A 10s spec-stated timeout that hides 60s of internal SDK retry storms violates the contract while technically "respecting" it.
+
+Caught in consolidation-govern round 2 (connection-test endpoint).
+
+### [2026-05-07] Spec authoring — body hash canonicalisation must include Unicode NFC
+
+When using a body hash for idempotency keys (`UNIQUE(parent_id, body_hash)`), canonicalise in this order before hashing:
+
+1. **Unicode NFC normalisation** — visually-identical strings can have different byte representations (composed vs decomposed accents, ligatures). Without NFC, a user pasting the same text from two sources can produce two different hashes.
+2. Whitespace canonicalisation: trim ends, collapse internal runs to single spaces.
+3. Decide and document case-sensitivity (case-sensitive for human-authored override text in our spec; case-insensitive for canonical identifiers).
+4. Hash function: SHA-256, hex-encoded, lower-case (deterministic encoding).
+
+Skipping NFC produces long-tail duplicate revision bugs that are nearly impossible to reproduce. Caught in consolidation-govern round 2.

@@ -3002,7 +3002,7 @@ Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerf
 | File | Purpose |
 |------|---------|
 | `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
-| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers) |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers). Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
 | `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
 | `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
 | `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
