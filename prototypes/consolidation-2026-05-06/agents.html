@@ -163,6 +163,31 @@
 .modal-option-title { font-size: 13px; font-weight: 600; color: var(--slate-900); }
 .modal-option-desc  { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
 
+/* ── SORT/FILTER PATTERN ───────────────────────────────────────────────
+   Reused pattern: sortable column headers + filterable caret dropdowns.
+   ─────────────────────────────────────────────────────────────────── */
+.sf-th { position: relative; white-space: nowrap; user-select: none; }
+.sf-th-inner { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.sf-sort-indicator { font-size: 10px; color: var(--slate-400); transition: color 0.1s; }
+.sf-th-inner:hover .sf-sort-indicator { color: var(--slate-600); }
+.sf-sort-indicator.active { color: var(--indigo-500); }
+.sf-caret-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; border: none; background: none; cursor: pointer; color: var(--slate-400); font-size: 10px; padding: 0; margin-left: 2px; transition: background 0.1s, color 0.1s; }
+.sf-caret-btn:hover { background: var(--slate-200); color: var(--slate-700); }
+.sf-caret-btn.filtered { color: var(--indigo-500); background: var(--indigo-50); }
+.sf-dropdown { position: absolute; top: 100%; left: 0; z-index: 30; background: white; border: 1px solid var(--slate-200); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); min-width: 190px; padding: 8px 0 0; display: none; }
+.sf-dropdown.open { display: block; }
+.sf-dropdown-head { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 6px; border-bottom: 1px solid var(--slate-100); font-size: 11.5px; }
+.sf-dropdown-head a { color: var(--indigo-500); cursor: pointer; text-decoration: none; }
+.sf-dropdown-head a:hover { text-decoration: underline; }
+.sf-dropdown-list { max-height: 220px; overflow-y: auto; padding: 4px 0; }
+.sf-dropdown-item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12.5px; color: var(--slate-700); cursor: pointer; transition: background 0.1s; }
+.sf-dropdown-item:hover { background: var(--slate-50); }
+.sf-dropdown-item input[type="checkbox"] { cursor: pointer; }
+.sf-dropdown-footer { padding: 6px 10px; border-top: 1px solid var(--slate-100); }
+.sf-apply-btn { width: 100%; padding: 6px 0; background: var(--indigo-600); color: white; border: none; border-radius: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background 0.1s; }
+.sf-apply-btn:hover { background: var(--indigo-700); }
+.sf-empty-row td { text-align: center; padding: 28px 0; color: var(--slate-400); font-size: 13px; }
+
 /* View mode switcher strip */
 .view-switch-strip {
   display: flex; gap: 4px; align-items: center;
@@ -967,8 +992,31 @@ function renderAgentsForView(view) {
       <span class="filter-pill">Deprecated (${fc.deprecated})</span>`;
   }
 
-  // Table header
-  const thCells = data.columns.map(c => `<th>${c}</th>`).join('');
+  // Table header — workspace view gets sort/filter headers; other views get plain headers
+  let thCells;
+  if (view === 'workspace') {
+    thCells = `
+      <th class="sf-th">
+        <span class="sf-th-inner" onclick="agentSortBy('name')">Agent <span class="sf-sort-indicator active" id="agent-sort-name">&#9650;</span></span>
+      </th>
+      <th class="sf-th">
+        <span class="sf-th-inner" onclick="agentSortBy('status')">Status <span class="sf-sort-indicator" id="agent-sort-status">&#9650;</span></span>
+        <button class="sf-caret-btn" id="agent-fcaret-status" onclick="agentToggleFilter(event,'status')" title="Filter by status">&#9660;</button>
+        <div class="sf-dropdown" id="agent-fdrop-status"></div>
+      </th>
+      <th class="sf-th">
+        <span class="sf-th-inner" onclick="agentSortBy('lastrun')">Last run <span class="sf-sort-indicator" id="agent-sort-lastrun">&#9650;</span></span>
+      </th>
+      <th>Tags</th>
+      <th class="sf-th">
+        <span class="sf-th-inner" onclick="agentSortBy('reportsto')">Reports to <span class="sf-sort-indicator" id="agent-sort-reportsto">&#9650;</span></span>
+        <button class="sf-caret-btn" id="agent-fcaret-reportsto" onclick="agentToggleFilter(event,'reportsto')" title="Filter by manager">&#9660;</button>
+        <div class="sf-dropdown" id="agent-fdrop-reportsto"></div>
+      </th>
+      <th>Actions</th>`;
+  } else {
+    thCells = data.columns.map(c => `<th>${c}</th>`).join('');
+  }
 
   // Table rows
   let rows = '';
@@ -1110,6 +1158,123 @@ function renderAgentsForView(view) {
     });
   });
 }
+
+/* ── SORT/FILTER PATTERN — Agents table (workspace view only) ─────────
+   Sort/filter operates on the live DOM rows after renderAgentsForView().
+   ─────────────────────────────────────────────────────────────────── */
+var agentSortCol = 'name';
+var agentSortDir = 'asc';
+var agentColFilters = { status: null, reportsto: null }; // colFilters: null = no filter (Set when active)
+
+function agentSortBy(col) {
+  if (agentSortCol === col) {
+    agentSortDir = (agentSortDir === 'asc') ? 'desc' : 'asc';
+  } else {
+    agentSortCol = col;
+    agentSortDir = 'asc';
+  }
+  // Update indicators
+  ['name','status','lastrun','reportsto'].forEach(function(c) {
+    var el = document.getElementById('agent-sort-' + c);
+    if (el) {
+      el.classList.toggle('active', agentSortCol === c);
+      el.innerHTML = (agentSortCol === c && agentSortDir === 'asc') ? '&#9650;' : '&#9660;';
+    }
+  });
+  // Sort table rows by swapping in tbody
+  var tbody = document.querySelector('.data-table tbody');
+  if (!tbody) return;
+  var rows = Array.from(tbody.querySelectorAll('tr:not(.sf-empty-row)'));
+  var colIdx = { name: 0, status: 1, lastrun: 2, reportsto: 4 }[agentSortCol] || 0;
+  rows.sort(function(a, b) {
+    var at = (a.cells[colIdx] || {}).textContent || '';
+    var bt = (b.cells[colIdx] || {}).textContent || '';
+    var cmp = at.trim().localeCompare(bt.trim());
+    return agentSortDir === 'asc' ? cmp : -cmp;
+  });
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
+
+function agentToggleFilter(e, col) {
+  e.stopPropagation();
+  var drop = document.getElementById('agent-fdrop-' + col);
+  if (!drop) return;
+  var isOpen = drop.classList.contains('open');
+  document.querySelectorAll('.data-table .sf-dropdown').forEach(function(d) { d.classList.remove('open'); });
+  if (!isOpen) {
+    // Collect unique values from the column
+    var tbody = document.querySelector('.data-table tbody');
+    var colIdx = col === 'status' ? 1 : 4;
+    var vals = [];
+    Array.from(tbody.querySelectorAll('tr:not(.sf-empty-row)')).forEach(function(r) {
+      var t = (r.cells[colIdx] || {}).textContent.trim();
+      if (t && vals.indexOf(t) < 0) vals.push(t);
+    });
+    vals.sort();
+    var active = agentColFilters[col];
+    drop.innerHTML =
+      '<div class="sf-dropdown-head">' +
+        '<a onclick="agentSelectAll(\'' + col + '\')">Select all</a>' +
+        '<a onclick="agentClearAll(\'' + col + '\')">Clear</a>' +
+      '</div>' +
+      '<div class="sf-dropdown-list">' +
+        vals.map(function(v) {
+          var chk = (!active || active.has(v)) ? 'checked' : '';
+          return '<label class="sf-dropdown-item"><input type="checkbox" value="' + v + '" ' + chk + '> ' + v + '</label>';
+        }).join('') +
+      '</div>' +
+      '<div class="sf-dropdown-footer"><button class="sf-apply-btn" onclick="agentApplyFilter(\'' + col + '\')">Apply</button></div>';
+    drop.classList.add('open');
+  }
+}
+
+function agentSelectAll(col) {
+  document.querySelectorAll('#agent-fdrop-' + col + ' input').forEach(function(b) { b.checked = true; });
+}
+function agentClearAll(col) {
+  document.querySelectorAll('#agent-fdrop-' + col + ' input').forEach(function(b) { b.checked = false; });
+}
+
+function agentApplyFilter(col) {
+  var drop = document.getElementById('agent-fdrop-' + col);
+  var checked = [];
+  drop.querySelectorAll('input:checked').forEach(function(b) { checked.push(b.value); });
+  var allBoxes = drop.querySelectorAll('input').length;
+  agentColFilters[col] = (checked.length < allBoxes) ? new Set(checked) : null;
+  var btn = document.getElementById('agent-fcaret-' + col);
+  if (btn) btn.classList.toggle('filtered', !!agentColFilters[col]);
+  drop.classList.remove('open');
+
+  var colIdx = col === 'status' ? 1 : 4;
+  var tbody = document.querySelector('.data-table tbody');
+  var rows = Array.from(tbody.querySelectorAll('tr:not(.sf-empty-row)'));
+  var visibleCount = 0;
+  rows.forEach(function(r) {
+    var t = (r.cells[colIdx] || {}).textContent.trim();
+    var show = !agentColFilters[col] || agentColFilters[col].has(t);
+    r.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
+  });
+  // Show empty state if nothing matches
+  var emptyRow = tbody.querySelector('.sf-empty-row');
+  if (visibleCount === 0) {
+    if (!emptyRow) {
+      emptyRow = document.createElement('tr');
+      emptyRow.className = 'sf-empty-row';
+      emptyRow.innerHTML = '<td colspan="6">No matching entries. Adjust filters.</td>';
+      tbody.appendChild(emptyRow);
+    }
+    emptyRow.style.display = '';
+  } else if (emptyRow) {
+    emptyRow.style.display = 'none';
+  }
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.sf-caret-btn') && !e.target.closest('.sf-dropdown')) {
+    document.querySelectorAll('.sf-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
+  }
+});
 
 /* ─────────────────────────────────────────────────────────────────────
    Modal helpers

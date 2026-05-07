@@ -161,7 +161,7 @@
 .filter-chip:hover { background: var(--slate-50); }
 .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
 
-/* Logins table */
+/* Logins / connections table */
 .logins-table {
   width: 100%; border-collapse: collapse;
   background: white; border: 1px solid var(--border); border-radius: 10px;
@@ -184,6 +184,45 @@
 .logins-table tbody tr:hover { background: var(--slate-50); }
 .login-url { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--slate-500); }
 .login-user-masked { font-size: 12px; color: var(--slate-600); }
+
+/* SORT/FILTER PATTERN — connections table */
+.sf-th { position: relative; white-space: nowrap; user-select: none; }
+.sf-th-inner { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.sf-sort-indicator { font-size: 10px; color: var(--slate-400); transition: color 0.1s; }
+.sf-th-inner:hover .sf-sort-indicator { color: var(--slate-600); }
+.sf-sort-indicator.active { color: var(--indigo-500); }
+.sf-caret-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 4px; border: none;
+  background: none; cursor: pointer; color: var(--slate-400); font-size: 10px;
+  padding: 0; margin-left: 2px; transition: background 0.1s, color 0.1s;
+}
+.sf-caret-btn:hover { background: var(--slate-200); color: var(--slate-700); }
+.sf-caret-btn.filtered { color: var(--indigo-500); background: var(--indigo-50); }
+.sf-dropdown {
+  position: absolute; top: 100%; left: 0; z-index: 30; background: white;
+  border: 1px solid var(--slate-200); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1); min-width: 190px;
+  padding: 8px 0 0; display: none;
+}
+.sf-dropdown.open { display: block; }
+.sf-dropdown-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px 6px; border-bottom: 1px solid var(--slate-100); font-size: 11.5px;
+}
+.sf-dropdown-head a { color: var(--indigo-500); cursor: pointer; text-decoration: none; }
+.sf-dropdown-list { max-height: 220px; overflow-y: auto; padding: 4px 0; }
+.sf-dropdown-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; font-size: 12.5px; color: var(--slate-700); cursor: pointer;
+}
+.sf-dropdown-item input[type="checkbox"] { cursor: pointer; }
+.sf-dropdown-footer { padding: 6px 10px; border-top: 1px solid var(--slate-100); }
+.sf-apply-btn {
+  width: 100%; padding: 6px 0; background: var(--indigo-600); color: white;
+  border: none; border-radius: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.sf-empty-row td { text-align: center; padding: 28px 0; color: var(--slate-400); font-size: 13px; }
 
 /* Overflow context menu */
 .ctx-menu {
@@ -717,50 +756,46 @@
 </div><!-- /panel-integrations -->
 
 <!-- ======================================================= -->
-<!-- LOGINS TAB -->
+<!-- LOGINS TAB (Connections list) -->
 <!-- ======================================================= -->
 <div class="tab-panel" id="panel-logins">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-    <div class="section-hdr" style="margin-bottom:0;">Web logins <span class="count">(3)</span></div>
+    <div class="section-hdr" style="margin-bottom:0;">All connections <span class="count" id="conn-count">(15)</span></div>
     <button class="btn btn-primary btn-sm" onclick="openAddLoginModal()">+ Add web login</button>
   </div>
 
   <table class="logins-table" id="logins-table">
     <thead>
       <tr>
-        <th>Service</th>
-        <th>URL</th>
-        <th>Username</th>
-        <th>Last verified</th>
-        <th>Status</th>
+        <th class="sf-th">
+          <span class="sf-th-inner" onclick="connSortBy('name')">Connection name <span class="sf-sort-indicator active" id="conn-sort-name">&#9650;</span></span>
+        </th>
+        <th class="sf-th">
+          <span class="sf-th-inner" onclick="connSortBy('provider')">Provider <span class="sf-sort-indicator" id="conn-sort-provider">&#9650;</span></span>
+          <button class="sf-caret-btn" id="conn-fcaret-provider" onclick="connToggleFilter(event,'provider')" title="Filter by provider">&#9660;</button>
+          <div class="sf-dropdown" id="conn-fdrop-provider"></div>
+        </th>
+        <th class="sf-th">
+          <span class="sf-th-inner" onclick="connSortBy('method')">Auth method <span class="sf-sort-indicator" id="conn-sort-method">&#9650;</span></span>
+          <button class="sf-caret-btn" id="conn-fcaret-method" onclick="connToggleFilter(event,'method')" title="Filter by auth method">&#9660;</button>
+          <div class="sf-dropdown" id="conn-fdrop-method"></div>
+        </th>
+        <th class="sf-th">
+          <span class="sf-th-inner" onclick="connSortBy('status')">Status <span class="sf-sort-indicator" id="conn-sort-status">&#9650;</span></span>
+          <button class="sf-caret-btn" id="conn-fcaret-status" onclick="connToggleFilter(event,'status')" title="Filter by status">&#9660;</button>
+          <div class="sf-dropdown" id="conn-fdrop-status"></div>
+        </th>
+        <th class="sf-th">
+          <span class="sf-th-inner" onclick="connSortBy('lastsync')">Last sync <span class="sf-sort-indicator" id="conn-sort-lastsync">&#9650;</span></span>
+        </th>
+        <th class="sf-th">
+          <span class="sf-th-inner" onclick="connSortBy('owner')">Owner <span class="sf-sort-indicator" id="conn-sort-owner">&#9650;</span></span>
+        </th>
         <th></th>
       </tr>
     </thead>
-    <tbody>
-      <tr onclick="openLoginDrawer('wiki')" data-search="acme internal wiki ops">
-        <td style="font-weight:600;">Acme Internal Wiki</td>
-        <td><span class="login-url">https://wiki.acme.internal</span></td>
-        <td><span class="login-user-masked">ops@***.com</span></td>
-        <td>Yesterday</td>
-        <td><div style="display:flex;align-items:center;gap:5px;"><span class="dot-g"></span> Active</div></td>
-        <td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,'Acme Internal Wiki')">&#8942;</button></td>
-      </tr>
-      <tr onclick="openLoginDrawer('insurance')" data-search="vendor portal insuranceco sarah">
-        <td style="font-weight:600;">Vendor Portal - InsuranceCo</td>
-        <td><span class="login-url">https://portal.insuranceco.com</span></td>
-        <td><span class="login-user-masked">sarah@***.com</span></td>
-        <td>5 days ago</td>
-        <td><div style="display:flex;align-items:center;gap:5px;"><span class="dot-a"></span> <span style="color:var(--amber-700);font-weight:500;">Stale</span></div></td>
-        <td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,'Vendor Portal')">&#8942;</button></td>
-      </tr>
-      <tr onclick="openLoginDrawer('timetrack')" data-search="legacy time tracker admin">
-        <td style="font-weight:600;">Legacy Time Tracker</td>
-        <td><span class="login-url">https://timetrack.legacy.com</span></td>
-        <td><span class="login-user-masked">admin</span></td>
-        <td>30 days ago</td>
-        <td><div style="display:flex;align-items:center;gap:5px;"><span class="dot-r"></span> <span style="color:var(--red-600);font-weight:500;">Expired</span></div></td>
-        <td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,'Legacy Time Tracker')">&#8942;</button></td>
-      </tr>
+    <tbody id="conn-tbody">
+      <!-- populated by renderConnections() -->
     </tbody>
   </table>
 </div><!-- /panel-logins -->
@@ -862,6 +897,169 @@
 </div>
 
 <script>
+// ============================================================
+// CONNECTIONS DATA
+// ============================================================
+var CONNECTIONS = [
+  { id:'gmail',     name:'Gmail / Google Workspace', provider:'Gmail',      method:'Sign in',  status:'Connected', lastsync:'2h ago',     lastsyncMs: Date.now()-7200000,   owner:'ops@acme.com' },
+  { id:'slack',     name:'Slack',                    provider:'Slack',      method:'Sign in',  status:'Connected', lastsync:'3h ago',     lastsyncMs: Date.now()-10800000,  owner:'ops@acme.com' },
+  { id:'hubspot',   name:'HubSpot',                  provider:'HubSpot',    method:'Sign in',  status:'Connected', lastsync:'1h ago',     lastsyncMs: Date.now()-3600000,   owner:'ops@acme.com' },
+  { id:'ghl',       name:'GoHighLevel',              provider:'GoHighLevel',method:'Sign in',  status:'Connected', lastsync:'30m ago',    lastsyncMs: Date.now()-1800000,   owner:'sarah@acme.com' },
+  { id:'stripe',    name:'Stripe',                   provider:'Stripe',     method:'Key',      status:'Connected', lastsync:'5h ago',     lastsyncMs: Date.now()-18000000,  owner:'ops@acme.com' },
+  { id:'gdrive',    name:'Google Drive',             provider:'Google Drive',method:'Sign in', status:'Connected', lastsync:'4h ago',     lastsyncMs: Date.now()-14400000,  owner:'sarah@acme.com' },
+  { id:'sf',        name:'Salesforce',               provider:'Salesforce', method:'Sign in',  status:'Expired',   lastsync:'2 days ago', lastsyncMs: Date.now()-172800000, owner:'ops@acme.com' },
+  { id:'linear',    name:'Linear',                   provider:'Linear',     method:'Key',      status:'Failed',    lastsync:'3 days ago', lastsyncMs: Date.now()-259200000, owner:'ops@acme.com' },
+  { id:'notion',    name:'Notion',                   provider:'Notion',     method:'Sign in',  status:'Connected', lastsync:'6h ago',     lastsyncMs: Date.now()-21600000,  owner:'sarah@acme.com' },
+  { id:'github',    name:'GitHub',                   provider:'GitHub',     method:'Key',      status:'Connected', lastsync:'1h ago',     lastsyncMs: Date.now()-3600000,   owner:'ops@acme.com' },
+  { id:'zoom',      name:'Zoom',                     provider:'Zoom',       method:'Sign in',  status:'Connected', lastsync:'Yesterday',  lastsyncMs: Date.now()-86400000,  owner:'sarah@acme.com' },
+  { id:'wiki',      name:'Acme Internal Wiki',       provider:'Web login',  method:'Web login',status:'Connected', lastsync:'Yesterday',  lastsyncMs: Date.now()-86400000,  owner:'ops@acme.com' },
+  { id:'insurance', name:'Vendor Portal - InsuranceCo',provider:'Web login',method:'Web login',status:'Pending',  lastsync:'5 days ago', lastsyncMs: Date.now()-432000000, owner:'sarah@acme.com' },
+  { id:'timetrack', name:'Legacy Time Tracker',      provider:'Web login',  method:'Web login',status:'Failed',    lastsync:'30 days ago',lastsyncMs: Date.now()-2592000000,owner:'ops@acme.com' },
+  { id:'mixpanel',  name:'Mixpanel',                 provider:'Mixpanel',   method:'Key',      status:'Connected', lastsync:'2h ago',     lastsyncMs: Date.now()-7200000,   owner:'sarah@acme.com' },
+];
+
+// ============================================================
+// SORT/FILTER STATE — connections table
+// ============================================================
+var connSortCol = 'name';
+var connSortDir = 'asc';
+var connColFilters = { provider: null, method: null, status: null }; // colFilters: null = no filter (Set when active)
+
+function statusDotHtml(status) {
+  var cls = status === 'Connected' ? 'dot-g' : status === 'Expired' || status === 'Failed' ? 'dot-r' : 'dot-a';
+  var color = status === 'Connected' ? '' : status === 'Expired' || status === 'Failed' ? 'color:var(--red-600);font-weight:500;' : 'color:var(--amber-700);font-weight:500;';
+  return '<div style="display:flex;align-items:center;gap:5px;"><span class="' + cls + '"></span><span style="' + color + '">' + status + '</span></div>';
+}
+
+function renderConnections() {
+  // Update sort indicators
+  ['name','provider','method','status','lastsync','owner'].forEach(function(c) {
+    var el = document.getElementById('conn-sort-' + c);
+    if (!el) return;
+    el.classList.toggle('active', c === connSortCol);
+    el.innerHTML = (c === connSortCol && connSortDir === 'desc') ? '&#9660;' : '&#9650;';
+  });
+
+  // Build filtered rows
+  var rows = CONNECTIONS.slice();
+
+  if (connColFilters.provider) rows = rows.filter(function(r) { return connColFilters.provider.has(r.provider); });
+  if (connColFilters.method)   rows = rows.filter(function(r) { return connColFilters.method.has(r.method); });
+  if (connColFilters.status)   rows = rows.filter(function(r) { return connColFilters.status.has(r.status); });
+
+  // Sort
+  rows.sort(function(a, b) {
+    var av = connSortCol === 'lastsync' ? a.lastsyncMs : (a[connSortCol] || '').toLowerCase();
+    var bv = connSortCol === 'lastsync' ? b.lastsyncMs : (b[connSortCol] || '').toLowerCase();
+    if (connSortCol === 'lastsync') {
+      return connSortDir === 'asc' ? av - bv : bv - av;
+    }
+    return connSortDir === 'asc' ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+  });
+
+  var tbody = document.getElementById('conn-tbody');
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr class="sf-empty-row"><td colspan="7">No matching connections. Adjust filters.</td></tr>';
+    document.getElementById('conn-count').textContent = '(0)';
+    return;
+  }
+
+  document.getElementById('conn-count').textContent = '(' + rows.length + ')';
+  tbody.innerHTML = rows.map(function(c) {
+    var searchStr = [c.name, c.provider, c.method, c.status, c.owner].join(' ').toLowerCase();
+    return '<tr onclick="openLoginDrawer(\'' + c.id + '\')" data-search="' + searchStr + '">' +
+      '<td style="font-weight:600;">' + c.name + '</td>' +
+      '<td>' + c.provider + '</td>' +
+      '<td><span class="app-method-chip">' + c.method + '</span></td>' +
+      '<td>' + statusDotHtml(c.status) + '</td>' +
+      '<td style="color:var(--slate-500);font-size:12px;">' + c.lastsync + '</td>' +
+      '<td style="font-size:12.5px;color:var(--slate-600);">' + c.owner + '</td>' +
+      '<td><button class="app-overflow-btn" style="position:static;" onclick="event.stopPropagation();openCardCtx(event,\'' + c.name.replace(/'/g, "\\'") + '\')" title="More">&#8942;</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function connSortBy(col) {
+  if (connSortCol === col) {
+    connSortDir = connSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    connSortCol = col;
+    connSortDir = 'asc';
+  }
+  renderConnections();
+}
+
+function connToggleFilter(e, col) {
+  e.stopPropagation();
+  var dropId = 'conn-fdrop-' + col;
+  var drop = document.getElementById(dropId);
+  var isOpen = drop.classList.contains('open');
+  closeAllConnDropdowns();
+  if (!isOpen) {
+    buildConnDropdown(col, drop);
+    drop.classList.add('open');
+  }
+}
+
+function buildConnDropdown(col, drop) {
+  var vals = [];
+  CONNECTIONS.forEach(function(c) {
+    var v = c[col];
+    if (vals.indexOf(v) === -1) vals.push(v);
+  });
+  vals.sort();
+  var active = connColFilters[col];
+  drop.innerHTML =
+    '<div class="sf-dropdown-head">' +
+      '<a onclick="connSelectAll(\'' + col + '\')">Select all</a>' +
+      '<a onclick="connClearFilter(\'' + col + '\')">Clear</a>' +
+    '</div>' +
+    '<div class="sf-dropdown-list">' +
+      vals.map(function(v) {
+        var chk = (!active || active.has(v)) ? 'checked' : '';
+        return '<label class="sf-dropdown-item"><input type="checkbox" value="' + v + '" ' + chk + '> ' + v + '</label>';
+      }).join('') +
+    '</div>' +
+    '<div class="sf-dropdown-footer"><button class="sf-apply-btn" onclick="connApplyFilter(\'' + col + '\')">Apply</button></div>';
+}
+
+function connApplyFilter(col) {
+  var drop = document.getElementById('conn-fdrop-' + col);
+  var checked = drop.querySelectorAll('input[type="checkbox"]:checked');
+  var allVals = drop.querySelectorAll('input[type="checkbox"]');
+  if (checked.length === allVals.length) {
+    connColFilters[col] = null;
+  } else {
+    connColFilters[col] = new Set([].map.call(checked, function(c) { return c.value; }));
+  }
+  var btn = document.getElementById('conn-fcaret-' + col);
+  if (btn) btn.classList.toggle('filtered', !!connColFilters[col]);
+  drop.classList.remove('open');
+  renderConnections();
+}
+
+function connSelectAll(col) {
+  var drop = document.getElementById('conn-fdrop-' + col);
+  drop.querySelectorAll('input[type="checkbox"]').forEach(function(c) { c.checked = true; });
+}
+
+function connClearFilter(col) {
+  var drop = document.getElementById('conn-fdrop-' + col);
+  drop.querySelectorAll('input[type="checkbox"]').forEach(function(c) { c.checked = false; });
+}
+
+function closeAllConnDropdowns() {
+  document.querySelectorAll('[id^="conn-fdrop-"]').forEach(function(d) { d.classList.remove('open'); });
+}
+
+// Close dropdowns on outside click or Esc
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.sf-th')) closeAllConnDropdowns();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeAllConnDropdowns();
+});
+
 // ---- Sub-tab switching ----
 function switchSubTab(tab) {
   ['integrations','logins'].forEach(t => {
@@ -902,13 +1100,14 @@ function handleUniversalSearch(val) {
       const match = !q || card.dataset.search.includes(q);
       card.style.display = match ? '' : 'none';
     });
-    // Count logins matches
-    const loginMatches = q ? [...document.querySelectorAll('#logins-table tbody tr')].filter(r => r.dataset.search.includes(q)).length : 0;
-    showCrossTabChip(loginMatches, 'Logins');
+    // Count connections matches (logins tab)
+    const loginMatches = q ? CONNECTIONS.filter(c => [c.name,c.provider,c.method,c.status,c.owner].join(' ').toLowerCase().includes(q)).length : 0;
+    showCrossTabChip(loginMatches, 'Connections');
   } else {
-    // Filter login rows
+    // Filter connection rows by search query on top of column filters
     document.querySelectorAll('#logins-table tbody tr').forEach(row => {
-      const match = !q || row.dataset.search.includes(q);
+      if (row.classList.contains('sf-empty-row')) return;
+      const match = !q || (row.dataset.search && row.dataset.search.includes(q));
       row.style.display = match ? '' : 'none';
     });
     // Count integrations matches
@@ -968,70 +1167,30 @@ function startConnecting(appName) {
   setTimeout(() => { ov.classList.remove('open'); }, 2200);
 }
 
-// ---- Login drawer ----
-const loginData = {
-  wiki: {
-    title: 'Acme Internal Wiki',
-    url: 'https://wiki.acme.internal',
-    user: 'ops@acme.com',
-    lastVerified: 'Yesterday at 3:42 PM',
-    status: 'green',
-    history: ['Verified 2026-05-05 15:42', 'Verified 2026-05-04 09:11', 'Verified 2026-05-03 14:28']
-  },
-  insurance: {
-    title: 'Vendor Portal - InsuranceCo',
-    url: 'https://portal.insuranceco.com',
-    user: 'sarah@acme.com',
-    lastVerified: '5 days ago',
-    status: 'amber',
-    history: ['Verified 2026-05-01 10:00', 'Failed 2026-04-30 10:00 (timeout)', 'Verified 2026-04-29 10:00']
-  },
-  timetrack: {
-    title: 'Legacy Time Tracker',
-    url: 'https://timetrack.legacy.com',
-    user: 'admin',
-    lastVerified: '30 days ago',
-    status: 'red',
-    history: ['Failed 2026-04-06 08:00 (session expired)', 'Verified 2026-04-05 08:00', 'Verified 2026-04-04 08:00']
-  }
-};
-
+// ---- Login / connection drawer ----
 function openLoginDrawer(key) {
-  const d = loginData[key];
-  document.getElementById('login-drawer-title').textContent = d.title;
-  const dotClass = d.status === 'green' ? 'dot-g' : d.status === 'amber' ? 'dot-a' : 'dot-r';
-  const statusLabel = d.status === 'green' ? 'Active' : d.status === 'amber' ? 'Stale' : 'Expired';
-  document.getElementById('login-drawer-body').innerHTML = `
-    <div class="drawer-section-label">Connection details</div>
-    <div class="drawer-field">
-      <label>URL</label>
-      <div class="val-mono">${d.url}</div>
-    </div>
-    <div class="drawer-field">
-      <label>Username</label>
-      <div class="val">${d.user}</div>
-    </div>
-    <div class="drawer-field">
-      <label>Password</label>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span class="val-masked" id="drawer-pass-display">••••••••••••</span>
-        <button class="show-hide-btn" style="position:static;transform:none;" onclick="toggleDrawerPass(this)">Show</button>
-      </div>
-    </div>
-    <div class="drawer-field">
-      <label>Status</label>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <span class="${dotClass}"></span>
-        <span class="val">${statusLabel}</span>
-      </div>
-    </div>
-    <div class="drawer-field">
-      <label>Last verified</label>
-      <div class="val">${d.lastVerified}</div>
-    </div>
-    <div class="drawer-section-label">Verification history</div>
-    ${d.history.map(h => `<div class="verify-row"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${h}</div>`).join('')}
-  `;
+  var conn = CONNECTIONS.find(function(c) { return c.id === key; });
+  if (!conn) return;
+  document.getElementById('login-drawer-title').textContent = conn.name;
+  var dotClass = conn.status === 'Connected' ? 'dot-g' : conn.status === 'Pending' ? 'dot-a' : 'dot-r';
+  var isWebLogin = conn.method === 'Web login';
+  document.getElementById('login-drawer-body').innerHTML =
+    '<div class="drawer-section-label">Connection details</div>' +
+    '<div class="drawer-field"><label>Provider</label><div class="val">' + conn.provider + '</div></div>' +
+    '<div class="drawer-field"><label>Auth method</label><div class="val"><span class="app-method-chip">' + conn.method + '</span></div></div>' +
+    '<div class="drawer-field"><label>Status</label>' +
+      '<div style="display:flex;align-items:center;gap:6px;"><span class="' + dotClass + '"></span><span class="val">' + conn.status + '</span></div>' +
+    '</div>' +
+    '<div class="drawer-field"><label>Last sync</label><div class="val">' + conn.lastsync + '</div></div>' +
+    '<div class="drawer-field"><label>Owner</label><div class="val">' + conn.owner + '</div></div>' +
+    (isWebLogin ? '<div class="drawer-field"><label>Credentials</label>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span class="val-masked" id="drawer-pass-display">••••••••••••</span>' +
+        '<button class="show-hide-btn" style="position:static;transform:none;" onclick="toggleDrawerPass(this)">Show</button>' +
+      '</div></div>' : '') +
+    '<div class="drawer-section-label">Sync history</div>' +
+    '<div class="verify-row"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Last sync: ' + conn.lastsync + '</div>' +
+    '<div class="verify-row"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Previous: 1 day before last</div>';
   document.getElementById('login-drawer-overlay').classList.add('open');
 }
 
@@ -1073,6 +1232,12 @@ function togglePassword(inputId, btn) {
   if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
   else { inp.type = 'password'; btn.textContent = 'Show'; }
 }
+
+// ---- Init ----
+(function() {
+  renderConnections();
+  renderSidebar('workspace', 'integrations.html');
+})();
 </script>
 </body>
 </html>
