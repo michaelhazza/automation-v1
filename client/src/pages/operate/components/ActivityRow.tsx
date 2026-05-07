@@ -1,6 +1,7 @@
 // client/src/pages/operate/components/ActivityRow.tsx
 //
-// Row renderer for ActivityItem. Used by ActivityPage (table) and HomeRecentActivity (C7).
+// Row renderer for ActivityItem. Used by HomeRecentActivity (C7) for the home widget.
+// ActivityPage uses only the re-exported helpers (StatusDot, SeverityDot, TypeTag, formatType).
 // The trigger handler is passed in by the parent (`onOpen`) so the row stays
 // trigger-agnostic — row click in table opens a Drawer; in HomeRecentActivity it
 // may open a modal. The run-id link is only rendered when `embedded !== true`.

@@ -88,7 +88,7 @@ export function SeverityLegend({ userId }: SeverityLegendProps): React.ReactElem
               />
               <span className="text-xs text-slate-700">
                 <span className="font-medium">{label}</span>
-                <span className="text-slate-500 ml-1 hidden sm:inline">— {description}</span>
+                <span className="text-slate-500 ml-1 hidden sm:inline">: {description}</span>
               </span>
             </div>
           ))}
