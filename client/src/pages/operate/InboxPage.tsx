@@ -59,24 +59,20 @@ export function InboxPage({ user }: InboxPageProps): React.ReactElement {
     previous: { ...EMPTY_BAND_STATE },
   });
 
-  // Monotonic request sequence per band (latest-request-wins stale-response guard)
-  const highSeqRef = useRef(0);
-  const needsActionSeqRef = useRef(0);
-  const previousSeqRef = useRef(0);
-
-  const seqRefs: Record<InboxBandType, React.MutableRefObject<number>> = {
-    high: highSeqRef,
-    needs_action: needsActionSeqRef,
-    previous: previousSeqRef,
-  };
+  // Monotonic request sequence per band (latest-request-wins stale-response guard).
+  // Stored in a stable useRef map so loadBand's closure is never stale.
+  const seqCounters = useRef<Record<InboxBandType, number>>({
+    high: 0,
+    needs_action: 0,
+    previous: 0,
+  });
 
   // ---------------------------------------------------------------------------
   // Fetch one band
   // ---------------------------------------------------------------------------
 
   const loadBand = useCallback((band: InboxBandType, searchQ: string) => {
-    const seqRef = seqRefs[band];
-    const seq = ++seqRef.current;
+    const seq = ++seqCounters.current[band];
 
     setBandStates((prev) => ({
       ...prev,
@@ -86,22 +82,21 @@ export function InboxPage({ user }: InboxPageProps): React.ReactElement {
     fetchInbox({ band, q: searchQ || undefined })
       .then((data) => {
         // Stale-response guard: discard if a newer request was dispatched for this band
-        if (seqRef.current !== seq) return;
+        if (seqCounters.current[band] !== seq) return;
         setBandStates((prev) => ({
           ...prev,
           [band]: { items: data.items, loading: false, error: null },
         }));
       })
       .catch((err) => {
-        if (seqRef.current !== seq) return;
+        if (seqCounters.current[band] !== seq) return;
         console.error(`[InboxPage] fetchInbox(${band}) error:`, err);
         setBandStates((prev) => ({
           ...prev,
           [band]: { items: [], loading: false, error: 'Failed to load. Please try again.' },
         }));
       });
-  // seqRefs is stable (refs, not state), q and band drive re-runs via useEffect
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // seqCounters is a stable ref — no deps needed
   }, []);
 
   // ---------------------------------------------------------------------------

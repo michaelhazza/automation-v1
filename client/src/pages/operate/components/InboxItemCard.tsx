@@ -138,12 +138,7 @@ export function InboxItemCard({ item, user, onRemove }: InboxItemCardProps): Rea
   }
 
   async function handleReject() {
-    if (!rejectOpen) {
-      // First click: open the inline reason input
-      setRejectOpen(true);
-      return;
-    }
-    // Second click (from "Confirm reject" button): submit
+    // Called from the "Confirm reject" button (rejectOpen is always true at this point).
     setActionLoading('reject');
     setActionError(null);
     try {

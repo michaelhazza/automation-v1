@@ -67,7 +67,7 @@ export function InboxBand({
         className="flex items-center gap-2 px-4 py-2 bg-slate-50 border-y border-slate-200 text-left w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
         style={{ position: 'sticky', top: 0, zIndex: 10 }}
         aria-expanded={expanded}
-        aria-label={`${label} band — ${count} item${count !== 1 ? 's' : ''}`}
+        aria-label={`${label} band, ${count} item${count !== 1 ? 's' : ''}`}
       >
         {/* Chevron */}
         <svg
