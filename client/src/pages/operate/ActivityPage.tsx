@@ -2,7 +2,7 @@
 //
 // Operate > Activity page.
 // - <SearchBox> with 200ms debounce wired to `q`
-// - <SortableTable persistKey="operate-activity"> for the activity feed
+// - <SortableTable persistKey={`operate-activity:v${tableResetNonce}`}> abandons old persisted
 // - <Drawer> opens on row click (activity detail)
 // - <EmptyState> with "Clear filters" CTA when the filtered list is empty
 // - Stale-response guard: monotonic requestSeq ref (latest-request-wins)
@@ -436,7 +436,7 @@ export function ActivityPage({ user }: ActivityPageProps): React.ReactElement {
             rows={items}
             columns={columns}
             rowKey={(item) => item.id}
-            persistKey="operate-activity"
+            persistKey={`operate-activity:v${tableResetNonce}`}
             initialSort={{ key: 'createdAt', dir: 'desc' }}
             onRowClick={handleRowClick}
             emptyState={
