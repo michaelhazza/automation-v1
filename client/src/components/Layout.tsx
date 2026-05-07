@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { BriefCreationEnvelope } from '../../../shared/types/briefFastPath.js';
 import CommandPalette from './CommandPalette';
 import GlobalAskBar from './global-ask-bar/GlobalAskBar';
+import ViewModeSwitcher from './ViewModeSwitcher';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
@@ -15,6 +16,10 @@ import {
 import { useSocketRoom } from '../hooks/useSocket';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { getSocket, disconnectSocket, reconnectSocket } from '../lib/socket';
+import { useViewMode } from '../hooks/useViewMode';
+import { buildNavItems } from '../config/sidebar';
+import type { NavContext, NavItemSpec } from '../config/sidebar';
+import type { AppRoute } from '../config/routes';
 
 interface LayoutProps {
   user: User;
@@ -139,7 +144,7 @@ function NavButton({ icon, label, onClick }: { icon: React.ReactNode; label: str
 
 function NavItem({
   to, icon, label, badge, badgeLabel, exact = false, manageTo,
-}: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean; manageTo?: string }) {
+}: { to: string | AppRoute; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean; manageTo?: string | AppRoute }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const baseTo = to.split('?')[0]; // ignore query params for matching
@@ -316,6 +321,11 @@ export default function Layout({ user, children }: LayoutProps) {
 
   // Command palette
   const [cmdOpen, setCmdOpen] = useState(false);
+
+  // ViewMode — derived from identity state; wires to command palette for client selection
+  const { viewMode, availableModes, setViewMode } = useViewMode({
+    onRequireClientSelection: () => setCmdOpen(true),
+  });
 
   // Module-driven sidebar config
   const [sidebarItems, setSidebarItems] = useState<Set<string> | null>(null);
@@ -591,6 +601,114 @@ export default function Layout({ user, children }: LayoutProps) {
   const userInitials = `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || '?';
   const breadcrumbs = buildBreadcrumbs(location.pathname, activeClientName);
 
+  // ── Config-driven nav ──────────────────────────────────────────────────
+  const navCtx: NavContext = {
+    isSystemAdmin,
+    hasOrgContext,
+    hasAnyOrgPerm,
+    activeClientId,
+    activeClientName,
+    hasOrgPerm,
+    hasClientPerm,
+    hasSidebarItem,
+    viewMode,
+    navProjects: navProjects.map(p => ({ id: p.id, name: p.name, color: p.color, status: p.status })),
+    navAgents: navAgents.map(a => ({ id: a.id, agentId: a.agentId, name: a.agent.name, icon: a.agent.icon })),
+    reviewCount,
+    liveAgentCount,
+    incidentCount,
+    onCreateProject: () => setShowCreateProject(true),
+    onCreateAgent: () => setShowCreateAgent(true),
+    onOpenNewBrief: handleOpenNewBrief,
+    onLogout: handleLogout,
+    onOpenConfigAssistant: () => openConfigAssistant(),
+  };
+  const navItems = buildNavItems(navCtx);
+
+  /** Map a NavItemSpec to the appropriate JSX component. */
+  function renderNavItem(spec: NavItemSpec) {
+    if (spec.kind === 'empty-hint') {
+      return (
+        <div key={spec.key} className="px-[18px] py-1 text-[11px] text-slate-600 italic">
+          {spec.label}
+        </div>
+      );
+    }
+    if (spec.kind === 'section-header') {
+      const action = spec.onClick
+        ? <NavSectionAction onClick={spec.onClick} />
+        : undefined;
+      return <NavSection key={spec.key} label={spec.label ?? ''} action={action} />;
+    }
+
+    if (spec.kind === 'button') {
+      // Special-case: New Task button uses bolt icon inline style
+      if (spec.key === 'new-task') {
+        return (
+          <button
+            key={spec.key}
+            onClick={spec.onClick}
+            className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
+          >
+            <span><Icons.bolt /></span>
+            <span className="flex-1">{spec.label}</span>
+          </button>
+        );
+      }
+      // Special-case: sign-out uses the original footer button styling (slate-600 base)
+      if (spec.key === 'sign-out') {
+        return (
+          <button
+            key={spec.key}
+            onClick={spec.onClick}
+            className="flex items-center gap-[9px] px-3 py-[7px] w-[calc(100%-12px)] mx-1.5 my-px border-none cursor-pointer rounded-[7px] bg-transparent text-slate-600 text-[13px] font-medium [font-family:inherit] transition-[color,background] duration-100 hover:text-slate-100 hover:bg-white/[0.04]"
+          >
+            <Icons.logout />
+            <span>{spec.label}</span>
+          </button>
+        );
+      }
+      return (
+        <NavButton
+          key={spec.key}
+          icon={resolveIcon(spec.iconKey)}
+          label={spec.label ?? ''}
+          onClick={spec.onClick ?? (() => {})}
+        />
+      );
+    }
+
+    // kind === 'link'
+    if (!spec.to) return null;
+    return (
+      <NavItem
+        key={spec.key}
+        to={spec.to}
+        icon={resolveIcon(spec.iconKey)}
+        label={spec.label ?? ''}
+        badge={spec.badge}
+        badgeLabel={spec.badgeLabel}
+        exact={spec.exact}
+        manageTo={spec.manageTo}
+      />
+    );
+  }
+
+  /** Resolve an iconKey string to the appropriate React node. */
+  function resolveIcon(iconKey: string | undefined): React.ReactNode {
+    if (!iconKey) return <Icons.inbox />;
+    if (iconKey.startsWith('emoji:')) {
+      const emoji = iconKey.slice('emoji:'.length);
+      return <span className="text-[13px] shrink-0 leading-none">{emoji}</span>;
+    }
+    if (iconKey.startsWith('project-dot:')) {
+      const color = iconKey.slice('project-dot:'.length);
+      return <span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: color }} />;
+    }
+    const icon = Icons[iconKey as keyof typeof Icons];
+    return icon ? icon() : <Icons.inbox />;
+  }
+
   return (
     <div className="flex h-screen overflow-hidden">
       <CommandPalette
@@ -735,200 +853,26 @@ export default function Layout({ user, children }: LayoutProps) {
           )}
         </div>
 
-        {/* Navigation */}
+        {/* ViewModeSwitcher — shown above nav when org-admin+ permissions exist */}
+        {(hasOrgContext && hasAnyOrgPerm) && (
+          <div className="px-3 py-2 border-b border-white/5 flex justify-center">
+            <ViewModeSwitcher
+              value={viewMode}
+              onChange={setViewMode}
+              availableModes={availableModes}
+            />
+          </div>
+        )}
+
+        {/* Navigation — config-driven (all groups except footer) */}
         <div className="flex-1 py-1 overflow-y-auto overflow-x-hidden">
-
-          {/* ── Top controls — always visible when client selected */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <button
-                onClick={handleOpenNewBrief}
-                className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
-              >
-                <span><Icons.bolt /></span>
-                <span className="flex-1">New Task</span>
-              </button>
-              {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to="/" icon={<Icons.inbox />} label="Home" badge={reviewCount} />
-              )}
-            </>
-          )}
-
-          {/* ── Fallback when no client selected */}
-          {!(hasOrgContext && activeClientId) && (
-            <NavItem to="/" icon={<Icons.inbox />} label="Home" />
-          )}
-
-          {/* ── Work section */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Work" />
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
-              )}
-              {hasOrgPerm('org.automations.view') && (
-                <NavItem to="/automations" icon={<Icons.automations />} label="Automations" />
-              )}
-              {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.workflow_templates.read')) && (
-                <NavItem to="/workflows" icon={<Icons.automations />} label="Workflows" />
-              )}
-              {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
-              )}
-              {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/schedule-calendar`} icon={<Icons.scheduled />} label="Calendar" />
-              )}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/page-projects`} icon={<Icons.portal />} label="Sites" />
-              )}
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/triggers`} icon={<Icons.scheduled />} label="Triggers" />
-              )}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/actions`} icon={<Icons.activity />} label="Action Log" />
-              )}
-            </>
-          )}
-
-          {/* ── Projects section — dynamic list */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Projects" action={<NavSectionAction onClick={() => setShowCreateProject(true)} />} />
-              {navProjects.length === 0 && (
-                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No projects yet</div>
-              )}
-              {navProjects.map((p) => (
-                <NavItem
-                  key={p.id}
-                  to={`/projects/${p.id}`}
-                  icon={<span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: p.color }} />}
-                  label={p.name}
-                />
-              ))}
-            </>
-          )}
-
-          {/* ── Agents section — dynamic list */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Agents" action={<NavSectionAction onClick={() => setShowCreateAgent(true)} />} />
-              {navAgents.length === 0 && (
-                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No agents yet</div>
-              )}
-              {navAgents.map((a) => (
-                <NavItem
-                  key={a.id}
-                  to={`/agents/${a.agentId}`}
-                  icon={a.agent.icon ? <span className="text-[13px] shrink-0 leading-none">{a.agent.icon}</span> : <Icons.agents />}
-                  label={a.agent.name}
-                  manageTo={`/admin/subaccounts/${activeClientId}/agents/${a.id}/manage`}
-                />
-              ))}
-            </>
-          )}
-
-          {/* ── Company section */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Company" />
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/goals`} icon={<Icons.goals />} label="Goals" />
-              )}
-              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && (
-                <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
-              )}
-              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && (
-                <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
-              )}
-              {hasSidebarItem('companies') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
-              )}
-              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.edit') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
-              )}
-            </>
-          )}
-
-          {/* ── ClientPulse section — shown when org has client_pulse module */}
-          {hasOrgContext && hasSidebarItem('clientpulse') && (
-            <>
-              <NavSection label="ClientPulse" />
-              <NavItem
-                to="/clientpulse"
-                exact
-                icon={<Icons.dashboard />}
-                label="Dashboard"
-                badge={liveAgentCount > 0 ? liveAgentCount : undefined}
-                badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined}
-              />
-              {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
-              <NavItem to="/clientpulse/settings" icon={<Icons.settings />} label="ClientPulse Settings" />
-            </>
-          )}
-
-          {/* ── Organisation section — always shown when org context exists */}
-          {hasOrgContext && hasAnyOrgPerm && (
-            <>
-              <NavSection label="Organisation" />
-              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
-              {hasSidebarItem('config_assistant') && (
-                <NavButton
-                  icon={<Icons.settings />}
-                  label="Configuration Assistant"
-                  onClick={() => openConfigAssistant()}
-                />
-              )}
-              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
-              {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/schedule-calendar" icon={<Icons.scheduled />} label="Calendar" />}
-              {hasSidebarItem('workflows') && hasOrgPerm('org.automations.view') && <NavItem to="/admin/automations" icon={<Icons.automations />} label="Automations" />}
-              {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
-              {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasSidebarItem('team') && hasOrgPerm('org.teams.manage') && <NavItem to="/admin/teams" icon={<Icons.team />} label="Teams" />}
-              {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
-              {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage" />}
-              {/* Agentic Commerce — Spending Budgets (admin edit) or read-only (spend_approver) */}
-              {(hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver')) && (
-                <NavItem to="/admin/spending-budgets" icon={<Icons.usage />} label="Spending Budgets" />
-              )}
-              {/* Agentic Commerce — Spend Ledger (spend_approver or admin) */}
-              {activeClientId && (hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver') || hasClientPerm('spend_approver')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/spend-ledger`} icon={<Icons.diagnostic />} label="Spend Ledger" />
-              )}
-            </>
-          )}
-
-          {/* ── Platform section — system admin */}
-          {isSystemAdmin && (
-            <>
-              <NavSection label="Platform" />
-              <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
-              <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
-              <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
-              <NavItem to="/system/workflow-studio" icon={<Icons.automations />} label="Workflow Studio" />
-              <NavItem to="/system/automations" icon={<Icons.automations />} label="Automations" />
-              <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
-              <NavItem to="/system/incidents" icon={<Icons.diagnostic />} label="Incidents" badge={incidentCount} />
-              <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
-              <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
-              <NavItem to="/system/llm-pnl" icon={<Icons.usage />} label="LLM P&L" />
-              <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
-            </>
-          )}
+          {navItems.filter(s => s.group !== 'footer').map(renderNavItem)}
         </div>
 
-        {/* Footer */}
+        {/* Footer — trial countdown + support link; profile/signout from buildNavItems */}
         <div className="px-1.5 pt-1.5 pb-2 border-t border-white/5">
           <TrialCountdown />
-          <NavItem to="/settings" exact icon={<Icons.settings />} label="Profile Settings" />
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-[9px] px-3 py-[7px] w-[calc(100%-12px)] mx-1.5 my-px border-none cursor-pointer rounded-[7px] bg-transparent text-slate-600 text-[13px] font-medium [font-family:inherit] transition-[color,background] duration-100 hover:text-slate-100 hover:bg-white/[0.04]"
-          >
-            <Icons.logout />
-            <span>Sign out</span>
-          </button>
+          {navItems.filter(s => s.group === 'footer').map(renderNavItem)}
           <a
             href="mailto:support@synthetos.ai"
             className="flex items-center gap-[9px] px-3 py-[5px] mx-1.5 my-px rounded-[7px] text-slate-700 text-[12px] no-underline transition-[color,background] duration-100 hover:text-slate-400 hover:bg-white/[0.04]"
