@@ -87,9 +87,11 @@ This spec assumes `consolidation-foundation` has shipped or is in flight. The co
 ```ts
 interface ActivityListQuery {
   scope?: 'workspace' | 'org' | 'system';   // matches viewMode; org/system require permission
-  cursor?: string;                           // opaque, returned by previous response
+  cursor?: string;                           // opaque; see cursor invariant below
   limit?: number;                            // default 50, max 200
-  // Filters (multi-select; AND semantics across keys, OR within a key)
+  // Filters (multi-select; AND across keys, OR within a key)
+  // SQL mapping: WHERE (type IN (...)) AND (status IN (...)) AND (actor IN (...)) ...
+  // Empty array = ignore that filter dimension; undefined ≠ empty array (undefined = not set)
   type?: string[];                           // e.g. ['agent_run', 'memory.created']
   status?: string[];
   actor?: string[];
@@ -98,10 +100,16 @@ interface ActivityListQuery {
   // Sort
   sortKey?: 'createdAt' | 'type' | 'subject' | 'status' | 'actor' | 'severity' | 'subaccount' | 'duration';
   sortDir?: 'asc' | 'desc';                  // default createdAt desc
-  // Free text
+  // Free text (applied after filters: WHERE <filters> AND <search predicate>)
   q?: string;                                // searches subject + actor + typeLabel
 }
 ```
+
+**Cursor invariant:**
+- Cursor encodes `(sortKeyValue, id)` — the sort always includes `id` as a deterministic tiebreaker (e.g. `ORDER BY createdAt DESC, id DESC`).
+- Cursor is invalidated if `sortKey`, `sortDir`, or any filter changes between requests. Server must ignore or reject a cursor whose encoded context does not match the current request parameters; on mismatch, respond as if `cursor` was absent (restart from page 1).
+
+**Sort stability:** every sort order must include `id` as a secondary key to prevent flickering rows across pages.
 
 **Response:**
 
@@ -116,6 +124,9 @@ interface ActivityListResponse {
     subaccount: Array<{ value: string; label: string; count: number }>;
   };
 }
+```
+
+**filterOptions count semantics (faceted search rule):** counts are computed against the full result set for the current `scope` and `q`, ignoring pagination but respecting all active filters *except* the dimension being counted. This prevents misleading zero-counts for a dimension the user is currently filtering on.
 
 interface ActivityItem {
   id: string;
@@ -178,6 +189,7 @@ When `embedded=1`:
 - Hide sidebar (Layout sidebar mount), topbar, breadcrumb, replaces-strip.
 - Render `.run-layout` at `height: 100vh`, no margin.
 - Workspace badges inside the page remain clickable per foundation §4.5 (still triggers `setActiveClient` + reload, which reloads the iframe with the new active client).
+- **Isolation invariant:** embedded mode must not mutate the parent page's scroll position or steal focus from the parent document. The `<iframe>` should be sandboxed (`sandbox="allow-scripts allow-same-origin allow-forms"`) where the hosting platform permits it.
 
 Backend contract unchanged — the embedded flag is a frontend-only mode.
 
@@ -211,6 +223,11 @@ Each list page (Inbox, Activity) renders `<SearchBox>` (foundation §4.9, deboun
 - **Activity** `q` searches `subject + actor + typeLabel`. Existing search behaviour (already implemented in the prototype) is preserved verbatim.
 - **Run-trace** an inline search filters the step list by step name / event type. Page-local; no backend round-trip.
 
+**Search + filter interaction:**
+- `q` is applied *after* filters: `WHERE <filters> AND <search predicate>`.
+- Clearing the search box (`q = ''`) does NOT clear column filters; they remain active.
+- The "Clear filters" action (on `<EmptyState>` and `<SortableTable>`) resets both column filters *and* `q`.
+
 Empty results render `<EmptyState title="No matches" body="Try clearing filters or search">` with a "Clear filters" secondary action that calls `<SortableTable>`'s `clearAllFilters()` (foundation Phase 0 patch §4.3 addition).
 
 ### 4.8 Sensitive data masking on run-trace
@@ -228,14 +245,19 @@ LLM call payloads, tool-call arguments, and tool-call results may contain PII (e
 
 Backend determines masking and emits the appropriate fields; the frontend never decides what to show. Consumer-visible field names remain stable across roles (masked fields return `null` or the mask token, never omitted) so the renderer doesn't branch on role. Producer: extend existing run-trace assembly in `server/services/agentRunMessageService.ts` (or equivalent) with a role-aware projection. Source-of-truth precedence: the backend projection is the SoT; the frontend never re-derives.
 
+**Redaction token contract:**
+- The exact mask token string is `"<redacted>"` — no other string, no `null`, no omission.
+- Masked fields must always be present in the response (never absent); the renderer must never need to branch on field presence.
+- Truncated fields (e.g. tool-call result first 200 chars) must include `truncated: true` alongside the value so the renderer can show a "truncated" indicator without inspecting string length.
+
 ### 4.9 Activity / Run-trace event metadata depth
 
 Several existing fields are already in the data model but not surfaced:
 
-- **Activity row**: add `triggerSource` field (`schedule | event | manual | api | retry`) so Home and Activity tables can render a "Source" column. Already derivable from `agent_run.trigger_kind`; expose in the API response.
+- **Activity row**: add `triggerSource` field (`schedule | event | manual | api | retry | unknown`) so Home and Activity tables can render a "Source" column. Already derivable from `agent_run.trigger_kind`; expose in the API response. If `trigger_kind` is unavailable or unmapped, emit `"unknown"` (never `null`, never omit).
 - **Run-trace LLM events**: render `tokensIn` / `tokensOut` / `costUsd` (already on `agent_run_messages.metadata`). Add to the run-trace event renderer.
 - **Run-trace tool-call events**: render `durationMs` (already on the row). Add a small "↔ matching result" affordance that scrolls the matching `tool_result` event into view (correlation by `tool_call_id`).
-- **Activity severity dot**: small inline legend (`<span class="severity-legend">critical / warning / info</span>` with three dots) renders above the table on first visit; sticky-dismissed via localStorage `activitySeverityLegendSeen=1`.
+- **Activity severity dot**: small inline legend (`<span class="severity-legend">critical / warning / info</span>` with three dots) renders above the table on first visit; sticky-dismissed via localStorage. Key: `activitySeverityLegendSeen:{userId}` — include the userId prefix so the flag is per-user in shared-browser environments (e.g. shared-login kiosk).
 
 ### 4.10 Confirmation dialogs on destructive actions
 
@@ -312,7 +334,13 @@ Files **NOT modified** by this spec:
 - Snooze: idempotent; `UPDATE ... SET snoozed_until = $1`. Re-snoozing extends the window, not an error.
 - HTTP mapping: never bubble `23505` as 500. Concurrency-loss responses use `200 alreadyApplied: true`.
 
-**State machine:** No new state machine. Inbox uses the existing approval lifecycle (`pending → approved | rejected | snoozed | archived`). Spec adds no new states.
+**State machine:** No new state machine. Inbox uses the existing approval lifecycle:
+
+```
+pending → approved | rejected | snoozed | archived
+```
+
+All action endpoints MUST enforce `WHERE status = 'pending'`. An item in any other state (already snoozed, already archived, etc.) returns `200 { ok: true, alreadyApplied: true }` — never a 4xx or 5xx. Spec adds no new states.
 
 ## 7. Phase / chunk plan (preview — architect will finalise)
 

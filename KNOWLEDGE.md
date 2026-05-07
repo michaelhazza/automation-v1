@@ -2637,3 +2637,30 @@ Don't over-engineer a grep gate to chase aliasing. Document, review, and accept 
 
 ### [2026-05-06] Correction — Synthetos is not agency-only; sub-account is a standalone product surface
 When framing product strategy or recommendations, do not default to "agency operator looking down at clients." The three-tier structure (system / org / sub-account) is deliberate: a sub-account can be sold standalone to an end-client (SMB, solo operator) with no agency above them, and the product must self-contain at that level. Agency-resold sub-accounts are one go-to-market, not the only one. When discussing operator-facing surfaces (Pulse, supervision home, watchers, proactive nudges, calibration), cover both lenses: (a) the agency operator managing many sub-accounts and (b) the end operator running their own business directly inside one sub-account. The video's "my mom" archetype maps to lens (b), not (a).
+
+
+### [2026-05-07] Spec authoring — cursor pagination contract (3 invariants every paginated API spec must state)
+
+When speccing a cursor-paginated endpoint, always state three things explicitly or ChatGPT/reviewers will flag it:
+
+1. **Encoding:** cursor encodes `(sortKeyValue, id)` — the id tiebreaker makes ordering deterministic. SQL: `ORDER BY <sortKey> <dir>, id <dir>`.
+2. **Invalidation:** cursor is invalidated when `sortKey`, `sortDir`, or any filter changes between pages. Server ignores/resets on mismatch.
+3. **Stability:** every sort order must include `id` as a secondary key (prevents row flickering across pages).
+
+Missing any one of these causes non-deterministic pagination (duplicate rows or skipped rows under concurrent writes or sort/filter changes).
+
+### [2026-05-07] Spec authoring — filterOptions count semantics (faceted search rule)
+
+For APIs that return `filterOptions` alongside paginated results: always state that counts are computed against the **full result set** (current scope + q), **ignoring pagination**, but **respecting active filters except the dimension being counted**. This is the standard "faceted search" rule. Without it, a user filtering by `type=email.sent` would see 0 counts on the `type` dimension — which is misleading.
+
+### [2026-05-07] Spec authoring — masking/redaction token contract
+
+When speccing role-aware masking on a backend projection:
+
+1. Lock the exact redaction token as a string constant: `"<redacted>"` — never `null`, never omit the field.
+2. Truncated fields (e.g. first 200 chars of a result body) must include `truncated: true` so the renderer knows without inspecting string length.
+3. These two rules prevent frontend branching creep (renderer never needs to branch on field presence or null-check mask values).
+
+### [2026-05-07] Spec authoring — per-user localStorage key scoping
+
+When a dismissal/seen flag is stored in localStorage (e.g. `somethingSeen=1`), add a userId prefix: `somethingSeen:{userId}`. Without it, the flag is shared across users in a shared-browser environment (kiosk, shared login), silently suppressing the UI for subsequent users.
