@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07 (chatgpt-spec-review round 1 — list-endpoint invariants, auto-memory override gate, time-window definitions, "Other" rollup rules, connection-test enum, snapshot consistency, body-hash canonicalisation, cost precision, status enum tightened to three values; all 12 sections complete)
+**Last updated:** 2026-05-07 (chatgpt-spec-review round 2 — cursor invariant under sort overrides, override pre-condition, zero-cap "unbounded" semantics + capUsage6mo nullable type, timeout monotonic-clock + SDK-retry bound, snapshot wording corrected to single-statement CTE, body-hash NFC normalisation, filterOptions same-snapshot invariant; round 1 invariants retained; all 12 sections complete)
 **Author:** michael
 **Build slug:** consolidation-govern
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
@@ -89,14 +89,14 @@ This spec assumes `consolidation-foundation` has shipped or is in flight; founda
 
 These invariants apply to every list endpoint in §4 (Knowledge §4.1, Spend Ledger §4.2, Connections §4.6) unless that endpoint says otherwise.
 
-- **Default ordering and cursor:** Each list endpoint declares an explicit default sort that ALWAYS ends with `id DESC` as the final tiebreaker:
+- **Default ordering and cursor:** Each list endpoint declares an explicit default sort that ALWAYS ends with `id` as the final tiebreaker:
   - Knowledge: `ORDER BY created_at DESC, id DESC`
   - Spend Ledger: `ORDER BY timestamp DESC, id DESC`
   - Connections: `ORDER BY created_at DESC, id DESC`
-  The `cursor` value encodes both the primary sort field and `id`, so pagination is stable across rows with identical sort values and across concurrent updates. Sort overrides via `sortKey` / `sortDir` always include `id DESC` as the final tiebreaker.
+  Under sort overrides via `sortKey` / `sortDir`, the `id` tiebreaker direction MUST follow the primary sort direction (e.g. `ORDER BY confidence ASC, id ASC` — never mix `confidence ASC, id DESC`). The `cursor` value encodes both `(primarySortValue, id)` in the effective sort order, so pagination is stable across rows with identical sort values, across concurrent updates, AND across ASC/DESC overrides.
 - **Max page size:** `limit` MUST be ≤ 50; requests with `limit > 50` are silently clamped to 50.
 - **`q` semantics:** Case-insensitive partial substring match against the fields named per endpoint. No stemming, no fuzzy match. Empty `q` is a no-op (not an empty-result filter). `q` composes with structured filters via AND.
-- **`filterOptions`:** Returned per `<SortableTable>` contract (foundation §4.3). Counts are computed AFTER RLS scoping but BEFORE applying the caller's filter selection so users see how many rows each filter value would yield. Options sort by descending count, then ascending value. Zero-count options are included so previously-selected filters remain visible after they no longer match any row.
+- **`filterOptions`:** Returned per `<SortableTable>` contract (foundation §4.3). Counts are computed AFTER RLS scoping but BEFORE applying the caller's filter selection so users see how many rows each filter value would yield. Counts MUST be computed from the same base-query snapshot as the row results (single SQL statement or CTE) so counts and rows cannot diverge under concurrent writes. Options sort by descending count, then ascending value. Zero-count options are included so previously-selected filters remain visible after they no longer match any row.
 
 ### 4.1 Knowledge entries — list + Edit-and-override
 
@@ -132,7 +132,7 @@ interface KnowledgeEntry {
 
 **`POST /api/knowledge/:id/reject`** — moves to `ignored`. State-based.
 
-**`POST /api/knowledge/:id/override`** — body: `{ body: string }`. Sets `auto_update_disabled = true`, writes a manual revision, status stays `in_use`. UI label: "Edit and override" (per round 13 prototype rename). Idempotent: re-submitting the same body is a no-op (no new revision); a different body creates a new revision.
+**`POST /api/knowledge/:id/override`** — body: `{ body: string }`. Sets `auto_update_disabled = true`, writes a manual revision, status stays `in_use`. UI label: "Edit and override" (per round 13 prototype rename). Idempotent: re-submitting the same body is a no-op (no new revision); a different body creates a new revision. **Pre-condition:** `status = 'in_use'`. Calls against `pending_review` or `ignored` rows return `409 invalid_state_transition` with `{ currentStatus: <status> }` in the body. Frontend hides the action on non-`in_use` rows per §4.12; the backend gate is defence-in-depth so a rejected row cannot be silently reactivated and a pending-review row cannot bypass the review workflow.
 
 **Status vs override:** `status` is closed at three values — `pending_review | in_use | ignored`. `auto_update_disabled` is the source of truth for "this block is detached from auto-extraction" and is exposed as a separate `autoUpdateDisabled` filter (and a row-level visual indicator), not as a fourth status. This avoids dual meaning where a row would simultaneously be "in use" and "overridden".
 
@@ -221,19 +221,26 @@ Pure aggregator over existing ledger data; no persistence. Synchronous read.
 interface SpendTrends {
   workspaces: Array<{
     id: string; name: string;
-    spend6mo: number[];        // length 6, oldest -> current month
-    capUsage6mo: number[];     // length 6, % values; >100 means over cap
-    capBlownAt: number | null; // index 0-5 of first month over cap, or null
+    spend6mo: number[];                 // length 6, oldest -> current month
+    capUsage6mo: (number | null)[];     // length 6, % values; >100 means over cap; null = no cap configured for that month
+    capBlownAt: number | null;          // index 0-5 of first month over cap, or null (null months are NOT counted as blown)
   }>;
+  // Cap semantics (applies to every workspace entry, including the synthetic 'Other'):
+  //   monthCap > 0  : capUsage6mo[i] = (monthSpend / monthCap) * 100. Values > 100 = over cap.
+  //   monthCap == 0 or null: "no cap configured / unbounded" — capUsage6mo[i] = null AND that
+  //     month is NOT counted as blown by capBlownAt (no cap → cannot be over cap, regardless
+  //     of monthSpend).
+  //
   // Workspace ranking: top 4 by current MTD spend, then synthetic "Other" at index 4
   // when the org has more than 5 workspaces.
   //   actual_workspace_count <= 5: array length is the actual count; no "Other" entry.
   //   actual_workspace_count >  5: array length is 5; positions 0-3 are the top 4
   //     workspaces ranked by current MTD spend; position 4 is the synthetic rollup with
-  //     id = '__other__', name = 'Other', spend6mo = sum of all non-top-4 workspaces'
-  //     spend6mo per index, capUsage6mo = (sum of those workspaces' spend per month) /
-  //     (sum of those workspaces' caps per month); months where the summed cap is zero
-  //     or null yield capUsage6mo = null at that index. capBlownAt = first index where
+  //     id = '__other__', name = 'Other', spend6mo[i] = sum of all non-top-4 workspaces'
+  //     spend6mo[i]; for capUsage6mo[i], a workspace whose cap is zero or null contributes
+  //     0 to the summed cap (its spend still contributes to the summed spend). When the
+  //     summed cap across the rolled-up workspaces is zero for a month, capUsage6mo[i] is
+  //     null at that index per the cap semantics above. capBlownAt = first index where
   //     the aggregate capUsage > 100, else null.
   monthLabels: string[];       // length 6, ['Apr', 'May', ..., 'Sep']
 }
@@ -320,6 +327,11 @@ Producer: extends `connectionTokenService.ts` with a per-kind `testConnection()`
   - `PROVIDER_ERROR` — provider responded with 4xx (non-auth) or 5xx, or returned a malformed response.
 - `error.message` is a short human-readable string suitable for an in-app notification; never includes secrets, tokens, or full URLs.
 
+**Timeout determinism:**
+- The 10s timeout is measured against a **monotonic** server clock (e.g. `process.hrtime.bigint()`), not wall clock — wall-clock skew or NTP jumps must NOT extend or shorten the budget.
+- The clock starts immediately before the outbound provider call. DNS, TCP, TLS, and HTTP all count against the 10s budget.
+- Per-kind SDK or HTTP client used by `testConnection()` MUST disable internal retries (or bound them within the same 10s envelope). A 10s spec timeout that hides multi-minute SDK retry storms violates the contract.
+
 ### 4.10 Connection disconnect — impact warning
 
 `GET /api/connections/:id/usage` (new):
@@ -336,7 +348,7 @@ Producer: pure read aggregator over `agent_data_sources` + `agent_triggers` + wo
 
 `POST /api/connections/:id/disconnect`: existing endpoint. Frontend pre-fetches `/usage` on the click to populate the `<ConfirmDialog>` body. Dialog copy: `"Disconnect <providerName>? <N> agents, <M> recurring tasks, and <K> workflows use this connection. They will fail until reconnected."` Type-to-confirm if `agents.length + recurringTasks.length + workflows.length > 0`.
 
-**Snapshot consistency:** The aggregator reads `agent_data_sources`, `agent_triggers`, and workflow definitions in a single read transaction (PostgreSQL `READ COMMITTED` is fine; the snapshot is taken at transaction start) so the three counts are mutually consistent — no cross-table mismatches if rows change mid-aggregation.
+**Snapshot consistency:** The aggregator reads `agent_data_sources`, `agent_triggers`, and workflow definitions within a **single SQL statement** (a CTE that joins / unions the three sources) so the three counts come from the same per-statement snapshot — no cross-table mismatches if rows change mid-aggregation. Single-statement scope is sufficient under PostgreSQL's default `READ COMMITTED` isolation; the implementation does NOT need to escalate to `REPEATABLE READ`. (If the aggregator is split across multiple statements, isolation MUST be raised to `REPEATABLE READ` to preserve the snapshot — but the single-CTE approach is preferred.)
 
 ### 4.11 Spending — pace + period semantics
 
@@ -444,7 +456,7 @@ No new permission keys.
 **Execution model:**
 - Knowledge list / spend ledger / caps / insights / trends / connections list: synchronous, cached at the route layer where the existing pattern applies.
 - Knowledge approve / reject: synchronous, state-based idempotency (`UPDATE ... WHERE status = 'pending_review'`). Second caller of same action returns `200 alreadyApplied: true`.
-- Knowledge override: synchronous, key-based idempotency. `memory_block_versions` carries `UNIQUE (memory_block_id, body_hash)`. **Body hash canonicalisation** before hashing: (a) strip leading and trailing whitespace, (b) collapse internal whitespace runs to single spaces, (c) preserve case (override text is human-authored and case-sensitive). Hash function: SHA-256, hex-encoded, lower-case. Submitting the same canonicalised body twice returns the existing revision (no new row); submitting a different canonicalised body creates a new revision. Sets `auto_update_disabled = true` atomically with the version insert. **Concurrency:** `UPDATE ... WHERE etag = $expected`. ETag mismatch → 409 with current ETag.
+- Knowledge override: synchronous, key-based idempotency. `memory_block_versions` carries `UNIQUE (memory_block_id, body_hash)`. **Body hash canonicalisation** before hashing (in this order): (a) Unicode NFC normalisation, (b) strip leading and trailing whitespace, (c) collapse internal whitespace runs to single spaces, (d) preserve case (override text is human-authored and case-sensitive). Hash function: SHA-256, hex-encoded, lower-case. Submitting the same canonicalised body twice returns the existing revision (no new row); submitting a different canonicalised body creates a new revision. Sets `auto_update_disabled = true` atomically with the version insert. **Concurrency:** `UPDATE ... WHERE etag = $expected`. ETag mismatch → 409 with current ETag.
 - Connection disconnect: synchronous, calls existing per-kind disconnect flow. Idempotent (already-disconnected → 200).
 - Connection test: synchronous-with-network-call. Wraps the provider call with a 10s timeout; failure returns `status: 'failed'`, never bubbles 5xx. Rate-limited per §4.9.
 
@@ -491,7 +503,7 @@ runtime_tests: pure_function_only
 frontend_tests: none_for_now
 ```
 
-- **Pure-function tests** for: spend insights ranking + delta computation, spend trends top-5 + Other-rollup logic, cap utilisation segment classification (normal vs over-cap), pace projector (last-N-days extrapolation), `auto_update_disabled` gate predicate, connection-usage aggregator. Each colocated `*Pure.test.ts`.
+- **Pure-function tests** for: spend insights ranking + delta computation (including previous-month-zero → null), spend trends top-5 + Other-rollup logic (including ≤5 workspace case + zero-cap = unbounded case), cap utilisation segment classification (normal / over-cap / no-cap-configured), pace projector (last-N-days extrapolation), `auto_update_disabled` gate predicate (skips both UPDATE and version INSERT), body hash canonicalisation (NFC + whitespace + same input → same hash), cursor pagination tiebreaker direction, connection-usage aggregator. Each colocated `*Pure.test.ts`.
 - **No frontend tests, no E2E, no API-contract tests, no visual regression** per framing.
 - **Static gates** (lint, typecheck, build:server, build:client) are the verification surface.
 
@@ -559,9 +571,15 @@ frontend_tests: none_for_now
   - Connection test never bubbles 5xx; `error.code` belongs to a closed enum: §4.9 + §6 (10s timeout + structured error response).
   - Top-5 ranking with explicit "Other" rollup rules (≤5 → no Other; >5 → top 4 + synthetic `__other__`): §4.5; pure-function test in §8.
   - Insights time windows (`mtdUsd`, `deltaPct`, `runs30d`) are unambiguous (UTC, calendar-month deltaPct, rolling-30d runs): §4.4.
-  - Connection-usage aggregator reads three tables in a single transaction for snapshot consistency: §4.10.
+  - Connection-usage aggregator reads three sources in a single SQL statement (CTE) so counts are snapshot-consistent under default `READ COMMITTED`: §4.10.
   - Status enum is closed at three values; `auto_update_disabled` is the single source of truth for "detached from auto-extraction": §4.1 + §6.
   - Spend amounts use integer microcents in storage and aggregation; no floats: §6 (Cost precision).
+  - Cursor pagination is stable under sort overrides: tiebreaker direction follows primary sort; cursor encodes both `(primarySortValue, id)` in effective sort order: §4.0.
+  - Override pre-condition: `status = 'in_use'`; non-`in_use` rows return `409 invalid_state_transition` so rejected/pending rows cannot be silently reactivated: §4.1.
+  - Zero-cap workspaces in `SpendTrends` mean "no cap configured / unbounded" — `capUsage6mo[i] = null`, that month is NOT counted as blown by `capBlownAt`: §4.5.
+  - Connection test 10s timeout is monotonic-clock-anchored, covers DNS / TCP / TLS / HTTP, and SDK internal retries MUST be disabled or bounded within the same envelope: §4.9.
+  - Body hash canonicalisation includes Unicode NFC normalisation before whitespace collapse so visually-identical inputs hash identically: §6.
+  - `filterOptions` counts come from the same base-query snapshot as the row results (single SQL statement / CTE) so counts and rows cannot diverge: §4.0.
 - File inventory complete? Every page/component/service named in §4 appears in §5.
 - Phase dependency graph clean? §7 lists C2 → C1, C4 → C3, C7 → all C1–C6, C8/C9/C11 → C7, C10 → C9, C12 → C8+C9+C10+C11. No cycles.
 - Deferred items section exists? §10.
@@ -587,8 +605,14 @@ frontend_tests: none_for_now
 - [x] §14 Spend insights time windows (MTD / deltaPct / runs30d) explicitly UTC-anchored in §4.4.
 - [x] §15 Spend trends "Other" rollup behaviour spelled out for ≤5 and >5 workspace cases in §4.5.
 - [x] §16 Connection test failure contract (always 200, closed `error.code` enum) in §4.9.
-- [x] §17 Connection-usage snapshot consistency (single read transaction across three tables) in §4.10.
+- [x] §17 Connection-usage snapshot consistency: single SQL statement / CTE under default `READ COMMITTED` in §4.10.
 - [x] §18 Status enum closed at three values; `auto_update_disabled` exposed as a separate filter in §4.1.
 - [x] §19 Cost precision invariant (integer microcents; no floats) in §6.
+- [x] §20 Cursor pagination tiebreaker direction follows primary sort; encoded in effective order in §4.0.
+- [x] §21 Override pre-condition (`status='in_use'` else 409 invalid_state_transition) in §4.1.
+- [x] §22 Zero-cap "no cap configured / unbounded" semantics in §4.5; `capUsage6mo` typed `(number | null)[]`.
+- [x] §23 Connection test timeout determinism (monotonic clock; SDK retries bounded) in §4.9.
+- [x] §24 Body hash canonicalisation includes Unicode NFC normalisation in §6.
+- [x] §25 `filterOptions` counts come from the same snapshot as row results (single SQL statement / CTE) in §4.0.
 
 Spec ready for `spec-reviewer`.

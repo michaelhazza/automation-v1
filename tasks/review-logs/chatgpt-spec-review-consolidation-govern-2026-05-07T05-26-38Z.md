@@ -126,3 +126,67 @@ Nice-to-have: 7, 8, 9.
 ### Top themes
 
 Invariants-first tightening: pagination determinism, override gate completeness, time-window UTC anchoring, error-enum closure, snapshot consistency, body-hash canonicalisation, status enum hygiene. No structural changes; spec remains buildable per existing chunk plan.
+
+---
+
+## Round 2 — 2026-05-07T (round 2)
+
+### ChatGPT Feedback (raw)
+
+Round 2 verdict: still APPROVED. Materially tighter than most consolidation specs. Invariants are doing the heavy lifting instead of relying on implementation discipline.
+
+Recommended tightenings (all hardening, none blocking):
+
+1. Cursor invariant under arbitrary sort overrides. §4.0 says all sorts end with id DESC, but cursor contract is ambiguous when sortDir='asc'. Tiebreaker should follow primary direction. ORDER BY confidence ASC, id ASC — not confidence ASC, id DESC. Cursor encodes (primarySortValue, id) in effective sort order.
+
+2. Knowledge override race between approve/reject and override. Override keeps status as in_use but spec doesn't forbid overriding pending_review or ignored. Recommend: override only valid when status='in_use'; otherwise 409 invalid_state_transition. Without this: rejected memory silently reactivated, pending-review memory bypasses review.
+
+3. "Other" rollup divide-by-zero precision. §4.5 handles summed cap zero/null → capUsage6mo = null. Missing edge: spend > 0 AND summed cap == 0 returns null and hides over-cap. Either treat as blown OR explicitly define zero-cap as "unbounded/no cap". Current wording could mislead implementers.
+
+4. Connection test timeout determinism. §4.9 says 10s timeout. Add: timeout measured using monotonic server clock; timeout starts immediately before outbound provider call; SDK retries MUST be disabled or bounded within 10s envelope.
+
+5. Snapshot consistency wording. §4.10 says "PostgreSQL READ COMMITTED is fine; snapshot taken at transaction start". Technically inaccurate — READ COMMITTED snapshot is per-statement; transaction-scoped requires REPEATABLE READ. Either upgrade wording to REPEATABLE READ OR weaken to "single SQL statement / CTE pipeline". This is the only true correctness issue.
+
+6. Body hash canonicalisation Unicode ambiguity. Missing NFC normalization. Visually identical Unicode strings can hash differently. Recommend: normalize to NFC before hashing.
+
+7. filterOptions performance invariant. Add: filterOptions MUST be computed from the same base query snapshot as row results. Otherwise counts and rows can diverge under concurrent updates.
+
+Strong areas now: override precedence semantics, deterministic pagination, closed status enum, no-float spend accounting, explicit rollup rules, snapshot-consistency intent, always-200 connection test contract, state machine separation. Most important remaining fix: §4.10 snapshot wording. Everything else is hardening, not blocking. Ready for build after these tightenings.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F1 | Cursor under sort overrides: tiebreaker direction follows primary, cursor encodes both in effective order | technical | apply | auto (apply) | medium | Closes a latent skip/duplicate hazard when `sortDir='asc'`. |
+| F2 | Override pre-condition: status='in_use' or 409 invalid_state_transition | technical | apply | auto (apply) | medium | Defence-in-depth gate; frontend already hides on non-`in_use` rows per §4.12 — backend now matches. |
+| F3 | Zero-cap = "no cap configured / unbounded"; capUsage null + NOT counted by capBlownAt | technical | apply | auto (apply) | medium | Picked the unbounded-no-cap interpretation; updated `capUsage6mo` type to `(number \| null)[]`. |
+| F4 | Timeout determinism: monotonic clock, SDK internal retries disabled or bounded within 10s | technical | apply | auto (apply) | low | Hardens the 10s envelope against SDK retry storms. |
+| F5 | Snapshot wording correction: single SQL statement / CTE under READ COMMITTED (not transaction-start) | technical | apply | auto (apply) | medium | True correctness fix to round 1 wording. Picked single-statement / CTE (preferred) over REPEATABLE READ escalation. |
+| F6 | Body hash NFC normalisation before whitespace + hash | technical | apply | auto (apply) | low | Prevents long-tail visually-identical Unicode duplicate-revision bugs. |
+| F7 | `filterOptions` from same base-query snapshot as row results | technical | apply | auto (apply) | low | Counts and rows cannot diverge under concurrent writes. |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] **§4.0 Default ordering and cursor:** tiebreaker direction follows primary sort; cursor encodes `(primarySortValue, id)` in effective order. ASC sorts get `id ASC` tiebreaker; DESC sorts get `id DESC`.
+- [auto] **§4.0 filterOptions:** counts MUST be computed from the same base-query snapshot as the row results (single SQL statement / CTE).
+- [auto] **§4.1 Override pre-condition:** `status = 'in_use'`; non-`in_use` rows return `409 invalid_state_transition` with `{ currentStatus: <status> }`. Backend gate is defence-in-depth.
+- [auto] **§4.5 SpendTrends type:** `capUsage6mo` retyped from `number[]` to `(number | null)[]`. `capBlownAt` doc clarifies null months are NOT counted as blown.
+- [auto] **§4.5 Cap semantics:** zero or null cap = "no cap configured / unbounded"; cross-cutting rule applied to all workspace entries including 'Other'. Detailed Other-rollup arithmetic restated for the new convention.
+- [auto] **§4.9 Timeout determinism:** monotonic-clock anchor; clock starts immediately before outbound; DNS/TCP/TLS/HTTP all on the budget; SDK internal retries disabled or bounded within the 10s envelope.
+- [auto] **§4.10 Snapshot wording corrected:** single SQL statement / CTE under default `READ COMMITTED`; multi-statement aggregator MUST escalate to `REPEATABLE READ`. Single-CTE preferred.
+- [auto] **§6 Body hash canonicalisation:** Unicode NFC normalisation added as step (a), before whitespace operations.
+- [auto] **§8 Pure-function tests:** test enumeration expanded to cover the new invariants (zero-cap unbounded, ≤5 workspace path, deltaPct previous-month-zero null, body-hash canonicalisation, cursor tiebreaker direction, override pre-condition gate).
+- [auto] **§11 Self-consistency check:** added eight new invariant-to-section mappings.
+- [auto] **§12 Pre-review checklist:** added §20-§25 covering all round 2 contractual additions.
+- [auto] **Header `Last updated`:** reflects round 2 changes.
+
+### Integrity check
+
+- Forward references: `capUsage6mo` and `capBlownAt` references all consistent with the new nullable type. §8 test enumeration mentions cap utilisation segment classification — updated to include the no-cap-configured class.
+- Contradictions: round 1's `READ COMMITTED + snapshot at transaction start` contradiction is now resolved with the single-CTE wording. No other contradictions.
+- Missing inputs/outputs: all new rules operate on existing inputs (sort params, status, cap values, body strings, query base). No new inputs/outputs without specification.
+- Issues found this round: 0 (auto: 0, escalated: 0).
+
+### Top themes
+
+Hardening pass on round 1's invariants — pagination tiebreaker direction made explicit, snapshot wording corrected to PostgreSQL-accurate single-CTE semantics, timeout envelope made monotonic and SDK-retry-resistant, zero-cap semantics resolved as "unbounded / no cap configured" with consequent type widening of `capUsage6mo`, override action gated to `in_use` only, body hash made Unicode-stable. No structural changes; chunk plan unchanged.
