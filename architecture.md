@@ -1897,10 +1897,12 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 ## Client Patterns
 
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
-- **Permissions-driven nav** — `Layout.tsx` loads `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` to show/hide nav items
+- **Permissions-driven nav** — `Layout.tsx` loads `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` to show/hide nav items; nav structure built by `buildNavItems` in `client/src/config/sidebar.ts` (`NavGroup` types).
+- **Route registry** — all client-side path constants live in `client/src/config/routes.ts` (`APP_ROUTE_PATTERNS` literal-tuple, `AppRoute` brand type, `buildRoute`/`staticRoute` helpers). Never hard-code path strings outside this file.
+- **Page layout** — new pages wrap their body in `<PageShell>` (`client/src/components/PageShell.tsx`). Provides `.page-shell` / `.page-content` / `.page-body` structure and the correct scroll context for fixed footers (`<FormFooter>`).
 - **Real-time updates** — `useSocketRoom` for per-entity rooms (agent runs, playbook runs); `useSocket` for subaccount-scoped board updates. WebSocket is the primary update path; backstop polling covers reconnect windows (see Event-Driven Architecture above).
 - **API wrapper** — all HTTP calls go through `src/lib/api.ts`
-- **Shared client utilities** — `formatMoney.ts` (currency display), `runStatus.ts` (run state enum + guards), `runPlanView.ts` (execution plan rendering). New client-wide helpers go in `src/lib/`.
+- **Shared client utilities** — `formatMoney.ts` (currency display), `runStatus.ts` (run state enum + guards), `runPlanView.ts` (execution plan rendering), `colorHash.ts` (deterministic FNV-1a palette hash for workspace colours), `workspace.ts` (`switchWorkspace` — only allowed reload call site for workspace switching). New client-wide helpers go in `src/lib/`.
 
 ---
 
@@ -3433,7 +3435,16 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the Live Agent Execution Log payload writer | `server/services/agentRunPayloadWriter.ts::buildPayloadRow` — redaction → tool-policy → greatest-first truncation pipeline. Patterns in `server/lib/redaction.ts` (bearer / openai / anthropic / github / slack / aws / google). Per-tool opt-in via `payloadPersistencePolicy: 'full' \| 'args-redacted' \| 'args-never-persisted'`. Size cap: `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default 1 MB). `response` input is nullable (`null` = no usable provider output; partial object = usage-only/refusal data). Pure tests in `server/services/__tests__/agentRunPayloadWriterPure.test.ts` + `agentRunPayloadWriterFailurePathPure.test.ts`. Modifications recorded in `agent_run_llm_payloads.modifications` + `redacted_fields` (separate columns — never overloaded). |
 | Modify the Live Agent Execution Log client timeline | `client/src/pages/AgentRunLivePage.tsx` (snapshot+live merge, sliding-window cap `TIMELINE_WINDOW_SIZE = 2000`, cap-reached banner, sequence-gap + collision counters via `getAgentRunLiveClientMetrics()`) + `client/src/components/agentRunLog/{Timeline,EventRow,EventDetailDrawer}.tsx`. Socket hookup via `useSocketRoom('agent-run', runId, ...)`; server emitter `emitAgentExecutionEvent` in `server/websocket/emitters.ts`; room-join gate in `server/websocket/rooms.ts` runs the full `resolveAgentRunVisibility` AGENTS_VIEW check. |
 | Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
-| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
+| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx`. Wrap the page body in `<PageShell>` (`client/src/components/PageShell.tsx`) — canonical layout surface for new pages (provides `.page-shell` / `.page-content` / `.page-body` structure). Register the path constant in `client/src/config/routes.ts` (`APP_ROUTE_PATTERNS` literal-tuple + `buildRoute`/`staticRoute` helpers) and add a nav entry via `client/src/config/sidebar.ts` (`buildNavItems` factory). |
+| Add or modify a UI table (sortable/filterable) | `client/src/components/SortableTable.tsx` (React wrapper) + `client/src/components/sortableTablePure.ts` (pure sort/filter logic, unit-testable). |
+| Add a form page with a fixed footer | Wrap action buttons in `<FormFooter>` (`client/src/components/FormFooter.tsx`) — renders `.form-footer` / `.form-footer-inner` layout via `index.css`. |
+| Add a side drawer / slide-over panel | `client/src/components/Drawer.tsx` — portal-rendered, focus-trapped, scroll-locked (via `client/src/components/overlayScrollLock.ts` reference-counted helper). Modal (`client/src/components/Modal.tsx`) uses the same scroll-lock helper. |
+| Show workspace identity | `client/src/components/WorkspaceBadge.tsx` — workspace identity pill; colour derived via `client/src/lib/colorHash.ts` (deterministic FNV-1a palette hash). |
+| Switch workspace programmatically | `client/src/lib/workspace.ts::switchWorkspace` — the ONLY allowed call site for workspace-switch reloads. Do not call `window.location.reload()` directly. |
+| Toggle between list / table / card views | `client/src/components/ViewModeSwitcher.tsx` (three-segment pill UI) + `client/src/hooks/useViewMode.ts` (derives `ViewMode` from identity state) + `client/src/hooks/useViewModePure.ts` (pure derivation helpers). |
+| Add a search input (debounced, controlled) | `client/src/components/SearchBox.tsx` — debounced controlled input; drop this in place of a raw `<input>` for any list-filter surface. |
+| Show a zero-results state | `client/src/components/EmptyState.tsx` — standardised zero-results panel. |
+| Show a fetch-error state | `client/src/components/ErrorState.tsx` — standardised fetch-error panel. |
 | Add a new permission key | `server/lib/permissions.ts` |
 | Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
 | Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
