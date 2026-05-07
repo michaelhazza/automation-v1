@@ -79,3 +79,18 @@ export const getActiveClientId = getActiveSubaccountId;
 export const getActiveClientName = getActiveSubaccountName;
 export const setActiveClient = setActiveSubaccount;
 export const removeActiveClient = removeActiveSubaccount;
+
+// system_admin_org_override — when active, a system_admin is viewing the platform in
+// "System" mode (cross-org view). Enabling this flag switches viewMode to 'system';
+// disabling it (e.g. when entering Org or Workspace mode) returns to normal org-scoped context.
+export function getSystemAdminOrgOverride(): boolean {
+  return localStorage.getItem('systemAdminOrgOverride') === 'true';
+}
+
+export function setSystemAdminOrgOverride(active: boolean): void {
+  if (active) {
+    localStorage.setItem('systemAdminOrgOverride', 'true');
+  } else {
+    localStorage.removeItem('systemAdminOrgOverride');
+  }
+}
