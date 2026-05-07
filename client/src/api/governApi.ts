@@ -61,3 +61,8 @@ export const getConnectionUsage = (id: string): Promise<ConnectionUsage> =>
 
 export const testConnection = (id: string): Promise<ConnectionTestResponse> =>
   api.post(`/api/connections/${encodeURIComponent(id)}/test`).then(r => r.data);
+
+export const disconnectConnection = (
+  id: string,
+): Promise<{ success: true; alreadyDisconnected: boolean; kind: 'integration' | 'mcp' }> =>
+  api.post(`/api/connections/${encodeURIComponent(id)}/disconnect`).then(r => r.data);

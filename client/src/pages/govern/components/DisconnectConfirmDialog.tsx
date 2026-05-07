@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import Modal from '../../../components/Modal';
-import { getConnectionUsage } from '../../../api/governApi';
+import { getConnectionUsage, disconnectConnection } from '../../../api/governApi';
 import type { Connection, ConnectionUsage } from '../../../../../shared/types/govern.js';
 
 interface Props {
@@ -36,17 +36,15 @@ export function DisconnectConfirmDialog({ connection, onClose, onDisconnected }:
     setBusy(true);
     setDisconnectError(null);
     try {
-      const res = await fetch(`/api/connections/${encodeURIComponent(connection.id)}/disconnect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
-      }
+      await disconnectConnection(connection.id);
       onDisconnected();
     } catch (e: unknown) {
-      setDisconnectError(e instanceof Error ? e.message : 'Disconnect failed.');
+      const msg = (() => {
+        if (e instanceof Error) return e.message;
+        const maybeAxios = e as { response?: { data?: { message?: string } } };
+        return maybeAxios.response?.data?.message ?? 'Disconnect failed.';
+      })();
+      setDisconnectError(msg);
       setBusy(false);
     }
   }

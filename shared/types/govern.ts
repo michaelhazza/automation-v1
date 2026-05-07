@@ -6,6 +6,8 @@
 
 export interface KnowledgeListQuery {
   scope?: 'workspace' | 'org';
+  /** Required when scope='workspace' — the active subaccount/workspace id. */
+  subaccountId?: string;
   status?: ('pending_review' | 'in_use' | 'ignored')[];
   autoUpdateDisabled?: boolean;
   kind?: ('belief' | 'fact' | 'observation' | 'preference' | 'issue')[];
@@ -41,6 +43,8 @@ export interface KnowledgeListResponse {
 
 export interface LedgerQuery {
   scope?: 'workspace' | 'org';
+  /** Required when scope='workspace' — the active subaccount/workspace id. */
+  subaccountId?: string;
   workspace?: string[];
   agent?: string[];
   type?: ('llm' | 'embedding' | 'tool_call' | 'storage' | 'other')[];
@@ -133,6 +137,8 @@ export interface SpendTrends {
 
 export interface ConnectionsQuery {
   scope?: 'workspace' | 'org';
+  /** Required when scope='workspace' — the active subaccount/workspace id. */
+  subaccountId?: string;
   provider?: string[];
   authMethod?: ('oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie')[];
   status?: ('connected' | 'expired' | 'failed' | 'pending')[];

@@ -14,7 +14,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
-import { listConnections, getConnectionUsage } from '../services/connectionsService.js';
+import { listConnections, getConnectionUsage, disconnectConnection } from '../services/connectionsService.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -238,10 +238,17 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const querySchema = z.object({
+      scope: z.enum(['workspace', 'org']).optional(),
+      subaccountId: z.string().uuid().optional(),
       authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie']).optional(),
       status: z.enum(['connected', 'expired', 'failed', 'pending']).optional(),
-    });
+    }).refine(
+      (q) => q.scope !== 'workspace' || !!q.subaccountId,
+      { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+    );
     const parsed = querySchema.safeParse({
+      scope: req.query.scope,
+      subaccountId: req.query.subaccountId,
       authMethod: req.query.authMethod,
       status: req.query.status,
     });
@@ -253,6 +260,8 @@ router.get(
     const limit = Math.min(Number(req.query.limit) || 50, 50);
     const result = await listConnections({
       organisationId: req.orgId!,
+      scope: parsed.data.scope,
+      subaccountId: parsed.data.subaccountId,
       provider: req.query.provider as string | undefined,
       authMethod: parsed.data.authMethod,
       status: parsed.data.status,
@@ -277,6 +286,24 @@ router.get(
     }
     const usage = await getConnectionUsage(req.params.id, req.orgId!);
     res.json(usage);
+  })
+);
+
+// POST disconnect a connection — delegates to per-kind revoke/delete per spec §4.10
+router.post(
+  '/api/connections/:id/disconnect',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_MANAGE),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const result = await disconnectConnection(req.params.id, req.orgId!);
+    if ('notFound' in result) {
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
+    res.status(200).json({ success: true, alreadyDisconnected: result.alreadyDisconnected, kind: result.kind });
   })
 );
 

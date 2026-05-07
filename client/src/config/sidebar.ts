@@ -193,7 +193,10 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'activity',
       });
     }
-    if (hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) {
+    // Knowledge page calls /api/knowledge which is gated by org.agents.view
+    // (memory_blocks are extracted by agents). Keep the sidebar gate aligned
+    // with the route to avoid showing a 403 link.
+    if (hasOrgPerm('org.agents.view') || isSystemAdmin) {
       items.push({
         group: 'work',
         kind: 'link',
@@ -467,7 +470,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'usage',
       });
     }
-    if (hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) {
+    if (hasOrgPerm('org.connections.view') || isSystemAdmin) {
       items.push({
         group: 'organisation',
         kind: 'link',

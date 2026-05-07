@@ -253,7 +253,10 @@ const listEntriesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(25),
   sortKey: z.enum(['createdAt', 'updatedAt', 'confidence', 'sourceAgent', 'kind', 'status']).default('createdAt'),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
-});
+}).refine(
+  (q) => q.scope !== 'workspace' || !!q.subaccountId,
+  { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+);
 
 router.get(
   '/api/knowledge',

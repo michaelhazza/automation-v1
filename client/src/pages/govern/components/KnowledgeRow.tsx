@@ -114,14 +114,18 @@ export function KnowledgeRow({ row, hasWritePerm, onOverride, onReject, onApprov
       {/* Provenance: agentName + run trace link */}
       <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
         <span>{row.source.agentName}</span>
-        <span>·</span>
-        <button
-          type="button"
-          onClick={() => setRunTraceOpen(true)}
-          className="text-indigo-600 hover:text-indigo-800 hover:underline focus:outline-none"
-        >
-          run {row.source.runId.slice(0, 8)}
-        </button>
+        {row.source.runId && (
+          <>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => setRunTraceOpen(true)}
+              className="text-indigo-600 hover:text-indigo-800 hover:underline focus:outline-none"
+            >
+              run {row.source.runId.slice(0, 8)}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Action buttons (spec §4.14 — hidden when no write perm) */}
@@ -159,7 +163,7 @@ export function KnowledgeRow({ row, hasWritePerm, onOverride, onReject, onApprov
       )}
 
       {/* Run trace modal (spec §4.12) */}
-      {runTraceOpen && (
+      {runTraceOpen && row.source.runId && (
         <Modal
           title="Run trace"
           size="iframe"

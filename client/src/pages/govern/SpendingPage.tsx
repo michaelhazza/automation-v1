@@ -12,7 +12,7 @@ import ViewModeSwitcher from '../../components/ViewModeSwitcher';
 import { WorkspaceBadge } from '../../components/WorkspaceBadge';
 import { useViewMode } from '../../hooks/useViewMode';
 import { listLedger, getSpendInsights, getCaps, getSpendTrends } from '../../api/governApi';
-import { getUserRole } from '../../lib/auth';
+import { getUserRole, getActiveClientId } from '../../lib/auth';
 import type { LedgerRow, SpendInsights, CapsResponse, SpendTrends } from '../../../../shared/types/govern.js';
 import { SpendInsightsRow } from './components/SpendInsightsRow';
 import { SpendBarChart } from './components/SpendBarChart';
@@ -51,7 +51,16 @@ function LedgerTab({ viewMode }: LedgerTabProps) {
   useEffect(() => {
     setRows(null);
     setError(null);
-    listLedger({ scope: viewMode === 'org' ? 'org' : 'workspace', q })
+    const isWorkspace = viewMode !== 'org';
+    const subaccountId = isWorkspace ? getActiveClientId() ?? undefined : undefined;
+    // Fail-closed locally: workspace scope without an active workspace would
+    // silently return all org rows on the server (see knowledgeService /
+    // spendLedgerService scope filters).
+    if (isWorkspace && !subaccountId) {
+      setError(new Error('No active workspace selected.'));
+      return;
+    }
+    listLedger({ scope: isWorkspace ? 'workspace' : 'org', subaccountId, q })
       .then((r) => setRows(r.rows))
       .catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
   }, [viewMode, q, fetchKey]);
@@ -215,7 +224,13 @@ function CapsTab({ viewMode }: { viewMode: ViewMode }) {
   useEffect(() => {
     setCaps(null);
     setError(null);
-    getCaps(viewMode === 'org' ? 'org' : 'workspace')
+    const isWorkspace = viewMode !== 'org';
+    const subaccountId = isWorkspace ? getActiveClientId() ?? undefined : undefined;
+    if (isWorkspace && !subaccountId) {
+      setError(new Error('No active workspace selected.'));
+      return;
+    }
+    getCaps(isWorkspace ? 'workspace' : 'org', subaccountId)
       .then(setCaps)
       .catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
   }, [viewMode, fetchKey]);

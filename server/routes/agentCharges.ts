@@ -145,7 +145,10 @@ const ledgerQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional().default(25),
   sortKey: z.enum(['timestamp', 'workspace', 'agent', 'type', 'tokens', 'cost']).optional().default('timestamp'),
   sortDir: z.enum(['asc', 'desc']).optional().default('desc'),
-});
+}).refine(
+  (q) => q.scope !== 'workspace' || !!q.subaccountId,
+  { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+);
 
 router.get(
   '/api/spend/ledger',
@@ -184,7 +187,10 @@ function arrayify<T>(v: T | T[] | undefined): T[] | undefined {
 const capsQuery = z.object({
   scope: z.enum(['workspace', 'org']).optional().default('org'),
   subaccountId: z.string().uuid().optional(),
-});
+}).refine(
+  (q) => q.scope !== 'workspace' || !!q.subaccountId,
+  { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+);
 
 router.get(
   '/api/spend/caps',

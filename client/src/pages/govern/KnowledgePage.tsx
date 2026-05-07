@@ -14,7 +14,7 @@ import { HelpHint } from '../../components/ui/HelpHint';
 import { WorkspaceBadge } from '../../components/WorkspaceBadge';
 import { useViewMode } from '../../hooks/useViewMode';
 import { listKnowledge, rejectKnowledge } from '../../api/governApi';
-import { getUserRole } from '../../lib/auth';
+import { getUserRole, getActiveClientId } from '../../lib/auth';
 import type { KnowledgeEntry } from '../../../../shared/types/govern.js';
 import { KnowledgeRow } from './components/KnowledgeRow';
 import { KnowledgeOverrideDialog } from './components/KnowledgeOverrideDialog';
@@ -40,7 +40,15 @@ export default function KnowledgePage() {
   useEffect(() => {
     setRows(null);
     setError(null);
-    listKnowledge({ scope: viewMode === 'org' ? 'org' : 'workspace', q })
+    const isWorkspace = viewMode !== 'org';
+    const subaccountId = isWorkspace ? getActiveClientId() ?? undefined : undefined;
+    // In workspace view, if no active workspace is selected, the request would
+    // silently return all org rows on the server — fail-closed locally instead.
+    if (isWorkspace && !subaccountId) {
+      setError(new Error('No active workspace selected.'));
+      return;
+    }
+    listKnowledge({ scope: isWorkspace ? 'workspace' : 'org', subaccountId, q })
       .then((r) => setRows(r.rows))
       .catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
   }, [viewMode, q, fetchKey]);

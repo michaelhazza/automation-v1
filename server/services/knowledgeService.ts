@@ -617,7 +617,8 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
         mb.created_at,
         mb.subaccount_id::text AS subaccount_id,
         sa.name AS subaccount_name,
-        mb.last_edited_by_agent_id::text AS last_edited_agent_id
+        mb.last_edited_by_agent_id::text AS last_edited_agent_id,
+        mb.source_run_id::text AS source_run_id
       FROM memory_blocks mb
       LEFT JOIN subaccounts sa ON sa.id = mb.subaccount_id
       WHERE mb.organisation_id = ${query.organisationId}::uuid
@@ -660,6 +661,7 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
       auto_update_disabled: boolean; updated_at: string; created_at: string;
       subaccount_id: string | null; subaccount_name: string | null;
       last_edited_agent_id: string | null;
+      source_run_id: string | null;
     }> | null;
     status_options: Array<{ value: string; label: string; count: number }> | null;
   };
@@ -688,7 +690,7 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
       try { return dbStatusToContract(r.status as DbStatus); }
       catch { return 'pending_review' as ContractStatus; }
     })(),
-    source: { runId: '', agentName: r.last_edited_agent_id ?? 'system', extractedAt: r.created_at },
+    source: { runId: r.source_run_id ?? '', agentName: r.last_edited_agent_id ?? 'system', extractedAt: r.created_at },
     subaccount: r.subaccount_id ? { id: r.subaccount_id, name: r.subaccount_name ?? r.subaccount_id } : null,
     autoUpdateDisabled: r.auto_update_disabled,
     lastEditedBy: null,
