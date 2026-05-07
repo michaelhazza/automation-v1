@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: docs/baseline-capture-spec.md
-active_plan: tasks/builds/baseline-capture/plan.md
-build_slug: baseline-capture
-branch: claude/baseline-capture
-status: REVIEWING
-last_updated: 2026-05-05
-last_merged_pr: #264
-last_merged_slug: pre-launch-phase-2
-last_merged_branch: claude/pre-launch-phase-2
-last_merged_at: 2026-05-05T10:15:12Z
-last_merged_commit: bcc9c965
+active_spec: tasks/builds/consolidation-foundation/spec.md
+active_plan: tasks/builds/consolidation-foundation/plan.md
+build_slug: consolidation-foundation
+branch: claude/learn-harbour-ui-B4k7a
+status: BUILDING
+last_updated: 2026-05-07
+last_merged_pr: #265
+last_merged_slug: baseline-capture
+last_merged_branch: claude/baseline-capture
+last_merged_at: 2026-05-05T10:16:56Z
+last_merged_commit: TBD
 -->
 
 # Current Focus
@@ -24,10 +24,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `docs/baseline-capture-spec.md`
-**Active plan:** `tasks/builds/baseline-capture/plan.md`
-**Active build slug:** `baseline-capture`
-**Status:** **REVIEWING** — F3 baseline-capture build implemented + spec-conformance CONFORMANT (re-run) + pr-reviewer APPROVED + adversarial-reviewer ALL_CLOSED. HEAD `b516e26a`. Phase 2 handoff at `tasks/builds/baseline-capture/handoff.md`. Next step: launch finalisation-coordinator. **REVIEW_GAP:** dual-reviewer skipped (Codex CLI unavailable in this Claude Code web session); chatgpt-pr-review will be the second-opinion pass during Phase 3.
+**Active spec:** `tasks/builds/consolidation-foundation/spec.md`
+**Active plan:** `tasks/builds/consolidation-foundation/plan.md` (will be produced by feature-coordinator → architect)
+**Active build slug:** `consolidation-foundation`
+**Status:** **BUILDING** — Phase 1 complete via manual chatgpt-spec-review workflow (spec finalised in commit `649f94be`; rounds 1-3 in commits `e71760c5`, `b87091dd`, `eee9967d`, `94752162`). Phase 1 handoff at `tasks/builds/consolidation-foundation/handoff.md` (written retrospectively at Phase 2 launch). chatgpt-spec-review log at `tasks/review-logs/chatgpt-spec-review-consolidation-foundation-2026-05-07T02-35-29Z.md`. Next step: feature-coordinator → architect → plan gate.
+
+**Just merged:** PR #265 — `baseline-capture` (`claude/baseline-capture`, MERGED 2026-05-05T10:16:56Z). F3 opening-state baseline capture at sub-account onboarding. All 12 plan chunks built, spec-conformance CONFORMANT (re-run), pr-reviewer APPROVED after fix-loop, adversarial-reviewer ALL_CLOSED. 3 migrations (0280/0281/0282), partial UNIQUE index, FORCE RLS on both tables, FK-walked policy on the child table, 9 telemetry events. Phase 3 handoff at `tasks/builds/baseline-capture/handoff.md`. Dual-reviewer skipped (Codex unavailable); chatgpt-pr-review covered the second-opinion pass.
 
 ---
 
