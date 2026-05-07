@@ -70,7 +70,7 @@ If the elegant fix would require a larger change, apply the minimum patch now an
 
 ### Step 6 — Author or update one targeted test
 
-The bug existed because no test caught it. Add the test that would have. One test, scoped to the failure mode. Use the project's targeted-test idiom (e.g. `npx tsx <path-to-test>`).
+The bug existed because no test caught it. Add the test that would have. One test, scoped to the failure mode. Use the project's Vitest convention — `**/__tests__/*.test.ts`, `import { test, expect } from 'vitest'`, run via `npx vitest run <path-to-test>`. Never `node:test`, `node:assert`, or `npx tsx`-runnable harnesses. See `docs/testing-conventions.md`.
 
 If the existing tests already covered the case, the gap is in fixture realism — note that in the KNOWLEDGE entry but don't author duplicate tests.
 
@@ -79,7 +79,7 @@ If the existing tests already covered the case, the gap is in fixture realism �
 Run, in order:
 1. `npm run lint`
 2. `npm run typecheck`
-3. The new / updated test file via `npx tsx <path>`
+3. The new / updated test file via `npx vitest run <path>`
 
 Do NOT run `npm test`, `npm run test:gates`, `scripts/verify-*.sh`, or any other gate / repo-wide verifier. See [`references/test-gate-policy.md`](../../references/test-gate-policy.md) — CI runs the full battery on the PR.
 

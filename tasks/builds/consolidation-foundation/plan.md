@@ -7,7 +7,7 @@
 **Author:** architect (inline)
 **Target builder:** sonnet
 **Estimated effort:** 2-3 days, single PR
-**Plan version:** v1
+**Plan version:** v3 (Phase 0 patch — C3.5 + C6.5 added)
 
 ---
 
@@ -22,9 +22,11 @@
    - C1 — Modal extension + scroll-lock helper
    - C2 — Drawer + WorkspaceBadge + helpers
    - C3 — SortableTable + pure helpers + tests
+   - C3.5 — SortableTable filter controls (clearAllFilters + AND/OR indicator)
    - C4 — useViewMode hook + ViewModeSwitcher
    - C5 — routes config + sidebar config + Layout refactor
    - C6 — FormFooter + PageShell + shared CSS
+   - C6.5 — SearchBox + EmptyState + ErrorState
    - C7 — Doc-sync (architecture.md only)
 7. Risks and mitigations
 8. System invariants
@@ -97,6 +99,12 @@ export function buildRoute<P extends AppRoutePattern>(
       out = out.replace(`:${k}`, encodeURIComponent(v));
     }
   }
+  // Dev-only guard: surface unresolved `:param` segments early.
+  // Production keeps the placeholder behaviour (acceptable for Phase 0; A/B/C may tighten).
+  if (process.env.NODE_ENV !== 'production' && /(?:^|\/):[A-Za-z_][A-Za-z0-9_]*/.test(out)) {
+    // eslint-disable-next-line no-console
+    console.warn('buildRoute: unresolved params in pattern', { pattern, params, result: out });
+  }
   return out as AppRoute;
 }
 
@@ -128,9 +136,18 @@ interface LockWindow {
   [SNAPSHOT_KEY]?: string;
 }
 
+// INVARIANT: COUNTER_KEY MUST NEVER be negative. Math.max(0, ...) defends against
+// double-unmount or HMR-induced cleanup drift. If the counter ever drifts below zero,
+// the snapshot may be lost and `overflow` resets to '' instead of the original value.
+//
+// INVARIANT: overlayScrollLock assumes exclusive ownership of document.body.style.overflow
+// while any overlay is mounted. External mutation of `document.body.style.overflow` during
+// lock lifetime is undefined behaviour — the snapshot restored on final release will revert
+// the external change. Do NOT mutate body overflow from outside this helper.
 export function acquireScrollLock(): void {
   const w = window as unknown as LockWindow;
-  const next = (w[COUNTER_KEY] ?? 0) + 1;
+  const current = Math.max(0, w[COUNTER_KEY] ?? 0);
+  const next = current + 1;
   if (next === 1) {
     w[SNAPSHOT_KEY] = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -140,7 +157,9 @@ export function acquireScrollLock(): void {
 
 export function releaseScrollLock(): void {
   const w = window as unknown as LockWindow;
-  const current = w[COUNTER_KEY] ?? 0;
+  // Clamp to zero defensively: a stray release without acquire (e.g. test teardown calling
+  // cleanup twice) MUST NOT push the counter into negative territory.
+  const current = Math.max(0, w[COUNTER_KEY] ?? 0);
   if (current <= 1) {
     document.body.style.overflow = w[SNAPSHOT_KEY] ?? '';
     delete w[SNAPSHOT_KEY];
@@ -220,14 +239,16 @@ Seven chunks, ordered for forward-only dependencies. Two chunks (C1, C3, C6) are
 | C1 | Modal extension + scroll-lock helper | 2 created/modified | — |
 | C2 | Drawer + WorkspaceBadge + helpers | 5 created | C1 (scroll-lock helper) |
 | C3 | SortableTable + pure helpers + tests | 3 created | — |
+| C3.5 | SortableTable filter controls | 2 modified | C3 |
 | C4 | useViewMode hook + ViewModeSwitcher | 4 created | — |
 | C5 | routes config + sidebar config + Layout refactor | 5 created/modified | C4 |
 | C6 | FormFooter + PageShell + shared CSS | 3 created/modified | — |
-| C7 | Doc-sync (architecture.md only) | 1 modified | C1-C6 |
+| C6.5 | SearchBox + EmptyState + ErrorState | 3 created | — |
+| C7 | Doc-sync (architecture.md only) | 1 modified | C1-C6.5 |
 
-C1 ships the scroll-lock helper because Modal is the first overlay to consume it. C2 reuses the helper. C5 depends on C4 only because `Layout.tsx` wires `useViewMode`'s `onRequireClientSelection` callback. All other chunks are pairwise independent.
+C1 ships the scroll-lock helper because Modal is the first overlay to consume it. C2 reuses the helper. C3.5 depends on C3 (extends the already-shipped SortableTable). C5 depends on C4 only because `Layout.tsx` wires `useViewMode`'s `onRequireClientSelection` callback. C6.5 is independent of all other chunks. All other chunks are pairwise independent.
 
-The dependency graph is forward-only and acyclic: C1 → C2; C4 → C5; C7 closes after every other chunk.
+The dependency graph is forward-only and acyclic: C1 → C2; C3 → C3.5; C4 → C5; C7 closes after every other chunk (C1-C6.5).
 
 ## 6. Per-chunk detail
 
@@ -338,7 +359,28 @@ WorkspaceBadge `clickable` defaults to `true` if user has org-admin permission i
 
 `hashToColor` algorithm: deterministic 32-bit FNV-1a over the input string, mod palette length. Pure function; identical input produces identical output. JSDoc states: "Reused wherever a stable visual identity per name is needed."
 
-`switchWorkspace` JSDoc states verbatim: "TEMPORARY: relies on a hard reload because Phase 0 does not yet have router-level state refresh. A later phase replaces the reload with a targeted invalidation. Do NOT inline `window.location.reload()` elsewhere in the codebase; route every workspace switch through this helper."
+`switchWorkspace` implementation:
+
+```typescript
+// client/src/lib/workspace.ts
+import { setActiveClient } from './auth';
+
+/**
+ * Switches the active workspace.
+ *
+ * INVARIANT: this is the ONLY allowed `window.location.reload()` call site for the
+ * workspace-switch case. DO NOT call `window.location.reload()` anywhere else in the
+ * codebase for workspace changes. Verified by the C2 pre-commit grep check.
+ *
+ * TEMPORARY: relies on a hard reload because Phase 0 does not yet have router-level
+ * state refresh. A later phase replaces the reload with a targeted invalidation.
+ */
+export function switchWorkspace(clientId: string, clientName: string): void {
+  if (!clientId) return; // defensive guard: no-op on empty id
+  setActiveClient(clientId, clientName);
+  window.location.reload();
+}
+```
 
 **Error handling:**
 - No async paths.
@@ -438,8 +480,11 @@ export function applySortAndFilters<Row>(
   filters: Record<string, Set<string>>,
   columns: ColumnDef<Row>[],
 ): Row[];
+// INVARIANT: relies on V8 stable sort (Node >= 12 / modern browsers). Any future change
+// to the sort implementation MUST preserve sort stability — equal-key rows MUST retain
+// insertion order across sort flips. Verified by sortableTablePure.test.ts.
 // 1. Apply filters: row passes column's filter iff Set is empty (no filter) or contains deriveFilterKey(getValue(row), columnKey).
-// 2. Stable sort: use a stable algorithm (Array.prototype.sort is stable on V8 since 7.0; document the dependency in JSDoc).
+// 2. Stable sort: Array.prototype.sort (stable on V8 since 7.0).
 //    Apply direction by negating the comparator output for 'desc'; null-to-bottom remains null-to-bottom in both directions.
 // 3. Return new array (do not mutate input).
 ```
@@ -447,6 +492,7 @@ export function applySortAndFilters<Row>(
 **Persistence behaviour:**
 - `persistKey='spending-ledger'` → reads/writes `localStorage.getItem('table:v1:spending-ledger')`.
 - The component owns the `table:v1:` prefix; callers pass the unprefixed identifier.
+- **INVARIANT:** `persistKey` MUST be globally unique per table usage. Two distinct tables that share the same `persistKey` will silently corrupt each other's persisted sort/filter state. The recommended pattern is `<page>-<table-purpose>` (e.g. `spending-ledger`, `agents-list`, `subaccount-tasks`). This is documented in `SortableTable.tsx`'s JSDoc on the `persistKey` prop.
 - Persisted shape: `{ sort: { key: string; dir: 'asc' | 'desc' } | null; filters: Record<string, string[]> }`. Filter sets serialise as arrays.
 - Read on mount; if `JSON.parse` fails, treat as absent and start fresh (do NOT throw).
 - Write debounced 200ms after sort/filter change; flush on unmount.
@@ -522,6 +568,51 @@ npx tsx client/src/components/__tests__/sortableTablePure.test.ts
 - Filter dropdown UX matches the spec: Apply commits, Cancel restores, Esc cancels, outside-click cancels.
 - localStorage persistence reads/writes the `table:v1:` prefix; missing/corrupt values do not throw.
 - Tests pass under `npx tsx`.
+
+### Chunk C3.5 — SortableTable filter controls
+
+**spec_sections:** §4.3 (clearAllFilters addition, AND/OR filter indicator).
+
+**Logical responsibility:** extend the already-shipped `SortableTable` with two additive controls: a "Clear filters" link and a multi-column AND indicator.
+
+**Files to modify:**
+- `client/src/components/SortableTable.tsx` — add `showClearFilters` prop (default `true`); render "Clear filters" button above the table when any filter is active; render "AND" tag between active filter indicators when `activeFilterColumns.length > 1`.
+- `client/src/components/sortableTablePure.ts` — no changes to pure functions; `ColumnDef` interface unchanged.
+
+**Files NOT touched:** `sortableTablePure.test.ts` (pure logic unchanged), any consumer.
+
+**Contracts (additive, locked from §4.3 patch):**
+
+```typescript
+// SortableTableProps addition (additive):
+showClearFilters?: boolean;  // default true
+```
+
+- When `showClearFilters` is `true` (default) and any column has an active filter: render a small "Clear filters" button/link above the table header row.
+- Clicking "Clear filters" resets all active column filters to empty Sets. Sort state is NOT touched.
+- When `activeFilterColumns.length > 1`: render a small "AND" indicator between the active filter summary indicators in the table header. Implementation detail: can be a small grey tag rendered after each active-filter-column's header caret except the last.
+- When only one column is filtered: no AND tag (would be redundant).
+- When no column is filtered: "Clear filters" hidden.
+
+**Error handling:**
+- No async paths. `showClearFilters={false}` suppresses the button entirely regardless of filter state.
+
+**Test considerations:**
+- No new automated tests (the pure functions are unchanged). Visual verification at G2.
+
+**Verification commands:**
+
+```bash
+npm run lint
+npm run typecheck
+npm run build:client
+```
+
+**Acceptance criteria:**
+- "Clear filters" appears when at least one filter is active; clicking resets all filters without touching sort.
+- "AND" tag renders between active-filter column headers when two or more columns are filtered; absent when zero or one column filtered.
+- `showClearFilters={false}` completely suppresses the control.
+- Existing SortableTable callers unaffected (prop is optional, default `true`).
 
 ### Chunk C4 — useViewMode hook + ViewModeSwitcher
 
@@ -677,6 +768,11 @@ A static array literal cannot encode this. The factory pattern accepts the full 
 import type { ReactNode } from 'react';
 import type { AppRoute } from './routes';
 
+// INVARIANT: NavGroup declaration order IS the visual render order. `buildNavItems`
+// MUST emit items in this group sequence:
+//   top → work → projects → agents → company → clientpulse → organisation → platform → footer
+// Reordering this union (or sorting the output by anything other than this sequence)
+// is a visual regression and MUST fail the C5 visual-diff acceptance criterion.
 export type NavGroup =
   | 'top'              // Home, New Task above sections
   | 'work'             // workspace mode work items
@@ -777,7 +873,7 @@ In `Layout.tsx`, this is roughly between the org-picker block and the client-pic
 - org admin with no `activeClientId` sees `top` + `organisation` + `footer`.
 - org admin with `activeClientId` sees the full workspace nav (top + work + projects + agents + company + organisation + footer).
 - system admin sees `platform` group.
-- viewMode='org' suppresses workspace-section nav items even when `activeClientId` is set.
+- viewMode='org' suppresses workspace-section nav items even when `activeClientId` is set. **Concrete assertion:** with `viewMode: 'org'` + `activeClientId` truthy, `expect(items.some(i => i.group === 'work')).toBe(false)`, and equivalently for `i.group === 'projects'` and `i.group === 'agents'`. This catches the regression where a future edit accidentally wires workspace-section visibility to `activeClientId` truthiness only, ignoring `viewMode`.
 
 **Verification commands:**
 
@@ -885,6 +981,84 @@ npm run build:client
 - `<PageShell>` accepts `header`, `bottomPadding`, `maxWidth` props and applies them.
 - CSS additions in `index.css` are isolated to the spec-named classes; no existing class is modified.
 - Existing pages render unchanged (no page imports `PageShell` yet — this is by design).
+
+### Chunk C6.5 — SearchBox + EmptyState + ErrorState
+
+**spec_sections:** §4.9 (SearchBox), §4.10 (EmptyState), §4.11 (ErrorState).
+
+**Logical responsibility:** ship three small presentational primitives used across every Phase-2 list page.
+
+**Files to create:**
+- `client/src/components/SearchBox.tsx` — debounced controlled search input.
+- `client/src/components/EmptyState.tsx` — centered zero-results panel.
+- `client/src/components/ErrorState.tsx` — centered fetch-error panel.
+
+**Files NOT touched:** any existing page. These are new primitives with no consumers until Specs A/B/C.
+
+**Contracts (locked from spec §4.9-4.11):**
+
+```typescript
+// SearchBox.tsx
+interface SearchBoxProps {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;       // default "Search..."
+  debounceMs?: number;        // default 200
+  autoFocus?: boolean;
+  "aria-label"?: string;
+}
+
+// EmptyState.tsx
+interface EmptyStateProps {
+  title: string;
+  body?: string;
+  icon?: React.ReactNode;
+  primaryAction?: { label: string; onClick: () => void };
+  secondaryAction?: { label: string; onClick: () => void };
+}
+
+// ErrorState.tsx
+interface ErrorStateProps {
+  title?: string;             // default "Something went wrong"
+  body?: string;
+  error?: Error | null;
+  retry?: () => void;
+}
+```
+
+**SearchBox behaviour:**
+- Debounced `onChange` using `useEffect` + `setTimeout`. Caller owns the controlled `value`.
+- Search SVG icon left. Clear-X button right when `value` non-empty; clicking calls `onChange('')`.
+- Esc key calls `onChange('')`.
+
+**EmptyState behaviour:**
+- Centered card: icon (optional, 48x48) → title → body → buttons.
+- Primary action: indigo filled button. Secondary: outline button.
+
+**ErrorState behaviour:**
+- Same structure as EmptyState with an error/exclamation glyph.
+- `error.message` used as body fallback only in `process.env.NODE_ENV !== 'production'`.
+- `retry` prop renders an indigo "Try again" button.
+
+**Error handling:**
+- No async paths. All three are purely presentational.
+
+**Test considerations:**
+- No automated tests (presentational components per `frontend_tests: none_for_now`). Visual verification at G2.
+
+**Verification commands:**
+
+```bash
+npm run lint
+npm run typecheck
+npm run build:client
+```
+
+**Acceptance criteria:**
+- `SearchBox` debounces onChange by `debounceMs`, clears on Esc and X button, renders search icon.
+- `EmptyState` renders icon + title + body + up to two action buttons.
+- `ErrorState` renders error glyph + title + body (with `error.message` fallback in dev) + optional retry button.
+- All three type-check and build clean.
 
 ### Chunk C7 — Doc-sync (architecture.md only)
 
@@ -1011,9 +1185,11 @@ These are existing invariants the spec must not violate:
 | C1 | 2 (Modal + scroll-lock helper) | 1 (Modal extension + scroll-lock primitive) |
 | C2 | 5 (Drawer, WorkspaceBadge, colorHash, workspace, colorHash.test) | 1 (drawer + badge primitives) |
 | C3 | 3 (SortableTable, sortableTablePure, sortableTablePure.test) | 1 (sortable table primitive) |
+| C3.5 | 1 (SortableTable.tsx) | 1 (filter controls extension) |
 | C4 | 4 (useViewMode, useViewModePure, useViewModePure.test, ViewModeSwitcher) | 1 (view-mode primitive) |
 | C5 | 5 (routes.ts, sidebar.ts, Layout.tsx, buildRoute.test, buildNavItems.test) | 1 (Layout config-driven nav) |
 | C6 | 3 (FormFooter, PageShell, index.css) | 1 (page-level layout primitives) |
+| C6.5 | 3 (SearchBox, EmptyState, ErrorState) | 1 (display primitives) |
 | C7 | 1 (architecture.md) | 1 (doc sync) |
 
 Each chunk is ≤5 files OR ≤1 logical responsibility. C2, C4, C5 push the file-count boundary but stay within the responsibility boundary because each chunk's files are the tight set required to deliver one primitive end-to-end (component + helper + test).
@@ -1031,9 +1207,10 @@ The build is complete when:
    - `client/src/hooks/__tests__/useViewModePure.test.ts`
    - `client/src/config/__tests__/buildRoute.test.ts`
    - `client/src/config/__tests__/buildNavItems.test.ts`
-5. Manual G2 spot-check: every existing page that imports `Layout` or `Modal` renders without console errors. Spot-check around 10 pages including `SystemAgentsPage`, `WorkspaceMemoryPage`, `SubaccountAgentEditPage`, `AdminSkillsPage`.
+5. Manual G2 spot-check: every existing page that imports `Layout` or `Modal` renders without console errors. Spot-check around 10 pages including `SystemAgentsPage`, `WorkspaceMemoryPage`, `SubaccountAgentEditPage`, `AdminSkillsPage`. SearchBox, EmptyState, ErrorState render correctly with all prop combinations.
 6. Sidebar visual diff: open two tabs, one before / one after, confirm pixel-equivalent rendering for a workspace user, an org admin without active client, an org admin with active client, and a system admin.
 7. ViewModeSwitcher: as workspace-only user, control collapses to label. As org admin, two segments. As system admin with override, switching to System works.
 8. SortableTable manual smoke: deferred to first A/B/C consumer; no inline dev page is shipped (the operator deferred the `/dev/primitives` route per spec §10).
 9. spec-conformance verdict: `CONFORMANT` or `CONFORMANT_AFTER_FIXES`.
 10. pr-reviewer verdict: `APPROVED`.
+11. C3.5 verification: "Clear filters" appears/disappears correctly; "AND" tag visible when two or more columns filtered; clearing does not affect sort.
