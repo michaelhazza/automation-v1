@@ -27,8 +27,7 @@
 
 import { useEffect, useState } from 'react';
 import { User } from '../../lib/auth';
-import api from '../../lib/api';
-import { fetchActivity } from '../../lib/api';
+import api, { fetchActivity } from '../../lib/api';
 import type { ActivityItem } from '../../../../shared/types/operate';
 import { PageShell } from '../../components/PageShell';
 import MetricCard from '../../components/MetricCard';
@@ -300,7 +299,7 @@ export default function HomePage({ user }: { user: User }) {
                 ? 'all clear'
                 : `${attentionState.data?.client ?? 0} client · ${attentionState.data?.major ?? 0} config · ${attentionState.data?.internal ?? 0} internal`
             }
-            to="#"
+            to="/inbox"
             icon={IconBell}
             iconBg="bg-rose-50"
             iconColor="text-rose-500"
