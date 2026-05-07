@@ -705,24 +705,38 @@ export const inboxService = {
    * Archive a single inbox item by entityId.
    * Idempotent: returns alreadyApplied=true when the item is already archived in
    * inbox_read_states. Delegates to the existing bulk archiveItems otherwise.
-   * Always succeeds (archive is available for all kinds).
+   *
+   * kindToEntityType mapping:
+   *   task        → 'task'      (entityId = tasks.id)
+   *   review_item → 'review_item' (entityId = review_items.id)
+   *   agent_run   → 'agent_run'  (entityId = agent_runs.id)
+   *   approval    → NOT YET SUPPORTED — see guard below
+   *
+   * IMPORTANT: the caller's entityId MUST match the entityId that getUnifiedInbox
+   * uses for that kind when writing inbox_read_states rows. For approval-kind items
+   * the listing side has not yet settled on a canonical entityId (actions.id vs
+   * review_items.id), so archive is blocked until that is defined to prevent
+   * silently archiving under the wrong key.
    */
   async archiveItem(
     userId: string,
     orgId: string,
     ref: BandedInboxItemRef
-  ): Promise<InboxActionResult> {
+  ): Promise<InboxActionResult & { errorCode?: string }> {
+    // approval-kind archive is not yet implemented: getUnifiedInbox does not emit
+    // approval-kind items, so there is no canonical entityId for this kind in
+    // inbox_read_states. Block it now rather than silently archive under the wrong key.
+    if (ref.kind === 'approval') {
+      throw { statusCode: 400, errorCode: 'inbox_action_not_implemented', message: 'Archive for approval-kind items is not yet supported' };
+    }
+
     // Map kind → entityType for inboxReadStates
-    const kindToEntityType: Record<InboxKind, EntityType> = {
+    const kindToEntityType: Record<Exclude<InboxKind, 'approval'>, EntityType> = {
       task: 'task',
       review_item: 'review_item',
       agent_run: 'agent_run',
-      // approval items are backed by actions rows but their read-state is tracked
-      // under entityType='review_item' linked via review_items.actionId.
-      // For inbox read-state purposes we use 'review_item' as the entityType.
-      approval: 'review_item',
     };
-    const entityType = kindToEntityType[ref.kind];
+    const entityType = kindToEntityType[ref.kind as Exclude<InboxKind, 'approval'>];
 
     // Idempotency check: if the row already exists with isArchived=true, skip the upsert.
     const existing = await db

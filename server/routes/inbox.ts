@@ -5,6 +5,8 @@ import { inboxService } from '../services/inboxService.js';
 
 const router = Router();
 
+const VALID_INBOX_KINDS = ['review_item', 'approval', 'task', 'agent_run'] as const;
+
 /**
  * GET /api/inbox/unified
  * Aggregated inbox across tasks (status='inbox'), review items (pending),
@@ -170,7 +172,7 @@ router.get(
       subaccountId,
     });
 
-    res.json({ items });
+    res.json({ band: band ?? null, items, nextCursor: null });
   })
 );
 
@@ -195,9 +197,8 @@ router.post(
     // guard-ignore-next-line: input-validation reason="kind validated against allowlist below"
     const { kind } = req.body as { kind?: string };
 
-    const VALID_KINDS = ['review_item', 'approval', 'task', 'agent_run'];
-    if (!kind || !VALID_KINDS.includes(kind)) {
-      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_KINDS.join(', ')}` };
+    if (!kind || !VALID_INBOX_KINDS.includes(kind as any)) {
+      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_INBOX_KINDS.join(', ')}` };
     }
 
     const result = await inboxService.approveItem(orgId, userId, {
@@ -227,12 +228,15 @@ router.post(
     const userId = req.user!.id;
     const orgId = req.orgId!;
     const entityId = req.params.id;
-    // guard-ignore-next-line: input-validation reason="kind validated against allowlist; reason is a free-text string persisted to DB (audit log)"
+    // guard-ignore-next-line: input-validation reason="kind validated against allowlist; reason length capped at 2000 chars below"
     const { kind, reason } = req.body as { kind?: string; reason?: string };
 
-    const VALID_KINDS = ['review_item', 'approval', 'task', 'agent_run'];
-    if (!kind || !VALID_KINDS.includes(kind)) {
-      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_KINDS.join(', ')}` };
+    if (!kind || !VALID_INBOX_KINDS.includes(kind as any)) {
+      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_INBOX_KINDS.join(', ')}` };
+    }
+
+    if (reason && reason.length > 2000) {
+      throw { statusCode: 400, message: 'reason must not exceed 2000 characters' };
     }
 
     const result = await inboxService.rejectItem(orgId, userId, {
@@ -264,9 +268,8 @@ router.post(
     // guard-ignore-next-line: input-validation reason="kind validated against allowlist below"
     const { kind } = req.body as { kind?: string };
 
-    const VALID_KINDS = ['review_item', 'approval', 'task', 'agent_run'];
-    if (!kind || !VALID_KINDS.includes(kind)) {
-      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_KINDS.join(', ')}` };
+    if (!kind || !VALID_INBOX_KINDS.includes(kind as any)) {
+      throw { statusCode: 400, message: `kind is required. Must be one of: ${VALID_INBOX_KINDS.join(', ')}` };
     }
 
     const result = await inboxService.archiveItem(userId, orgId, {
