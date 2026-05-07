@@ -71,3 +71,53 @@
 ## Next step
 
 Operator runs `chatgpt-pr-review` manually as a separate session step against this branch state.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**Run timestamp:** 2026-05-07T22:22:55Z
+**Phase 3 coordinator:** finalisation-coordinator (Opus, 1M context)
+
+**PR number:** #271
+**PR URL:** https://github.com/michaelhazza/automation-v1/pull/271
+**PR state:** MERGED (squash) at 2026-05-07T22:01:22Z
+**Merge commit:** `29d983d2`
+**ready-to-merge label applied at:** prior session (verified present in this run; no action needed)
+
+**S2 sync:** post-merge merge of `origin/main` into `ui-consolidation-build` — 1 commit behind (the squash of PR #271 itself). Clean auto-merge; zero conflicts. Commit: `4234720c chore(sync): merge main into ui-consolidation-build (S2 post-merge)`. Branch HEAD post-S2: see commit log.
+
+**G4 regression guard:** PASS on first attempt.
+- `npm run lint` — 0 errors, 857 warnings (baseline unchanged).
+- `npm run typecheck` — clean.
+- `npm run build:server` — clean.
+- `npm run build:client` — clean (4.84s, normal bundle).
+
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-consolidation-build-2026-05-07T20-53-42Z.md` — 2 rounds complete in the prior session. Per operator instruction, this Phase 3 run did NOT re-invoke `chatgpt-pr-review`.
+
+**spec_deviations reviewed:** n/a — no `spec_deviations:` field in Phase 2 handoff. Two known directional gaps (Skills tier-source tooltips §4.12; Budget persistence backing schema) routed to `tasks/todo.md` as CONSOL-BLD-DEF-1 and CONSOL-BLD-DEF-2.
+
+**REVIEW_GAP markers:** none (Codex CLI was available; dual-reviewer ran clean with 4 findings all fixed).
+
+**Doc-sync sweep verdicts (all 13 registered docs):**
+- `architecture.md` — yes (Build stream key-files-per-domain rows for AgentEditPage / RecurringTasksPage / ProjectEditPage / identityKeyDiff; SkillStudioPage retired note + ADR 0007 cross-ref; landed in C11 commit `74239a9f`).
+- `docs/capabilities.md` — yes (Changelog row 2026-05-07 — "Consolidation Build: retire 9 legacy admin pages into 4 consolidated Build-stream pages"; landed in C11 commit `74239a9f`).
+- `docs/integration-reference.md` — n/a — no integration behaviour change.
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` — yes (DEVELOPMENT_GUIDELINES §8.30 added in commit `8ae2e7bb` — non-durable async PLAN_GAP documentation rule arose from this build).
+- `CONTRIBUTING.md` — n/a — no lint-suppression policy or `// reason:` convention change.
+- `docs/frontend-design-principles.md` — n/a — no new UI hard rule introduced; consolidation reuses existing PageShell / FormFooter / SortableTable patterns.
+- `KNOWLEDGE.md` — yes (4 consolidation-build entries already present: WRITE_ORDER excludes schedule/budget tabs, startRunAsync fire-and-forget, formatFireCondition RRULE subset, TRIGGER_ADD_NOT_SUPPORTED 501 guard; plus the iframe recursion guard pattern).
+- `docs/spec-context.md` — n/a — not a spec-review session.
+- `docs/decisions/` — yes (ADR 0007 authored + tightened with Round 1 ChatGPT permission-management rationale in commit `ada95651`).
+- `docs/context-packs/` — n/a — no anchor changes; section names in architecture.md unchanged.
+- `references/test-gate-policy.md` — n/a — no gate-posture change.
+- `references/spec-review-directional-signals.md` — n/a — no spec-reviewer signal threshold reached.
+- `.claude/FRAMEWORK_VERSION` + `CHANGELOG.md` — n/a — repo-specific change, not framework-level.
+
+**KNOWLEDGE.md entries added in this Phase 3 run:** 0 (cross-check: 47 entries dated 2026-05-07 across the consolidation-foundation + consolidation-build builds; chatgpt-pr-review's 2 rounds already extracted all durable patterns from this build).
+
+**tasks/todo.md changes:** added new section `## Deferred from branch-level reviews — consolidation-build (2026-05-07)` with 12 deferred items (CONSOL-BLD-DEF-1 through CONSOL-BLD-DEF-12) plus CONSOL-BLD-MANUAL-G2. No items closed (the build itself does not close prior backlog rows).
+
+**current-focus.md:** transitioned `REVIEWING → MERGED`. Active fields cleared. `last_merged_pr` / `last_merged_slug` / `last_merged_branch` / `last_merged_at` / `last_merged_commit` set.
+
+**Operator preferences honoured:** CEO-level summaries; no raw agent dumps; no em-dashes in summaries; auto-commit per review-agent exception.

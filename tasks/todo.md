@@ -3240,3 +3240,57 @@ These items require operator action outside the file system (repo/GitHub setting
 - [ ] **CONSOL-FND-DEF-5 — Central overlay manager / stack ownership.** Source: chatgpt-pr-review round 1 F6. Modal/Drawer coordination is currently convention-driven (zIndex hierarchy + spec-documented carveout for modal-over-drawer). Two independent components opening overlays simultaneously can both acquire scroll locks, bind escape handlers, and compete for focus restoration. ChatGPT explicitly flagged this as "not a blocker for this PR, but likely needed as consolidation expands." Build during Specs A/B/C if a multi-overlay consumer surfaces.
 
 - [ ] **CONSOL-FND-DEF-6 — CSS injection vector on project `color` field.** Source: adversarial-reviewer worth-confirming 4.1. `<span style={{ background: color }}>` in nav-item rendering accepts whatever the server returns. Server-side validation is the right gate; confirm projects.color is constrained to a CSS color token at the schema or service layer. If not, add validation server-side and a defensive client-side hex/rgb sanitiser.
+
+---
+
+## Deferred from branch-level reviews — consolidation-build (2026-05-07)
+
+**Captured:** 2026-05-08T00:00:00Z
+**PR:** #271 — `ui-consolidation-build` → `main` (MERGED 2026-05-07T22:01:22Z, squash-commit `29d983d2`)
+**Source logs:**
+- spec-conformance: `tasks/review-logs/spec-conformance-log-consolidation-build-2026-05-07T20-26-01Z.md`
+- pr-reviewer: `tasks/review-logs/pr-review-log-consolidation-build-2026-05-07T20-30-27Z.md` + `pr-review-log-consolidation-build-rerun-2026-05-07T20-34-45Z.md` + `pr-review-log-consolidation-build-post-codex-2026-05-07T20-46-45Z.md`
+- adversarial-reviewer: `tasks/review-logs/adversarial-review-log-consolidation-build-2026-05-07T20-36-33Z.md`
+- dual-reviewer: `tasks/review-logs/dual-review-log-consolidation-build-2026-05-07T20-45-58Z.md`
+- chatgpt-pr-review: `tasks/review-logs/chatgpt-pr-review-consolidation-build-2026-05-07T20-53-42Z.md`
+- migration-gaps: `tasks/builds/consolidation-build/migration-gaps.md`
+
+### Phase 2 schema work
+
+- [ ] **CONSOL-BLD-DEF-1 — Skills tab tier-source tooltips (spec §4.12).** Source: spec-conformance directional gap. Skills tab currently shows status pills; tier chips with system/org/workspace tooltip strings are not implemented. Architectural choice: tier resolution requires joining `skills` against `system_skills` / `subaccountSkills`. Phase 2 task.
+- [ ] **CONSOL-BLD-DEF-2 — Budget tab persistence backing schema.** Source: spec-conformance directional gap + migration-gaps PLAN_GAP. `patchBudget` route accepts payloads but `agents` table lacks the `daily_cap_usd` / `monthly_cap_usd` / `warn_threshold_pct` columns. UI is read-only so no user-facing inconsistency today. Phase 2: add the columns and wire the read/write path.
+- [ ] **CONSOL-BLD-DEF-3 — `PUT /api/agents/:id/triggers` — remove 501 guard once subaccountAgentId resolution exists.** Source: dual-reviewer Codex F4 and migration-gaps. Trigger inserts currently return `501 TRIGGER_ADD_NOT_SUPPORTED` because triggers are subaccount-scoped (`subaccountAgentId` FK). Phase 2: resolve a default `subaccountAgentId` (e.g., via the org subaccount) and remove the guard.
+- [ ] **CONSOL-BLD-DEF-4 — `startRunAsync` durability through pg-boss.** Source: migration-gaps PLAN_GAP + KNOWLEDGE.md gotcha. `startRunAsync` in `agentExecutionService.ts` is bare fire-and-forget — a process restart between the 202 response and LLM completion leaves the `agent_runs` row in `status='running'` permanently. Acceptable for Phase 1 (test runs are low-stakes). Phase 2 should route test runs through pg-boss if orphaned rows become a support issue.
+- [ ] **CONSOL-BLD-DEF-5 — Goals page hierarchical management not replicated.** Source: migration-gaps. `GoalsPage` (deleted in C10) supported mission/objective/key-result tree, create/delete, level/status tagging. `ProjectEditPage` does not replicate these. The route now redirects to home. Phase 2: integrate goal management into `ProjectEditPage` or a dedicated page under the new build route structure.
+- [ ] **CONSOL-BLD-DEF-6 — Skill Studio / Skill Analyzer features not replicated.** Source: migration-gaps. Standalone skill authoring or analysis workflows previously at `/admin/skill-studio`, `/system/skill-studio`, `/system/skill-analyser` now redirect to `/agents`. Phase 2: assess whether dedicated skill authoring surfaces are needed.
+
+### Permission-gate hardening (worth-confirming, advisory)
+
+- [ ] **CONSOL-BLD-DEF-7 — Project route permission gate.** Source: adversarial-reviewer worth-confirming W1 + pr-reviewer S1. `GET /api/projects/:id` and `PATCH /api/projects/:id` are gated only by `authenticate` (no permission key). Matches legacy convention but should add `requirePermission('projects:read'|'projects:write')` for consistency with the rest of the route surface.
+- [ ] **CONSOL-BLD-DEF-8 — `replaceDataSources` Google Drive validation parity.** Source: adversarial-reviewer worth-confirming W2. The new full-replacement endpoint skips `google_drive` connection validation that the legacy POST enforces. Phase 2 follow-up: port the Google Drive connection-validity check into `replaceDataSources`.
+
+### Non-blocking (S2/N1-N3 carry-forward)
+
+- [ ] **CONSOL-BLD-DEF-9 — `outputSize` enum drift.** Source: pr-reviewer S2. `outputSize` enum drifts between schema and API contract. Reconcile to a single source of truth.
+- [ ] **CONSOL-BLD-DEF-10 — `BehaviourTab.constraints` accepted-but-discarded.** Source: pr-reviewer N1. The constraints field accepts user input but does not round-trip through the server. Either persist or remove the input.
+- [ ] **CONSOL-BLD-DEF-11 — `RecurringTasksPage` filter facets not wired to backend.** Source: pr-reviewer N2. Page does not consume the `filterOptions` facets returned by the backend. Wire the dropdowns.
+- [ ] **CONSOL-BLD-DEF-12 — Budget tab dirty-patch defence-in-depth.** Source: pr-reviewer N3. Add client-side guard so dirty payloads cannot be sent before the persistence schema lands (CONSOL-BLD-DEF-2).
+
+### Manual G2 owed by operator
+
+- [ ] **CONSOL-BLD-MANUAL-G2 — Visual G2 sweep.** Operator owes manual G2 across:
+  - Layout sidebar across user shapes (system / org / subaccount).
+  - All 8 agent-edit tabs in sequence; ETag round-trip 409 with a second writer.
+  - Recurring tasks union of schedule-fired + event-fired + manual rows; pause/resume action.
+  - Project edit form-footer alignment + Goals migration banner for migrated projects.
+  - Old admin/skill page routes 404 / redirect correctly.
+  - Skills / Recurring tasks / Skill picker `<SearchBox>` debounce.
+  - Empty Agents / Recurring tasks / Runs render `<EmptyState>`.
+  - `formatFireCondition()` against 5 common rrule shapes.
+  - Version chip + tooltip on Agents list.
+  - Confirmation dialogs (Delete agent / Delete project / skill remove / trigger pause).
+  - Action visibility by role (workspace user viewing system agent; non-org-admin Delete buttons).
+  - Skills tab tier chip tooltips.
+  - Data sources status pill.
+  - Budget actual-vs-limit bar.
+  - Runs tab cost column.

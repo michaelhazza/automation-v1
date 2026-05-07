@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/consolidation-build/spec.md
-active_plan: tasks/builds/consolidation-build/plan.md
-build_slug: consolidation-build
-branch: ui-consolidation-build
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGED
 last_updated: 2026-05-07
-last_merged_pr: #270
-last_merged_slug: consolidation-foundation
-last_merged_branch: claude/consolidation-foundation
-last_merged_at: 2026-05-07T09:11:23Z
-last_merged_commit: 82300017
+last_merged_pr: #271
+last_merged_slug: consolidation-build
+last_merged_branch: ui-consolidation-build
+last_merged_at: 2026-05-07T22:01:22Z
+last_merged_commit: 29d983d2
 -->
 
 # Current Focus
@@ -24,13 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/consolidation-build/spec.md`
-**Active plan:** `tasks/builds/consolidation-build/plan.md`
-**Active build slug:** `consolidation-build`
-**Branch:** `ui-consolidation-build`
-**Status:** **REVIEWING** — Phase 2 BUILD complete on 2026-05-07. All 13 chunks (C1, C2, C3, C3b, C4, C5, C5b, C6, C7, C8, C9, C10, C11) committed. Branch-level review pass complete: spec-conformance CONFORMANT, pr-reviewer APPROVED (after 1 fix-loop iteration on B1), adversarial-reviewer ADVISORY (0 confirmed-holes), dual-reviewer Codex APPROVED (4 findings F1-F4 all ACCEPT and fixed in commit `42d95e86`), post-Codex pr-reviewer re-review APPROVED. Doc-sync gate complete (1 KNOWLEDGE.md entry added for the new TRIGGER_ADD_NOT_SUPPORTED 501 guard). Handoff at `tasks/builds/consolidation-build/handoff.md`. Branch HEAD at handoff: `85b3f51b`. **Next step:** operator runs `chatgpt-pr-review` manually as a separate session.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGED** — no build in flight.
 
-**Just merged:** PR #270 — `consolidation-foundation` (squash-merged from `claude/consolidation-foundation` 2026-05-07). Phase 0 cross-cutting frontend primitives extracted from the broader consolidation prototype set. Ships shared `PageShell` / `Drawer` / `Modal` / `SortableTable` / `FormFooter` / `SearchBox` / `EmptyState` / `ErrorState` / `WorkspaceBadge` / `ViewModeSwitcher` primitives, route registry (`client/src/config/routes.ts` with branded `AppRoute` type, `APP_ROUTE_PATTERNS` literal-tuple, `buildRoute` helper using a negative-lookahead regex to prevent `:id` matching inside `:idFoo`), sidebar config (`client/src/config/sidebar.ts` with `buildNavItems` factory + `NavGroup` types), Layout refactor consuming the new config, helpers (`colorHash` deterministic FNV-1a, `workspace.switchWorkspace` as the only allowed reload call site, `useViewMode` + `useViewModePure`), reference-counted scroll-lock singleton (`overlayScrollLock.ts`) keyed via `Symbol.for(...)` for HMR-safe coordination across stacked overlays. ModuleGuard added for `/clientpulse/*` and `/reports/*` route trees (closed adversarial-reviewer confirmed hole). Late-build bundle: 5 vitest test files converted from custom `npx tsx` harness to vitest's `expect()` API; portable framework tests refactored to read `FRAMEWORK_VERSION` dynamically so future bumps don't break the suite; `finalisation-coordinator` agent updated to auto-resolve known-shape S2 merge conflicts (append-only artefact files take HEAD or union; code-area conflicts still pause). Pipeline: per-chunk pr-reviewer + dual-reviewer + adversarial-reviewer rounds → branch-level chatgpt-pr-review (2 rounds APPROVED) → S2 merge of origin/main with three resolved conflicts (spec.md / plan.md kept HEAD; tasks/todo.md union-merged) → G4 regression guard clean → doc-sync sweep complete → ready-to-merge labelled → all CI green. 6 items deferred (CONSOL-FND-DEF-1..6 in `tasks/todo.md`). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T08-15-18Z.md`. **Manual G2 still owed by operator:** visual diff of Layout sidebar across user shapes; ViewModeSwitcher transitions; SortableTable filter dropdown select-all; direct-URL nav to `/clientpulse` for a non-system-admin without that module.
+**Just merged:** PR #271 — `consolidation-build` (squash-merged from `ui-consolidation-build` 2026-05-07T22:01:22Z, squash-commit `29d983d2`). Phase 2 stream B of the four-spec consolidation programme: the **Build** authoring surface. Replaces 9 legacy admin/skill pages (`AdminAgentsPage`, `AdminAgentEditPage`, `AdminSkillsPage`, `AdminSkillEditPage`, `SkillStudioPage`, `SkillAnalyzerPage`, `SystemAgentsPage`, `ScheduledTasksPage`, `GoalsPage`) with 4 consolidated Build-stream pages: `AgentsListPage` (view-mode-aware list across all agent tiers), `AgentEditPage` (8-tab edit — Configure / Behaviour / Personality / Skills / Data sources / Schedule / Budget / Runs — with ETag-gated per-tab writes via `agentEtag.ts` + `agentEtagPrecondition` middleware; inline `TestRunnerCard` per round-15 prototype), `RecurringTasksPage` (aggregator across triggers/heartbeats/manual runs with `recurringTasksServicePure.ts` cursor pagination + `formatFireCondition()` RRULE projector), `ProjectEditPage` (consolidated form + `MigratedFromGoalsBanner`). Server: `server/routes/agents/agentTabs.ts` (tab-scoped PATCH/PUT + `GET /:id/full`), `server/routes/recurringTasks.ts`, `server/services/recurringTasksService.ts` + `*Pure.ts`, `server/services/projectService.ts`, `server/lib/identityKeyDiff.ts` (full-replacement-safety helper), `server/lib/agentEtag.ts` (canonicalStringify with NaN/Infinity rejection + -0→0 normalisation). One additive migration (0286). Pipeline: spec-conformance CONFORMANT (38 reqs, 36 PASS, 2 directional gaps deferred) → pr-reviewer round 1 CHANGES_REQUESTED (B1 fixed in `84d9f285`) → round 2 APPROVED → adversarial-reviewer ADVISORY (0 confirmed, 1 likely-hole accepted Phase 1, 6 worth-confirming) → dual-reviewer Codex APPROVED (F1-F4 all ACCEPT, fixed in `42d95e86` — TestRunnerCard mounted, RRULE/timezone wired through, `isSystemManaged` retained, `TRIGGER_ADD_NOT_SUPPORTED` 501 guard) → post-Codex pr-reviewer re-review APPROVED → chatgpt-pr-review 2 rounds (Round 1: numeric canonicalisation tests + audit logging on identity-key removals + ADR rationale tightening; Round 2: 7 tightenings — WRITE_ORDER contract, recurring-task dedupe invariant, filter-reset/workspace-switch protections, redirect deprecation telemetry, tab-local state rollback, iframe recursion guard) → S2 post-merge sync clean (1 commit behind, zero conflicts) → G4 regression guard PASS (lint 0/857, typecheck clean, build:server clean, build:client clean) → doc-sync sweep complete (architecture.md + capabilities.md + ADR 0007 + KNOWLEDGE.md + DEVELOPMENT_GUIDELINES §8.30 all in sync). ADR 0007 (`docs/decisions/0007-consolidation-build-page-retirement.md`) documents the 9→4 retirement decision and Phase 2 deferrals. 12 items deferred (CONSOL-BLD-DEF-1..12 in `tasks/todo.md`) + CONSOL-BLD-MANUAL-G2 (manual G2 sweep owed by operator). Phase 3 handoff: `tasks/builds/consolidation-build/handoff.md § Phase 3 (FINALISATION) — complete`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-build-2026-05-07T20-53-42Z.md`. **No REVIEW_GAP markers** — Codex was available throughout.
+
+**Just merged:** PR #270 — `consolidation-foundation` (squash-merged from `claude/consolidation-foundation` 2026-05-07T09:11:23Z, squash-commit `82300017`). Phase 0 cross-cutting frontend primitives. Ships shared `PageShell` / `Drawer` / `Modal` / `SortableTable` / `FormFooter` / `SearchBox` / `EmptyState` / `ErrorState` / `WorkspaceBadge` / `ViewModeSwitcher` primitives, route registry, sidebar config, Layout refactor, helpers (`colorHash`, `workspace.switchWorkspace`, `useViewMode`), reference-counted scroll-lock singleton (`overlayScrollLock.ts` keyed via `Symbol.for(...)` for HMR safety), ModuleGuard for `/clientpulse/*` and `/reports/*`. Late-build bundle: 5 vitest test files migrated to `expect()`; portable framework tests read `FRAMEWORK_VERSION` dynamically; `finalisation-coordinator` agent updated to auto-resolve known-shape S2 conflicts. 6 items deferred (CONSOL-FND-DEF-1..6 in `tasks/todo.md`). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T08-15-18Z.md`. **Manual G2 still owed by operator:** Layout sidebar across user shapes, ViewModeSwitcher transitions, SortableTable filter dropdown, direct-URL nav guard.
 
 **Just merged:** PR #267 — `pre-launch-phase-3-deferred-backlog` (squash-commit `8b6f8d80`, 2026-05-06T14:15:00Z). Pre-launch Phase 3 deferred backlog. See archived prose in git history.
 
@@ -74,7 +76,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-07T09:11:23Z
+**Last updated:** 2026-05-07T22:22:55Z
 
 ---
 
