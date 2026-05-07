@@ -38,6 +38,16 @@ export function diffByIdentityKey<T>(
   incoming: T[],
   getKey: (item: T) => string,
 ): DiffResult<T> {
+  // Guard: duplicate incoming keys are a caller error — error fast rather than
+  // silently processing one item twice (Q6 invariant).
+  const incomingKeys = incoming.map(getKey);
+  const uniqueIncomingKeys = new Set(incomingKeys);
+  if (uniqueIncomingKeys.size !== incomingKeys.length) {
+    const seen = new Set<string>();
+    const dupes = incomingKeys.filter((k) => seen.has(k) || !seen.add(k));
+    throw new Error(`diffByIdentityKey: duplicate incoming keys: ${[...new Set(dupes)].join(', ')}`);
+  }
+
   const existingMap = new Map<string, T>();
   for (const item of existing) {
     existingMap.set(getKey(item), item);

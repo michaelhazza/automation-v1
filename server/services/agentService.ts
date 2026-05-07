@@ -1,7 +1,9 @@
-import { eq, and, or, isNull, asc, max, desc } from 'drizzle-orm';
+import { eq, and, or, isNull, asc, max, desc, inArray, ne, sql as drizzleSql } from 'drizzle-orm';
 import * as fs from 'node:fs';
 import { db } from '../db/index.js';
-import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks } from '../db/schema/index.js';
+import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks, agentTriggers as agentTriggersTable, agentRuns, skills, subaccountAgents } from '../db/schema/index.js';
+import { computeAgentEtag } from '../lib/agentEtag.js';
+import { diffByIdentityKey } from '../lib/identityKeyDiff.js';
 import crypto from 'crypto';
 import { auditService } from './auditService.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -1759,10 +1761,7 @@ export const agentService = {
    * ensure deterministic ETag computation.
    */
   async getFull(agentId: string, orgId: string): Promise<AgentFull> {
-    const { sql: drizzleSql, count: drizzleCount } = await import('drizzle-orm');
-    const { agentRuns, skills, agentTriggers: agentTriggersTable, agentDataSources: agentDataSourcesTable } = await import('../db/schema/index.js');
-    const { spendingBudgets } = await import('../db/schema/spendingBudgets.js');
-    const { computeAgentEtag } = await import('../lib/agentEtag.js');
+    const agentDataSourcesTable = agentDataSources;
 
     const [rawAgent] = await db
       .select()
@@ -1775,7 +1774,6 @@ export const agentService = {
     const slugs: string[] = (rawAgent.defaultSkillSlugs ?? []) as string[];
     let skillRows: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }> = [];
     if (slugs.length > 0) {
-      const { inArray } = await import('drizzle-orm');
       const rows = await db
         .select({ id: skills.id, slug: skills.slug, name: skills.name, isActive: skills.isActive, createdAt: skills.createdAt })
         .from(skills)
@@ -1804,18 +1802,28 @@ export const agentService = {
       .orderBy(asc(agentDataSourcesTable.createdAt), asc(agentDataSourcesTable.id));
 
     // ── Triggers ─────────────────────────────────────────────────────────────
-    const triggers = await db
-      .select()
-      .from(agentTriggersTable)
-      .where(
-        and(
-          eq(agentTriggersTable.organisationId, orgId),
-          drizzleSql`${agentTriggersTable.deletedAt} IS NULL`,
-          // Org-level triggers: no subaccount scope
-          drizzleSql`${agentTriggersTable.subaccountAgentId} IS NULL`,
-        )
-      )
-      .orderBy(asc(agentTriggersTable.createdAt), asc(agentTriggersTable.id));
+    // agentTriggers has no direct agentId FK — triggers link to agents through
+    // subaccountAgents. We do a two-step query: find subaccountAgent IDs for
+    // this org-level agent, then fetch triggers scoped to those IDs.
+    const subaccountAgentRows = await db
+      .select({ id: subaccountAgents.id })
+      .from(subaccountAgents)
+      .where(and(eq(subaccountAgents.agentId, agentId), eq(subaccountAgents.organisationId, orgId)));
+
+    const saIds = subaccountAgentRows.map((sa) => sa.id);
+
+    const triggers = saIds.length > 0
+      ? await db
+          .select()
+          .from(agentTriggersTable)
+          .where(
+            and(
+              inArray(agentTriggersTable.subaccountAgentId, saIds),
+              isNull(agentTriggersTable.deletedAt),
+            )
+          )
+          .orderBy(asc(agentTriggersTable.createdAt), asc(agentTriggersTable.id))
+      : [];
 
     // ── Last 5 runs + 30d stats ───────────────────────────────────────────────
     const last5Runs = await db
@@ -1849,21 +1857,15 @@ export const agentService = {
       );
 
     // ── Budget ────────────────────────────────────────────────────────────────
-    const [budgetRow] = await db
-      .select()
-      .from(spendingBudgets)
-      .where(
-        and(
-          eq(spendingBudgets.agentId, agentId),
-          eq(spendingBudgets.organisationId, orgId),
-        )
-      )
-      .limit(1);
-
+    // Phase 1: agent LLM budget caps have no backing schema yet. These fields
+    // are returned as null/zero and writes are accepted but not persisted.
+    // Budget cap enforcement is a Phase 2 feature. The spendingBudgets table
+    // is for agentic commerce spend (not LLM cost caps) and must not be
+    // misread as dailyCapUsd / monthlyCapUsd values.
     const budget = {
       dailyCapUsd: null as number | null,
-      monthlyCapUsd: budgetRow ? (budgetRow.monthlySpendAlertThresholdMinor ?? null) !== null ? (budgetRow.monthlySpendAlertThresholdMinor! / 100) : null : null,
-      warnThresholdPct: 80,
+      monthlyCapUsd: null as number | null,
+      warnThresholdPct: 0,
     };
 
     // ── Personality ───────────────────────────────────────────────────────────
@@ -1963,11 +1965,11 @@ export const agentService = {
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.name !== undefined) {
-      update.name = patch.name;
+      const trimmedName = patch.name.trim();
+      update.name = trimmedName;
       // Slug update: derive new slug from name (idempotent within org)
-      const newSlug = patch.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const newSlug = makeSlug(trimmedName);
       // Check for slug conflict (excluding current agent)
-      const { ne } = await import('drizzle-orm');
       const [conflict] = await db
         .select({ id: agents.id })
         .from(agents)
@@ -2012,6 +2014,9 @@ export const agentService = {
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (patch.briefingTemplate !== undefined) update.additionalPrompt = patch.briefingTemplate;
+    // Phase 1: constraints are not persisted (additionalPrompt is a single text field).
+    // If constraints are provided, they are accepted but not stored.
+    // Frontend sends only briefingTemplate in Phase 1.
 
     await db.transaction(async (tx) => {
       await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
@@ -2039,7 +2044,7 @@ export const agentService = {
     await db.transaction(async (tx) => {
       // personality column is added by migration 0286
       await tx.execute(
-        (await import('drizzle-orm')).sql`
+        drizzleSql`
           UPDATE agents
           SET personality = ${JSON.stringify(merged)}::jsonb, updated_at = NOW()
           WHERE id = ${agentId} AND organisation_id = ${orgId}
@@ -2058,7 +2063,6 @@ export const agentService = {
     options: { force?: boolean },
     actor: { role?: string },
   ): Promise<AgentFull> {
-    const { diffByIdentityKey } = await import('../lib/identityKeyDiff.js');
     const current = await agentService.getFull(agentId, orgId);
     agentService._assertNotSystemManaged(current, actor.role);
     agentService._assertEtag(current, expectedEtag);
@@ -2094,9 +2098,7 @@ export const agentService = {
     options: { force?: boolean },
     actor: { role?: string },
   ): Promise<AgentFull> {
-    const { diffByIdentityKey } = await import('../lib/identityKeyDiff.js');
-    const { sql: drizzleSql } = await import('drizzle-orm');
-    const { agentDataSources: agentDataSourcesTable } = await import('../db/schema/index.js');
+    const agentDataSourcesTable = agentDataSources;
 
     const current = await agentService.getFull(agentId, orgId);
     agentService._assertNotSystemManaged(current, actor.role);
@@ -2117,7 +2119,6 @@ export const agentService = {
       // Delete removed sources
       const toRemove = diff.silentlyRemoved.map((d) => d.id);
       if (toRemove.length > 0) {
-        const { inArray } = await import('drizzle-orm');
         await tx.delete(agentDataSourcesTable).where(
           and(
             inArray(agentDataSourcesTable.id, toRemove),
@@ -2156,9 +2157,6 @@ export const agentService = {
     options: { force?: boolean },
     actor: { role?: string },
   ): Promise<AgentFull> {
-    const { diffByIdentityKey } = await import('../lib/identityKeyDiff.js');
-    const { agentTriggers: agentTriggersTable } = await import('../db/schema/index.js');
-
     const current = await agentService.getFull(agentId, orgId);
     agentService._assertNotSystemManaged(current, actor.role);
     agentService._assertEtag(current, expectedEtag);
@@ -2178,7 +2176,6 @@ export const agentService = {
       // Soft-delete removed triggers
       const toRemove = diff.silentlyRemoved.map((t) => t.id);
       if (toRemove.length > 0) {
-        const { inArray } = await import('drizzle-orm');
         await tx.update(agentTriggersTable)
           .set({ deletedAt: new Date() })
           .where(
@@ -2221,39 +2218,15 @@ export const agentService = {
     patch: Partial<{ dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number }>,
     actor: { role?: string },
   ): Promise<AgentFull> {
-    const { spendingBudgets } = await import('../db/schema/spendingBudgets.js');
+    // Phase 1: agent LLM budget caps have no backing schema yet.
+    // Patches are accepted (ETag / permission checks still apply) but not persisted.
+    // Phase 2 should add daily_cap_usd, monthly_cap_usd, warn_threshold_pct columns
+    // to agents and implement the read/write path.
+    void patch; // intentional no-op
 
     const current = await agentService.getFull(agentId, orgId);
     agentService._assertNotSystemManaged(current, actor.role);
     agentService._assertEtag(current, expectedEtag);
-
-    const monthlyMinor = patch.monthlyCapUsd !== undefined
-      ? patch.monthlyCapUsd !== null ? Math.round(patch.monthlyCapUsd * 100) : null
-      : undefined;
-
-    await db.transaction(async (tx) => {
-      const [existing] = await tx
-        .select({ id: spendingBudgets.id })
-        .from(spendingBudgets)
-        .where(and(eq(spendingBudgets.agentId, agentId), eq(spendingBudgets.organisationId, orgId)))
-        .limit(1);
-
-      if (existing) {
-        const upd: Record<string, unknown> = { updatedAt: new Date() };
-        if (monthlyMinor !== undefined) upd.monthlySpendAlertThresholdMinor = monthlyMinor;
-        await tx.update(spendingBudgets).set(upd).where(eq(spendingBudgets.id, existing.id));
-      } else if (monthlyMinor !== undefined && monthlyMinor !== null) {
-        await tx.insert(spendingBudgets).values({
-          organisationId: orgId,
-          agentId,
-          currency: 'USD',
-          name: 'Agent budget',
-          monthlySpendAlertThresholdMinor: monthlyMinor,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-      }
-    });
 
     return agentService.getFull(agentId, orgId);
   },

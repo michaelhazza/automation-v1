@@ -81,13 +81,12 @@ describe('diffByIdentityKey', () => {
     expect(result.updated[0].name).toBe('new');
   });
 
-  it('handles duplicate ids in incoming gracefully (last wins in map)', () => {
+  it('throws on duplicate incoming keys (Q6 invariant)', () => {
     const existing: Item[] = [];
     const incoming = [{ id: 'a', name: 'first' }, { id: 'a', name: 'second' }];
-    // Both have id 'a'; the map will have the last one, but both appear as added
-    const result = diffByIdentityKey(existing, incoming, getKey);
-    // Both items get added since existing is empty; neither is filtered
-    expect(result.added).toHaveLength(2);
+    expect(() => diffByIdentityKey(existing, incoming, getKey)).toThrow(
+      /duplicate incoming keys.*a/,
+    );
   });
 
   it('key extraction function is used correctly for string identity', () => {
