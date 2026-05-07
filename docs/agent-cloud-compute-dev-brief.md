@@ -1,11 +1,12 @@
 # Agent Cloud Compute — Development Brief
 
-> **Status:** Rev 4 — incorporates second reviewer pass. Self-contained. Ready for next stress-test cycle.
+> **Status:** Rev 5 — LOCKED. Strategy phase complete. Next moves are validation interviews, UX exploration, and the §10.2 session-persistence spec.
 > **Date:** 2026-05-07
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii`
 > **Audience:** Internal engineering, plus LLM and external reviewers without prior context.
-> **Posture:** Strategic recommendation with stress-test framing. Recommendation is in §9 with full reasoning; §17 is the explicit "where this could be wrong" challenge surface.
-> **What's new in Rev 4:** Adds §7 *"The abstraction layer we are actually building"* as the strategic spine — Synthetos is building a persistent operational identity layer for AI workers, not a compute platform. Reframes the Workspace UI in §11.1 as the **embodiment layer** for that identity, not an administrative dashboard, and adds an *ambient presence* component (heartbeat, current focus, recent observations) so the workspace feels alive rather than archival. Recasts ephemeral compute as a more evolved architecture in §12, not as the cheap alternative. Adds the *"workspace without capability depth"* risk to the honest-cons list and to the open questions. Strengthens the *"workspace exists by default"* posture as identity instantiation rather than infrastructure provisioning.
+> **Posture:** Strategic recommendation. Recommendation is in §8 with full reasoning; §16 is the explicit "where this could be wrong" challenge surface. Conceptual iteration is closed; further revisions should arise only from new evidence, not from re-framing the existing argument.
+> **What's new in Rev 5 (final):** Adds Phase 0 (Validation before commitment) to §15 with concrete activities — customer interviews, positioning A/B tests, workspace mockup reaction sessions, organic VM-language emergence test. Adds the UX expectation-ceiling risk to §12.2 cons (the ambient presence surface raises autonomy expectations; if agent behaviour underneath is shallow, the illusion breaks hard). Adds §14.9 explicit prohibition: this is NOT a "workspace UI project" — it is a positioning, platform-abstraction, and identity-layer project; the UI is the embodiment mechanism. Closing reviewer note updated to mark the brief as locked.
+> **Strategic spine (carried from Rev 4):** §6 establishes that Synthetos is building a persistent operational identity layer for AI workers, not a compute platform. Compute is interchangeable underneath. §10.1 Workspace UI is the embodiment layer for that identity, with an ambient presence surface to keep the workspace feeling alive. §11.7 frames ephemeral compute as a more evolved architecture, not a cheap alternative.
 
 ---
 
@@ -468,6 +469,7 @@ Listed without spin. The reviewer pass on Rev 2 specifically called out the abse
 - **Local-execution trajectory is a hypothesis, not a proven trend.** §11.3 may not materialise on the timeline assumed. If the market stays cloud-centric, that strategic asset is worth less than we're claiming.
 - **Reversibility argument cuts both ways.** Yes, we can add §10.5 later. But adding it later costs sales velocity in the interim if competitors keep accumulating VM-tier customers in segments we'd want to win.
 - **Workspace without capability depth.** Path C bets on the abstraction layer (workspace, identity, presence) carrying the strategy. If competitors pair *their* workspace pitch with materially deeper underlying capability — better long-running reasoning, more autonomous planning, deeper tooling, more robust execution, longer-horizon goal pursuit — then a beautiful workspace surface over thinner execution loses on substance. **The workspace abstraction only wins if the underlying execution quality stays competitive.** This is the highest-priority risk to monitor; depth investment in the agent itself (planning, tools, autonomy, reliability) cannot be neglected while the workspace layer ships.
+- **UX expectation ceiling.** The ambient presence surface (heartbeat, current focus, recent observations, active goals) makes the agent *feel* autonomous, present, and proactive. That felt-aliveness sets a customer expectation that the agent actually *is* autonomous, present, and proactive — i.e. that it takes initiative, anticipates, persists across context, and acts without prompting. If the agent behaves shallowly under that surface (brittle workflows, weak planning, repetitive behaviour, no real initiative), the illusion breaks hard and the workspace becomes evidence of overpromising rather than of strength. This is adjacent to the capability-depth risk in the previous bullet but specifically a **UX-expectation-management** risk: every step of presence surface we ship implicitly commits the agent to behave in a way that justifies the surface. Ship the presence layer in proportion to the agent's actual capability, not ahead of it.
 
 ## 13. Three-path side-by-side comparison
 
@@ -519,9 +521,47 @@ Different product surface, different customer profile, not a fit for our agency-
 ### 14.8 We will not try to deliver Path C purely through documentation
 The Workspace UI is non-negotiable. A capabilities-doc rewrite without the product surface is Path B with extra steps. The customer must be able to *see* their agent's workspace in the app.
 
+### 14.9 We will not let this become a "workspace UI project"
+Internally, this is the most insidious failure mode and it deserves a named prohibition. The easy reading of this brief — by an engineer scoping a sprint, a PM cutting a roadmap, or a stakeholder skimming for a deliverable — is *"build a Workspace UI."* That reading trivialises the strategic insight and quietly destroys the value of the brief.
+
+This is not a workspace UI project. It is:
+
+- A **product positioning** project — moving the entire conversation about Synthetos from *"agent platform"* to *"persistent operational identity layer for AI workers."*
+- A **platform abstraction** project — establishing identity as the thing we own and compute as the thing we use, so future compute primitives (warm runtimes, edge execution, customer-managed hardware, model-provider sandboxes) compose underneath without disrupting product identity.
+- An **identity layer** project — defining and surfacing the persistent state, memory, files, tools, history, and continuity that constitute an agent's existence.
+- A **market framing** project — refusing the VM frame on its terms while delivering its outcomes through a sharper abstraction.
+
+The Workspace UI is the **embodiment mechanism** for the identity layer. It is the most visible surface but not the deepest commitment. If the work ships as *"Workspace UI v1"* without the positioning rewrite, the abstraction discipline, the language standards, and the cross-team alignment on what Synthetos is actually building, we will have shipped a UI sprint and missed the strategy.
+
+Operational guardrail: every Phase document, spec, sprint summary, and stakeholder update for this work names the strategic frame at the top — *"identity layer project, embodiment surface in flight"* — not *"workspace UI project, screens shipping."* The vocabulary discipline is part of the deliverable.
+
 ## 15. Implementation order
 
-Five components, sequenced for risk reduction and earliest customer value. Each step is independently shippable; cumulative effect compounds.
+Six phases, sequenced for risk reduction and earliest customer value. Phase 0 is validation; Phases 1-4 are build; Phase 5 is reserved. Each step is independently shippable; cumulative effect compounds.
+
+### Phase 0 — Validation before commitment (1-2 weeks)
+The brief reasons from competitive signal, not from customer interviews. Before burning engineering on Phases 1-4, validate the thesis with concrete activities. Phase 0 is small, cheap, and non-negotiable — it protects against shipping a strategy customers don't actually want.
+
+**Customer interviews (target N=10).** Existing customers across the agency-tier and individual-operator profile. Open-ended questions on:
+- *"Where do you think your agent's stuff lives today?"* — tests whether the workspace mental model is missing or already implicit.
+- *"What would change for you if your agent had its own persistent workspace?"* — tests whether persistence outcomes (functional + psychological) resonate.
+- *"Do you think your agent should have its own VM?"* — tests whether VM language emerges organically. If customers don't reach for it, the marketing risk in §12.2 is overstated.
+- *"How do you want to know what your agent is doing right now?"* — tests appetite for the ambient presence surface.
+
+**Positioning A/B test (3 variants).** Across three sample marketing pages or sales decks, test:
+- Variant A — *"Your agent has its own computer"* (Manus-style framing)
+- Variant B — *"Persistent agent workspace, on-demand compute"* (Path C framing)
+- Variant C — *"Synthetos is the persistent operational identity layer for AI workers"* (Rev 4 spine framing)
+
+Measure click-through, sign-up intent, demo requests. Determine which framing actually converts buyers in our addressable market.
+
+**Workspace mockup reaction sessions.** Click-through prototypes of §10.1 — state surface plus minimum-viable ambient presence. Run 5-7 sessions, observing whether customers describe what they see as *"my agent's workspace,"* *"my agent's computer,"* or something else. Their unprompted vocabulary is the signal.
+
+**"Pay only when work happens" resonance test.** Across the same interviews and any pricing-sensitive sales conversations, listen for whether the cost-attribution story resonates as a feature or registers as a limitation. If buyers consistently shrug, the cost-and-audit differentiation is weaker than the brief assumes and Path C's offensive marketing posture needs adjustment.
+
+**Competitive deal-loss audit.** Internal: review the last 6-12 months of lost deals. Tag any that reference VM-tier compute, dedicated runtimes, or the Manus / OpenClaw pitch as a stated reason. Quantifies whether §10.5 (Dedicated Agent Runtime tier) needs to ship in parallel with v1 or genuinely belongs deferred.
+
+**Decision gate at end of Phase 0.** If validation contradicts the brief — e.g. customers consistently want VMs, refuse workspace framing, or care nothing about cost-and-audit — return to §16 and stress-test the thesis again before committing to Phases 1-4. Do not skip this gate to preserve timeline. The brief's recommendation is conditional on the thesis surviving customer contact.
 
 ### Phase 1 — Positioning and persistence model (Week 1)
 - §10.4 Capabilities and positioning rewrite. No code changes; high leverage; prepares the language the Workspace UI in Phase 2 will use.
@@ -599,4 +639,16 @@ A potential customer can:
 
 ---
 
-> **Note for the next reviewer.** This is Rev 4 of the brief. Earlier revisions: Rev 2 stress-tested Path A (build VMs) against Path B (refuse the frame); Rev 3 introduced Path C (Path B's architecture, Path A's presentation) after a reviewer pointed out both purist paths forced an unnecessary trade-off. Rev 4 incorporates a second reviewer pass and adds the strategic spine: §6 names what Synthetos is actually building — *a persistent operational identity layer for AI workers* — so every other recommendation in the brief follows from that principle rather than from compute decisions. Rev 4 also reframes the Workspace UI in §10.1 as the **embodiment layer** for that identity (not an admin dashboard) and adds an *ambient presence* component so the workspace feels alive rather than archival; recasts ephemeral compute in §11.7 as a more evolved architecture rather than a cheap alternative; and adds the *workspace-without-capability-depth* risk to the cons list and open questions, with the explicit note that capability investment in the agent itself cannot be neglected while the workspace layer ships. Section 16 lists where this version could still be wrong; questions 13 and 14 are new in Rev 4 — please push hardest on those, plus anything else that feels load-bearing on a single assumption.
+> **Note for future readers — brief is LOCKED at Rev 5.**
+>
+> Iteration history: Rev 2 stress-tested Path A (build VMs) against Path B (refuse the frame). Rev 3 introduced Path C (Path B's architecture, Path A's presentation) after a reviewer pointed out both purist paths forced an unnecessary trade-off. Rev 4 added the strategic spine in §6 — Synthetos is building a *persistent operational identity layer for AI workers*, with compute interchangeable underneath — and reframed the Workspace UI in §10.1 as the embodiment layer for that identity, with an ambient presence surface to keep it feeling alive. Rev 5 (this version) closes out the strategy phase: adds Phase 0 validation in §15, the UX expectation-ceiling risk in §12.2, and the §14.9 prohibition against treating this as a "workspace UI project."
+>
+> The brief is now considered conceptually complete. Further conceptual revisions should arise only from new evidence (Phase 0 validation results, competitive shifts, customer signal) — not from re-framing the existing argument. The next moves are operational, not editorial:
+>
+> 1. **Phase 0 validation** (§15) — customer interviews, positioning A/B, workspace mockup sessions, deal-loss audit. **Decision gate** at the end of Phase 0; if validation contradicts the thesis, return to §16 and re-stress before committing to Phases 1-4.
+> 2. **Workspace UX exploration** — design-level prototyping of the embodiment surface, including the ambient presence components, before locking §10.1 v1 scope.
+> 3. **Technical feasibility spike** — confirm the run-trace pipeline can support ambient presence (current focus, recent observations) in near-real-time. Names a concrete go/no-go input for §10.1 scope.
+> 4. **Capability roadmap alignment** — explicit pairing with whatever depth investment is happening on agent capability (planning, autonomy, reliability), so §12.2's *workspace-without-capability-depth* risk is tracked rather than assumed away.
+> 5. **§10.2 session-persistence spec** — the only piece of v1 that needs a real engineering spec before code; carry the brief's principles into it directly.
+>
+> If a future reviewer encounters this document, the highest-value thing they can do is push on §16 (Open Questions) with **new evidence**, not new framings. The framings have been worked.
