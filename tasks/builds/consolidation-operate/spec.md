@@ -1,6 +1,6 @@
-**Status:** draft
+**Status:** accepted
 **Spec date:** 2026-05-07
-**Last updated:** 2026-05-07 (round 2 — bucket-1/bucket-2 polish folded in; foundation Phase 0 patch assumed available)
+**Last updated:** 2026-05-07 (chatgpt-spec-review 2 rounds — APPROVED BUILD WITH CONFIDENCE)
 **Author:** michael
 **Build slug:** consolidation-operate
 **Depends on:** `tasks/builds/consolidation-foundation/spec.md` (Phase 0; primitives must land first)
