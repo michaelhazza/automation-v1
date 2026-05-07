@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
-last_updated: 2026-05-07
+active_spec: tasks/builds/consolidation-operate/spec.md
+active_plan: tasks/builds/consolidation-operate/plan.md
+build_slug: consolidation-operate
+branch: ui-consolidation-operate
+status: REVIEWING
+last_updated: 2026-05-08
 last_merged_pr: #270
 last_merged_slug: consolidation-foundation
 last_merged_branch: claude/consolidation-foundation
@@ -24,10 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Status:** **NONE** — PR #270 (`consolidation-foundation`) merged 2026-05-07T09:11:23Z. Pick-next queue: see `tasks/todo.md`.
+**Active spec:** `tasks/builds/consolidation-operate/spec.md`
+**Active plan:** `tasks/builds/consolidation-operate/plan.md` (v1.3, 9 chunks C1–C9, all built)
+**Active build slug:** `consolidation-operate`
+**Branch:** `ui-consolidation-operate` (27 commits ahead of `main`, NOT yet pushed — finalisation-coordinator pushes first)
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-07. All chunks built, G2 PASS, spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer NO_HOLES_FOUND, pr-reviewer APPROVED, dual-reviewer APPROVED (2 iterations, Codex available, 1 fix applied + 2 directional gaps deferred to OPER-DEF-3/4), doc-sync gate PASS. 4 deferred items routed to `tasks/todo.md` (OPER-DEF-1..4). Phase 3 next: `launch finalisation` in a fresh session — that runs S2 sync, G4 regression guard, push, `gh pr create`, and `chatgpt-pr-review` manual rounds. Handoff: `tasks/builds/consolidation-operate/handoff.md`. Progress: `tasks/builds/consolidation-operate/progress.md`. Dual-reviewer log: `tasks/review-logs/dual-review-log-consolidation-operate-2026-05-07T20-58-57Z.md`.
 
 **Just merged:** PR #270 — `consolidation-foundation` (squash-merged from `claude/consolidation-foundation` 2026-05-07). Phase 0 cross-cutting frontend primitives extracted from the broader consolidation prototype set. Ships shared `PageShell` / `Drawer` / `Modal` / `SortableTable` / `FormFooter` / `SearchBox` / `EmptyState` / `ErrorState` / `WorkspaceBadge` / `ViewModeSwitcher` primitives, route registry (`client/src/config/routes.ts` with branded `AppRoute` type, `APP_ROUTE_PATTERNS` literal-tuple, `buildRoute` helper using a negative-lookahead regex to prevent `:id` matching inside `:idFoo`), sidebar config (`client/src/config/sidebar.ts` with `buildNavItems` factory + `NavGroup` types), Layout refactor consuming the new config, helpers (`colorHash` deterministic FNV-1a, `workspace.switchWorkspace` as the only allowed reload call site, `useViewMode` + `useViewModePure`), reference-counted scroll-lock singleton (`overlayScrollLock.ts`) keyed via `Symbol.for(...)` for HMR-safe coordination across stacked overlays. ModuleGuard added for `/clientpulse/*` and `/reports/*` route trees (closed adversarial-reviewer confirmed hole). Late-build bundle: 5 vitest test files converted from custom `npx tsx` harness to vitest's `expect()` API; portable framework tests refactored to read `FRAMEWORK_VERSION` dynamically so future bumps don't break the suite; `finalisation-coordinator` agent updated to auto-resolve known-shape S2 merge conflicts (append-only artefact files take HEAD or union; code-area conflicts still pause). Pipeline: per-chunk pr-reviewer + dual-reviewer + adversarial-reviewer rounds → branch-level chatgpt-pr-review (2 rounds APPROVED) → S2 merge of origin/main with three resolved conflicts (spec.md / plan.md kept HEAD; tasks/todo.md union-merged) → G4 regression guard clean → doc-sync sweep complete → ready-to-merge labelled → all CI green. 6 items deferred (CONSOL-FND-DEF-1..6 in `tasks/todo.md`). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-consolidation-foundation-2026-05-07T08-15-18Z.md`. **Manual G2 still owed by operator:** visual diff of Layout sidebar across user shapes; ViewModeSwitcher transitions; SortableTable filter dropdown select-all; direct-URL nav to `/clientpulse` for a non-system-admin without that module.
 
