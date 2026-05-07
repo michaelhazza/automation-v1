@@ -49,6 +49,11 @@ interface InboxFilters {
   sortDirection?: SortDirection;
   // Only include subaccounts that opted in to org inbox (for org-wide view)
   orgWide?: boolean;
+  /**
+   * When true, archived items are included in the result set (skipped otherwise).
+   * Used by listInboxByBand when band=previous so archived items surface correctly.
+   */
+  includeArchived?: boolean;
 }
 
 // Hard upper bounds to prevent expensive queries
@@ -161,6 +166,7 @@ export const inboxService = {
           updatedAt: tasks.updatedAt,
           subaccountId: tasks.subaccountId,
           priority: tasks.priority,
+          dueDate: tasks.dueDate,
           isRead: inboxReadStates.isRead,
           isArchived: inboxReadStates.isArchived,
           readAt: inboxReadStates.readAt,
@@ -179,7 +185,11 @@ export const inboxService = {
         .limit(MAX_ITEMS_PER_SOURCE);
 
       for (const row of taskRows) {
-        if (row.isArchived) continue;
+        if (!filters.includeArchived && row.isArchived) continue;
+        // Map tasks.priority='urgent' → severity='urgent' so deriveBand can classify correctly.
+        // Tasks cannot reach the 'high' band (HIGH_ELIGIBLE_KINDS excludes 'task'), but the
+        // signals are plumbed for completeness and future band-rule extensions.
+        const taskSeverity = row.priority === 'urgent' ? 'urgent' : undefined;
         items.push({
           entityType: 'task',
           kind: 'task',
@@ -190,6 +200,8 @@ export const inboxService = {
           isArchived: row.isArchived ?? false,
           readAt: row.readAt ?? null,
           updatedAt: row.updatedAt,
+          dueAt: row.dueDate ?? undefined,
+          severity: taskSeverity,
           meta: { subaccountId: row.subaccountId, priority: row.priority },
         });
       }
@@ -214,11 +226,19 @@ export const inboxService = {
           createdAt: reviewItems.createdAt,
           subaccountId: reviewItems.subaccountId,
           actionId: reviewItems.actionId,
+          // suspendUntil from the linked action serves as the approval window deadline (dueAt proxy).
+          // This is the timestamp after which the approval request times out, giving deriveBand
+          // a concrete signal to classify the item as 'high' when the window is within 24 h.
+          actionSuspendUntil: actions.suspendUntil,
           isRead: inboxReadStates.isRead,
           isArchived: inboxReadStates.isArchived,
           readAt: inboxReadStates.readAt,
         })
         .from(reviewItems)
+        .leftJoin(
+          actions,
+          eq(actions.id, reviewItems.actionId)
+        )
         .leftJoin(
           inboxReadStates,
           and(
@@ -232,7 +252,7 @@ export const inboxService = {
         .limit(MAX_ITEMS_PER_SOURCE);
 
       for (const row of reviewRows) {
-        if (row.isArchived) continue;
+        if (!filters.includeArchived && row.isArchived) continue;
         // If search is specified, filter by a simple text match on status (reviews lack a title)
         if (search && !row.reviewStatus.includes(search.toLowerCase())) continue;
         items.push({
@@ -245,6 +265,9 @@ export const inboxService = {
           isArchived: row.isArchived ?? false,
           readAt: row.readAt ?? null,
           updatedAt: row.createdAt,
+          // Use the linked action's suspension deadline as due-date signal for band derivation.
+          // When suspendUntil is within 24 h, deriveBand classifies this as 'high'.
+          dueAt: row.actionSuspendUntil ?? undefined,
           meta: { subaccountId: row.subaccountId, actionId: row.actionId },
         });
       }
@@ -297,7 +320,8 @@ export const inboxService = {
         .limit(MAX_ITEMS_PER_SOURCE);
 
       for (const row of runRows) {
-        if (row.isArchived) continue;
+        if (!filters.includeArchived && row.isArchived) continue;
+        // agent_runs are not high-eligible: dueAt and severity are intentionally not set.
         items.push({
           entityType: 'agent_run',
           kind: 'agent_run',
@@ -489,12 +513,18 @@ export const inboxService = {
     orgId: string,
     filters: ListInboxByBandFilters
   ): Promise<Array<UnifiedInboxItem & { band: InboxBand }>> {
-    // Reuse getUnifiedInbox to fetch all items across all tabs (no tab filter)
+    // Reuse getUnifiedInbox to fetch all items across all tabs (no tab filter).
+    // When band=previous (or no band filter — caller may want all bands including previous),
+    // pass includeArchived=true so archived items reach deriveBand and surface as 'previous'.
+    // Without this flag, getUnifiedInbox skips archived rows and the 'previous' band is
+    // only populated by items that are read-but-not-archived.
+    const includeArchived = !filters.band || filters.band === 'previous';
     const all = await inboxService.getUnifiedInbox(userId, orgId, {
       tab: 'all',
       subaccountId: filters.subaccountId,
       // Pass orgWide when no subaccount filter
       orgWide: !filters.subaccountId,
+      includeArchived,
     });
 
     const now = new Date();
@@ -516,19 +546,6 @@ export const inboxService = {
 
       result.push({ ...item, band });
     }
-
-    // Also include archived items in 'previous' band when band=previous is requested
-    // (getUnifiedInbox skips archived items; re-fetch with isArchived flag)
-    // The existing getUnifiedInbox already includes read items in `all`; archived items
-    // are filtered out in getUnifiedInbox. For the `previous` band we surface them by
-    // re-querying inboxReadStates for archived entity IDs and returning stub items.
-    // To keep complexity low in Phase 1: archived items are visible as "previous"
-    // if they were returned by getUnifiedInbox with isRead=true. The `isArchived`
-    // flag is already checked by deriveBand (archived → previous).
-    // Note: getUnifiedInbox SKIPS archived items (row.isArchived → continue).
-    // Phase 1: only read (non-archived) items surface in previous. Archived items
-    // that are NOT in the active union (task/review/agent_run) are not listed here.
-    // This is acceptable per spec §4.2 Phase 1 scope.
 
     return result;
   },
@@ -686,7 +703,8 @@ export const inboxService = {
 
   /**
    * Archive a single inbox item by entityId.
-   * Delegates to the existing bulk archiveItems with a single-item array.
+   * Idempotent: returns alreadyApplied=true when the item is already archived in
+   * inbox_read_states. Delegates to the existing bulk archiveItems otherwise.
    * Always succeeds (archive is available for all kinds).
    */
   async archiveItem(
@@ -705,6 +723,23 @@ export const inboxService = {
       approval: 'review_item',
     };
     const entityType = kindToEntityType[ref.kind];
+
+    // Idempotency check: if the row already exists with isArchived=true, skip the upsert.
+    const existing = await db
+      .select({ isArchived: inboxReadStates.isArchived })
+      .from(inboxReadStates)
+      .where(and(
+        eq(inboxReadStates.userId, userId),
+        eq(inboxReadStates.entityType, entityType),
+        eq(inboxReadStates.entityId, ref.entityId),
+        eq(inboxReadStates.isArchived, true),
+      ))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return { ok: true, alreadyApplied: true };
+    }
+
     await inboxService.archiveItems(userId, orgId, [{ entityType, entityId: ref.entityId }]);
     return { ok: true, alreadyApplied: false };
   },
