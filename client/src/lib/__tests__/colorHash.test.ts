@@ -1,25 +1,11 @@
 // client/src/lib/__tests__/colorHash.test.ts
 //
 // Pure-function tests for hashToColor.
-// Run with: npx tsx client/src/lib/__tests__/colorHash.test.ts
+// Run via vitest (CI) or `npx vitest run client/src/lib/__tests__/colorHash.test.ts` locally.
 
 import assert from 'assert/strict';
+import { test } from 'vitest';
 import { hashToColor, DEFAULT_WORKSPACE_PALETTE } from '../colorHash.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    console.log(`  PASS  ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  FAIL  ${name}`);
-    console.error(`        ${(err as Error).message}`);
-    failed++;
-  }
-}
 
 // ── Determinism ────────────────────────────────────────────────────────────────
 
@@ -115,11 +101,3 @@ test('different custom palettes produce results scoped to each palette', () => {
   // And they can't be the same value since the palettes have no overlap
   assert.notEqual(colorA, colorB);
 });
-
-// ── Summary ────────────────────────────────────────────────────────────────────
-
-console.log('');
-console.log(`colorHash: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

@@ -1,9 +1,6 @@
 /**
  * useViewModePure — unit tests for the pure derivation helpers.
- *
- * Uses Node's built-in assert/strict module — no test framework required.
- * Run with:
- *   npx tsx client/src/hooks/__tests__/useViewModePure.test.ts
+ * Run via vitest (CI) or `npx vitest run client/src/hooks/__tests__/useViewModePure.test.ts` locally.
  *
  * Test coverage per spec §4.6:
  *   - deriveViewMode: all four representative cases
@@ -12,6 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import {
   deriveViewMode,
   deriveAvailableModes,
@@ -41,28 +39,6 @@ function systemAdminWithOverride(): ViewModeContext {
 
 function systemAdminNoOverride(): ViewModeContext {
   return { hasActiveClient: true, hasSystemOverride: false, isOrgAdmin: true, isSystemAdmin: true };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-let passed = 0;
-let failed = 0;
-const failures: string[] = [];
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    const msg = err instanceof Error ? err.message : String(err);
-    failures.push(`  FAIL  ${name}\n         ${msg}`);
-    console.error(`  FAIL  ${name}`);
-    console.error(`         ${msg}`);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -223,15 +199,3 @@ test('workspace → workspace: no active client still returns true (idempotent)'
   const ctx: ViewModeContext = { hasActiveClient: false, hasSystemOverride: false, isOrgAdmin: false, isSystemAdmin: false };
   assert.equal(isLegalTransition('workspace', 'workspace', ctx), true);
 });
-
-// ---------------------------------------------------------------------------
-// Summary
-// ---------------------------------------------------------------------------
-
-console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.error('\nFailed tests:');
-  for (const f of failures) console.error(f);
-  process.exit(1);
-}

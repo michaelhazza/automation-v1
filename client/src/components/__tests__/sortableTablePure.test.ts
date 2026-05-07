@@ -2,38 +2,17 @@
  * sortableTablePure.test.ts
  *
  * Pure-function tests for SortableTable helpers.
- *
- * Self-contained — uses Node's built-in `assert` module only (no Jest, no Vitest).
- * Run via:
- *   npx tsx client/src/components/__tests__/sortableTablePure.test.ts
+ * Run via vitest (CI) or `npx vitest run client/src/components/__tests__/sortableTablePure.test.ts` locally.
  */
 
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import {
   compareForSort,
   deriveFilterKey,
   applySortAndFilters,
   type ColumnDef,
 } from '../sortableTablePure.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-let passCount = 0;
-let failCount = 0;
-
-function test(label: string, fn: () => void): void {
-  try {
-    fn();
-    console.log(`  PASS  ${label}`);
-    passCount++;
-  } catch (err) {
-    console.error(`  FAIL  ${label}`);
-    console.error(`        ${(err as Error).message}`);
-    failCount++;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // compareForSort — string
@@ -343,13 +322,3 @@ test('stability: equal-key rows preserve insertion order', () => {
     'second asc flip still preserves insertion order',
   );
 });
-
-// ---------------------------------------------------------------------------
-// Summary
-// ---------------------------------------------------------------------------
-
-console.log(`\n── Results: ${passCount} passed, ${failCount} failed ──\n`);
-
-if (failCount > 0) {
-  process.exit(1);
-}
