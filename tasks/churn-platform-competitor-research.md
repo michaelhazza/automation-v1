@@ -1,289 +1,216 @@
-# Customer Success Platform Market — Competitor & Viability Brief
+# AI Churn Detection / Customer Success Platform — Executable Research Brief
 
 **Date:** 2026-05-08
-**Author:** Strategy session (Claude)
-**Purpose:** Assess the size, structure, and contestability of the Customer Success Platform (CSP) market as a beachhead wedge for Synthetos. Read alongside `tasks/universal-chat-entry-brief.md` and `docs/capabilities.md`.
+**Type:** Executable research prompt (hand to a fresh Claude session)
+**Companion brief:** `tasks/portfolio-ops-competitor-research.md`
 
 ---
 
-## Table of Contents
+## Sections
 
-1. TL;DR
-2. Market sizing
-3. Competitive landscape
-4. Pain points incumbents have not solved
-5. Where Synthetos can win
-6. Risks & headwinds
-7. Decisions required from leadership
-8. Recommended next moves (90 days)
-9. Open questions for further research
-10. Sources
-
----
-
-## 1. TL;DR
-
-- **Market is real and growing fast.** 2025 CSP market sized $2.1B–$5.8B depending on methodology; consensus CAGR 22–26%; 2030 estimates $6B–$22B. Even the conservative reads put it at a $5B+ category by decade end.
-- **Incumbents are mature, profitable, and consolidating.** Gainsight (PE-owned, est. $200M+ ARR), Totango+Catalyst merged Feb 2024 (~600 customers combined), ChurnZero ($180M+ rev, going hard on AI). Vitally is the modern challenger. The market is no longer a green field.
-- **Incumbent pain points are durable.** 6–12 week implementations, reporting rigidity, admin overhead, "AI bolted on" complaints — these are structural to legacy architectures and cannot be patched with feature releases.
-- **AI-native window is open but closing.** ChurnZero has redirected 80% of engineering to AI. Vitally rebranded around AI. New entrants (Cuoral, others) are stealth-launching. Synthetos has 12–18 months before "AI-native CS" stops being differentiated.
-- **Viability verdict: yes, with conditions.** A $1M–$3M ARR business in 24 months is achievable on a focused mid-market wedge. Scaling beyond $10M ARR requires either vertical depth or a structural advantage incumbents cannot copy (multi-tenant agency motion, portfolio intelligence, model-agnostic routing).
-- **Biggest risk is not Gainsight — it's ChurnZero.** Gainsight is slow and enterprise; ChurnZero is fast, cheap, mid-market, and committed to AI. They are the direct competitor for our ICP.
+1. Mission
+2. Background context
+3. Strategic hypothesis to test
+4. Research questions (must answer with evidence)
+5. Out of scope
+6. Sources to consult
+7. Deliverables
+8. Quality bar
+9. Assumptions to challenge explicitly
+10. Output format expectations
+11. Stop conditions
 
 ---
 
-## 2. Market sizing
+## 1. Mission
 
-### 2.1 Top-down TAM
+Validate (or refute) the hypothesis that Synthetos has a defensible **first wedge** selling **AI-native, action-oriented churn detection** to mid-market B2B SaaS — and produce the evidence base needed to make a go / no-go decision in the next 30 days.
 
-Multiple research firms, varied methodologies:
+Output a memo that lets the founder decide:
+- Is the wedge real?
+- Who exactly pays?
+- How big is it?
+- What's the 90-day move?
 
-| Source | 2025 size | 2030/2031 size | CAGR |
-|---|---|---|---|
-| Mordor Intelligence | $2.20B | $5.99B (2030) | 22.18% |
-| ReportPrime | $5.80B | — | 22.15% |
-| Research and Markets | $2.92B | — | 23.4% |
-| Expert Market Research | $2.15B | $21.85B (2035) | 26.10% |
-| Straits Research | $2.83B (2025) | $16.6B (2033) | 24.73% |
+## 2. Background context
 
-The 2.5x variance reflects different definitions (CS software only vs. CS + adjacent retention tooling). Take the conservative read: **~$2.5B in 2025, ~$6B in 2030**, growing >20% annually. This is one of the better-growing B2B software categories.
+### What Synthetos is
+Multi-tenant operations platform for AI agents. Three-tier isolation (System → Org → Subaccount). Out-of-the-box agents and workflows. Approval gates on agent actions. Model-agnostic routing. Full positioning in `docs/capabilities.md`.
 
-### 2.2 Bottom-up sanity check
+### Why this wedge is being considered
+- Churn detection has a built-in OOTB workflow path inside Synthetos (composite health scoring + integration framework + approval gates), so time-to-value is plausibly under 7 days.
+- B2B SaaS VPs of CS at $5M–$25M ARR have a budgeted line item, an immediate pain (NRR pressure), and a clear current-vendor cohort (ChurnZero, Vitally, Totango+Catalyst, sometimes Gainsight).
+- A separate research brief at `tasks/portfolio-ops-competitor-research.md` covers the candidate **second** wedge (AI Operations Layer for Holdcos / lower-mid PE).
 
-- US B2B SaaS companies (20–500 employees): ~847,000 (per benchmark research)
-- Of those, ~195,000 in "target verticals" with $500k+ S&M spend
-- CSP penetration in the $5M–$50M ARR band: estimated 25–40% today, rising
-- Addressable sub-segment for Synthetos's ICP ($5M–$25M ARR B2B SaaS, US/EU): **~6,000–10,000 companies**
-- At an average $30k ACV: **~$200M–$300M ARR** of pure-mid-market spend, before international expansion
+### Initial findings (from prior research, validate and extend)
+1. **Market is real and growing fast.** 2025 CSP market sized $2.1B–$5.8B depending on methodology (Mordor: $2.20B, ReportPrime: $5.80B, Research and Markets: $2.92B); consensus CAGR 22–26%; 2030 estimates $6B–$22B.
+2. **Incumbents are mature and consolidating.** Gainsight (Vista-owned, est. $200M+ ARR), Totango+Catalyst merged Feb 2024 (~600 customers combined), ChurnZero ($180M+ rev per Latka, treat as upper bound), Vitally ($42.6M raised, A16Z + HubSpot Ventures). Catalyst was acquired by Totango — confirm no further consolidation since.
+3. **AI-native window is open but closing.** ChurnZero claims "first CSP with native CS-tuned GenAI" and has redirected 80% of engineering to AI. Vitally rebranded as "AI Copilot for Customer Success." Cuoral and other AI-native challengers stealth-launching.
+4. **Incumbent pain points are durable.** 6–12 week implementations (Gainsight), reporting rigidity (#1 ChurnZero complaint), admin overhead, "AI feels bolted on" — structural to legacy architectures.
+5. **ICP candidate:** B2B SaaS, $5M–$25M ARR, 100–1,000 customers, ARPU $500–$5k/mo, NRR 95–105%, US/EU.
+6. **Pricing candidate:** $1.5k entry / $4k team / $9k portfolio (monthly).
+7. **Realistic capture:** ~6,000–10,000 companies in the ICP slice; Year 3 target ~$6M ARR at 1.8% capture.
 
-This aligns with the $2.5B–$6B top-down sizing once enterprise (Gainsight stronghold) and SMB tail are included.
+### Initial assumptions (challenge these)
+1. ChurnZero is the *direct* competitor, Gainsight is too enterprise to fight, Totango+Catalyst is going up-market not down.
+2. The wedge message is "AI that takes action, not just alerts."
+3. Multi-tenant becomes a defensible moat as customers grow into multi-BU/multi-region rollouts.
+4. Switching cost in CS software is high — competitive displacement only works at renewal cycles.
+5. Buy-vs-build threat is ~30% of would-be buyers; the remaining 70% is still a $5B+ opportunity.
 
-### 2.3 Synthetos's realistic capture path
+## 3. Strategic hypothesis to test
 
-| Year | Customers | Avg ACV | ARR | % of mid-market ICP |
-|---|---|---|---|---|
-| Year 1 | 20 | $20k | $400k | 0.2% |
-| Year 2 | 60 | $30k | $1.8M | 0.7% |
-| Year 3 | 150 | $40k | $6M | 1.8% |
-| Year 5 | 400 | $50k | $20M | 5% |
+> **Mid-market B2B SaaS VPs of CS will pay $1.5k–$4k/month for an AI-native, action-oriented churn detection platform that lands in 7 days, because (a) ChurnZero/Vitally have visible incumbent pain (slow setup, reporting rigidity, alert-not-act), (b) the $5M–$25M ARR band is under-served by Gainsight (too expensive) and over-served by ChurnZero (too configuration-heavy), and (c) Synthetos's OOTB workflow + integration framework makes the 7-day promise actually executable.**
 
-5% of a single sub-segment = $20M ARR. This is a plausible Series B story. Beyond that, growth requires going up-market (compete with Gainsight directly), going international, or expanding the wedge into adjacent ops (RevOps, GTM ops).
+A successful brief either confirms this with sourced evidence and a clear ICP, or refutes it with specific reasons (and proposes an alternative wedge or a no-go).
 
----
+## 4. Research questions
 
-## 3. Competitive landscape
+### 4.1 Market sizing
 
-### 3.1 The four players that matter
+1. Reconcile the wide TAM range ($2.1B–$5.8B in 2025). Which methodology best fits Synthetos's ICP? Cite Mordor, ReportPrime, MarketsandMarkets, Research and Markets, Straits, Expert Market Research.
+2. How many B2B SaaS companies sit in the $5M–$25M ARR band globally and in US/EU? Sources: ChartMogul, Lighter Capital, Pepper Effect, Benchmarkit, OpenView. Validate the ~6,000–10,000 ICP estimate.
+3. What is current CSP penetration in this band? 25–40% is the prior estimate — verify or replace with sourced data.
+4. What is the realistic 3-year and 5-year ARR ceiling at 1–5% capture of the ICP?
 
-#### Gainsight
-- **Founded:** 2009
-- **Ownership:** Vista Equity Partners (acquired Nov 2020 for $1.1B at ~$100M ARR; estimated $200M+ ARR today)
-- **Customer count:** 1,000+ (as of 2019 disclosure; likely 1,500+ now)
-- **Pricing:** $80k+/year starting; enterprise often $200k–$500k+
-- **Position:** Category leader, enterprise focus
-- **Strengths:** Feature breadth, ecosystem, brand recognition, board-level credibility
-- **Weaknesses:**
-  - Lengthy implementation (6–12+ weeks documented)
-  - Heavy admin complexity, requires dedicated CS Ops
-  - "Excessive AI focus at expense of basic feature stability" (admin community quote)
-  - Price premium that mid-market can't justify
-- **Threat to Synthetos:** LOW for the $5M–$25M ARR ICP. Their buyer is $50M+ ARR.
+### 4.2 Competitive landscape
 
-#### ChurnZero — *the direct competitor*
-- **Founded:** 2015
-- **Ownership:** Independent (Insight Partners-backed)
-- **Revenue:** $180.8M reported in 2024 (Latka data; treat as upper-bound estimate, may include services)
-- **Customer count:** Mid-thousands (4,000–10,000 range based on disclosures)
-- **Pricing:** $12k entry; $25k+ for mid-market deployments
-- **Position:** Mid-market leader, AI-aggressive
-- **Strengths:**
-  - 4.7/5 on G2 with 1,558+ reviews — strong user love
-  - "First CSP to embed CS-tuned GenAI natively" (their own claim, market accepts it)
-  - 80% of engineering on AI roadmap
-  - Faster implementation than Gainsight
-  - Strong customer service reputation
-- **Weaknesses:**
-  - Reporting rigidity is the #1 user complaint
-  - Limited admin tooling at enterprise scale
-  - Learning curve deters non-technical users
-  - Heavy CRM dependency, configuration overhead
-  - Architecture is still pre-AI-native; AI is built on top of legacy data model
-- **Threat to Synthetos:** **HIGH.** Same ICP, same price band, racing to AI. This is the company Synthetos must out-position.
+For each named competitor, produce: founding year, ARR or revenue, customer count, recent funding, AI-product status, ICP positioning, top 3 strengths, top 3 weaknesses, current G2 / Gartner Peer Insights ratings.
 
-#### Totango + Catalyst (merged February 2024)
-- **Backing:** Great Hill Partners
-- **Combined customers:** ~600 globally (notably small)
-- **Catalyst pre-merger:** $44.2M revenue (Oct 2024 disclosure), $63.4M raised total
-- **Position:** Stated strategy is to "take on Gainsight" — clear enterprise/upmarket play
-- **Strengths:**
-  - Combined enterprise + product capabilities
-  - Modern UX inherited from Catalyst
-  - PE backing for sales scale
-- **Weaknesses:**
-  - Mid-merger integration risk (technology unification ongoing)
-  - Customer base is small relative to Gainsight or ChurnZero — limited network effects
-  - Going up-market means leaving Synthetos's ICP relatively uncontested
-- **Threat to Synthetos:** LOW–MEDIUM. They are aiming above us. Watch in 18–24 months if they pivot back down.
+- **Gainsight** (Vista Equity-owned, est. $200M+ ARR — confirm; enterprise-only price points; AI features added in 2024–2025 — assess product credibility)
+- **ChurnZero** (the direct competitor — confirm Latka $180M revenue figure; Insight Partners-backed; "first AI-native CSP" claim; 80% engineering on AI — what have they actually shipped?)
+- **Totango + Catalyst** (post-merger Feb 2024 — what is the integrated product? Did the merger actually ship a unified platform? Has Great Hill Partners injected more capital?)
+- **Vitally** ($42.6M raised; Series B Feb 2023; "AI Copilot" rebrand — assess shipped AI features vs. marketing)
+- **Pylon** — B2B support + CS with AI agents
+- **Update.ai** — meeting intelligence + CS
+- **Cuoral** — explicit AI-native churn detection ("85%+ accuracy" claim — challenge it)
+- Stealth-mode AI-native CS entrants — find at least 3 not in this list
+- **HubSpot CS Hub** — bundle threat; what is the agentic AI roadmap?
+- **Salesforce Customer 360 / Service Cloud** — bundle threat at enterprise
 
-#### Vitally
-- **Founded:** 2017
-- **Funding:** $42.6M total (last round Series B, $30M, Feb 2023, led by Next47)
-- **Backers:** Andreessen Horowitz, HubSpot Ventures, NewView Capital
-- **Headcount:** 120
-- **Position:** Modern mid-market challenger; rebranded around "AI Copilot for Customer Success"
-- **Strengths:**
-  - Modern UX; popular with PLG/product-led companies
-  - HubSpot Ventures backing = HubSpot integration story
-  - AI repositioning is on-strategy
-- **Weaknesses:**
-  - Smaller than ChurnZero
-  - Less vertical depth than incumbents
-  - Limited enterprise muscle
-- **Threat to Synthetos:** **MEDIUM.** Same ICP, same modern positioning. Less aggressive than ChurnZero on AI but better UX.
+### 4.3 Buyer reality
 
-### 3.2 AI-native challengers (the new wave)
+1. Who is the actual economic buyer for a $1.5k–$4k/mo CS tool at a $10M–$25M ARR SaaS? Validate VP CS as champion, CFO as economic buyer, Head of RevOps as influencer.
+2. What is the buying committee shape and the typical sales cycle length? Find 3+ first-person sources (VP CS at this band who recently bought).
+3. Where does this buyer hang out — Pavilion, CS Cafe, Modern Sales Pros, RevOps Co-op, Wynter, ChurnZero community, LinkedIn cohorts? Confirm size and engagement.
+4. What are the top 5 specific complaints VPs of CS have about ChurnZero / Vitally / Gainsight in 2025–2026? Sources: G2 reviews, Gartner Peer Insights, Reddit r/CustomerSuccess, Pavilion threads, podcast interviews.
+5. What is the typical renewal-cycle timing for ChurnZero/Vitally customers? When does competitive displacement work?
 
-- **Cuoral** — explicit churn-detection AI startup, "Day 1 detection" positioning, claims 85%+ accuracy
-- **Pylon** — B2B support platform with AI agents, adjacent to CS
-- **Update.ai** — meeting intelligence + CS signals, narrower scope
-- Several stealth-mode AI-native CS plays surfacing in 2025 H2 (per industry signals)
+### 4.4 Where Synthetos can win (or can't)
 
-These are the natural competitive cohort for Synthetos. None has reached $10M ARR yet (best estimate). The window where "AI-native" is the differentiator is open but narrowing.
+1. Map Synthetos's architectural advantages (multi-tenant, OOTB workflows, approval gates, agentic, model-agnostic) against named incumbent gaps. Specifically — is action-orientation (Synthetos executes save plays) a felt buyer pain, or do buyers prefer alerts because they want human-in-the-loop?
+2. Is the 7-day implementation promise credible? What does the OOTB churn-detection demo actually look like with which integrations live?
+3. What competitor would be most threatening if they decided to attack the same ICP with the same wedge message? How fast could ChurnZero ship a credible "agentic CS" product?
+4. Is the multi-tenant story actually compelling for mid-market CS, or is it a feature that lands only after expansion (BUs, regions)?
 
-### 3.3 Adjacent / bundled threats
+### 4.5 Risks
 
-- **HubSpot Customer Success Hub** — bundled with HubSpot CRM, free-to-cheap, "good enough" for many SMBs
-- **Salesforce Customer 360 / Service Cloud** — bundled enterprise option
-- **Pendo / Mixpanel / Amplitude** — product analytics with CS overlap, used as "CSP-lite" by many
-- **Internal builds** — covered separately; the "we'll build it with Claude Code" threat is real for ~30% of would-be buyers
+1. Top 5 competitive risks ranked by probability and severity.
+2. Top 3 structural risks (buy-vs-build, switching costs, regulatory).
+3. Top 3 macro risks (B2B SaaS spend tightening, AI regulation on agentic actions on customer data, GDPR/EU AI Act timeline).
+4. The ChurnZero AI roadmap risk — what would they have to ship in 2026 to close the gap?
 
----
+### 4.6 Decision support
 
-## 4. Pain points incumbents have not solved
+1. Recommended ICP definition (concrete: "$X–$Y ARR, N customers, ARPU $Z, NRR range, vertical preference").
+2. Recommended pricing tiers (3 tiers, validate $1.5k / $4k / $9k vs. market).
+3. Recommended pilot structure (free vs. paid, length, success metric, money-back terms).
+4. Recommended initial sales motion (founder-led, AE hire timing, channel mix — competitive displacement vs. greenfield).
+5. Recommended first 5 design partners profile (specific company shapes, not names).
 
-Validated from G2, Gartner Peer Insights, and competitive comparison content:
+## 5. Out of scope
 
-| Pain | Gainsight | ChurnZero | Totango/Catalyst | Vitally |
-|---|---|---|---|---|
-| Slow implementation (6+ weeks) | Severe | Moderate | Severe | Moderate |
-| Admin complexity / requires CS Ops | Severe | Moderate | Moderate | Low |
-| Reporting rigidity | Moderate | **Severe (#1 complaint)** | Moderate | Low |
-| AI feels bolted on | Moderate | Moderate | Severe | Low |
-| Action-orientation (executes vs. alerts) | Weak | Weak | Weak | Weak |
-| Multi-tenant for portfolios/agencies | None | None | None | None |
-| Approval workflows on auto-actions | Weak | Weak | Weak | Weak |
-| Per-skill model routing | None | None | None | None |
-| Pricing transparent for mid-market | Poor | Poor | Poor | Moderate |
+- Enterprise SaaS ($75M+ ARR) — defended by Gainsight + Salesforce Customer 360
+- Sub-$2M ARR companies — no budget, no champion, freemium HubSpot CS Hub adequate
+- Pure customer support (Intercom, Zendesk, Front territory) — different buyer, different motion
+- Consumer-product churn (telecoms, B2C SaaS) — different signal architecture
+- LP-reporting / fund-side CS analytics — covered by Carta/Visible
+- Pure CRM (Salesforce, HubSpot) — adjacent, not the wedge
+- Fund accounting and back-office tooling — irrelevant
 
-The bottom four rows are where Synthetos has structural advantages incumbents cannot replicate without rebuilding.
+## 6. Sources to consult
 
----
+### Companies & products
+ChurnZero (churnzero.com, Customer Success AI page, Harbinger), Gainsight (gainsight.com), Totango+Catalyst (totango.com, catalyst.io), Vitally (vitally.io), Pylon, Update.ai, Cuoral, Velaris, Accoil, Oliv.ai churn comparisons, Coworker.ai comparisons, Avoma comparisons, BuildBetter platform reviews
 
-## 5. Where Synthetos can win
+### Review and benchmark sites
+G2 (CSP category leaders, ChurnZero/Gainsight pages), Gartner Peer Insights (CSP Magic Quadrant 2025), Capterra, TrustRadius, SoftwareSuggest
 
-### 5.1 Differentiators that map to incumbent weaknesses
+### Publications & research
+Mordor Intelligence (Customer Success Management Market), MarketsandMarkets (CSP report), ReportPrime, Research and Markets, Straits Research, Expert Market Research, Forrester (CSP consolidation blog), McKinsey & Bain SaaS reports, OpenView SaaS Benchmarks
 
-1. **AI-native, action-oriented architecture.** Incumbents alert; Synthetos executes save plays through approval gates. This is the primary wedge message.
-2. **Multi-tenant from day one.** Critical for any buyer with multiple business units, regions, brands, or portfolio companies. Incumbents are single-tenant — adding it is a 12–24 month rebuild.
-3. **Approval workflows native.** Compliance-grade audit trail for AI actions on customer accounts. Becomes existential as agentic AI takes more action on real customer data.
-4. **Model-agnostic routing.** When GPT-6 / Claude 5 / Gemini 3 ships, Synthetos routes to it per skill. Incumbents will have written model-specific code throughout their stack.
-5. **Faster onboarding.** OOTB churn-detection workflow + integrations should land first value in 7 days. Incumbents take 6+ weeks. This is the demo-able difference.
-6. **Lower price.** $1k–$3k/mo opens the lower mid-market band ($5M–$10M ARR) that ChurnZero has priced out.
+### Communities & operator sources
+Pavilion (CS leader community), Customer Success Cafe, RevOps Co-op, Modern Sales Pros, Wynter, Sales Assembly, Demand Curve, ChurnZero community, Vitally Success Network
 
-### 5.2 The wedge sales motion
+### Specific people / signals to find
+- VP CS at $10M–$25M ARR Series B SaaS who joined in last 12 months (LinkedIn Sales Nav)
+- Pulse conference attendees (Gainsight's event — full of dissatisfied buyers)
+- ChurnZero/Vitally renewal cycles via job-posting and intent data
+- Recent (2025–2026) "Head of Customer Success" job postings — what tooling do they require?
+- B2B SaaS Benchmarks 2026 (Pepper Effect, ChartMogul, Lighter Capital)
+- Recent G2 1-star and 2-star reviews on ChurnZero / Vitally / Totango — find concrete pain quotes
 
-| Stage | Tactic |
-|---|---|
-| Top-of-funnel | Competitive displacement targeting ChurnZero/Vitally/Totango customers approaching renewal. Content: "We replaced ChurnZero in 2 weeks" case studies. |
-| Discovery | Single hero use case: "First 10 at-risk accounts flagged with recommended save actions by Friday." |
-| Pilot | 14-day paid pilot, $0–$2k. Outcome: at-risk-account list + 3 save plays executed. |
-| Expansion | Land on churn, expand to QBR prep, exec briefings, RevOps hygiene. The OS thesis becomes real *after* the wedge lands. |
-| Defense | Lock in via multi-tenant rollouts (BU/region/brand) — once a portfolio depends on Synthetos isolation, switching cost is high. |
+## 7. Deliverables
 
-### 5.3 What Synthetos should NOT do
+A single memo, ~10–15 pages, in `tasks/churn-research-output.md`, with these sections:
 
-- **Do not pitch the platform.** "Operations OS" lands flat in mid-market CS. Lead with churn outcomes.
-- **Do not pursue enterprise <$50M ARR companies.** Gainsight will defend; long sales cycles will burn runway.
-- **Do not start with the agency motion.** The agency story is the *expansion*, not the wedge. Direct-to-VP-CS first.
-- **Do not chase feature parity with Gainsight.** That race is unwinnable and unnecessary. Be deliberately narrower and faster.
+1. **TL;DR** (≤6 bullets)
+2. **Verdict:** GO / NO-GO / GO-WITH-CONDITIONS — with one-paragraph rationale
+3. **Market sizing** (top-down + bottom-up + capture path)
+4. **Competitive landscape** (named competitors with structured profile per §4.2)
+5. **ICP definition** (concrete, exclusionary)
+6. **Pain-point matrix** (incumbents × pain points)
+7. **Where Synthetos can / can't win**
+8. **Recommended wedge motion** (positioning, pricing, pilot, sequencing)
+9. **Risks ranked**
+10. **90-day next moves** (numbered, with owners and acceptance criteria)
+11. **Sources** (markdown links, ≥20 distinct sources)
 
----
+## 8. Quality bar
 
-## 6. Risks & headwinds
+**Good looks like:**
+- Every quantitative claim has a source link
+- Every named competitor has at least 5 data points (founded, ARR/rev, customers, last raise, AI status, G2/Gartner rating)
+- The ICP is narrow enough that a salesperson could build a target list from it the same day
+- The 90-day plan has acceptance criteria — each item is either done or not done
+- The memo openly states what couldn't be validated and what the executing session is uncertain about
+- Real quotes from VPs of CS (or sourced equivalents) appear in the pain-point analysis
 
-### 6.1 Competitive risks (ranked)
+**Bad looks like:**
+- Vague TAM ranges with no methodology
+- "ChurnZero has AI" without specific evidence of what they shipped vs. marketing
+- Generic positioning ("we'll win on AI") without naming the structural advantage incumbents can't copy
+- Missing the AI-native challenger cohort (Cuoral, Pylon, stealth entrants) entirely
+- Recommending "GO" without a credible 7-day-pilot demo path
 
-1. **ChurnZero's AI roadmap closes the gap.** With 80% of engineering on AI, they ship native agentic features in 2026. Differentiation collapses to "we have multi-tenant" — a feature mid-market doesn't urgently need.
-2. **Vitally rebrand sticks.** Vitally is the most architecturally similar challenger (modern stack, AI-positioned, A16Z-backed). They have an 18-month head start on brand and partnerships.
-3. **A new AI-native entrant raises a $50M Series B** with celebrity-VC backing and outspends Synthetos on category creation.
-4. **Gainsight ships "Gainsight Lite" or acquires an AI-native startup** to attack mid-market downward.
-5. **HubSpot CS Hub gets agentic** and bundles AI churn detection free with HubSpot CRM — eats the bottom of mid-market.
+## 9. Assumptions to challenge explicitly
 
-### 6.2 Structural risks
+1. **Is "AI churn detection" actually being purchased as a category, or is it a feature line buyers want bundled into existing CSPs?** If it's a feature, Synthetos competes against incremental ChurnZero releases, not as a standalone product.
+2. **Is ChurnZero's AI lead defensible?** Their architecture is pre-AI-native — challenge the prior assumption that they can ship credible agentic features in 12–18 months. Look at their actual 2024–2026 release notes.
+3. **Is the 7-day pilot promise actually executable on Synthetos's current OOTB product?** Validate by reading capabilities.md and integration framework — do not take this on faith.
+4. **Is the mid-market ICP ($5M–$25M ARR) actually budget-rich enough for $1.5k–$4k/mo CS tooling, or is HubSpot CS Hub bundle eating it?** Test penetration data and HubSpot AI roadmap.
+5. **Is buy-vs-build risk really only ~30%?** The prior estimate is unsourced. Validate against actual VP-CS conversations or sourced operator quotes.
+6. **Is action-orientation (executing save plays) what the buyer wants, or do they want better alerts and faster triage?** Test directly with operator interviews.
 
-- **Buy-vs-build:** ~30% of would-be buyers will attempt a Claude-Code internal build. Mitigated by ICP discipline (target non-technical CS leaders) and aggregate-intelligence moat.
-- **Switching costs in CS software are high.** Reps trained, dashboards configured, integrations live. Even a clearly-better product faces inertia. Mitigated by competitive displacement at renewal cycles only.
-- **Vertical depth required for moat.** Without aggregate churn intelligence across customers (the network effect), Synthetos eventually competes only on price. Must build benchmarks/data-flywheel from customer #10.
+## 10. Output format expectations
 
-### 6.3 Macro risks
+- Markdown
+- All claims sourced (footnote-style or inline links)
+- Concrete numbers preferred over ranges where possible
+- Tables for competitor comparisons and pain-point matrices
+- Executive summary readable in 90 seconds
+- Full memo readable in 20 minutes
+- No marketing tone. No hedging. State what is true, what is uncertain, and what would change the answer.
 
-- B2B SaaS spend tightening in late 2025/2026 = longer sales cycles, more procurement scrutiny.
-- AI regulation (EU AI Act, US state-level) may slow agentic AI deployment on customer data — slows entire category but disproportionately hits us as agentic AI is core to pitch.
+## 11. Stop conditions
 
----
+Stop and report if any of these conditions are hit:
 
-## 7. Decisions required from leadership
+- ChurnZero has shipped a credible agentic-action product (rated 4.5+ on G2 with shipped save-play execution features) in 2025–2026
+- HubSpot CS Hub bundles agentic AI churn detection in its standard tier in 2025–2026
+- Mid-market ($5M–$25M ARR) penetration of CS platforms is found to be >60% (saturated) with high satisfaction
+- Buy-vs-build evidence shows >50% of target buyers will internal-build with Claude Code / OpenAI / similar
+- Operator interviews indicate "alerts are fine, we don't want auto-action" — the action-orientation wedge is wrong
+- The 7-day pilot promise is found to be uncredible against Synthetos's current product (integration gaps, missing skills, no working demo)
 
-1. **Wedge commitment.** Are we willing to narrow Synthetos's external positioning to "AI churn detection for B2B SaaS" for 12 months? Required for sales focus and content efficiency.
-2. **Pricing model.** $1k/mo entry vs. $2k/mo entry. Lower entry = faster logo growth, lower ACV. Higher entry = better margins, slower start. Recommend $1.5k/mo entry to undercut ChurnZero without commodity-pricing.
-3. **Pilot structure.** Free pilot vs. paid pilot ($500–$2k). Recommend paid — qualifies seriousness, accelerates conversion.
-4. **Geographic focus.** US-only Year 1 vs. US+UK. Recommend US-only — sales cycle simplicity, founder-led motion.
-5. **Vertical specialisation inside SaaS.** "All B2B SaaS" vs. "Vertical SaaS only" (legaltech, healthtech, fintech, etc.). Recommend horizontal B2B SaaS Year 1, vertical-specific case studies Year 2.
-6. **Build the aggregate-intelligence moat now or later?** Recommend now — design the data architecture from customer #1 to enable cross-customer benchmarks at customer #25.
-7. **Competitive displacement vs. greenfield.** Both work; displacement compresses sales cycle but requires renewal-timing intel. Recommend 60% displacement / 40% greenfield in pipeline mix.
-
----
-
-## 8. Recommended next moves (90 days)
-
-1. **Pick 5 design partners** in $5M–$25M ARR B2B SaaS. Ideal: 3 displacing ChurnZero/Vitally, 2 first-time CS tooling.
-2. **Ship a 7-day pilot promise** with measurable outcome (at-risk account list + 3 executed save plays). Money-back if missed.
-3. **Build aggregate-data architecture** so customer #1's signals contribute to a shared benchmark library (with consent).
-4. **Publish one piece of research** ("State of B2B SaaS Churn 2026: AI-Era Benchmarks") to anchor the brand at the AI-native position before ChurnZero captures it.
-5. **Identify 3 ChurnZero/Vitally renewal hunters** — sales reps from CS-adjacent companies who know which accounts are unhappy. Hire one as #1 AE.
-6. **Lock pricing** at $1,500/mo entry, $4,000/mo team tier, $9,000/mo portfolio tier. Public pricing — direct contrast to incumbents' "talk to sales."
-
----
-
-## 9. Open questions for further research
-
-- ChurnZero exact ARR (the $180M Latka figure may include services/multi-year contract value — should validate against private signals).
-- Renewal timing data for ChurnZero/Vitally cohorts (intent data sources).
-- Specific churn-action workflows that incumbent customers most want and can't get.
-- AI-regulation timeline for agentic actions on customer accounts (especially in EU).
-- Stealth-mode AI-native entrants — names, backers, traction. Worth a separate quarterly scan.
-
----
-
-## 10. Sources
-
-- [Mordor Intelligence — Customer Success Management Market](https://www.mordorintelligence.com/industry-reports/customer-success-management-market)
-- [ReportPrime — Customer Success Platforms Market](https://www.reportprime.com/customer-success-platforms-r14655)
-- [Research and Markets — Customer Success Platforms Market Report 2026](https://www.researchandmarkets.com/reports/5783011/customer-success-platforms-market-report)
-- [Expert Market Research — Customer Success Platform Market](https://www.expertmarketresearch.com/reports/customer-success-platform-market)
-- [Straits Research — Customer Success Management Market](https://straitsresearch.com/report/customer-success-management-market)
-- [Gainsight — $100M ARR Press Release](https://www.gainsight.com/press/gainsight-delivers-record-breaking-year-surpassing-100-million-arr-as-momentum-for-customer-success-movement-accelerates-worldwide/)
-- [TechCrunch — Vista acquires Gainsight for $1.1B](https://techcrunch.com/2020/11/30/vista-acquires-gainsight-for-1-1b-adding-to-its-growing-enterprise-arsenal/)
-- [Latka — ChurnZero Revenue & Customers](https://getlatka.com/companies/churnzero)
-- [Latka — Catalyst Software Revenue](https://getlatka.com/companies/catalyst-software)
-- [TechCrunch — Totango + Catalyst Merger](https://techcrunch.com/2024/02/28/totango-catalyst-merger-customer-success/)
-- [Forrester — Customer Success Platform Consolidation](https://www.forrester.com/blogs/customer-success-platform-consolidation-reflects-market-dynamism/)
-- [TechCrunch — Vitally $30M Series B](https://techcrunch.com/2023/02/22/showing-customer-success-platforms-havent-lost-steam-vitally-secures-30m/)
-- [Coworker.ai — ChurnZero vs Gainsight Comparison](https://coworker.ai/blog/churnzero-vs-gainsight)
-- [Avoma — Gainsight vs ChurnZero](https://www.avoma.com/blog/gainsight-vs-churnzero)
-- [Oliv.ai — ChurnZero Reviews 400+](https://www.oliv.ai/blog/churnzero-reviews-customer-feedback)
-- [Accoil — Top Gainsight Alternatives](https://www.accoil.com/blog/gainsight-alternatives)
-- [BuildBetter — Best Customer Success Platforms with AI 2026](https://blog.buildbetter.ai/10-best-customer-success-platforms-with-ai-insights-in-2026/)
-- [Cuoral — Real-Time Churn Detection](https://cuoral.com/real-time-churn-detection)
-- [Lighter Capital — 2025 B2B SaaS Startup Benchmarks](https://www.lightercapital.com/blog/2025-b2b-saas-startup-benchmarks)
-- [Pepper Effect — B2B SaaS Benchmarks 2026](https://peppereffect.com/blog/b2b-saas-benchmarks)
+In any of these cases, do not write a "GO" recommendation. Surface the blocker and recommend a pivot or a no-go. If multiple stop conditions trigger, reorient the memo around the strongest alternative wedge identified.
