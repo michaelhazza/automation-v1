@@ -7,6 +7,7 @@
 **Scope:** Phases 1, 2, 3, 4, 6 (all chunks except Chunk 12 — run-trace lineage chips, hard-blocked on Phase 1; deferred per spec)
 **Changed-code set:** 96 files (full branch diff vs origin/main, less spec/plan/progress and review-log artifacts)
 **Run at:** 2026-05-08T22-10-41Z
+**Commit at finish:** `7ee4f417`
 
 ---
 
