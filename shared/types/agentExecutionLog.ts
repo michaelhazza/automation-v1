@@ -9,6 +9,8 @@ import type { EventOrigin } from './workflowStepGate.js';
 export type { EventOrigin };
 import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.js';
 
+import type { RetrievalResult } from './retrieval.js';
+
 // ---------------------------------------------------------------------------
 // Source-service tag
 // ---------------------------------------------------------------------------
@@ -23,7 +25,8 @@ export type AgentExecutionSourceService =
   | 'runContextLoader'
   | 'orchestratorFromTaskJob'
   | 'requestClarification'
-  | 'correctionCaptureService';
+  | 'correctionCaptureService'
+  | 'retrievalService';
 
 // ---------------------------------------------------------------------------
 // Linked-entity taxonomy
@@ -87,7 +90,9 @@ export type AgentExecutionEventType =
   | 'run.terminal.summary_missing'
   | 'run.terminal.extracted_with_errorMessage'
   | 'runtime_check.completed'
-  | 'correction.captured';
+  | 'correction.captured'
+  | 'retrieval.summary'
+  | 'retrieval.always_available.mode_changed';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -283,6 +288,24 @@ export type AgentExecutionEventPayload =
       skillSlug: string;
       memoryBlockId: string;
       forcedGradeEnqueued: boolean;
+    }
+  | {
+      /** Auto Knowledge Retrieval — exactly one per run (spec §10.4, §1.5 #7). */
+      eventType: 'retrieval.summary';
+      critical: false;
+      result: RetrievalResult;
+      chunkConfig: { targetTokens: number; overlapTokens: number };
+    }
+  | {
+      /** Auto Knowledge Retrieval — emitted when a document's mode changes to/from always_available. */
+      eventType: 'retrieval.always_available.mode_changed';
+      critical: false;
+      organisationId: string;
+      documentId: string;
+      oldMode: string;
+      newMode: string;
+      actorUserId: string;
+      occurredAt: string;
     };
 
 // ---------------------------------------------------------------------------
@@ -315,6 +338,8 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'run.terminal.extracted_with_errorMessage': false,
   'runtime_check.completed': false,
   'correction.captured': false,
+  'retrieval.summary': false,
+  'retrieval.always_available.mode_changed': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

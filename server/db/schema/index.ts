@@ -217,6 +217,13 @@ export * from './userSettings.js';
 // (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
 export * from './referenceDocuments.js';
 export * from './referenceDocumentVersions.js';
+
+// Auto Knowledge Retrieval Phase 1 — document chunk embeddings (migration 0289)
+export * from './referenceDocumentChunks.js';
+// Auto Knowledge Retrieval Phase 1 — document-to-data-source scope links (migration 0290)
+export * from './referenceDocumentDataSources.js';
+// Auto Knowledge Retrieval Phase 5A — promotion audit ledger (migration 0294)
+export * from './documentPromotionAudit.js';
 export * from './documentBundles.js';
 export * from './documentBundleMembers.js';
 export * from './documentBundleAttachments.js';

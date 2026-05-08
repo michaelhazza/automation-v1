@@ -29,10 +29,6 @@ export const agentDataSources = pgTable(
     cacheMinutes: integer('cache_minutes').notNull().default(60),
     // Sync mode: lazy = re-fetch on demand when cache expires; proactive = background polling
     syncMode: text('sync_mode').notNull().default('lazy').$type<'lazy' | 'proactive'>(),
-    // Loading mode: eager = rendered into the system prompt Knowledge Base block;
-    //               lazy  = manifest entry only, agent fetches on demand via read_data_source skill.
-    // Migration 0078. Default 'eager' for backward compatibility.
-    loadingMode: text('loading_mode').notNull().default('eager').$type<'eager' | 'lazy'>(),
     lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
     lastFetchStatus: text('last_fetch_status').$type<'ok' | 'error' | 'pending'>(),
     lastFetchError: text('last_fetch_error'),

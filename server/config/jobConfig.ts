@@ -560,6 +560,72 @@ export const JOB_CONFIG = {
     deadLetter: 'run:resumeAfterOAuth__dlq',
     idempotencyStrategy: 'singleton-key' as const,
   },
+
+  // ── auto-knowledge-retrieval — document summary generation ───────
+  // Enqueued after a new reference document version is written. Makes a
+  // cheap LLM call to produce a 2-3 sentence retrieval hint summary.
+  // one-shot: one job per version write; idempotency guard in the handler
+  // checks summaryGeneratedAt >= version.createdAt before calling the LLM.
+  'document:summarise': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'document:summarise__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // ── auto-knowledge-retrieval — document chunk + embed ────────────
+  // Enqueued after a new reference document version is written. Chunks the
+  // version content, embeds all chunks via OpenAI (outside tx), then
+  // atomically flips retrieval_version_id after count verification.
+  // retryLimit 3: embeddings are expensive; backoff gives transient API
+  // errors time to clear. expireInSeconds 300: embedding a large document
+  // can take several minutes across multiple API batches.
+  // one-shot: one job per version; handler's count-check + pointer-flip are
+  // idempotent on retry (ON CONFLICT DO NOTHING + idempotent UPDATE).
+  'document:chunk-embed': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'document:chunk-embed__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // ── auto-knowledge-retrieval — embedding-model upgrade sweep ─────
+  // Enqueued when the org's embedding model changes. Iterates documents
+  // where active_embedding_model != targetEmbeddingModel and re-embeds
+  // missing chunks under the new model, then atomically flips the pointer.
+  // fifo: sweep re-reads current DB state each run; retries are safe because
+  // ON CONFLICT DO NOTHING makes persistChunks idempotent and the pointer
+  // flip is guarded by a count-match check.
+  // expireInSeconds 600: up to 10 documents per invocation, each potentially
+  // requiring several API batches.
+  'document:reembed': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'document:reembed__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  // ── auto-knowledge-retrieval — deferred file durability flip ─────
+  // Chained after document:chunk-embed success. Verifies retrieval_version_id
+  // is non-null then flips execution_files.expiresAt to a far-future sentinel
+  // so the promoted file is never pruned by the maintenance cleanup sweep.
+  // retryLimit 5 with backoff: if retrieval_version_id is still null (embedding
+  // in progress), retries with exponential backoff give the chunk-embed job
+  // time to complete. Backoff series: 30 + 60 + 120 + 240 + 480 ≈ 930s total
+  // retry window. expireInSeconds must exceed the full series.
+  // one-shot: one job per promotion audit; idempotency guard in the handler
+  // checks expiresAt threshold before issuing the UPDATE.
+  'document:promotion-finalise': {
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 1200,
+    deadLetter: 'document:promotion-finalise__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

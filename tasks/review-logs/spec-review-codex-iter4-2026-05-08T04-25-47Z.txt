@@ -1,0 +1,1204 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\files\Claude\automation-v1
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019e05e1-b6eb-7112-8f0f-e098023d2cf0
+--------
+user
+Spec at tasks/builds/auto-knowledge-retrieval/spec.md, iter-4 verification. The iter-3 fixes added: (a) active_embedding_model column on reference_documents as the per-document active-generation pointer with §13.3 atomic flip; (b) consistent UNIQUE (file_id) on document_promotion_audit; (c) §4.6 now matches §6.5/§8 (deferred durability flip via document:promotion-finalise); (d) §5.3 no longer references option a/b; (e) §18.7 closed; (f) §8 re-embed row now uses 3-column key. Verify the spec is internally consistent. Output 'CLEAN' if no material findings; otherwise list residual contradictions or unclosed mechanisms tersely with section anchors.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'tasks/builds/auto-knowledge-retrieval/spec.md'" in C:\files\Claude\automation-v1
+ succeeded in 711ms:
+**Status:** draft
+**Spec date:** 2026-05-08
+**Last updated:** 2026-05-08
+**Author:** spec-coordinator (Opus 4.7)
+**Build slug:** auto-knowledge-retrieval
+
+# Auto Knowledge Retrieval, Architecture Spec
+
+> **Source brief:** `docs/auto-knowledge-retrieval-dev-brief.md` (Rev 4, 2026-05-08).
+> **Mockups:** `prototypes/auto-knowledge-retrieval/` â€” 8 prototypes pre-approved across 5 prior rounds; treat as design source of truth.
+> **Phase relationship:** Phase 1 of the broader agent-workspace strategy in `docs/agent-cloud-compute-dev-brief.md`. Stands on its own; ships before agent workspace.
+
+This is an **architecture-level** spec. Domain model, service contracts, data model, integration boundaries, and chunk plan are pinned here. Function signatures, exact SQL, and wireframes are explicitly out of scope; they belong in the implementation plan that `feature-coordinator` produces from this spec.
+
+---
+
+## Contents
+
+1. Goals, non-goals, framing assumptions
+2. Phase plan
+3. Existing primitives â€” reuse, extend, invent
+4. Domain model (data layer)
+5. File inventory lock
+6. Contracts
+7. Permissions / RLS checklist
+8. Execution model
+9. Phase sequencing (dependency graph)
+10. Execution-safety contracts
+11. Retrieval observability
+12. Tenant isolation invariants
+13. Lifecycle, versioning, re-embedding
+14. UI surfaces
+15. Deferred items
+16. Self-consistency pass result
+17. Testing posture
+18. Open questions
+
+---
+
+## 1. Goals, non-goals, framing assumptions
+
+### 1.1 Goals
+
+- Replace per-document **eager / lazy** loading with one of three modes: **Auto** (default), **Always available**, **Reference only**. The user-facing eager / lazy concept disappears.
+- Add a **shared retrieval engine** that ranks both `memory_blocks` and `reference_documents` against the current task context, applying threshold filtering and budget capping.
+- Add the missing **org** and **recurring-task** scopes for documents; add the **recurring-task** scope for memory blocks. Five tiers for documents, four tiers for memory blocks.
+- Ship a **chunked-embedding model** for documents (whole-document embeddings are not used).
+- Surface **retrieval observability** as an operator product (not internal-only telemetry): "why was this loaded / not loaded" tooltips, per-document relevance signals, per-run trace.
+- Surface **Files** as a Knowledge tab and ship the **Add to Knowledge** promotion flow.
+- Hard tenant isolation: authorization filtering occurs **before** semantic retrieval.
+
+### 1.2 Non-goals (explicit)
+
+- No new storage backend. Continue with Postgres + pgvector + OpenAI `text-embedding-3-small`.
+- No cross-encoder re-ranking. Pure cosine for v1.
+- No version-aware retrieval (latest version only).
+- No document-level ad-hoc semantic search UI.
+- No per-tenant custom embedding provider.
+- No backfill of historical documents (dev environment, no data).
+- No promotion-request workflow for sub-account admins (org admins are the sole org-pinning authority in v1).
+- No new storage layer for files; the Files tab surfaces existing `execution_files` rows.
+- No bundle-driven retrieval. **Bundles remain organisational only**, they do not modify ranking, threshold, or budget behaviour. Mode is set on the document, not on the bundle (enforced).
+
+### 1.3 Framing assumptions (cross-checked against `docs/spec-context.md`)
+
+- `pre_production: yes`, `live_users: no`, `feature_stability: low`. Breaking schema changes acceptable.
+- `testing_posture: static_gates_primary`, `runtime_tests: pure_function_only`. The retrieval ranker, threshold logic, scoping logic, and re-embedding decision are pure-function tested. No frontend / API-contract / E2E tests against the app.
+- `feature_flags: only_for_behaviour_modes`. No rollout-gate flags introduced. The legacy `loadingMode: 'eager' | 'lazy'` column on `agent_data_sources` is **retired** as part of this build (see Â§15).
+- `staged_rollout: never_for_this_codebase_yet`. Direct cutover.
+- Existing primitives prevail: `memoryBlockRetrievalServicePure`, `referenceDocumentService`, `executionFiles`, the bundle stack, `withOrgTx`, `RLS_PROTECTED_TABLES`, `withBackoff`, `createWorker`. No new service layers without a "why-not-reuse" paragraph.
+
+## 2. Phase plan
+
+The build divides into seven phases. Phase ordering is strictly dependency-driven (Â§9). Each phase ships a coherent slice; nothing partial straddles a phase boundary.
+
+| Phase | Theme | Scope summary | Ships independently? |
+|---|---|---|---|
+| 1 | Schema + RLS foundation | New tables, new columns, RLS policies, manifest entries. No service code. | No, but unblocks 2-7. |
+| 2 | Shared retrieval engine | `retrievalServicePure` extracted from `memoryBlockRetrievalServicePure`; chunking pipeline; mode resolver. Pure-function only. | Yes, passes the gate without UI changes. |
+| 3 | Document ingestion + re-embedding | Background jobs (`document-summarise`, `document-chunk-embed`, `document-reembed`). `summary_stale` flag. | Yes, admin ingest only; UI surface in Phase 5. |
+| 4 | Retrieval integration into agent run **+ observability event emission** | Agent execution path consults `retrievalServicePure`. Old eager/lazy path retired. **`retrieval.summary` events emit from day one** (brief Â§9 invariant â€” observability is non-negotiable for v1). | No, but unblocks 5-7 once Phase 1+2+3 ship. |
+| 5 | UI: Knowledge tabs + Add-to-Knowledge | Files tab surfaces `execution_files`. Knowledge â†’ Documents tab refresh. Add to Knowledge modal. | Yes after Phase 4. |
+| 6 | UI: Agent Data Sources tab + Document Detail modal | Per-agent view with mode chips and relevance signals. Bundles read-only mode chips. | Yes after Phase 5. |
+| 7 | Retrieval observability **surfaces** (tooltips, drill-in, relevance bar) | Operator-facing UI consuming the events emitted in Phase 4. | Yes after Phase 4 (events) and Phase 5/6 (tab + modal hosts). |
+
+Phase 4 is the only cross-cutting phase. Everything else can stage independently after its prerequisites land.
+
+## 3. Existing primitives â€” reuse, extend, invent
+
+Per `docs/spec-authoring-checklist.md` Â§1, every new primitive carries a "why not reuse" line.
+
+### 3.1 Reused (no extension needed)
+
+| Primitive | Why it fits |
+|---|---|
+| `withOrgTx` / `withAdminConnection` | Three-layer fail-closed isolation entry points; every retrieval read uses `withOrgTx`. |
+| `withBackoff` | OpenAI embedding API calls reuse this; no new retry primitive. |
+| `createWorker` | Re-embedding job, summarisation job, document chunking job all run as pg-boss workers via this primitive. |
+| `referenceDocumentService` (existing) | Document CRUD + version writes already correctly scoped. We extend its consumer surface; we do not replace it. |
+| `referenceDocumentVersionsTable` | Immutable version chain already supports re-embedding without breaking reproducibility. |
+| `documentBundles*` schema (existing) | Bundles remain organisational. The brief explicitly forbids retrieval-modifying bundle semantics. |
+| `executionFiles` table | Files tab surfaces these rows; no new table needed. |
+| `memoryBlockRetrievalServicePure` | Refactored into a generic ranker (Â§3.3). The current ranker IS the seed of the shared engine. |
+| `RLS_PROTECTED_TABLES` manifest | Every new tenant-scoped table added in Phase 1 lands in the manifest in the same migration. |
+| `verify-rls-coverage.sh` / `verify-rls-contract-compliance.sh` | CI gates already enforce manifest coverage; no new gate needed. |
+| OpenAI `text-embedding-3-small` + pgvector | Already in production for memory blocks; documents adopt the same provider with no schema deviation. |
+
+### 3.2 Extended (existing primitive grows by a column or argument)
+
+| Primitive | Extension | Why not invent new |
+|---|---|---|
+| `reference_documents` table | New columns: `mode` (enum, default `'auto'`), `summary` (text, nullable), `summary_stale` (boolean), `summary_generated_at` (timestamptz), `last_chunked_at` (timestamptz), **`active_embedding_model` (text, names the generation retrieval reads â€” single-source-of-truth pointer for the active embedding generation; flipped atomically by `document:reembed` after the new generation is fully written, see Â§13.3)**. | These are document properties, not link properties. Putting them on a side-table would force every read to join. |
+| `memory_blocks` table | New nullable column: `scheduled_task_id` (uuid, FK). Indexed partial. | Brief Â§7, memory blocks gain the recurring-task tier as a free side-effect of the shared engine. Adding a separate `task_scoped_memory` table would duplicate the mature memory-block lifecycle (versioning, divergence detection, attachments). |
+| `agent_data_sources` table | The `loading_mode` column is **retired** in Phase 4 (column dropped after Phase 4 ships and code-paths cut over). The table itself remains for HTTP / CSV / Drive non-document data sources. | The HTTP / CSV / Drive sources are operationally distinct from knowledge documents and require different fetch logic. Folding them into `reference_documents` would force unrelated ingestion code to share a model. |
+
+### 3.3 Invented (genuinely new primitives)
+
+Three new primitives. Each has a one-paragraph justification.
+
+#### 3.3.1 `reference_document_chunks` (new table)
+
+**Why:** documents are chunked for retrieval; each chunk gets its own embedding and is independently retrievable (brief Â§8). Memory blocks embed the whole block because blocks are short-by-design; documents can be 50+ pages and require chunk-level granularity. Reusing `memory_blocks` for chunks would conflate two distinct lifecycles (a chunk is derived; a block is authored).
+
+#### 3.3.2 `reference_document_data_sources` (new join table, link / scope / mode)
+
+**Why:** the existing bundle-attachment table `document_bundle_attachments` only supports bundle-level attachment with `attachment_mode: 'always_load' | 'available_on_demand'`. The brief requires direct (non-bundle) attachment of a document to a scope (org / sub-account / agent / recurring task / task instance) with the **document's own mode** (Auto / Always available / Reference only). Reusing `agent_data_sources` would force documents through the HTTP-source ingestion model; reusing `documentBundleAttachments` would couple every document to a synthetic single-document bundle and contradict Â§5 of the brief ("bundles are organisational, not retrieval-altering"). A new join table is correct.
+
+#### 3.3.3 `retrievalServicePure` (new pure-function service)
+
+**Why:** the existing `memoryBlockRetrievalServicePure` is memory-block-specific (priority enum, divergence flags, ownerAgent semantics). The brief Â§8 requires a single ranker that takes "a set of candidate items with embeddings" and returns "items to load, in priority order". The right move is to **extract the generic part** of the memory-block ranker into a new pure module with a polymorphic input shape (`RetrievalCandidate`), and have `memoryBlockRetrievalServicePure` plus the new `documentRetrievalServicePure` both consume it. That preserves the memory-block-specific logic where it belongs (block-side filters before ranking) while concentrating the ranking algorithm in one place. Future cross-encoder re-ranking, learned thresholds, and new knowledge primitives all benefit.
+
+## 4. Domain model (data layer)
+
+### 4.1 The five tiers (documents)
+
+A document attaches at exactly one of these scopes per link row:
+
+| Tier | Tier ID | Scope key columns on `reference_document_data_sources` |
+|---|---|---|
+| 1. Task instance | `task_instance` | `task_instance_id` (FK to `agent_runs.id` or successor) |
+| 2. Recurring task | `recurring_task` | `scheduled_task_id` |
+| 3. Agent | `agent` | `agent_id` |
+| 4. Sub-account | `subaccount` | `subaccount_id` |
+| 5. Organisation | `organisation` | (org-only; all scope keys above are null) |
+
+A single document can have multiple link rows (one per scope). Mode is set on the document, not on the link, so all attachments of the same document share the same mode (see Â§6.4 for the source-of-truth rule).
+
+### 4.2 The four tiers (memory blocks)
+
+Memory blocks gain `scheduled_task_id`. They do **not** gain `task_instance_id` (brief Â§7, persistent memory at an ephemeral scope is a category error).
+
+| Tier | Memory blocks | Documents |
+|---|---|---|
+| Org | yes (existing) | yes (new via `reference_document_data_sources`) |
+| Sub-account | yes (existing) | yes (existing path now goes via the new link table) |
+| Agent | yes (existing, `owner_agent_id`) | yes (new) |
+| Recurring task | **yes (new, `scheduled_task_id`)** | yes (new) |
+| Task instance | no | yes (new) |
+
+### 4.3 Modes
+
+Three discriminated values on `reference_documents.mode`:
+
+- `auto` (default), eligible for retrieval; participates in threshold + ranking + budget.
+- `always_available`, bypasses threshold and ranking; **does still participate in overall context budgeting** (brief Â§3 hard invariant). If always-available alone exceeds context budget, the system surfaces operator guidance and degrades gracefully (see Â§10.5).
+- `reference_only`, never auto-loaded. Only its title + 1-2 sentence summary appears in the prompt manifest. The agent fetches full content via tool call.
+
+The status set is **closed**: adding a new mode value requires a spec amendment (Â§10.7).
+
+### 4.4 Source provenance
+
+`reference_documents.source` tracks where the document came from. Closed enum:
+
+- `manual` (default, user-authored on the Documents tab)
+- `from_file` (promoted from `execution_files` via Add to Knowledge)
+- `auto_memory_approved` (promoted from auto-memory pending review)
+- `synthesised_by_agent` (reserved for future, brief Â§6 "system-generated documents")
+- `external` (existing, Google Drive etc., for compatibility)
+
+Brief Â§17 rule: only non-default cases get a UI badge. The default `manual` shows no badge.
+
+### 4.5 Chunks
+
+`reference_document_chunks` rows are derived from `reference_document_versions`. When a new version lands, chunk rows are written by the chunking job and the prior version's chunks are retained until the new version is ready, then atomically swapped (atomic-swap source of truth: Â§6.4 / Â§13).
+
+Chunk size, overlap, and boundary detection are tuned in implementation; the spec mandates only:
+
+- Chunks are semantically coherent (paragraph- or section-aligned, not byte-windowed).
+- Each chunk has its own embedding row.
+- Each chunk references the parent `document_version_id` so version pinning is preserved.
+- Each chunk is keyed `(version_id, chunk_index, embedding_model)`; the parent document carries the active-generation pointer `active_embedding_model` (Â§13.3) so reads always select the right generation.
+- Whole-document embeddings are NOT stored on `reference_documents`. Retrieval operates at chunk granularity (brief Â§8).
+
+### 4.6 Files vs Documents
+
+`execution_files` is **not** modified by this build. The Files tab is a read view of existing rows filtered by sub-account / agent / scope. The "Add to Knowledge" action transforms an `execution_files` row into a new `reference_documents` row plus link rows; the file row itself is untouched in the inline transaction. The brief mandates the source file becomes durable: `execution_files.expiresAt` is flipped to `NULL` or far-future by the `document:promotion-finalise` job after the chunking job commits (Â§6.5, Â§8). Until finalise runs, the file is still expirable; the `document_promotion_audit` row prevents the promotion path from re-running if expiry races finalise. Operator-facing: the file row is marked "durable" in the UI as soon as the inline transaction completes (audit-row backed); the `expiresAt` flip is invisible to the operator.
+
+## 5. File inventory lock
+
+This is the single source of truth for every file / migration / column / table this spec touches. Prose references must cascade into this section (checklist Â§2).
+
+### 5.1 Migrations (new)
+
+| Migration | Phase | Purpose |
+|---|---|---|
+| `0288_reference_document_modes_and_summary.sql` | 1 | Add `mode`, `summary`, `summary_stale`, `summary_generated_at`, `last_chunked_at`, `active_embedding_model` to `reference_documents`. |
+| `0289_reference_document_chunks.sql` | 1 | Create `reference_document_chunks` table + indexes + RLS policy + HNSW index on the `embedding` column. |
+| `0290_reference_document_data_sources.sql` | 1 | Create `reference_document_data_sources` join table + indexes + RLS policy + scope-key CHECK constraints. |
+| `0291_memory_blocks_scheduled_task_scope.sql` | 1 | Add nullable `scheduled_task_id` to `memory_blocks`; partial index on the column. |
+| `0291a_document_promotion_audit.sql` | 5 | Create `document_promotion_audit` table â€” append-only ledger of `(file_id, document_id, organisation_id, principal_id, created_at)` with `UNIQUE (file_id) WHERE deleted_at IS NULL`; written inside the promotion transaction as the idempotency anchor (Â§10.1). RLS via direct org-isolation. Manifest entry added in same migration. |
+| `0291b_agent_execution_events_retrieval_summary_unique.sql` | 4 | Add partial unique index on `agent_execution_events` enforcing exactly one `retrieval.summary` event per run (Â§10.4). |
+| `0292_retrieval_events.sql` | (deferred, see Â§15) | Reserved migration number for a future dedicated retrieval-events table. Not built in v1; see Â§6.7. |
+| `0293_agent_data_sources_drop_loading_mode.sql` | 4 | Drop `loading_mode` column from `agent_data_sources` after Phase 4 cutover ships. |
+
+The exact migration numbers may shift if other branches land first (the next free number is checked at Phase 1 commit time). Phase 4's drop migration runs only after the corresponding code change has shipped behind the read path.
+
+### 5.2 Schema files (Drizzle)
+
+| Path | Phase | Change |
+|---|---|---|
+| `server/db/schema/referenceDocuments.ts` | 1 | Add columns. |
+| `server/db/schema/referenceDocumentChunks.ts` | 1 | New file. |
+| `server/db/schema/referenceDocumentDataSources.ts` | 1 | New file. |
+| `server/db/schema/memoryBlocks.ts` | 1 | Add column. |
+| `server/db/schema/agentDataSources.ts` | 4 | Drop `loadingMode`. |
+| `server/db/schema/index.ts` | 1, 4 | Re-export new tables; drop dead reference. |
+| `server/config/rlsProtectedTables.ts` | 1 | Add entries for `reference_document_chunks`, `reference_document_data_sources`. |
+
+### 5.3 Server services (new)
+
+| Path | Phase | Responsibility |
+|---|---|---|
+| `server/services/retrievalServicePure.ts` | 2 | Generic ranker over `RetrievalCandidate[]`. Replaces the ranking core of `memoryBlockRetrievalServicePure`. |
+| `server/services/retrievalService.ts` | 2 | DB-backed surface that builds the candidate pool (RLS-scoped), hands off to `retrievalServicePure`, returns the load order and observability snapshot. |
+| `server/services/documentRetrievalServicePure.ts` | 2 | Document-specific filters before ranking (mode, version pinning, chunk grouping). |
+| `server/services/documentChunkingServicePure.ts` | 2 | Chunk-boundary heuristics. Pure. |
+| `server/services/documentSummariseService.ts` | 3 | Cheap-LLM summarisation, async. |
+| `server/services/documentEmbeddingService.ts` | 3 | OpenAI embedding for chunks. Wraps `withBackoff`. |
+| `server/services/documentDataSourceService.ts` | 3 | CRUD + scope validation for `reference_document_data_sources`. Includes the only path that mutates link rows. |
+| `server/services/documentPromotionService.ts` | 5 | Add-to-Knowledge transaction: file -> document + link rows + `document_promotion_audit` row (idempotency anchor). |
+| `server/db/schema/documentPromotionAudit.ts` | 5 | New schema file for the audit ledger; declared in `RLS_PROTECTED_TABLES`. |
+| `server/services/retrievalObservabilityService.ts` | 4 (emission), 7 (read aggregates) | Emits the `retrieval.summary` event into `agent_execution_events` (canonical storage, Â§6.7). The Phase 7 surfaces consume the same ledger via aggregate queries. |
+
+### 5.4 Server services (modified)
+
+| Path | Phase | Change |
+|---|---|---|
+| `server/services/memoryBlockRetrievalServicePure.ts` | 2 | Refactor: keep block-specific filtering, delegate ranking to `retrievalServicePure`. |
+| `server/services/referenceDocumentService.ts` | 1, 3 | Add chunk-aware version write; expose mode-update API; trigger summarisation + embedding jobs on version write. |
+| `server/services/agentExecutionService.ts` (and its Pure sibling) | 4 | The eager/lazy code path is replaced by `retrievalService.assembleKnowledgeForRun(...)`. The `loading_mode` consumer is removed. |
+| `server/services/agentRunPromptService.ts` | 4 | Prompt assembly takes `RetrievalResult` instead of bare data-source rows. |
+
+### 5.5 Server jobs (new pg-boss queues)
+
+| Queue / job | Phase | Purpose |
+|---|---|---|
+| `document:summarise` | 3 | Generate the 1-2 sentence summary on document version write. |
+| `document:chunk-embed` | 3 | Chunk the new version + embed chunks. |
+| `document:reembed` | 3 | Background sweep when embedding model upgrades or content extraction improves. |
+| `document:promotion-finalise` | 5 | Side-effects of Add-to-Knowledge after the inline transaction commits (mark file durable, emit telemetry). |
+
+### 5.6 Server routes
+
+| Path | Phase | Change |
+|---|---|---|
+| `server/routes/referenceDocuments.ts` | 1, 3, 5 | New CRUD endpoints for mode + scope link rows; promotion endpoint. |
+| `server/routes/agentDataSources.ts` | 4 | Drop the eager/lazy fields from request/response shapes; redirect callers to the new mode-update endpoint. |
+| `server/routes/files.ts` | 5 | New: list `execution_files` for a given scope (Files tab surface). |
+
+### 5.7 Client surfaces
+
+Mockups at `prototypes/auto-knowledge-retrieval/` are the design source of truth for these.
+
+| Path | Phase | Mockup |
+|---|---|---|
+| `client/src/pages/govern/KnowledgePage.tsx` | 5 | Tab strip, add Files tab; refresh Documents tab. (Authored memory + Auto-memory tabs already exist.) |
+| `client/src/pages/govern/components/KnowledgeFilesTab.tsx` (new) | 5 | `knowledge-files-tab.html` |
+| `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` (new or refresh) | 5 | `knowledge-documents-tab.html` |
+| `client/src/pages/govern/components/KnowledgeBundlesTab.tsx` (refresh) | 6 | `knowledge-bundles-tab.html` |
+| `client/src/pages/govern/components/AddToKnowledgeModal.tsx` (new) | 5 | `add-to-knowledge-modal.html` |
+| `client/src/pages/govern/components/DocumentDetailModal.tsx` (new) | 6 | `document-detail-modal.html` |
+| `client/src/pages/govern/components/BundleEditModal.tsx` (refresh) | 6 | `bundle-edit-modal.html` |
+| `client/src/pages/agents/components/AgentDataSourcesTab.tsx` (refresh) | 6 | `agent-data-sources.html` |
+
+The new components consume the `PageShell` / `Modal` / `SortableTable` / `EmptyState` / `ErrorState` primitives from PR #270 (consolidation-foundation). No new shared primitives.
+
+### 5.8 Client API hooks
+
+| Path | Phase | Purpose |
+|---|---|---|
+| `client/src/api/knowledgeApi.ts` (extend) | 5, 6 | Document mode + scope link CRUD; Add-to-Knowledge call. |
+| `client/src/api/filesApi.ts` (new) | 5 | List execution files. |
+
+### 5.9 Shared types
+
+| Path | Phase | Purpose |
+|---|---|---|
+| `shared/types/retrieval.ts` (new) | 2 | `RetrievalCandidate`, `RetrievalResult`, `RetrievalRejectionReason`, `RetrievalMode`. |
+| `shared/types/knowledge.ts` (new or extend) | 5 | DTOs the API and the React surfaces share. |
+| `shared/runStatus.ts` | (no change) | , |
+
+### 5.10 Documentation
+
+| Path | Phase | Update |
+|---|---|---|
+| `architecture.md Â§ Key files per domain` | 7 | Add row for the shared retrieval engine and the document chunk pipeline. |
+| `docs/capabilities.md` | 7 | New capability entry under the knowledge domain (vendor-neutral, editorial-rules-compliant). |
+| `docs/frontend-design-principles.md` | (no change, already updated by the mockup pass) | , |
+| `KNOWLEDGE.md` | per phase | Patterns appended as they emerge; the doc-sync gate at finalisation enforces. |
+
+## 6. Contracts
+
+Every cross-boundary data shape is pinned here with at least one concrete example. Source-of-truth precedence is declared where multiple representations exist.
+
+### 6.1 `RetrievalCandidate`
+
+```ts
+type RetrievalCandidate = {
+  id: string;                    // chunk id OR memory_block id
+  kind: 'document_chunk' | 'memory_block';
+  organisationId: string;
+  subaccountId: string | null;
+  agentId: string | null;
+  scheduledTaskId: string | null;
+  taskInstanceId: string | null;       // documents only; always null for memory blocks
+  embedding: number[];                  // vector(1536)
+  tokenCount: number;
+  // For documents: the chunk's parent document id, version id, and mode.
+  parentDocumentId?: string;
+  parentDocumentVersionId?: string;
+  mode?: 'auto' | 'always_available' | 'reference_only';
+  // For memory blocks: priority + isAuthoritative + ownerAgent (already in the existing ranker).
+  priority?: 'low' | 'medium' | 'high';
+  isAuthoritative?: boolean;
+};
+```
+
+### 6.2 `RetrievalResult`
+
+```ts
+type RetrievalResult = {
+  loaded: Array<{
+    candidateId: string;
+    finalScore: number;
+    relevanceScore: number;
+    scopeBonus: number;
+    recencyBonus: number;
+    operatorPinBonus: number;
+    tier: 'task_instance' | 'recurring_task' | 'agent' | 'subaccount' | 'organisation';
+    tokenCost: number;
+  }>;
+  rejected: {
+    aboveThreshold: Array<{ candidateId: string; finalScore: number; reason: 'budget_exhausted' | 'lower_score_in_tie' }>;
+    belowThreshold: { count: number };  // Counts only, not full list.
+  };
+  alwaysAvailable: Array<{ candidateId: string; tokenCost: number; degraded: boolean }>;
+  referenceOnlyManifest: Array<{ candidateId: string; title: string; summary: string }>;
+  poolSize: { taskInstance: number; recurringTask: number; agent: number; subaccount: number; organisation: number };
+};
+```
+
+### 6.3 `RetrievalRejectionReason` (closed)
+
+`'budget_exhausted' | 'lower_score_in_tie' | 'mode_excluded' | 'authorization_filtered' | 'below_threshold'`. Authorization-filtered candidates never appear in the result; the count is a property of the candidate-pool builder, not the ranker.
+
+### 6.4 Source-of-truth precedence
+
+Multiple representations exist for the same fact. The precedence is **declared, not implicit**:
+
+| Fact | Source of truth | Read path |
+|---|---|---|
+| Document content | `reference_document_versions` (the row pointed to by `reference_documents.current_version_id`) | always read via `referenceDocumentService.getCurrent(documentId)` |
+| Document mode | `reference_documents.mode` | one column, no other source |
+| Link / scope | `reference_document_data_sources` rows for `(document_id, scope_columns)` | `documentDataSourceService.findByDocument(documentId)` |
+| Document chunks | `reference_document_chunks` joined to `reference_document_versions` via `version_id` AND filtered by `embedding_model = reference_documents.active_embedding_model` (active-generation pointer, Â§13.3) | always pinned by version id + active model; never "latest by timestamp" |
+| `summary_stale` | `reference_documents.summary_stale` (boolean), set true on version write, set false when `document:summarise` job completes successfully | UI must surface stale state when true |
+
+The atomic-swap rule for chunks (Â§4.5) is: on new version write, the new chunks are inserted with the new `version_id`; the active version pointer flips only after all chunks for the new version are embedded; old chunks are not deleted, they age out via `version_id != current_version_id`.
+
+### 6.5 Add-to-Knowledge promotion contract
+
+```ts
+type AddToKnowledgeRequest = {
+  fileId: string;                       // execution_files.id
+  title: string;                        // pre-filled from filename, editable
+  scope: 'organisation' | 'subaccount' | 'agent' | 'recurring_task' | 'task_instance';
+  agentIds?: string[];                  // when scope='agent'; otherwise applies to all agents in the chosen scope
+  scheduledTaskId?: string;             // required when scope='recurring_task'
+  taskInstanceId?: string;              // required when scope='task_instance'
+  mode?: 'auto' | 'always_available' | 'reference_only';  // default 'auto' if omitted
+};
+```
+
+Producer: `client/src/api/knowledgeApi.ts -> addToKnowledge`. Consumer: `documentPromotionService.promoteFile(req, principal)`. The default scope is **inherited from the surface that originated the request** (brief Â§6) â€” the Manage-Task page defaults to `task_instance`, the recurring-task surface defaults to `recurring_task`, the Agent edit surface defaults to `agent`, the Knowledge page in a sub-account view defaults to `subaccount`, and the Knowledge page in an org view defaults to `organisation`. Org admins may promote upward; sub-account admins may not.
+
+The promotion transaction (inline, in `withOrgTx`) inserts `reference_documents` + inserts initial `reference_document_versions` + inserts `reference_document_data_sources` rows + writes a `document_promotion_audit` row (the idempotency anchor) + enqueues `document:summarise` + `document:chunk-embed` via pg-boss. The `execution_files.expiresAt` durability flip is **deferred to `document:promotion-finalise`** which runs after the chunking job has committed the new version's chunks. Until that completes, the file remains expirable; if the user races deletion, the audit row stops the promotion path from re-running. See Â§8 for the rationale.
+
+### 6.6 Mode-change contract
+
+```ts
+type ChangeDocumentModeRequest = {
+  documentId: string;
+  mode: 'auto' | 'always_available' | 'reference_only';
+};
+```
+
+Idempotent (state-based: predicate `WHERE mode <> :mode`). Returns the new mode. UI surfaces the change inline. Mode is a property of the document, not the link, so changing mode applies to every scope the document is linked at.
+
+### 6.7 Retrieval observability event
+
+**Storage: `agent_execution_events`.** A new event type is added to the existing ledger (`shared/types/agentExecutionLog.ts -> AGENT_EXECUTION_EVENT_CRITICALITY`). New `criticality` entry: `'observability'`. New event-shape `'retrieval.summary'` carrying the `RetrievalResult` shape from Â§6.2 plus a per-document chunk fan-out under `loaded[i].chunkIds: string[]`. Emission begins in Phase 4; the partial unique index in `0291b_agent_execution_events_retrieval_summary_unique.sql` (Â§10.4) enforces the exactly-one-per-run invariant.
+
+A dedicated `retrieval_events` table is **deferred** (see Â§15) â€” splitting events into a separate table is reconsidered only if Phase 7 telemetry shows event volume swamping the existing ledger. Any future split must preserve the Phase-4 emission point and the terminal-event uniqueness guarantee with equivalent DB-level mechanisms; it is not a v1 decision.
+
+### 6.8 Bundle attachment contract (no change)
+
+`document_bundle_attachments` continues to drive bundle-level attachment. Per brief Â§5: bundles do not modify retrieval. The new per-document `reference_document_data_sources` rows are independent of bundle attachments. A document can be both attached directly and through a bundle; retrieval treats it as a single candidate (deduplicated by `(documentId, chunkId)`).
+
+## 7. Permissions / RLS checklist
+
+Per `docs/spec-authoring-checklist.md` Â§4. Every new tenant-scoped table satisfies all four requirements.
+
+| Table | RLS policy | Manifest entry | Route guard | Principal-scoped context |
+|---|---|---|---|---|
+| `reference_document_chunks` | yes, migration `0289`, FK-walked through `reference_documents` (parent-policied pattern, mirrors `reference_document_versions`'s shape) | yes, added in `0289` | yes, `authenticate` + `requirePermission('knowledge:read')` for read; `requirePermission('knowledge:write')` for write | yes, every read flows via `withOrgTx` and the GUC propagation is enforced by the existing `rls.context-propagation.test.ts` harness |
+| `reference_document_data_sources` | yes, migration `0290`, direct org-isolation shape (org_id is on every row) | yes, added in `0290` | yes, `authenticate` + `requirePermission('knowledge:write')` for mutations; `requirePermission('knowledge:read')` for reads | yes, `withOrgTx` |
+
+`memory_blocks.scheduled_task_id` does not require new RLS work (the parent table already has FORCE RLS). The new column is filtered by the same policy.
+
+The new permission key is `knowledge` with `read` / `write` scopes. The org-admin-only "promote to org-wide" check is enforced in `documentPromotionService` and surfaced in the UI per the mockup (the field is absent from the DOM for non-org-admins, brief Â§17 / `docs/frontend-design-principles.md`).
+
+### 7.1 Authorization-before-retrieval invariant (brief Â§10)
+
+The candidate pool is built **before** ranking. The pool builder (`retrievalService.buildCandidatePool`) is the only path that touches the DB; it runs inside `withOrgTx` so RLS is in effect. The ranker (`retrievalServicePure`) is pure and never sees rows it shouldn't have. The rule is: **no path constructs a candidate from a row that didn't survive the RLS-scoped query**. Tested at the pure-function boundary by passing mixed-org candidates and asserting the ranker filters by org id (defence-in-depth, the ranker treats wrong-org candidates as a programmer error, not normal flow).
+
+## 8. Execution model
+
+Per checklist Â§5: every behaviour that crosses a transactional or latency boundary picks one of inline / queued / cached.
+
+| Behaviour | Model | Why |
+|---|---|---|
+| Per-run retrieval (Â§4 of brief) | **Inline / synchronous.** | The agent execution path needs the result before assembling the prompt. Latency budget is < 100ms added per run (brief Â§16). |
+| Document version write | **Inline.** | The version row IS the durable artefact; the user expects "save" to commit. Returns the new version id. |
+| Summarisation on version write | **Queued (`document:summarise`).** | LLM call, network-bound, retryable. |
+| Chunking + embedding on version write | **Queued (`document:chunk-embed`).** | Chunking is CPU; embedding is network-bound. The new version's chunks are committed inside this job; the active-version pointer flips at the end. |
+| Re-embedding on model upgrade | **Queued sweep (`document:reembed`).** | Walks every document; idempotent per chunk via `(version_id, chunk_index, embedding_model)` unique index. |
+| Add-to-Knowledge promotion | **Inline transaction + queued finalise.** | The user expects the file to appear as a document immediately. The inline transaction (in `withOrgTx`) inserts `reference_documents`, `reference_document_versions`, `reference_document_data_sources`, and `document_promotion_audit` rows, and enqueues `document:summarise` + `document:chunk-embed`. The `execution_files.expiresAt` durability flip and any post-commit telemetry happen in `document:promotion-finalise`, which is enqueued after the chunking job has committed (chained on the chunking job's success). The audit row is the idempotency anchor â€” see Â§10.1. |
+| Retrieval observability event emission | **Inline at terminal (run end).** | Same boundary as the existing `agent_execution_events` emitter. |
+
+No prompt-partition / cached-context interaction in v1. The brief explicitly defers cross-tier cache-token optimisation; documents go into the dynamic suffix per existing prompt-assembly conventions. Future work (Phase 8+) can graduate Always-available documents into a stable-prefix partition.
+
+### 8.1 Idempotency across queued boundaries
+
+| Job | Idempotency key | Posture |
+|---|---|---|
+| `document:summarise` | `(document_id, version_id)` | key-based, DB unique index on the pair; if job replays, no new write |
+| `document:chunk-embed` | `(version_id, chunk_index, embedding_model)` | key-based, DB unique index on chunks; if a chunk for the same model already exists, the job no-ops it. The three-column key matches Â§10.1, Â§10.6, and Â§13.3 so re-embedding can write a new generation alongside the old one without colliding. |
+| `document:reembed` | `(version_id, chunk_index, embedding_model)` | key-based, supports embedding-model migrations |
+| `document:promotion-finalise` | `(document_id, file_id)` | key-based |
+
+## 9. Phase sequencing (dependency graph)
+
+Per checklist Â§6. No phase references a column / table / service introduced later.
+
+```
+Phase 1 (schema + RLS)
+   |
+   v
+Phase 2 (retrievalServicePure + chunking pipeline pure functions)
+   |
+   v
+Phase 3 (ingestion / re-embedding jobs, needs schema + ranker contracts)
+   |
+   v
+Phase 4 (agent run integration, needs ingestion to be working in some form)
+   |
+   v
+Phase 5 (UI: Knowledge tabs + Add-to-Knowledge, needs ingestion + integration)
+   |
+   v
+Phase 6 (UI: agent data sources + document detail, needs Phase 5 components)
+   |
+   v
+Phase 7 (retrieval observability, needs the run path emitting events)
+```
+
+Phases ship in the linear order above. The framing assumption (`feature_flags: only_for_behaviour_modes`, `staged_rollout: never_for_this_codebase_yet`) prohibits gating a partial UI behind a rollout flag; partial-product branches are not introduced.
+
+### 9.1 Dependency check by phase
+
+| Phase | Schema introduced | Code referenced | Schema dependency |
+|---|---|---|---|
+| 1 | `0288`-`0291` | (none, schema-only phase) | , |
+| 2 | (none) | `reference_document_chunks`, `reference_document_data_sources`, `memory_blocks.scheduled_task_id` | introduced in Phase 1 ok |
+| 3 | (none) | All Phase 1 tables; new jobs | introduced in Phase 1 ok |
+| 4 | (none) | All above + observability emission (writes `retrieval.summary` events into `agent_execution_events`) | ok |
+| 5 | (none) | All above + Phase 5 routes | ok |
+| 6 | (none) | All above | ok |
+| 7 | (none) | observability surfaces (tooltips, drill-in, relevance bar) read events emitted from Phase 4 | uses existing `agent_execution_events` (canonical) |
+| 4 (post-cutover) | `0293` (drop) | dropped column was already unused after Phase 4 cutover | ok |
+
+No backward references. No orphaned deferrals. No phase-boundary contradictions.
+
+## 10. Execution-safety contracts
+
+Per checklist Â§10.
+
+### 10.1 Idempotency posture (every external-trigger write)
+
+| Write | Posture | Mechanism |
+|---|---|---|
+| Add document version | state-based (`version = current_version + 1` predicate; UNIQUE on `(document_id, version)`) | `referenceDocumentService.writeVersion` |
+| Insert chunk | key-based (`UNIQUE (version_id, chunk_index, embedding_model)`, the same key used by re-embedding in Â§13.3 so a model upgrade can write a new generation alongside the old one without violating the index) | `documentEmbeddingService.embedChunk` |
+| Insert link row | key-based (`UNIQUE (document_id, scope_columns) WHERE deleted_at IS NULL`) | `documentDataSourceService.link` |
+| Mode change | state-based (`UPDATE ... WHERE mode <> :new_mode`) | `documentDataSourceService.changeMode` |
+| Add-to-Knowledge promote | key-based (`UNIQUE (file_id) WHERE deleted_at IS NULL` on a new `document_promotion_audit` row inside the transaction; matches the Â§5.1 / Â§10.3 / Â§10.6 form) | `documentPromotionService.promoteFile` |
+| Retrieval event | key-based (`UNIQUE (run_id, event_type='retrieval.summary')` partial unique index on `agent_execution_events`; replay catches `23505` and treats it as an idempotent hit) | `retrievalObservabilityService.emit` |
+
+### 10.2 Retry classification
+
+| Operation | Class | Boundary |
+|---|---|---|
+| Add version | guarded | predicate above |
+| Insert chunk | safe | dedup'd by unique index |
+| Insert link row | guarded | unique index |
+| Mode change | safe | optimistic predicate |
+| Promote file | guarded | inside `withOrgTx`; unique index on the audit row |
+| Re-embed sweep | safe | per-chunk idempotency |
+
+### 10.3 Concurrency guard for racing writes
+
+| Race | Guard | Losing-caller response |
+|---|---|---|
+| Two callers promote the same file simultaneously | UNIQUE on `(file_id) WHERE ...` on the audit row; catch `23505` | 409 Conflict + "Already promoted to document {id}" + the existing document id in the body |
+| Two callers change document mode at the same time | Last-write-wins is acceptable (mode is a property, not a state machine); no guard needed | the second response carries the final mode |
+| Two callers add the same document at the same scope | UNIQUE on `(document_id, scope_columns) WHERE deleted_at IS NULL`; catch `23505` | 409 Conflict + "Already linked at this scope" |
+| Two embedders run on the same chunk | UNIQUE on `(version_id, chunk_index, embedding_model)` | safe, one wins, the other no-ops |
+| Two re-embed jobs touch the same chunk | same UNIQUE | same |
+
+### 10.4 Terminal event guarantee
+
+Every retrieval has exactly one terminal observability event (`retrieval.summary`) per run, emitted once at the end of the run regardless of success / partial / failed status. No intermediate retrieval events. **Enforcement mechanism:** a partial unique index `UNIQUE (run_id) WHERE event_type = 'retrieval.summary'` on `agent_execution_events`. If run finalisation retries after a successful emit, the second insert violates the index and is treated as an idempotent hit (no-op). Single-writer-per-run is preserved; double-counting in Â§11 aggregates is impossible.
+
+### 10.5 No-silent-partial-success
+
+The "always-available bypass-but-still-budget-bound" rule (brief Â§3) is the trickiest place. The contract is:
+
+- If `sum(alwaysAvailable token_cost) > context_budget`, the system flags the run as `degraded` in the retrieval result and emits operator guidance via `RetrievalResult.alwaysAvailable[i].degraded = true`. It does NOT silently truncate; the agent execution continues but the run-summary surface marks it. Operator-facing copy in the UI reads "Some always-available documents could not be loaded due to context limits."
+- Threshold-passing documents that don't fit the remaining budget are tracked in `rejected.aboveThreshold[i].reason = 'budget_exhausted'` so the "why wasn't this loaded?" drill-in (Â§11) can surface the truth.
+
+### 10.6 Unique-constraint-to-HTTP mapping
+
+| Constraint | HTTP status | Body |
+|---|---|---|
+| `reference_documents_org_name_uq` violation | 409 Conflict | `{ error: "DOCUMENT_NAME_EXISTS", existingDocumentId: "..." }` |
+| `reference_document_data_sources_unique_per_scope` | 409 Conflict | `{ error: "DOCUMENT_ALREADY_LINKED", existingLinkId: "..." }` |
+| `reference_document_chunks_unique_per_version_chunk_model` (i.e. `(version_id, chunk_index, embedding_model)`) | 200 (idempotent hit) | `{ noop: true, chunkId: "..." }` (job context only; never bubbled to operators) |
+| `document_promotion_audit_unique_per_file` | 409 Conflict | `{ error: "FILE_ALREADY_PROMOTED", existingDocumentId: "..." }` |
+
+### 10.7 State machine closure
+
+The `mode` enum is closed: `auto | always_available | reference_only`. Adding a new mode requires a spec amendment. The `source` enum is also closed (Â§4.4).
+
+`summary_stale` is a boolean (`true` after version write, `false` after summarisation completes). Forbidden transitions: none; the column is a flag, not a multi-state machine.
+
+`reference_document_data_sources` rows have a soft-delete model (`deleted_at IS NULL` filter). Forbidden transitions: re-creating a deleted link must use a fresh row, not un-deleting (audit-friendly). The unique index applies only to `WHERE deleted_at IS NULL`.
+
+## 11. Retrieval observability
+
+Brief Â§9, operator-facing principle, not internal-only telemetry. **Day-one v1 invariant** per the brief: event emission lands in Phase 4 alongside the run-path integration; only the operator-facing surfaces (tooltips, drill-in, relevance bar) are deferred to Phase 7.
+
+### 11.1 What gets recorded
+
+Per the `RetrievalResult` contract (Â§6.2). Every per-run retrieval emits one `retrieval.summary` event. No intermediate events. Emission begins in Phase 4 (the same phase that wires retrieval into the agent run). Surface consumers ship in Phase 7. The brief Â§9 day-one requirement is satisfied because telemetry is captured from the first run â€” if a Phase 5 / 6 surface is added later that needs to look back, the data is already there.
+
+### 11.2 Operator-facing surfaces
+
+Each one consumes the same event stream:
+
+1. **"Why was this loaded?" tooltip** on document rows in Agent Data Sources and Documents tabs. Reads the last N runs that used this document; renders plain-language summary ("Loaded for CRM enrichment and lead scoring tasks").
+2. **"Why wasn't this loaded?" drill-in** on a per-run trace (existing run-trace surface). Renders `rejected.aboveThreshold` with reasons.
+3. **"Loaded in N of last 30 runs" relevance bar** on document rows. Backed by an aggregate query over the event stream.
+4. **Token usage per workspace and per agent** on the spending surface (already exists; this build adds the per-document attribution).
+
+### 11.3 Internal telemetry surfaces
+
+Engineering-only:
+
+- Relevance threshold tuning histograms (per organisation).
+- Embedding model evaluation (RAG quality benchmarking).
+- Retrieval drift detection (week-over-week candidate-pool size and rejection-reason distribution).
+
+These surfaces are not gated behind the new `knowledge` permission; they're admin-only.
+
+## 12. Tenant isolation invariants
+
+Brief Â§10. The hard rules:
+
+1. **Cross-org boundary is absolute.** `withOrgTx` is the only entry to retrieval reads. The `RLS_PROTECTED_TABLES` manifest enforces FORCE RLS on every new table. The CI gate `verify-rls-coverage.sh` blocks merges that miss a policy.
+2. **Per-scope filters are enforced at candidate-pool construction**, not after ranking. The pool builder constructs a UNION of five authorization-scoped queries, one per tier, each with its own filter:
+   - Org tier: `organisation_id = :ctx_org_id AND subaccount_id IS NULL AND agent_id IS NULL AND scheduled_task_id IS NULL AND task_instance_id IS NULL`
+   - Sub-account tier: `subaccount_id = :ctx_subaccount_id` (with org guard already in scope via `withOrgTx`).
+   - Agent tier: `agent_id = :current_run.agent_id`.
+   - Recurring-task tier: `scheduled_task_id = :current_run.scheduled_task_id` (null when the run is not on a schedule).
+   - Task-instance tier: `task_instance_id = :current_run.id` (null when not applicable).
+3. **Authorization filtering occurs BEFORE semantic retrieval.** No path runs a similarity search and then filters; the candidate pool IS the result of an authorization-scoped query (the five-tier UNION above).
+4. **Embeddings are tenant-scoped.** `reference_document_chunks.organisation_id` is on every row (denormalised from the parent document for RLS-policy locality).
+5. **Defence-in-depth at the ranker.** `retrievalServicePure` re-asserts org-id equality on every candidate; mixed-org candidates are filtered out as a programmer-error case (the existing pattern in `memoryBlockRetrievalServicePure`).
+
+Tested by:
+
+- Existing `rls.context-propagation.test.ts` harness expanded with the new tables (Phase 1).
+- Pure-function ranker test that asserts mixed-org candidates are filtered by `organisationId` (defence-in-depth, Phase 2).
+- A new manual test in the spec-conformance step at Phase 4: spin up two orgs, attach the same-named document to each, verify run isolation.
+
+## 13. Lifecycle, versioning, re-embedding
+
+Brief Â§11. Knowledge artefacts are versioned and re-indexable; embedding generations are replaceable infrastructure.
+
+### 13.1 Document edit
+
+1. New version row written (`reference_document_versions`); `current_version_id` flipped at the end.
+2. `summary_stale = true` immediately on version write.
+3. `document:summarise` job enqueued.
+4. `document:chunk-embed` job enqueued.
+5. Retrieval continues using the prior version's chunks until the new version's chunks are committed.
+6. Atomic swap: when the chunking job completes, it updates `reference_documents.last_chunked_at`. Until then, retrieval queries chunk rows `WHERE version_id = current_version_id`. Old version's chunks are retained (history) but excluded.
+
+### 13.2 Source-file change (e.g. underlying CSV updated)
+
+Same as document edit, triggered by the existing version-write hook in `referenceDocumentService`.
+
+### 13.3 Embedding model upgrade
+
+When OpenAI ships a new model (or operator chooses to migrate):
+
+1. The unique index on `(version_id, chunk_index, embedding_model)` allows the new generation to be written alongside the old one without collision.
+2. `document:reembed` job sweeps all chunks for the affected document(s), writing rows for the new `embedding_model` value while the existing rows remain.
+3. **The active-generation pointer is `reference_documents.active_embedding_model`.** Retrieval reads chunks `WHERE version_id = current_version_id AND embedding_model = active_embedding_model`. While the sweep is in progress, `active_embedding_model` still names the old generation; reads continue from the old embedding.
+4. **Atomic flip:** when the sweep completes for a document (every chunk in `current_version_id` has a row for the new model), the job updates `reference_documents.active_embedding_model` in a single statement. The next read sees the new generation. Old rows are retained (audit) but not consulted. Per-document flips, not global; one document can be on the new model while another is still on the old.
+5. No operator action required. The flip is invisible to the operator.
+
+### 13.4 Bundle changes
+
+Bundle composition affects which documents are pulled into a scope. The link rows are in `reference_document_data_sources` (direct attachment) and `document_bundle_attachments` (bundle attachment); neither requires re-embedding. The retrieval engine treats both as candidate-pool sources and deduplicates by `documentId`.
+
+### 13.5 Document deletion
+
+Soft delete on `reference_documents.deleted_at`. Cascade soft-delete to `reference_document_data_sources` (link rows). Chunks and version rows are retained for audit. Affected agents see a notice on their Data Sources tab (UI surface in Phase 6).
+
+## 14. UI surfaces
+
+Mockups at `prototypes/auto-knowledge-retrieval/` are the design source of truth. This section pins the architectural decisions only; pixel-level rendering belongs in the implementation plan.
+
+### 14.1 Knowledge page tab strip
+
+Sibling tabs in this order: Authored memory, Auto-memory, Documents, Files, Bundles. (The first two exist; Documents is refreshed; Files and Bundles are new tabs in this build, Bundles already exists as a sub-tab and is being promoted to a top-level tab consistent with the mockup.)
+
+The Bundles change is design-only (no backend change); it's listed under Phase 6 because it ships alongside the bundle-edit modal mode-chip enforcement.
+
+### 14.2 Files tab
+
+Read view of `execution_files`. Filters by sub-account, agent, scope. Three-dots row menu surfaces "Add to Knowledge" as the primary action. Mockup: `knowledge-files-tab.html`.
+
+### 14.3 Documents tab
+
+Refreshed view of `reference_documents` with new columns: tier, mode, source provenance, "used by N agents" (computed from `reference_document_data_sources`). Three-dots menu has Edit (opens detail modal), Change mode flyout, Add to bundle, Duplicate, Delete. Mockup: `knowledge-documents-tab.html`.
+
+### 14.4 Bundles tab
+
+Same data model as today. The bundle-edit modal shows per-document mode chips as **read-only** (brief Â§5 enforces). Mockup: `knowledge-bundles-tab.html`.
+
+### 14.5 Add to Knowledge modal
+
+Title + content preview + scope (org admins only) + Advanced expander (Apply to + mode override). Mockup: `add-to-knowledge-modal.html`.
+
+### 14.6 Document Detail modal
+
+Two-column layout. Main: title, content, mode picker, scope, available-to. Side: tier, qualitative size widget, created info, linked agents with usage bars. Mockup: `document-detail-modal.html`.
+
+### 14.7 Agent Data Sources tab
+
+Per-agent view of all linked documents across all five tiers. Mode chips. Relevance signal bar. No eager/lazy controls. Mockup: `agent-data-sources.html`.
+
+### 14.8 Bundle Edit modal
+
+Mode chips read-only. Mockup: `bundle-edit-modal.html`.
+
+### 14.9 Pre-design checklist verification
+
+Per `docs/frontend-design-principles.md`, every UI artefact passes the pre-design checklist. The five hard rules:
+
+- Primary user is the agency operator (lowest complexity tolerance).
+- Single primary task per screen (Documents tab: pick a document. Detail modal: edit a document. Add to Knowledge: promote a file).
+- Minimum information; no KPI tile rows; no observability sprawl.
+- Defaults invisible (token counts, IDs, cost rollups all hidden by default).
+- Three-second comprehension test passes against each mockup (see `mockup-log.md`).
+
+The recurring patterns from `docs/frontend-design-principles.md Â§ Recurring UI patterns` are followed across all surfaces.
+
+## 15. Deferred items
+
+Per checklist Â§7. The following are mentioned in prose or implied by the brief but are explicitly deferred from this build.
+
+- **Cross-encoder re-ranking.** Pure cosine for v1; future re-ranking with a small LLM if telemetry shows we need it. Reason: brief Â§15 + framing posture.
+- **Per-agent / per-user Always-available token budget caps (hard).** Soft warning in UI only; hard cap deferred. Reason: brief Â§15.
+- **Document-level ad-hoc semantic search UI.** No "search documents" surface in v1. Reason: brief Â§15.
+- **Document, File reverse promotion.** Out of scope. Reason: brief Â§15.
+- **Promotion-request workflow.** Sub-account admins request org-pinning. Reason: brief Â§15.
+- **Multilingual retrieval optimisation.** Reason: brief Â§15.
+- **Custom embedding provider per workspace.** Reason: brief Â§15.
+- **Retired column drop migration (`0293`).** Lands AFTER Phase 4 ships and is observed for one full sprint. Reason: rolling-cutover safety, per the existing column-retirement convention.
+- **Always-available stable-prefix partition optimisation.** Future work to graduate `always_available` documents into the cached prompt prefix. Reason: Â§8, out of scope for v1; revisit after retrieval telemetry exposes the right cache tier.
+- **Synthesised-by-agent source provenance.** Schema accommodates the value (Â§4.4) but no agent emits it in v1. Reason: brief Â§6 reserves the concept.
+- **Backfill of historical documents.** Dev environment, no historical data. Reason: brief Â§13 #11.
+- **Dedicated `retrieval_events` table (`0292_retrieval_events.sql`).** Storage in `agent_execution_events` is canonical for v1 (Â§6.7). Migration number is reserved so a future split does not collide. Reason: avoid premature partitioning; revisit only if event volume justifies it.
+
+If `chatgpt-spec-review` adds additional deferred items, they go here too.
+
+## 16. Self-consistency pass result
+
+Per checklist Â§8. Read pass complete. Findings:
+
+- Goals (Â§1) match Implementation (Â§4-Â§14). The five hard goals each map to a phase + a primitive.
+- Every phase item has an explicit verdict (BUILD / DEFER) somewhere in the spec.
+- Single-source-of-truth claims (Â§6.4) survive: every read path uses the named service.
+- Non-functional claims (latency < 100ms added per run, < 1c per run) match the inline + queued split in Â§8.
+- Load-bearing claims:
+  - "Authorization filtering before retrieval" -> mechanism: `withOrgTx` candidate-pool builder (Â§7.1, Â§12).
+  - "Atomic chunk swap" -> mechanism: `current_version_id` pointer flip after chunking job completes (Â§13.1).
+  - "Always-available bypasses threshold but participates in budget" -> mechanism: `RetrievalResult.alwaysAvailable[i].degraded` flag and operator-facing copy (Â§10.5).
+  - "Mode is a property of the document, not the link" -> mechanism: `mode` column on `reference_documents`, not on `reference_document_data_sources` (Â§4.3, Â§6.4).
+  - "Bundles are organisational only" -> mechanism: bundle attachments are deduplicated against direct attachments at retrieval time; mode chip is read-only in the bundle edit modal (Â§6.8, Â§14.8).
+
+No contradictions found at this draft pass. The spec author expects `spec-reviewer` and `chatgpt-spec-review` to surface gaps not visible to the author.
+
+## 17. Testing posture
+
+Per checklist Â§9. Aligned with `docs/spec-context.md` framing.
+
+- **Pure-function tests** (Vitest, runtime tests allowed for pure functions per `runtime_tests: pure_function_only`):
+  - `retrievalServicePure.test.ts`, ranker correctness, scope-bonus bounding (irrelevant doc never outranks relevant doc), threshold filtering, budget capping, deterministic tiebreak.
+  - `documentRetrievalServicePure.test.ts`, mode resolution, version pinning, chunk grouping.
+  - `documentChunkingServicePure.test.ts`, boundary correctness, edge cases (very short docs, very long docs, mixed content).
+  - Cross-tenant defence-in-depth: ranker with mixed-org candidates filters by `organisationId`.
+- **Static gates** (CI):
+  - `verify-rls-coverage.sh` covers the two new tables.
+  - `verify-rls-contract-compliance.sh` confirms no direct DB access bypasses `withOrgTx`.
+  - Existing grep gates apply (table-list, error-envelope, rate-limit-key).
+- **No frontend / API-contract / E2E tests authored against this build.** Per `docs/spec-context.md` framing.
+- **Manual G2 verification** at finalisation: spin up two orgs, attach same-named document to each, verify run isolation.
+
+The spec author flags one framing-deviation for review: the cross-tenant defence-in-depth ranker test is a pure-function test that exercises a security invariant. It is permitted under `pure_function_only` since the invariant is inside the pure function, not in an integration boundary.
+
+## 18. Open questions
+
+For `spec-reviewer` and `chatgpt-spec-review` to triage. Each is a question, not a hidden assumption:
+
+1. **Chunk size and overlap defaults.** Tuning belongs in the implementation plan, not here, but the spec author leaves the default-value decision to the Phase 2 builder. Reasonable starting point: 512 tokens with 64-token overlap. Spec-reviewer may push back if a different default is conventional in this repo.
+2. **Recency bonus shape.** The brief mentions "recency_bonus" in the ranking formula (Â§3) but does not pin the decay. The spec defers this to Phase 2 with a default of "linear decay over 30 days, max +0.05 added to the cosine score". Open to alternative defaults.
+3. **Operator-pin bonus shape.** Same as recency. Default +0.10, bounded so it can never invert a relevance gap > 0.10.
+4. **Reference-only manifest token cost.** Each manifest entry is title + 1-2 sentence summary; rough budget is < 50 tokens per entry. Should the spec pin a hard cap? Recommendation: yes, 80 tokens per manifest entry, configurable per organisation.
+5. **Files tab scope filter.** Should the Files tab default to "current sub-account scope" or "all scopes the user can see"? Recommendation: current sub-account, with a scope selector for org admins.
+6. **Add-to-Knowledge transaction shape.** Inline transaction for the row inserts + queued for summarisation/embedding (Â§8). Should the modal block until the summary is generated, or return immediately and show a "summarising..." indicator? Recommendation: return immediately, show indicator, refresh on background completion (existing pattern in this repo).
+7. **Phase 7 observability storage.** Closed in iter-3: storage is canonically `agent_execution_events` (Â§6.7). The `0292_retrieval_events.sql` migration number is reserved for a future split if event volume justifies it (Â§15). No remaining open question.
+8. **`agent_data_sources.loadingMode` retirement.** The spec retires the column in Phase 4. Should it instead be DEFAULT NULL'd and ignored, leaving the column for one cycle? Recommendation: drop in Phase 4 cutover. Open to "soft-retire" instead.
+9. **Recurring-task scope: which table holds the FK?** `memory_blocks.scheduled_task_id` is straightforward. For `reference_document_data_sources`, the column is part of the scope-key tuple. CHECK constraints enforce mutual exclusion (only one scope key non-null per row except for the org case). Open to alternative shape (e.g. polymorphic `scope_type` + `scope_id`), recommendation: stick with the scope-key columns since the join cardinality is asymmetric and policy-checking is easier with named columns.
+10. **What permission key does Files-tab read use?** Recommendation: `knowledge:read` covers it; the existing `files:read` (if any) is not extended. Open if the existing convention prefers per-resource keys.
+
+These are starting points; the author expects them to be tightened or closed by the review pass.
+
+---
+
+> End of spec.
+
+2026-05-08T04:39:08.308327Z ERROR codex_core::tools::router: error=`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'tasks/builds/auto-knowledge-retrieval/spec.md' -Pattern '"'^## 6'"\\.|"'^### 6'"\\.|"'^## 8'"\\.|"'^### 8'"\\.|"'^## 13'"\\.|"'^### 13'"\\.|"'^## 18'"\\.|"'^### 18'"\\.' -Context 0,12"` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'tasks/builds/auto-knowledge-retrieval/spec.md' -Pattern '"'^## 6'"\\.|"'^### 6'"\\.|"'^## 8'"\\.|"'^### 8'"\\.|"'^## 13'"\\.|"'^### 13'"\\.|"'^## 18'"\\.|"'^### 18'"\\.' -Context 0,12" in C:\files\Claude\automation-v1
+ declined in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'tasks/builds/auto-knowledge-retrieval/spec.md' -Pattern '"'^## 6'"\\.|"'^### 6'"\\.|"'^## 8'"\\.|"'^### 8'"\\.|"'^## 13'"\\.|"'^### 13'"\\.|"'^## 18'"\\.|"'^### 18'"\\.' -Context 0,12"` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^(##|###) (6|8|13|18)'"\\.\" tasks/builds/auto-knowledge-retrieval/spec.md" in C:\files\Claude\automation-v1
+ succeeded in 379ms:
+311:## 6. Contracts
+315:### 6.1 `RetrievalCandidate`
+338:### 6.2 `RetrievalResult`
+362:### 6.3 `RetrievalRejectionReason` (closed)
+366:### 6.4 Source-of-truth precedence
+380:### 6.5 Add-to-Knowledge promotion contract
+398:### 6.6 Mode-change contract
+409:### 6.7 Retrieval observability event
+415:### 6.8 Bundle attachment contract (no change)
+436:## 8. Execution model
+452:### 8.1 Idempotency across queued boundaries
+616:## 13. Lifecycle, versioning, re-embedding
+620:### 13.1 Document edit
+629:### 13.2 Source-file change (e.g. underlying CSV updated)
+633:### 13.3 Embedding model upgrade
+643:### 13.4 Bundle changes
+647:### 13.5 Document deletion
+755:## 18. Open questions
+
+2026-05-08T04:39:14.756218Z ERROR codex_core::tools::router: error=`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content '"'tasks/builds/auto-knowledge-retrieval/spec.md'; "'$c[314..430]'` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content '"'tasks/builds/auto-knowledge-retrieval/spec.md'; "'$c[314..430]' in C:\files\Claude\automation-v1
+ declined in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content '"'tasks/builds/auto-knowledge-retrieval/spec.md'; "'$c[314..430]'` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content 'tasks/builds/auto-knowledge-retrieval/spec.md' | Select-Object -Skip 314 -First 117" in C:\files\Claude\automation-v1
+ succeeded in 457ms:
+### 6.1 `RetrievalCandidate`
+
+```ts
+type RetrievalCandidate = {
+  id: string;                    // chunk id OR memory_block id
+  kind: 'document_chunk' | 'memory_block';
+  organisationId: string;
+  subaccountId: string | null;
+  agentId: string | null;
+  scheduledTaskId: string | null;
+  taskInstanceId: string | null;       // documents only; always null for memory blocks
+  embedding: number[];                  // vector(1536)
+  tokenCount: number;
+  // For documents: the chunk's parent document id, version id, and mode.
+  parentDocumentId?: string;
+  parentDocumentVersionId?: string;
+  mode?: 'auto' | 'always_available' | 'reference_only';
+  // For memory blocks: priority + isAuthoritative + ownerAgent (already in the existing ranker).
+  priority?: 'low' | 'medium' | 'high';
+  isAuthoritative?: boolean;
+};
+```
+
+### 6.2 `RetrievalResult`
+
+```ts
+type RetrievalResult = {
+  loaded: Array<{
+    candidateId: string;
+    finalScore: number;
+    relevanceScore: number;
+    scopeBonus: number;
+    recencyBonus: number;
+    operatorPinBonus: number;
+    tier: 'task_instance' | 'recurring_task' | 'agent' | 'subaccount' | 'organisation';
+    tokenCost: number;
+  }>;
+  rejected: {
+    aboveThreshold: Array<{ candidateId: string; finalScore: number; reason: 'budget_exhausted' | 'lower_score_in_tie' }>;
+    belowThreshold: { count: number };  // Counts only, not full list.
+  };
+  alwaysAvailable: Array<{ candidateId: string; tokenCost: number; degraded: boolean }>;
+  referenceOnlyManifest: Array<{ candidateId: string; title: string; summary: string }>;
+  poolSize: { taskInstance: number; recurringTask: number; agent: number; subaccount: number; organisation: number };
+};
+```
+
+### 6.3 `RetrievalRejectionReason` (closed)
+
+`'budget_exhausted' | 'lower_score_in_tie' | 'mode_excluded' | 'authorization_filtered' | 'below_threshold'`. Authorization-filtered candidates never appear in the result; the count is a property of the candidate-pool builder, not the ranker.
+
+### 6.4 Source-of-truth precedence
+
+Multiple representations exist for the same fact. The precedence is **declared, not implicit**:
+
+| Fact | Source of truth | Read path |
+|---|---|---|
+| Document content | `reference_document_versions` (the row pointed to by `reference_documents.current_version_id`) | always read via `referenceDocumentService.getCurrent(documentId)` |
+| Document mode | `reference_documents.mode` | one column, no other source |
+| Link / scope | `reference_document_data_sources` rows for `(document_id, scope_columns)` | `documentDataSourceService.findByDocument(documentId)` |
+| Document chunks | `reference_document_chunks` joined to `reference_document_versions` via `version_id` AND filtered by `embedding_model = reference_documents.active_embedding_model` (active-generation pointer, Â§13.3) | always pinned by version id + active model; never "latest by timestamp" |
+| `summary_stale` | `reference_documents.summary_stale` (boolean), set true on version write, set false when `document:summarise` job completes successfully | UI must surface stale state when true |
+
+The atomic-swap rule for chunks (Â§4.5) is: on new version write, the new chunks are inserted with the new `version_id`; the active version pointer flips only after all chunks for the new version are embedded; old chunks are not deleted, they age out via `version_id != current_version_id`.
+
+### 6.5 Add-to-Knowledge promotion contract
+
+```ts
+type AddToKnowledgeRequest = {
+  fileId: string;                       // execution_files.id
+  title: string;                        // pre-filled from filename, editable
+  scope: 'organisation' | 'subaccount' | 'agent' | 'recurring_task' | 'task_instance';
+  agentIds?: string[];                  // when scope='agent'; otherwise applies to all agents in the chosen scope
+  scheduledTaskId?: string;             // required when scope='recurring_task'
+  taskInstanceId?: string;              // required when scope='task_instance'
+  mode?: 'auto' | 'always_available' | 'reference_only';  // default 'auto' if omitted
+};
+```
+
+Producer: `client/src/api/knowledgeApi.ts -> addToKnowledge`. Consumer: `documentPromotionService.promoteFile(req, principal)`. The default scope is **inherited from the surface that originated the request** (brief Â§6) â€” the Manage-Task page defaults to `task_instance`, the recurring-task surface defaults to `recurring_task`, the Agent edit surface defaults to `agent`, the Knowledge page in a sub-account view defaults to `subaccount`, and the Knowledge page in an org view defaults to `organisation`. Org admins may promote upward; sub-account admins may not.
+
+The promotion transaction (inline, in `withOrgTx`) inserts `reference_documents` + inserts initial `reference_document_versions` + inserts `reference_document_data_sources` rows + writes a `document_promotion_audit` row (the idempotency anchor) + enqueues `document:summarise` + `document:chunk-embed` via pg-boss. The `execution_files.expiresAt` durability flip is **deferred to `document:promotion-finalise`** which runs after the chunking job has committed the new version's chunks. Until that completes, the file remains expirable; if the user races deletion, the audit row stops the promotion path from re-running. See Â§8 for the rationale.
+
+### 6.6 Mode-change contract
+
+```ts
+type ChangeDocumentModeRequest = {
+  documentId: string;
+  mode: 'auto' | 'always_available' | 'reference_only';
+};
+```
+
+Idempotent (state-based: predicate `WHERE mode <> :mode`). Returns the new mode. UI surfaces the change inline. Mode is a property of the document, not the link, so changing mode applies to every scope the document is linked at.
+
+### 6.7 Retrieval observability event
+
+**Storage: `agent_execution_events`.** A new event type is added to the existing ledger (`shared/types/agentExecutionLog.ts -> AGENT_EXECUTION_EVENT_CRITICALITY`). New `criticality` entry: `'observability'`. New event-shape `'retrieval.summary'` carrying the `RetrievalResult` shape from Â§6.2 plus a per-document chunk fan-out under `loaded[i].chunkIds: string[]`. Emission begins in Phase 4; the partial unique index in `0291b_agent_execution_events_retrieval_summary_unique.sql` (Â§10.4) enforces the exactly-one-per-run invariant.
+
+A dedicated `retrieval_events` table is **deferred** (see Â§15) â€” splitting events into a separate table is reconsidered only if Phase 7 telemetry shows event volume swamping the existing ledger. Any future split must preserve the Phase-4 emission point and the terminal-event uniqueness guarantee with equivalent DB-level mechanisms; it is not a v1 decision.
+
+### 6.8 Bundle attachment contract (no change)
+
+`document_bundle_attachments` continues to drive bundle-level attachment. Per brief Â§5: bundles do not modify retrieval. The new per-document `reference_document_data_sources` rows are independent of bundle attachments. A document can be both attached directly and through a bundle; retrieval treats it as a single candidate (deduplicated by `(documentId, chunkId)`).
+
+## 7. Permissions / RLS checklist
+
+Per `docs/spec-authoring-checklist.md` Â§4. Every new tenant-scoped table satisfies all four requirements.
+
+| Table | RLS policy | Manifest entry | Route guard | Principal-scoped context |
+|---|---|---|---|---|
+| `reference_document_chunks` | yes, migration `0289`, FK-walked through `reference_documents` (parent-policied pattern, mirrors `reference_document_versions`'s shape) | yes, added in `0289` | yes, `authenticate` + `requirePermission('knowledge:read')` for read; `requirePermission('knowledge:write')` for write | yes, every read flows via `withOrgTx` and the GUC propagation is enforced by the existing `rls.context-propagation.test.ts` harness |
+| `reference_document_data_sources` | yes, migration `0290`, direct org-isolation shape (org_id is on every row) | yes, added in `0290` | yes, `authenticate` + `requirePermission('knowledge:write')` for mutations; `requirePermission('knowledge:read')` for reads | yes, `withOrgTx` |
+
+`memory_blocks.scheduled_task_id` does not require new RLS work (the parent table already has FORCE RLS). The new column is filtered by the same policy.
+
+The new permission key is `knowledge` with `read` / `write` scopes. The org-admin-only "promote to org-wide" check is enforced in `documentPromotionService` and surfaced in the UI per the mockup (the field is absent from the DOM for non-org-admins, brief Â§17 / `docs/frontend-design-principles.md`).
+
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content 'tasks/builds/auto-knowledge-retrieval/spec.md' | Select-Object -Skip 435 -First 180" in C:\files\Claude\automation-v1
+ succeeded in 452ms:
+## 8. Execution model
+
+Per checklist Â§5: every behaviour that crosses a transactional or latency boundary picks one of inline / queued / cached.
+
+| Behaviour | Model | Why |
+|---|---|---|
+| Per-run retrieval (Â§4 of brief) | **Inline / synchronous.** | The agent execution path needs the result before assembling the prompt. Latency budget is < 100ms added per run (brief Â§16). |
+| Document version write | **Inline.** | The version row IS the durable artefact; the user expects "save" to commit. Returns the new version id. |
+| Summarisation on version write | **Queued (`document:summarise`).** | LLM call, network-bound, retryable. |
+| Chunking + embedding on version write | **Queued (`document:chunk-embed`).** | Chunking is CPU; embedding is network-bound. The new version's chunks are committed inside this job; the active-version pointer flips at the end. |
+| Re-embedding on model upgrade | **Queued sweep (`document:reembed`).** | Walks every document; idempotent per chunk via `(version_id, chunk_index, embedding_model)` unique index. |
+| Add-to-Knowledge promotion | **Inline transaction + queued finalise.** | The user expects the file to appear as a document immediately. The inline transaction (in `withOrgTx`) inserts `reference_documents`, `reference_document_versions`, `reference_document_data_sources`, and `document_promotion_audit` rows, and enqueues `document:summarise` + `document:chunk-embed`. The `execution_files.expiresAt` durability flip and any post-commit telemetry happen in `document:promotion-finalise`, which is enqueued after the chunking job has committed (chained on the chunking job's success). The audit row is the idempotency anchor â€” see Â§10.1. |
+| Retrieval observability event emission | **Inline at terminal (run end).** | Same boundary as the existing `agent_execution_events` emitter. |
+
+No prompt-partition / cached-context interaction in v1. The brief explicitly defers cross-tier cache-token optimisation; documents go into the dynamic suffix per existing prompt-assembly conventions. Future work (Phase 8+) can graduate Always-available documents into a stable-prefix partition.
+
+### 8.1 Idempotency across queued boundaries
+
+| Job | Idempotency key | Posture |
+|---|---|---|
+| `document:summarise` | `(document_id, version_id)` | key-based, DB unique index on the pair; if job replays, no new write |
+| `document:chunk-embed` | `(version_id, chunk_index, embedding_model)` | key-based, DB unique index on chunks; if a chunk for the same model already exists, the job no-ops it. The three-column key matches Â§10.1, Â§10.6, and Â§13.3 so re-embedding can write a new generation alongside the old one without colliding. |
+| `document:reembed` | `(version_id, chunk_index, embedding_model)` | key-based, supports embedding-model migrations |
+| `document:promotion-finalise` | `(document_id, file_id)` | key-based |
+
+## 9. Phase sequencing (dependency graph)
+
+Per checklist Â§6. No phase references a column / table / service introduced later.
+
+```
+Phase 1 (schema + RLS)
+   |
+   v
+Phase 2 (retrievalServicePure + chunking pipeline pure functions)
+   |
+   v
+Phase 3 (ingestion / re-embedding jobs, needs schema + ranker contracts)
+   |
+   v
+Phase 4 (agent run integration, needs ingestion to be working in some form)
+   |
+   v
+Phase 5 (UI: Knowledge tabs + Add-to-Knowledge, needs ingestion + integration)
+   |
+   v
+Phase 6 (UI: agent data sources + document detail, needs Phase 5 components)
+   |
+   v
+Phase 7 (retrieval observability, needs the run path emitting events)
+```
+
+Phases ship in the linear order above. The framing assumption (`feature_flags: only_for_behaviour_modes`, `staged_rollout: never_for_this_codebase_yet`) prohibits gating a partial UI behind a rollout flag; partial-product branches are not introduced.
+
+### 9.1 Dependency check by phase
+
+| Phase | Schema introduced | Code referenced | Schema dependency |
+|---|---|---|---|
+| 1 | `0288`-`0291` | (none, schema-only phase) | , |
+| 2 | (none) | `reference_document_chunks`, `reference_document_data_sources`, `memory_blocks.scheduled_task_id` | introduced in Phase 1 ok |
+| 3 | (none) | All Phase 1 tables; new jobs | introduced in Phase 1 ok |
+| 4 | (none) | All above + observability emission (writes `retrieval.summary` events into `agent_execution_events`) | ok |
+| 5 | (none) | All above + Phase 5 routes | ok |
+| 6 | (none) | All above | ok |
+| 7 | (none) | observability surfaces (tooltips, drill-in, relevance bar) read events emitted from Phase 4 | uses existing `agent_execution_events` (canonical) |
+| 4 (post-cutover) | `0293` (drop) | dropped column was already unused after Phase 4 cutover | ok |
+
+No backward references. No orphaned deferrals. No phase-boundary contradictions.
+
+## 10. Execution-safety contracts
+
+Per checklist Â§10.
+
+### 10.1 Idempotency posture (every external-trigger write)
+
+| Write | Posture | Mechanism |
+|---|---|---|
+| Add document version | state-based (`version = current_version + 1` predicate; UNIQUE on `(document_id, version)`) | `referenceDocumentService.writeVersion` |
+| Insert chunk | key-based (`UNIQUE (version_id, chunk_index, embedding_model)`, the same key used by re-embedding in Â§13.3 so a model upgrade can write a new generation alongside the old one without violating the index) | `documentEmbeddingService.embedChunk` |
+| Insert link row | key-based (`UNIQUE (document_id, scope_columns) WHERE deleted_at IS NULL`) | `documentDataSourceService.link` |
+| Mode change | state-based (`UPDATE ... WHERE mode <> :new_mode`) | `documentDataSourceService.changeMode` |
+| Add-to-Knowledge promote | key-based (`UNIQUE (file_id) WHERE deleted_at IS NULL` on a new `document_promotion_audit` row inside the transaction; matches the Â§5.1 / Â§10.3 / Â§10.6 form) | `documentPromotionService.promoteFile` |
+| Retrieval event | key-based (`UNIQUE (run_id, event_type='retrieval.summary')` partial unique index on `agent_execution_events`; replay catches `23505` and treats it as an idempotent hit) | `retrievalObservabilityService.emit` |
+
+### 10.2 Retry classification
+
+| Operation | Class | Boundary |
+|---|---|---|
+| Add version | guarded | predicate above |
+| Insert chunk | safe | dedup'd by unique index |
+| Insert link row | guarded | unique index |
+| Mode change | safe | optimistic predicate |
+| Promote file | guarded | inside `withOrgTx`; unique index on the audit row |
+| Re-embed sweep | safe | per-chunk idempotency |
+
+### 10.3 Concurrency guard for racing writes
+
+| Race | Guard | Losing-caller response |
+|---|---|---|
+| Two callers promote the same file simultaneously | UNIQUE on `(file_id) WHERE ...` on the audit row; catch `23505` | 409 Conflict + "Already promoted to document {id}" + the existing document id in the body |
+| Two callers change document mode at the same time | Last-write-wins is acceptable (mode is a property, not a state machine); no guard needed | the second response carries the final mode |
+| Two callers add the same document at the same scope | UNIQUE on `(document_id, scope_columns) WHERE deleted_at IS NULL`; catch `23505` | 409 Conflict + "Already linked at this scope" |
+| Two embedders run on the same chunk | UNIQUE on `(version_id, chunk_index, embedding_model)` | safe, one wins, the other no-ops |
+| Two re-embed jobs touch the same chunk | same UNIQUE | same |
+
+### 10.4 Terminal event guarantee
+
+Every retrieval has exactly one terminal observability event (`retrieval.summary`) per run, emitted once at the end of the run regardless of success / partial / failed status. No intermediate retrieval events. **Enforcement mechanism:** a partial unique index `UNIQUE (run_id) WHERE event_type = 'retrieval.summary'` on `agent_execution_events`. If run finalisation retries after a successful emit, the second insert violates the index and is treated as an idempotent hit (no-op). Single-writer-per-run is preserved; double-counting in Â§11 aggregates is impossible.
+
+### 10.5 No-silent-partial-success
+
+The "always-available bypass-but-still-budget-bound" rule (brief Â§3) is the trickiest place. The contract is:
+
+- If `sum(alwaysAvailable token_cost) > context_budget`, the system flags the run as `degraded` in the retrieval result and emits operator guidance via `RetrievalResult.alwaysAvailable[i].degraded = true`. It does NOT silently truncate; the agent execution continues but the run-summary surface marks it. Operator-facing copy in the UI reads "Some always-available documents could not be loaded due to context limits."
+- Threshold-passing documents that don't fit the remaining budget are tracked in `rejected.aboveThreshold[i].reason = 'budget_exhausted'` so the "why wasn't this loaded?" drill-in (Â§11) can surface the truth.
+
+### 10.6 Unique-constraint-to-HTTP mapping
+
+| Constraint | HTTP status | Body |
+|---|---|---|
+| `reference_documents_org_name_uq` violation | 409 Conflict | `{ error: "DOCUMENT_NAME_EXISTS", existingDocumentId: "..." }` |
+| `reference_document_data_sources_unique_per_scope` | 409 Conflict | `{ error: "DOCUMENT_ALREADY_LINKED", existingLinkId: "..." }` |
+| `reference_document_chunks_unique_per_version_chunk_model` (i.e. `(version_id, chunk_index, embedding_model)`) | 200 (idempotent hit) | `{ noop: true, chunkId: "..." }` (job context only; never bubbled to operators) |
+| `document_promotion_audit_unique_per_file` | 409 Conflict | `{ error: "FILE_ALREADY_PROMOTED", existingDocumentId: "..." }` |
+
+### 10.7 State machine closure
+
+The `mode` enum is closed: `auto | always_available | reference_only`. Adding a new mode requires a spec amendment. The `source` enum is also closed (Â§4.4).
+
+`summary_stale` is a boolean (`true` after version write, `false` after summarisation completes). Forbidden transitions: none; the column is a flag, not a multi-state machine.
+
+`reference_document_data_sources` rows have a soft-delete model (`deleted_at IS NULL` filter). Forbidden transitions: re-creating a deleted link must use a fresh row, not un-deleting (audit-friendly). The unique index applies only to `WHERE deleted_at IS NULL`.
+
+## 11. Retrieval observability
+
+Brief Â§9, operator-facing principle, not internal-only telemetry. **Day-one v1 invariant** per the brief: event emission lands in Phase 4 alongside the run-path integration; only the operator-facing surfaces (tooltips, drill-in, relevance bar) are deferred to Phase 7.
+
+### 11.1 What gets recorded
+
+Per the `RetrievalResult` contract (Â§6.2). Every per-run retrieval emits one `retrieval.summary` event. No intermediate events. Emission begins in Phase 4 (the same phase that wires retrieval into the agent run). Surface consumers ship in Phase 7. The brief Â§9 day-one requirement is satisfied because telemetry is captured from the first run â€” if a Phase 5 / 6 surface is added later that needs to look back, the data is already there.
+
+### 11.2 Operator-facing surfaces
+
+Each one consumes the same event stream:
+
+1. **"Why was this loaded?" tooltip** on document rows in Agent Data Sources and Documents tabs. Reads the last N runs that used this document; renders plain-language summary ("Loaded for CRM enrichment and lead scoring tasks").
+2. **"Why wasn't this loaded?" drill-in** on a per-run trace (existing run-trace surface). Renders `rejected.aboveThreshold` with reasons.
+3. **"Loaded in N of last 30 runs" relevance bar** on document rows. Backed by an aggregate query over the event stream.
+4. **Token usage per workspace and per agent** on the spending surface (already exists; this build adds the per-document attribution).
+
+### 11.3 Internal telemetry surfaces
+
+Engineering-only:
+
+- Relevance threshold tuning histograms (per organisation).
+- Embedding model evaluation (RAG quality benchmarking).
+- Retrieval drift detection (week-over-week candidate-pool size and rejection-reason distribution).
+
+These surfaces are not gated behind the new `knowledge` permission; they're admin-only.
+
+## 12. Tenant isolation invariants
+
+Brief Â§10. The hard rules:
+
+1. **Cross-org boundary is absolute.** `withOrgTx` is the only entry to retrieval reads. The `RLS_PROTECTED_TABLES` manifest enforces FORCE RLS on every new table. The CI gate `verify-rls-coverage.sh` blocks merges that miss a policy.
+2. **Per-scope filters are enforced at candidate-pool construction**, not after ranking. The pool builder constructs a UNION of five authorization-scoped queries, one per tier, each with its own filter:
+   - Org tier: `organisation_id = :ctx_org_id AND subaccount_id IS NULL AND agent_id IS NULL AND scheduled_task_id IS NULL AND task_instance_id IS NULL`
+   - Sub-account tier: `subaccount_id = :ctx_subaccount_id` (with org guard already in scope via `withOrgTx`).
+   - Agent tier: `agent_id = :current_run.agent_id`.
+   - Recurring-task tier: `scheduled_task_id = :current_run.scheduled_task_id` (null when the run is not on a schedule).
+   - Task-instance tier: `task_instance_id = :current_run.id` (null when not applicable).
+3. **Authorization filtering occurs BEFORE semantic retrieval.** No path runs a similarity search and then filters; the candidate pool IS the result of an authorization-scoped query (the five-tier UNION above).
+4. **Embeddings are tenant-scoped.** `reference_document_chunks.organisation_id` is on every row (denormalised from the parent document for RLS-policy locality).
+5. **Defence-in-depth at the ranker.** `retrievalServicePure` re-asserts org-id equality on every candidate; mixed-org candidates are filtered out as a programmer-error case (the existing pattern in `memoryBlockRetrievalServicePure`).
+
+Tested by:
+
+- Existing `rls.context-propagation.test.ts` harness expanded with the new tables (Phase 1).
+- Pure-function ranker test that asserts mixed-org candidates are filtered by `organisationId` (defence-in-depth, Phase 2).
+- A new manual test in the spec-conformance step at Phase 4: spin up two orgs, attach the same-named document to each, verify run isolation.
+
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"document_promotion_audit|deleted_at|append-only|active-version pointer|current_version_id|task_instance_id|referenceOnlyManifest|belowThreshold|why wasn't this loaded|loaded in N of last 30 runs|chunkIds|per-document attribution|used in N of last 30 runs|scope bonus|operatorPinBonus|document:promotion-finalise|summarise|chunk-embed\" tasks/builds/auto-knowledge-retrieval/spec.md" in C:\files\Claude\automation-v1
+ succeeded in 318ms:
+80:| 3 | Document ingestion + re-embedding | Background jobs (`document-summarise`, `document-chunk-embed`, `document-reembed`). `summary_stale` flag. | Yes, admin ingest only; UI surface in Phase 5. |
+140:| 1. Task instance | `task_instance` | `task_instance_id` (FK to `agent_runs.id` or successor) |
+150:Memory blocks gain `scheduled_task_id`. They do **not** gain `task_instance_id` (brief §7, persistent memory at an ephemeral scope is a category error).
+196:`execution_files` is **not** modified by this build. The Files tab is a read view of existing rows filtered by sub-account / agent / scope. The "Add to Knowledge" action transforms an `execution_files` row into a new `reference_documents` row plus link rows; the file row itself is untouched in the inline transaction. The brief mandates the source file becomes durable: `execution_files.expiresAt` is flipped to `NULL` or far-future by the `document:promotion-finalise` job after the chunking job commits (§6.5, §8). Until finalise runs, the file is still expirable; the `document_promotion_audit` row prevents the promotion path from re-running if expiry races finalise. Operator-facing: the file row is marked "durable" in the UI as soon as the inline transaction completes (audit-row backed); the `expiresAt` flip is invisible to the operator.
+210:| `0291a_document_promotion_audit.sql` | 5 | Create `document_promotion_audit` table — append-only ledger of `(file_id, document_id, organisation_id, principal_id, created_at)` with `UNIQUE (file_id) WHERE deleted_at IS NULL`; written inside the promotion transaction as the idempotency anchor (§10.1). RLS via direct org-isolation. Manifest entry added in same migration. |
+240:| `server/services/documentPromotionService.ts` | 5 | Add-to-Knowledge transaction: file -> document + link rows + `document_promotion_audit` row (idempotency anchor). |
+257:| `document:summarise` | 3 | Generate the 1-2 sentence summary on document version write. |
+258:| `document:chunk-embed` | 3 | Chunk the new version + embed chunks. |
+260:| `document:promotion-finalise` | 5 | Side-effects of Add-to-Knowledge after the inline transaction commits (mark file durable, emit telemetry). |
+348:    operatorPinBonus: number;
+354:    belowThreshold: { count: number };  // Counts only, not full list.
+357:  referenceOnlyManifest: Array<{ candidateId: string; title: string; summary: string }>;
+372:| Document content | `reference_document_versions` (the row pointed to by `reference_documents.current_version_id`) | always read via `referenceDocumentService.getCurrent(documentId)` |
+376:| `summary_stale` | `reference_documents.summary_stale` (boolean), set true on version write, set false when `document:summarise` job completes successfully | UI must surface stale state when true |
+378:The atomic-swap rule for chunks (§4.5) is: on new version write, the new chunks are inserted with the new `version_id`; the active version pointer flips only after all chunks for the new version are embedded; old chunks are not deleted, they age out via `version_id != current_version_id`.
+396:The promotion transaction (inline, in `withOrgTx`) inserts `reference_documents` + inserts initial `reference_document_versions` + inserts `reference_document_data_sources` rows + writes a `document_promotion_audit` row (the idempotency anchor) + enqueues `document:summarise` + `document:chunk-embed` via pg-boss. The `execution_files.expiresAt` durability flip is **deferred to `document:promotion-finalise`** which runs after the chunking job has committed the new version's chunks. Until that completes, the file remains expirable; if the user races deletion, the audit row stops the promotion path from re-running. See §8 for the rationale.
+411:**Storage: `agent_execution_events`.** A new event type is added to the existing ledger (`shared/types/agentExecutionLog.ts -> AGENT_EXECUTION_EVENT_CRITICALITY`). New `criticality` entry: `'observability'`. New event-shape `'retrieval.summary'` carrying the `RetrievalResult` shape from §6.2 plus a per-document chunk fan-out under `loaded[i].chunkIds: string[]`. Emission begins in Phase 4; the partial unique index in `0291b_agent_execution_events_retrieval_summary_unique.sql` (§10.4) enforces the exactly-one-per-run invariant.
+444:| Summarisation on version write | **Queued (`document:summarise`).** | LLM call, network-bound, retryable. |
+445:| Chunking + embedding on version write | **Queued (`document:chunk-embed`).** | Chunking is CPU; embedding is network-bound. The new version's chunks are committed inside this job; the active-version pointer flips at the end. |
+447:| Add-to-Knowledge promotion | **Inline transaction + queued finalise.** | The user expects the file to appear as a document immediately. The inline transaction (in `withOrgTx`) inserts `reference_documents`, `reference_document_versions`, `reference_document_data_sources`, and `document_promotion_audit` rows, and enqueues `document:summarise` + `document:chunk-embed`. The `execution_files.expiresAt` durability flip and any post-commit telemetry happen in `document:promotion-finalise`, which is enqueued after the chunking job has committed (chained on the chunking job's success). The audit row is the idempotency anchor — see §10.1. |
+456:| `document:summarise` | `(document_id, version_id)` | key-based, DB unique index on the pair; if job replays, no new write |
+457:| `document:chunk-embed` | `(version_id, chunk_index, embedding_model)` | key-based, DB unique index on chunks; if a chunk for the same model already exists, the job no-ops it. The three-column key matches §10.1, §10.6, and §13.3 so re-embedding can write a new generation alongside the old one without colliding. |
+459:| `document:promotion-finalise` | `(document_id, file_id)` | key-based |
+514:| Insert link row | key-based (`UNIQUE (document_id, scope_columns) WHERE deleted_at IS NULL`) | `documentDataSourceService.link` |
+516:| Add-to-Knowledge promote | key-based (`UNIQUE (file_id) WHERE deleted_at IS NULL` on a new `document_promotion_audit` row inside the transaction; matches the §5.1 / §10.3 / §10.6 form) | `documentPromotionService.promoteFile` |
+536:| Two callers add the same document at the same scope | UNIQUE on `(document_id, scope_columns) WHERE deleted_at IS NULL`; catch `23505` | 409 Conflict + "Already linked at this scope" |
+549:- Threshold-passing documents that don't fit the remaining budget are tracked in `rejected.aboveThreshold[i].reason = 'budget_exhausted'` so the "why wasn't this loaded?" drill-in (§11) can surface the truth.
+558:| `document_promotion_audit_unique_per_file` | 409 Conflict | `{ error: "FILE_ALREADY_PROMOTED", existingDocumentId: "..." }` |
+566:`reference_document_data_sources` rows have a soft-delete model (`deleted_at IS NULL` filter). Forbidden transitions: re-creating a deleted link must use a fresh row, not un-deleting (audit-friendly). The unique index applies only to `WHERE deleted_at IS NULL`.
+583:4. **Token usage per workspace and per agent** on the spending surface (already exists; this build adds the per-document attribution).
+601:   - Org tier: `organisation_id = :ctx_org_id AND subaccount_id IS NULL AND agent_id IS NULL AND scheduled_task_id IS NULL AND task_instance_id IS NULL`
+605:   - Task-instance tier: `task_instance_id = :current_run.id` (null when not applicable).
+622:1. New version row written (`reference_document_versions`); `current_version_id` flipped at the end.
+624:3. `document:summarise` job enqueued.
+625:4. `document:chunk-embed` job enqueued.
+627:6. Atomic swap: when the chunking job completes, it updates `reference_documents.last_chunked_at`. Until then, retrieval queries chunk rows `WHERE version_id = current_version_id`. Old version's chunks are retained (history) but excluded.
+639:3. **The active-generation pointer is `reference_documents.active_embedding_model`.** Retrieval reads chunks `WHERE version_id = current_version_id AND embedding_model = active_embedding_model`. While the sweep is in progress, `active_embedding_model` still names the old generation; reads continue from the old embedding.
+640:4. **Atomic flip:** when the sweep completes for a document (every chunk in `current_version_id` has a row for the new model), the job updates `reference_documents.active_embedding_model` in a single statement. The next read sees the new generation. Old rows are retained (audit) but not consulted. Per-document flips, not global; one document can be on the new model while another is still on the old.
+649:Soft delete on `reference_documents.deleted_at`. Cascade soft-delete to `reference_document_data_sources` (link rows). Chunks and version rows are retained for audit. Affected agents see a notice on their Data Sources tab (UI surface in Phase 6).
+730:  - "Atomic chunk swap" -> mechanism: `current_version_id` pointer flip after chunking job completes (§13.1).
+
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"chunk grouping|deduplicated by \\(documentId, chunkId\\)|per-document|candidateId|parentDocumentId|chunkIds|document rows|usage bars|used by N agents\" tasks/builds/auto-knowledge-retrieval/spec.md" in C:\files\Claude\automation-v1
+ succeeded in 394ms:
+44:- Replace per-document **eager / lazy** loading with one of three modes: **Auto** (default), **Always available**, **Reference only**. The user-facing eager / lazy concept disappears.
+48:- Surface **retrieval observability** as an operator product (not internal-only telemetry): "why was this loaded / not loaded" tooltips, per-document relevance signals, per-run trace.
+235:| `server/services/documentRetrievalServicePure.ts` | 2 | Document-specific filters before ranking (mode, version pinning, chunk grouping). |
+329:  parentDocumentId?: string;
+343:    candidateId: string;
+353:    aboveThreshold: Array<{ candidateId: string; finalScore: number; reason: 'budget_exhausted' | 'lower_score_in_tie' }>;
+356:  alwaysAvailable: Array<{ candidateId: string; tokenCost: number; degraded: boolean }>;
+357:  referenceOnlyManifest: Array<{ candidateId: string; title: string; summary: string }>;
+411:**Storage: `agent_execution_events`.** A new event type is added to the existing ledger (`shared/types/agentExecutionLog.ts -> AGENT_EXECUTION_EVENT_CRITICALITY`). New `criticality` entry: `'observability'`. New event-shape `'retrieval.summary'` carrying the `RetrievalResult` shape from §6.2 plus a per-document chunk fan-out under `loaded[i].chunkIds: string[]`. Emission begins in Phase 4; the partial unique index in `0291b_agent_execution_events_retrieval_summary_unique.sql` (§10.4) enforces the exactly-one-per-run invariant.
+417:`document_bundle_attachments` continues to drive bundle-level attachment. Per brief §5: bundles do not modify retrieval. The new per-document `reference_document_data_sources` rows are independent of bundle attachments. A document can be both attached directly and through a bundle; retrieval treats it as a single candidate (deduplicated by `(documentId, chunkId)`).
+580:1. **"Why was this loaded?" tooltip** on document rows in Agent Data Sources and Documents tabs. Reads the last N runs that used this document; renders plain-language summary ("Loaded for CRM enrichment and lead scoring tasks").
+582:3. **"Loaded in N of last 30 runs" relevance bar** on document rows. Backed by an aggregate query over the event stream.
+583:4. **Token usage per workspace and per agent** on the spending surface (already exists; this build adds the per-document attribution).
+667:Refreshed view of `reference_documents` with new columns: tier, mode, source provenance, "used by N agents" (computed from `reference_document_data_sources`). Three-dots menu has Edit (opens detail modal), Change mode flyout, Add to bundle, Duplicate, Delete. Mockup: `knowledge-documents-tab.html`.
+671:Same data model as today. The bundle-edit modal shows per-document mode chips as **read-only** (brief §5 enforces). Mockup: `knowledge-bundles-tab.html`.
+679:Two-column layout. Main: title, content, mode picker, scope, available-to. Side: tier, qualitative size widget, created info, linked agents with usage bars. Mockup: `document-detail-modal.html`.
+743:  - `documentRetrievalServicePure.test.ts`, mode resolution, version pinning, chunk grouping.
+
+codex
+- **§6.4 / §8 / §13.1 / §16 — version-pointer semantics still conflict.** The spec says `reference_documents.current_version_id` is the content source of truth (§6.4), says a document edit flips `current_version_id` at save time (§13.1.1), but also says retrieval must keep using the prior version’s chunks until background chunking completes (§13.1.5-6, §8). Those cannot all be true with one pointer: if `current_version_id` flips immediately, retrieval points at a version with no active chunks yet; if it flips after chunking, normal document reads stay stale after “save”. §16’s “atomic chunk swap -> current_version_id pointer flip after chunking” also disagrees with §13.1.1.
+
+- **§6.1 / §6.2 / §6.7 / §11.2 — retrieval event granularity is still undecided (chunk-level vs document-level).** `RetrievalCandidate.id` / `RetrievalResult.loaded[*].candidateId` are defined as chunk IDs for documents (§6.1-§6.2), but the stored event then adds `loaded[i].chunkIds` “per-document” (§6.7) and the consuming surfaces are document-level (“why was this loaded?”, “Loaded in N of last 30 runs”, per-document token attribution; §11.2). The payload needs one canonical document-level identity for document rows, otherwise the Phase 7 aggregates and tooltips do not have a self-consistent source shape.
+
+- **§6.2 / §6.3 / §11.2 — “why wasn’t this loaded?” is not fully representable.** The closed rejection enum includes `below_threshold`, `mode_excluded`, and `authorization_filtered` (§6.3), but `RetrievalResult` only persists detailed rows for `aboveThreshold` and collapses below-threshold to a count (§6.2). That leaves no document-level event record for the common “below threshold” / “reference only” cases, which conflicts with the operator-facing “why wasn’t this loaded?” surface promised in §11.2.
+- **§6.4 / §8 / §13.1 / §16 — version-pointer semantics still conflict.** The spec says `reference_documents.current_version_id` is the content source of truth (§6.4), says a document edit flips `current_version_id` at save time (§13.1.1), but also says retrieval must keep using the prior version’s chunks until background chunking completes (§13.1.5-6, §8). Those cannot all be true with one pointer: if `current_version_id` flips immediately, retrieval points at a version with no active chunks yet; if it flips after chunking, normal document reads stay stale after “save”. §16’s “atomic chunk swap -> current_version_id pointer flip after chunking” also disagrees with §13.1.1.
+
+- **§6.1 / §6.2 / §6.7 / §11.2 — retrieval event granularity is still undecided (chunk-level vs document-level).** `RetrievalCandidate.id` / `RetrievalResult.loaded[*].candidateId` are defined as chunk IDs for documents (§6.1-§6.2), but the stored event then adds `loaded[i].chunkIds` “per-document” (§6.7) and the consuming surfaces are document-level (“why was this loaded?”, “Loaded in N of last 30 runs”, per-document token attribution; §11.2). The payload needs one canonical document-level identity for document rows, otherwise the Phase 7 aggregates and tooltips do not have a self-consistent source shape.
+
+- **§6.2 / §6.3 / §11.2 — “why wasn’t this loaded?” is not fully representable.** The closed rejection enum includes `below_threshold`, `mode_excluded`, and `authorization_filtered` (§6.3), but `RetrievalResult` only persists detailed rows for `aboveThreshold` and collapses below-threshold to a count (§6.2). That leaves no document-level event record for the common “below threshold” / “reference only” cases, which conflicts with the operator-facing “why wasn’t this loaded?” surface promised in §11.2.

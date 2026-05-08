@@ -650,6 +650,22 @@ export const agentExecutionService = {
           contentType: s.contentType,
         }));
 
+      // ── 3.5. Auto-knowledge retrieval — spec §8, Chunk 4B ──────────────
+      // Assembles ranked reference-document chunks and memory blocks for
+      // this run. Fail-open: degraded result carries loaded:[] so the run
+      // continues without knowledge context rather than aborting.
+      const { assembleKnowledgeForRun } = await import('./retrievalService.js');
+      const retrievalResult = await assembleKnowledgeForRun(run.id);
+      // Append loaded chunks (auto + always_available modes) to knowledge base.
+      for (const item of retrievalResult.loaded) {
+        dataSourceContents.push({
+          name: item.documentId ?? item.id,
+          description: null,
+          content: item.content,
+          contentType: 'text',
+        });
+      }
+
       // ── 4. Load org processes for trigger_process skill ─────────────────
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
 
@@ -1166,7 +1182,6 @@ export const agentExecutionService = {
         name: s.name,
         description: s.description,
         contentType: s.contentType,
-        loadingMode: s.loadingMode,
         sizeBytes: s.sizeBytes,
         tokenCount: s.tokenCount,
         fetchOk: s.fetchOk,
@@ -1179,8 +1194,7 @@ export const agentExecutionService = {
         suppressedBy: s.suppressedBy,
         exclusionReason: (() => {
           if (s.suppressedByOverride) return 'override_suppressed' as const;
-          if (s.loadingMode === 'lazy') return 'lazy_not_rendered' as const;
-          if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded' as const;
+          if (!s.includedInPrompt) return 'budget_exceeded' as const;
           return null;
         })(),
       }));
@@ -1215,8 +1229,7 @@ export const agentExecutionService = {
             includedInPrompt: s.includedInPrompt ?? false,
             exclusionReason: (() => {
               if (s.suppressedByOverride) return 'override_suppressed';
-              if (s.loadingMode === 'lazy') return 'lazy_not_rendered';
-              if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded';
+              if (!s.includedInPrompt) return 'budget_exceeded';
               return undefined;
             })(),
           },
@@ -1657,6 +1670,25 @@ export const agentExecutionService = {
             critical: false,
             runResultStatus: derivedRunResultStatus ?? 'partial',
           },
+        });
+      }
+
+      // Emit retrieval.summary event — spec §10.4, §11.4, Chunk 4B.
+      // Fire-and-forget: partial-unique-index (run_id, event_type='retrieval.summary')
+      // makes concurrent emits idempotent. Non-critical: failure logs and continues.
+      {
+        const { emitRetrievalSummary } = await import('./retrievalObservabilityService.js');
+        const { DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS } = await import('./documentChunkingServicePure.js');
+        emitRetrievalSummary({
+          runId: run.id,
+          organisationId: request.organisationId,
+          result: retrievalResult,
+          chunkConfig: { targetTokens: DEFAULT_CHUNK_TARGET_TOKENS, overlapTokens: DEFAULT_CHUNK_OVERLAP_TOKENS },
+        }).catch((err: unknown) => {
+          logger.warn('agentExecutionService.retrieval_summary_emit_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
       }
 

@@ -1,7 +1,9 @@
 // client/src/pages/govern/KnowledgePage.tsx
 // Govern surface — Knowledge page.
 // Spec: tasks/builds/consolidation-govern/spec.md §4.1, §4.7, §4.8, §4.12, §4.13, §4.14
-// Trust & Verification Layer spec §13.4, §13.5 — filter chips + Source column + provenance drawer.
+//       tasks/builds/auto-knowledge-retrieval/plan.md Chunk 5D
+// Trust & Verification Layer spec §13.4, §13.5 — filter chips + Source column + provenance drawer
+// (rendered inside the Auto-memory tab; tab strip is from auto-knowledge-retrieval).
 
 import { useEffect, useMemo, useState } from 'react';
 import { PageShell } from '../../components/PageShell';
@@ -20,6 +22,18 @@ import { getUserRole, getActiveClientId } from '../../lib/auth';
 import type { KnowledgeEntry, KnowledgeSourceFilter } from '../../../../shared/types/govern.js';
 import { KnowledgeRow } from './components/KnowledgeRow';
 import { KnowledgeOverrideDialog } from './components/KnowledgeOverrideDialog';
+import { KnowledgeFilesTab } from './components/KnowledgeFilesTab';
+import { KnowledgeDocumentsTab } from './components/KnowledgeDocumentsTab';
+
+type Tab = 'authored-memory' | 'auto-memory' | 'documents' | 'files' | 'bundles';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'authored-memory', label: 'Authored memory' },
+  { id: 'auto-memory', label: 'Auto-memory' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'files', label: 'Files' },
+  { id: 'bundles', label: 'Bundles' },
+];
 
 function canWriteKnowledge(): boolean {
   const role = getUserRole();
@@ -43,6 +57,7 @@ const EMPTY_BODY: Record<KnowledgeSourceFilter, string> = {
 };
 
 export default function KnowledgePage() {
+  const [activeTab, setActiveTab] = useState<Tab>('auto-memory');
   const { viewMode, availableModes, setViewMode } = useViewMode();
   const [q, setQ] = useState('');
   const [source, setSource] = useState<KnowledgeSourceFilter>('all');
@@ -57,6 +72,7 @@ export default function KnowledgePage() {
   const hasWritePerm = canWriteKnowledge();
 
   useEffect(() => {
+    if (activeTab !== 'auto-memory') return;
     setRows(null);
     setError(null);
     const isWorkspace = viewMode !== 'org';
@@ -68,7 +84,7 @@ export default function KnowledgePage() {
     listKnowledge({ scope: isWorkspace ? 'workspace' : 'org', subaccountId, q, source: source === 'all' ? undefined : source })
       .then((r) => setRows(r.rows))
       .catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
-  }, [viewMode, q, source, fetchKey]);
+  }, [activeTab, viewMode, q, source, fetchKey]);
 
   const columns: ColumnDef<KnowledgeEntry>[] = useMemo(() => {
     const baseColumns: ColumnDef<KnowledgeEntry>[] = [
@@ -155,7 +171,26 @@ export default function KnowledgePage() {
     return baseColumns;
   }, [viewMode, hasWritePerm, source]);
 
-  if (error) {
+  const tabStrip = (
+    <div className="flex border-b border-slate-200">
+      {TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setActiveTab(tab.id)}
+          className={
+            activeTab === tab.id
+              ? 'border-b-2 border-indigo-600 text-indigo-600 font-semibold px-4 py-2.5 text-sm'
+              : 'border-b-2 border-transparent text-slate-500 hover:text-slate-700 px-4 py-2.5 text-sm'
+          }
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (activeTab === 'auto-memory' && error) {
     return (
       <PageShell
         header={
@@ -164,6 +199,7 @@ export default function KnowledgePage() {
           </div>
         }
       >
+        {tabStrip}
         <ErrorState error={error} retry={() => setFetchKey((k) => k + 1)} />
       </PageShell>
     );
@@ -172,10 +208,21 @@ export default function KnowledgePage() {
   return (
     <PageShell
       header={
-        <div className="flex flex-col gap-3 px-6 py-4 border-b border-slate-100">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-slate-900">Knowledge</h1>
-            <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <h1 className="text-lg font-semibold text-slate-900">Knowledge</h1>
+        </div>
+      }
+    >
+      {tabStrip}
+
+      {activeTab === 'authored-memory' && (
+        <div className="p-6 text-sm text-slate-500">Authored memory tab — coming soon.</div>
+      )}
+
+      {activeTab === 'auto-memory' && (
+        <>
+          <div className="flex flex-col gap-3 px-6 py-3 border-b border-slate-100">
+            <div className="flex items-center justify-end gap-3">
               <ViewModeSwitcher
                 value={viewMode}
                 onChange={setViewMode}
@@ -187,78 +234,85 @@ export default function KnowledgePage() {
                 placeholder="Search entries, agent, run ID..."
               />
             </div>
+            {/* Source filter chips — TVL spec §13.4 */}
+            <div className="flex items-center gap-2">
+              {FILTER_CHIPS.map((chip) => (
+                <button
+                  key={chip.value}
+                  type="button"
+                  onClick={() => setSource(chip.value)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    source === chip.value
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
           </div>
-          {/* Source filter chips — spec §13.4 */}
-          <div className="flex items-center gap-2">
-            {FILTER_CHIPS.map((chip) => (
-              <button
-                key={chip.value}
-                type="button"
-                onClick={() => setSource(chip.value)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  source === chip.value
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      }
-    >
-      {rows === null ? (
-        <div className="text-sm text-slate-500 py-8 px-6">Loading...</div>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="No entries match your filters"
-          body={q ? 'Try a different search term or clear the search.' : EMPTY_BODY[source]}
-          primaryAction={
-            q ? { label: 'Clear search', onClick: () => setQ('') }
-            : source !== 'all' ? { label: 'Show all entries', onClick: () => setSource('all') }
-            : undefined
-          }
-        />
-      ) : (
-        <SortableTable
-          rows={rows}
-          columns={columns}
-          rowKey={(r) => r.id}
-          persistKey={`knowledge-${viewMode}`}
-          initialSort={{ key: 'status', dir: 'asc' }}
-        />
+          {rows === null ? (
+            <div className="text-sm text-slate-500 py-8 px-6">Loading...</div>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title="No entries match your filters"
+              body={q ? 'Try a different search term or clear the search.' : EMPTY_BODY[source]}
+              primaryAction={
+                q ? { label: 'Clear search', onClick: () => setQ('') }
+                : source !== 'all' ? { label: 'Show all entries', onClick: () => setSource('all') }
+                : undefined
+              }
+            />
+          ) : (
+            <SortableTable
+              rows={rows}
+              columns={columns}
+              rowKey={(r) => r.id}
+              persistKey={`knowledge-${viewMode}`}
+              initialSort={{ key: 'status', dir: 'asc' }}
+            />
+          )}
+
+          {overrideTarget && (
+            <KnowledgeOverrideDialog
+              entry={overrideTarget}
+              onClose={() => setOverrideTarget(null)}
+              onSaved={() => {
+                setOverrideTarget(null);
+                setFetchKey((k) => k + 1);
+              }}
+            />
+          )}
+
+          {rejectTarget && (
+            <ConfirmDialog
+              title="Reject knowledge entry?"
+              message="Reject this knowledge entry? It will be moved to ignored."
+              confirmLabel="Reject"
+              onCancel={() => setRejectTarget(null)}
+              onConfirm={async () => {
+                if (rejectBusy) return;
+                setRejectBusy(true);
+                try {
+                  await rejectKnowledge(rejectTarget.id);
+                  setRejectTarget(null);
+                  setFetchKey((k) => k + 1);
+                } finally {
+                  setRejectBusy(false);
+                }
+              }}
+            />
+          )}
+        </>
       )}
 
-      {overrideTarget && (
-        <KnowledgeOverrideDialog
-          entry={overrideTarget}
-          onClose={() => setOverrideTarget(null)}
-          onSaved={() => {
-            setOverrideTarget(null);
-            setFetchKey((k) => k + 1);
-          }}
-        />
-      )}
+      {activeTab === 'documents' && <KnowledgeDocumentsTab />}
 
-      {rejectTarget && (
-        <ConfirmDialog
-          title="Reject knowledge entry?"
-          message="Reject this knowledge entry? It will be moved to ignored."
-          confirmLabel="Reject"
-          onCancel={() => setRejectTarget(null)}
-          onConfirm={async () => {
-            if (rejectBusy) return;
-            setRejectBusy(true);
-            try {
-              await rejectKnowledge(rejectTarget.id);
-              setRejectTarget(null);
-              setFetchKey((k) => k + 1);
-            } finally {
-              setRejectBusy(false);
-            }
-          }}
-        />
+      {activeTab === 'files' && <KnowledgeFilesTab />}
+
+      {activeTab === 'bundles' && (
+        <div className="p-6 text-sm text-slate-500">Bundles — coming soon.</div>
       )}
     </PageShell>
   );

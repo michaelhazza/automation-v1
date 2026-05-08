@@ -490,7 +490,6 @@ export interface LoadedDataSource {
   contentType: string;
   tokenCount: number;
   sizeBytes: number;
-  loadingMode: 'eager' | 'lazy';
   priority: number;
   fetchOk: boolean;
   maxTokenBudget: number;
@@ -558,35 +557,6 @@ export async function fetchDataSourcesByScope(
       : source.subaccountAgentId ? 'subaccount'
       : 'agent';
 
-    // Lazy sources: emit manifest entry only; do NOT fetch content upfront.
-    // The read_data_source skill will call loadSourceContent on demand.
-    //
-    // Estimate sizeBytes from maxTokenBudget so the manifest's "~XKB" hint
-    // gives the agent a useful "should I bother reading this?" signal.
-    // The estimate uses ~4 chars/token (matching approxTokens) — it's a
-    // ceiling for the source, not the actual file size, but for the agent's
-    // decision-making "is this big enough to consume meaningful context?"
-    // it's the right heuristic. (pr-reviewer Major 2.)
-    if (source.loadingMode === 'lazy') {
-      const estimatedSize = source.maxTokenBudget * 4;
-      results.push({
-        id: source.id,
-        scope: resolvedScope,
-        name: source.name,
-        description: source.description,
-        content: '',
-        contentType: source.contentType,
-        tokenCount: 0,
-        sizeBytes: estimatedSize,
-        loadingMode: 'lazy',
-        priority: source.priority,
-        fetchOk: true,
-        maxTokenBudget: source.maxTokenBudget,
-      });
-      continue;
-    }
-
-    // Eager: fetch content now via the shared helper.
     const { content, fetchOk, tokenCount } = await loadSourceContent(source);
     results.push({
       id: source.id,
@@ -597,7 +567,6 @@ export async function fetchDataSourcesByScope(
       contentType: source.contentType,
       tokenCount,
       sizeBytes: Buffer.byteLength(content, 'utf8'),
-      loadingMode: 'eager',
       priority: source.priority,
       fetchOk,
       maxTokenBudget: source.maxTokenBudget,
@@ -629,11 +598,7 @@ export async function fetchAgentDataSources(
   fetchOk: boolean;
 }>> {
   const loaded = await fetchDataSourcesByScope({ agentId });
-  // Keep only eager sources for backwards compatibility — the old function
-  // always returned fully-loaded content. Lazy sources in the agent-chat
-  // surface would need a different UX, which is not part of this change.
   return loaded
-    .filter((s) => s.loadingMode === 'eager')
     .map((s) => ({
       id: s.id,
       name: s.name,
@@ -1159,7 +1124,6 @@ export const agentService = {
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
-      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
@@ -1186,7 +1150,6 @@ export const agentService = {
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
-        loadingMode: data.loadingMode ?? 'eager',
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
@@ -1225,7 +1188,6 @@ export const agentService = {
       sourceHeaders?: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode: 'lazy' | 'proactive';
-      loadingMode: 'eager' | 'lazy';
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
@@ -1263,7 +1225,6 @@ export const agentService = {
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
     if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
-    if (data.loadingMode !== undefined) update.loadingMode = data.loadingMode;
     // file_upload is always static
     if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
       update.syncMode = data.syncMode;
@@ -1445,7 +1406,6 @@ export const agentService = {
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
-      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
@@ -1470,7 +1430,6 @@ export const agentService = {
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
-        loadingMode: data.loadingMode ?? 'eager',
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
@@ -1496,7 +1455,6 @@ export const agentService = {
         scheduledTaskId,
         name: source.name,
         sourceType: source.sourceType,
-        loadingMode: source.loadingMode,
       },
     });
 
@@ -1514,7 +1472,6 @@ export const agentService = {
       sourceHeaders?: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode: 'lazy' | 'proactive';
-      loadingMode: 'eager' | 'lazy';
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
@@ -1546,7 +1503,6 @@ export const agentService = {
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
     if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
-    if (data.loadingMode !== undefined) update.loadingMode = data.loadingMode;
     if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
       update.syncMode = data.syncMode;
     }
@@ -1704,8 +1660,7 @@ export const agentService = {
    * (pr-reviewer Major 4.)
    *
    * Caller passes display metadata (name / description / contentType /
-   * loadingMode / priority) so the row matches what the operator
-   * intended in the upload form.
+   * priority) so the row matches what the operator intended in the upload form.
    */
   async uploadScheduledTaskDataSourceFile(
     scheduledTaskId: string,
@@ -1715,7 +1670,6 @@ export const agentService = {
       name: string;
       description?: string;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
-      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
     },
@@ -1751,7 +1705,6 @@ export const agentService = {
           sourcePath: storagePath,
           contentType: metadata.contentType ?? 'auto',
           syncMode: 'lazy', // file_upload is always static
-          loadingMode: metadata.loadingMode ?? 'eager',
           priority: metadata.priority ?? 0,
           maxTokenBudget: metadata.maxTokenBudget ?? 8000,
           cacheMinutes: 60,
@@ -1771,7 +1724,6 @@ export const agentService = {
           scheduledTaskId,
           name: source.name,
           sourceType: 'file_upload',
-          loadingMode: source.loadingMode,
           fileName: file.originalname,
           fileSizeBytes: file.size,
         },

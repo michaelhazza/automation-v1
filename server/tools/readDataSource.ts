@@ -45,7 +45,6 @@ interface ReadDataSourceResult {
     sizeBytes: number;
     tokenCount: number;
     contentType: string;
-    loadingMode: 'eager' | 'lazy';
     alreadyInKnowledgeBase: boolean;
     excludedByBudget: boolean;
     readable: boolean;
@@ -94,11 +93,8 @@ export async function executeReadDataSource(
         sizeBytes: s.sizeBytes,
         tokenCount: s.tokenCount,
         contentType: s.contentType,
-        loadingMode: s.loadingMode,
-        alreadyInKnowledgeBase:
-          s.loadingMode === 'eager' && !!s.includedInPrompt && s.fetchOk,
-        excludedByBudget:
-          s.loadingMode === 'eager' && !s.includedInPrompt,
+        alreadyInKnowledgeBase: !!s.includedInPrompt && s.fetchOk,
+        excludedByBudget: !s.includedInPrompt,
         readable: s.fetchOk,
       })),
     };
@@ -151,9 +147,9 @@ export async function executeReadDataSource(
       };
     }
 
-    // Step 1: ensure content is loaded (lazy fetch on first read, cached after)
+    // Step 1: ensure content is loaded (fetch on first read if not already present)
     let fullContent: string;
-    if (source.loadingMode === 'eager' && source.content) {
+    if (source.content) {
       fullContent = source.content;
     } else if (source.id.startsWith('task_attachment:')) {
       const attachmentId = source.id.slice('task_attachment:'.length);

@@ -70,7 +70,7 @@ export const agentRuns = pgTable(
       name: string;
       description: string | null;
       contentType: string;
-      loadingMode: 'eager' | 'lazy';
+      loadingMode?: 'eager' | 'lazy';
       sizeBytes: number;
       tokenCount: number;
       fetchOk: boolean;

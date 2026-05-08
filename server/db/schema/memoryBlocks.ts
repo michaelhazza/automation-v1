@@ -4,6 +4,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { workspaceMemoryEntries } from './workspaceMemories';
+import { scheduledTasks } from './scheduledTasks';
 
 // pgvector custom type — mirrors the convention in workspaceMemories.ts and
 // agentEmbeddings.ts.  Nullable here: embedding is populated asynchronously
@@ -122,6 +123,11 @@ export const memoryBlocks = pgTable(
     // when true. Set by the manual override path; never touched by auto-extraction.
     autoUpdateDisabled: boolean('auto_update_disabled').notNull().default(false),
 
+    // Auto Knowledge Retrieval Phase 1D (migration 0291, spec §4.2) — recurring-task
+    // scoped memory block. ON DELETE SET NULL so deleting the scheduled task does
+    // not cascade the block.
+    scheduledTaskId: uuid('scheduled_task_id').references(() => scheduledTasks.id, { onDelete: 'set null' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -146,6 +152,10 @@ export const memoryBlocks = pgTable(
     tierIdx: index('memory_blocks_tier_idx')
       .on(table.organisationId, table.subaccountId, table.tier)
       .where(sql`${table.tier} IS NOT NULL`),
+    // Auto Knowledge Retrieval Phase 1D (migration 0291) — recurring-task scope lookup.
+    scheduledTaskIdx: index('memory_blocks_scheduled_task_idx')
+      .on(table.scheduledTaskId)
+      .where(sql`${table.scheduledTaskId} IS NOT NULL`),
   })
 );
 

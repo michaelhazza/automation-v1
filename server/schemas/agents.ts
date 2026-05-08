@@ -41,7 +41,6 @@ export const createDataSourceBody = z.object({
   priority: z.number().int().optional(),
   maxTokenBudget: z.number().int().positive().optional(),
   cacheMinutes: z.number().int().nonnegative().optional(),
-  loadingMode: z.enum(['eager', 'lazy']).optional(),
   connectionId: z.string().uuid().optional(),
 });
 export type CreateDataSourceInput = z.infer<typeof createDataSourceBody>;

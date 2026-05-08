@@ -660,6 +660,46 @@ async function start() {
       console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
     }
   }
+  // Document summarise worker (auto-knowledge-retrieval)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentSummariseWorker } = await import('./jobs/documentSummariseJob.js');
+      registerDocumentSummariseWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-summarise worker', err);
+    }
+  }
+  // Document chunk-embed worker (auto-knowledge-retrieval)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentChunkEmbedWorker } = await import('./jobs/documentChunkEmbedJob.js');
+      registerDocumentChunkEmbedWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-chunk-embed worker', err);
+    }
+  }
+  // Document re-embed worker (auto-knowledge-retrieval — embedding-model upgrade sweep)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentReembedWorker } = await import('./jobs/documentReembedJob.js');
+      registerDocumentReembedWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-reembed worker', err);
+    }
+  }
+  // Document promotion-finalise worker (auto-knowledge-retrieval — deferred file durability flip)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentPromotionFinaliseWorker } = await import('./jobs/documentPromotionFinaliseJob.js');
+      registerDocumentPromotionFinaliseWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-promotion-finalise worker', err);
+    }
+  }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
   // Only runs if migration_states records BOTH config and memory as completed.
   try {
