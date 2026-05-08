@@ -832,15 +832,6 @@ A single `agent_data_sources` row can be scoped one of four ways. Higher precede
 
 A CHECK constraint on `agent_data_sources` enforces that `subaccount_agent_id` and `scheduled_task_id` are mutually exclusive — they're orthogonal scoping axes.
 
-### Eager vs lazy loading
-
-Each `agent_data_sources` row has a `loading_mode` (default `eager`):
-
-- **Eager** — content is fetched at run start and rendered into the `## Your Knowledge Base` block of the system prompt, subject to `MAX_EAGER_BUDGET` (60k tokens).
-- **Lazy** — only a manifest entry (name, scope, size) appears in the system prompt under `## Available Context Sources`. The agent fetches the actual content on demand by calling the `read_data_source` skill.
-
-Lazy mode is the scaling escape hatch for runs with many or large reference files. Manifest entries are capped at `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` (25) for prompt size; the full list is always available via `read_data_source op='list'`.
-
 ### Same-name override resolution
 
 When two sources across scopes share a normalised name (lowercase, trimmed), the highest-precedence scope wins as an explicit override. The losing source is suppressed: it does not appear in the prompt, is invisible to the `read_data_source` skill, but is persisted in the run snapshot with `suppressedByOverride: true` so the debug UI can explain why it wasn't used.
@@ -854,9 +845,7 @@ When two sources across scopes share a normalised name (lowercase, trimmed), the
 3. Sorts by scope precedence then per-scope priority
 4. Assigns `orderIndex` to the full sorted pool BEFORE override suppression (so suppressed entries have stable indices)
 5. Resolves same-name overrides
-6. Splits eager / lazy
-7. Walks the eager budget upstream, marking `includedInPrompt: true/false` deterministically
-8. Caps the lazy manifest for in-prompt rendering
+6. Walks the eager budget, marking `includedInPrompt: true/false` deterministically (all sources are now eager — `loading_mode` column removed in migration 0293)
 
 The downstream `buildSystemPrompt` character-level truncation is now a safety net only — the upstream walk is the primary budget mechanism.
 
@@ -868,7 +857,7 @@ When a run is fired by a scheduled task (`triggerContext.source === 'scheduled_t
 
 Single retrieval interface across all four scopes. Two ops:
 
-- `list` — returns the manifest of all active (non-suppressed) sources, including which are already in the Knowledge Base and which are lazy
+- `list` — returns the manifest of all active (non-suppressed) sources, including which are already in the Knowledge Base
 - `read` — fetches a specific source's content with optional `offset` / `limit` for chunked walks of large sources
 
 Enforced limits (in `server/config/limits.ts`):
@@ -878,13 +867,12 @@ Enforced limits (in `server/config/limits.ts`):
 | `MAX_EAGER_BUDGET` | 60000 | Total tokens in the `## Your Knowledge Base` block |
 | `MAX_READ_DATA_SOURCE_CALLS_PER_RUN` | 20 | Per-run cap on `op: 'read'` calls |
 | `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL` | 15000 | Per-call clamp on the `limit` parameter |
-| `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` | 25 | Lazy manifest entries rendered into the prompt |
 
 The skill is auto-injected onto every agent run via `agentExecutionService` step 5a — no per-agent configuration needed.
 
 ### Run-time snapshot
 
-`agent_runs.context_sources_snapshot` (JSONB) captures every source considered at run start, including winners, suppressed losers, eager-but-budget-excluded, and lazy manifest entries. Each entry carries `orderIndex`, `includedInPrompt`, `suppressedByOverride`, `suppressedBy`, and `exclusionReason` for debugging. Frozen after run start; surfaced in the run trace viewer's Context Sources panel.
+`agent_runs.context_sources_snapshot` (JSONB) captures every source considered at run start, including winners, suppressed losers, and budget-excluded sources. Each entry carries `orderIndex`, `includedInPrompt`, `suppressedByOverride`, `suppressedBy`, and `exclusionReason` for debugging. Frozen after run start; surfaced in the run trace viewer's Context Sources panel. Historical rows (pre-migration 0293) may carry a `loadingMode` field — this is a legacy field; `loadingMode` is optional in the current type.
 
 ### Permissions
 

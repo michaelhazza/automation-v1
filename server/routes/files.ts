@@ -1,9 +1,13 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { and, desc, eq, isNotNull, isNull, lt } from 'drizzle-orm';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { fileService } from '../services/fileService.js';
 import { validateMultipart } from '../middleware/validate.js';
 import { systemSettingsService } from '../services/systemSettingsService.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { db } from '../db/index.js';
+import { documentPromotionAudit, executionFiles, executions } from '../db/schema/index.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
@@ -67,5 +71,78 @@ router.get('/api/files/:fileId/download', authenticate, asyncHandler(async (req,
   const result = await fileService.downloadFile(req.params.fileId, req.user!.id, req.orgId!, req.user!.role);
   res.json(result);
 }));
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+router.get(
+  '/api/files',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, linkedToKnowledge, cursor, limit: limitParam } = req.query as Record<string, string | undefined>;
+    const rawLimit = parseInt(limitParam ?? String(DEFAULT_LIMIT), 10);
+    const limit = isNaN(rawLimit) || rawLimit < 1 ? DEFAULT_LIMIT : Math.min(rawLimit, MAX_LIMIT);
+
+    const conditions = [
+      eq(executions.organisationId, req.orgId!),
+    ];
+
+    if (subaccountId) {
+      conditions.push(eq(executions.subaccountId, subaccountId));
+    }
+
+    if (cursor) {
+      const cursorDate = new Date(cursor);
+      if (isNaN(cursorDate.getTime())) {
+        res.status(400).json({ error: 'Invalid cursor' });
+        return;
+      }
+      conditions.push(lt(executionFiles.createdAt, cursorDate));
+    }
+
+    const promotionConditions = [
+      eq(documentPromotionAudit.fileId, executionFiles.id),
+      eq(documentPromotionAudit.organisationId, req.orgId!),
+      isNull(documentPromotionAudit.deletedAt),
+    ];
+
+    const rows = await db
+      .select({
+        id: executionFiles.id,
+        fileName: executionFiles.fileName,
+        fileType: executionFiles.fileType,
+        mimeType: executionFiles.mimeType,
+        fileSizeBytes: executionFiles.fileSizeBytes,
+        expiresAt: executionFiles.expiresAt,
+        createdAt: executionFiles.createdAt,
+        executionId: executionFiles.executionId,
+        subaccountId: executions.subaccountId,
+        promotedDocumentId: documentPromotionAudit.documentId,
+      })
+      .from(executionFiles)
+      .innerJoin(executions, eq(executionFiles.executionId, executions.id))
+      .leftJoin(documentPromotionAudit, and(...promotionConditions))
+      .where(
+        linkedToKnowledge === 'true'
+          ? and(...conditions, isNotNull(documentPromotionAudit.id))
+          : linkedToKnowledge === 'false'
+            ? and(...conditions, isNull(documentPromotionAudit.id))
+            : and(...conditions),
+      )
+      .orderBy(desc(executionFiles.createdAt), desc(executionFiles.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const files = rows.slice(0, limit).map((r) => ({
+      ...r,
+      expiresAt: r.expiresAt.toISOString(),
+      createdAt: r.createdAt.toISOString(),
+      promotedDocumentId: r.promotedDocumentId ?? null,
+    }));
+
+    res.json({ files, hasMore });
+  }),
+);
 
 export default router;

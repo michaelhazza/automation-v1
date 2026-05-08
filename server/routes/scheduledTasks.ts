@@ -171,7 +171,7 @@ router.get(
 
 // Upload a file AND create the data source row in one atomic call.
 // Multipart fields: `file` (the upload), `name`, `description?`,
-// `contentType?`, `loadingMode?`, `priority?`, `maxTokenBudget?`.
+// `contentType?`, `priority?`, `maxTokenBudget?`.
 router.post(
   '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/upload',
   authenticate,
@@ -194,7 +194,6 @@ router.post(
         name,
         description: body.description,
         contentType: body.contentType as 'json' | 'csv' | 'markdown' | 'text' | 'auto' | undefined,
-        loadingMode: body.loadingMode as 'eager' | 'lazy' | undefined,
         priority: body.priority !== undefined ? Number(body.priority) : undefined,
         maxTokenBudget: body.maxTokenBudget !== undefined ? Number(body.maxTokenBudget) : undefined,
       },
@@ -214,7 +213,7 @@ router.post(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const {
       name, description, sourceType, sourcePath, sourceHeaders,
-      contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+      contentType, priority, maxTokenBudget, cacheMinutes,
       connectionId,
     } = req.body;
     if (!name || !sourceType) {
@@ -247,7 +246,7 @@ router.post(
       req.orgId!,
       {
         name, description, sourceType, sourcePath, sourceHeaders,
-        contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+        contentType, priority, maxTokenBudget, cacheMinutes,
         connectionId,
       },
       req.user?.id,

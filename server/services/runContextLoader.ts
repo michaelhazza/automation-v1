@@ -544,9 +544,9 @@ export async function loadRunContextData(
   if (taskInstructions) {
     const taskEmbedding = await generateEmbedding(taskInstructions);
     if (taskEmbedding) {
-      // Compute content embeddings for eager sources (on-the-fly)
-      const eagerSources = pool.filter(s => s.loadingMode === 'eager');
-      const embeddingPromises = eagerSources.slice(0, 20).map(async (source) => {
+      // Compute content embeddings for sources that have content (on-the-fly)
+      const sourcesWithContent = pool.filter(s => s.content);
+      const embeddingPromises = sourcesWithContent.slice(0, 20).map(async (source) => {
         if (source.content) {
           const emb = await generateEmbedding(source.content.slice(0, 2000));
           if (emb) {

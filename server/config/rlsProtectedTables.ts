@@ -1060,6 +1060,27 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0284_baseline_rls_and_dictionary.sql',
     rationale: 'Per-baseline metric values — pipeline value, lead count, revenue. Cross-tenant leak would expose customer-specific revenue figures.',
   },
+  // 0289 — Auto Knowledge Retrieval Phase 1: document chunk embeddings
+  {
+    tableName: 'reference_document_chunks',
+    schemaFile: 'referenceDocumentChunks.ts',
+    policyMigration: '0289_reference_document_chunks.sql',
+    rationale: 'Per-document embedding chunks with pgvector embeddings — chunk content may reveal confidential document content; cross-tenant leak exposes knowledge base.',
+  },
+  // 0290 — Auto Knowledge Retrieval Phase 1: document-to-data-source scope links
+  {
+    tableName: 'reference_document_data_sources',
+    schemaFile: 'referenceDocumentDataSources.ts',
+    policyMigration: '0290_reference_document_data_sources.sql',
+    rationale: 'Five-tier scope links between reference documents and agents/subaccounts/tasks — reveals which knowledge is available in which scope. Cross-tenant leak exposes knowledge access topology.',
+  },
+  // 0294 — Auto Knowledge Retrieval Phase 5A: promotion audit ledger
+  {
+    tableName: 'document_promotion_audit',
+    schemaFile: 'documentPromotionAudit.ts',
+    policyMigration: '0294_document_promotion_audit.sql',
+    rationale: 'Idempotency anchor for file→reference-document promotion. Contains file IDs and document IDs — cross-tenant leak would expose knowledge base content topology.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

@@ -59,14 +59,6 @@ export const MAX_READ_DATA_SOURCE_TOKENS_PER_CALL = 15000;
  */
 export const MAX_EAGER_BUDGET = 60000;
 
-/**
- * Maximum number of lazy manifest entries rendered INTO the system prompt's
- * "## Available Context Sources" block. Entries beyond this cap are still
- * accessible via read_data_source op='list' — the cap only affects inline
- * visibility in the prompt to keep runs with large manifests compact.
- */
-export const MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT = 25;
-
 // ── Model defaults ──────────────────────────────────────────────────────────
 
 // EXTRACTION_MODEL removed — internal extraction calls now use executionPhase: 'execution'
