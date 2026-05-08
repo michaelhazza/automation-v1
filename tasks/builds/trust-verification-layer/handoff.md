@@ -78,4 +78,71 @@ These six items from the spec's §18 "Open questions for operator" carry forward
 
 ## Phase status
 
-**phase_status: PHASE_1_COMPLETE**
+**phase_status: PHASE_2_COMPLETE**
+
+---
+
+## Phase 2 (BUILD) — complete
+
+**Plan path:** `tasks/builds/trust-verification-layer/plan.md`
+**Chunks built:** 16 / 16
+**Branch HEAD at handoff:** `c1ed1535`
+**Post-build pipeline ran:** 2026-05-08T12:09:27Z
+
+**G1 attempts (per chunk):** Built inline before post-build pipeline; per-chunk pr-reviewer fixes are tracked in commits `3d06e2fa` (Chunk 5), `e1b1d0bf` (Chunk 4), `d3636229` (Chunk 3), `9740723b` (Chunk 3 follow-up), `01facb66` (Chunk 8), `803984d3` (Chunk 9), `3ae846ec` (Chunk 10). No persistent per-chunk review logs.
+
+**G2 attempts:** 1 (PASS first try — lint 0 errors; typecheck clean; 229/229 targeted tests).
+
+**spec-conformance verdict:** CONFORMANT_AFTER_FIXES (`tasks/review-logs/spec-conformance-log-trust-verification-layer-2026-05-08T12-09-27Z.md`)
+
+**adversarial-reviewer verdict:** HOLES_FOUND (1 confirmed, 3 likely, 2 worth-confirming) (`tasks/review-logs/adversarial-review-log-trust-verification-layer-2026-05-08T12-09-27Z.md`)
+
+**pr-reviewer verdict:** CHANGES_REQUESTED → fix-loop applied (B-1, B-2, B-3, S-1, S-2, S-4 in commit `999ec0bf`); B-4 + S-3 deferred to operator. (`tasks/review-logs/pr-review-log-trust-verification-layer-2026-05-08T12-09-27Z.md`)
+
+**Fix-loop iterations:** 1 (single round, no re-pr-review needed because dual-reviewer found independent SQL/route bugs that warranted their own pass).
+
+**dual-reviewer verdict:** APPROVED (1 iteration; 4 [ACCEPT] decisions, all fixed in commit `c1ed1535`). Re-review verdict on post-dual-reviewer diff: APPROVED (changes were surgical bug fixes, no new issues). (`tasks/review-logs/dual-review-log-trust-verification-layer-2026-05-08T12-09-27Z.md`)
+
+**spec-reviewer (Codex) — Phase 1 status:** SKIPPED — REVIEW_GAP from Phase 1 (Codex CLI unavailable in operator's spec session). chatgpt-spec-review Rounds 1+2 covered the second-opinion pass on the spec. Codex dual-reviewer in Phase 2 closed the residual code-side gap.
+
+**Doc-sync gate verdicts:**
+- `architecture.md` updated: yes (sections "Key files per domain" — 8 new TVL rows; service-layer Govern Quality entry; integrations and patterns sections) — Chunk 16, commit `1f60a440`.
+- `docs/capabilities.md` updated: yes (Trust & Verification Layer entry added) — Chunk 16.
+- `docs/integration-reference.md` updated: no — no integration scope/skill/status/auth-method change in this build; no stale references.
+- `CLAUDE.md` updated: yes (coordinator-inline rule, framework sync from upstream — unrelated to this build but landed on the same branch via commit `7eeb1e5d`).
+- `DEVELOPMENT_GUIDELINES.md` updated: no — no new build-discipline rule, RLS/service-tier convention unchanged; grepped for `scorecard|runtime.check|bench_run|correction_pattern` — zero stale references.
+- `CONTRIBUTING.md` updated: no — no lint-suppression policy or comment-format change.
+- `docs/frontend-design-principles.md` updated: no — no new UI hard rule; the new pages (Govern/Quality, Scorecard library, Bench, Correct dialog) follow existing primitives (Drawer, Modal, SortableTable) without inventing new patterns.
+- `KNOWLEDGE.md` updated: yes (5 patterns appended in Chunk 16 commit `1f60a440`: cross-tenant source-pill compression, three-tier authority lock, single-share-toggle visibility primitive, idempotent UPSERT on operator correction capture, runtime check three-state UI collapse from five internal states; plus 1 pattern appended on the upstream framework sync — coordinators-run-inline rule).
+- `references/test-gate-policy.md` updated: no — no new test-gate posture; existing static-gates-primary stance preserved.
+- `references/spec-review-directional-signals.md` updated: no — spec-review session did not surface a repeated classifier signal warranting a new entry.
+- `docs/spec-context.md` updated: n/a (spec-review-only doc).
+- `docs/decisions/` updated: n/a — no durable architectural-choice ADR pending. The migration/route bug fixes from the dual-reviewer pass are debt removal, not policy choices.
+- `docs/context-packs/` updated: n/a — no context-pack section anchor changed.
+- `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` updated: n/a — repo-level architecture/feature changes only.
+
+**Open issues for finalisation (operator decisions before merge):**
+
+These survived the fix-loop and need operator-level direction. Filed in `tasks/todo.md`:
+
+- **B-4 (Tier-A blocker; deferred):** cross-entity guard bypass on `POST /api/runs/:runId/steps/:eventId/correct` when `eventId === runId`. Caller can pass any runId as both runId AND eventId to skip per-step verification. **Suggested approach:** expose canonical `agent_execution_events.id` from trace-events endpoint so the UI passes a real eventId; OR persist `sourceEventId: null` in the placeholder path. Operator decides; spec/UI question.
+- **S-3 (Tier-B; deferred):** cross-subaccount IDOR on `DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:scorecardId`. The `agentId` is not verified to belong to `subaccountId` (RLS protects writes by org but not by subaccount within the org). Suggested approach: verify `agent.subaccount_id` matches caller's resolved subaccount before proceeding.
+
+- **TVL-DG-1 + TVL-DG-10:** Stage 1 backfill incomplete (ACTION_REGISTRY interface extended; the 20 most-used skills' `verify` values are NOT actually backfilled in production code) AND `verify-runtime-check-coverage` CI gate has a Windows path bug (`pathToFileURL` missing) plus exits 2 advisory rather than 1 blocking. Spec §3 Stage 1 exit criterion not strictly met.
+- **TVL-DG-3:** `QualityCheck.passMark` (spec §6.3) implemented as `weight` with no `enabled` field. Affects every scorecard judgement. Recommend fix before Stage 2 GA. Suggested: rename across schema/Zod/frontend; add `enabled: boolean` field.
+- **TVL-DG-4:** `scorecard_judgements.trigger_source` enum collapsed `forced_runtime_check_fail` + `forced_correction` into `forced`, plus added `bench` (not in spec). Forced-source attribution lost.
+- **TVL-DG-5:** `scorecard_judgements.verdict` adds `'inconclusive'` not in spec §6.5. Either drop, or amend spec to formalise three verdict states.
+- **TVL-DG-6:** `bench_runs` schema misses spec §6.6 fields (`mode`, `triggerScopeType`, `triggerScopeId`, `testInputSource`, `testInputs`).
+- **TVL-DG-7:** `bench_results` row shape diverges from spec §6.6 BenchResult contract (per-sample DB row vs per-model aggregate spec shape).
+- **TVL-DG-9:** spec §5 file `shared/types/scorecard.ts` not created; types duplicated between server schema and client api. Drift risk.
+- **TVL-DG-2:** Two unplanned migrations (0296, 0297) added during build to fix gaps in 0293. Spec §5 inventory locked migrations to 0288–0295. Operator should confirm spec inventory is updated to 0288–0297.
+- **TVL-AM-1, TVL-AM-2:** §18 Q5 feature-flag for scorecard-tightening suggestion + §13.3 step 4 quality-check matching heuristic (cosine >0.75) — could not confirm presence; route to operator review.
+
+- **Adversarial findings (Phase 1 advisory; non-blocking):**
+  - **AR-TVL-1 (CONFIRMED-HOLE, HIGH):** same as B-4 above — cross-entity guard bypass.
+  - **AR-TVL-4 (LIKELY-HOLE, MEDIUM):** judge prompt injection — partially mitigated by S-2 fix (`<untrusted_input>` tags); would still benefit from a structured tool-use schema as a stronger defence.
+  - **AR-TVL-5, AR-TVL-6:** worth-confirming items kept in log only.
+
+**Branch HEAD at handoff:** `c1ed1535` (post fix-loop + dual-reviewer commits). Branch is 41 commits ahead of `origin/main`.
+
+**Recommended next action:** open a new Claude Code session and type `launch finalisation` to begin Phase 3.

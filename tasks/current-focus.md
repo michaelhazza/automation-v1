@@ -3,7 +3,7 @@ active_spec: tasks/builds/trust-verification-layer/spec.md
 active_plan: tasks/builds/trust-verification-layer/plan.md
 build_slug: trust-verification-layer
 branch: claude/synthetos-work-primitive-improvements-P17SD
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-08
 last_merged_pr: #273
 last_merged_slug: consolidation-govern
@@ -25,10 +25,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** `tasks/builds/trust-verification-layer/spec.md`
-**Active plan:** `tasks/builds/trust-verification-layer/plan.md` (not yet generated — feature-coordinator writes this in Phase 2)
+**Active plan:** `tasks/builds/trust-verification-layer/plan.md`
 **Active build slug:** `trust-verification-layer`
 **Branch:** `claude/synthetos-work-primitive-improvements-P17SD`
-**Status:** **BUILDING** — Phase 1 (SPEC) complete 2026-05-08. Spec at `tasks/builds/trust-verification-layer/spec.md` (1062 lines, 18 sections). Mockups at `prototypes/trust-verification-layer/` (6 rounds complete). Handoff at `tasks/builds/trust-verification-layer/handoff.md`. **Reduced review coverage flag:** `spec-reviewer` SKIPPED (Codex CLI unavailable in this environment); `chatgpt-spec-review` NOT-RUN (operator-driven, deferred to operator session). Operator should consider running `chatgpt-spec-review` interactively before launching `feature-coordinator`. Three-stage build: Stage 1 (skill verification + runtime checks), Stage 2 (scorecards + library + model bench), Stage 3 (correction-sourced auto-memory). 8 migrations (0288–0295), 5 new RLS-protected tables, 6 new permission keys.
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-08. All 16 chunks built; G2 PASS; spec-conformance CONFORMANT_AFTER_FIXES (13 directional gaps in `tasks/todo.md`); adversarial-reviewer HOLES_FOUND (1 confirmed + 3 likely routed to backlog); pr-reviewer CHANGES_REQUESTED → 4 blockers + 3 strong fixed in commit `999ec0bf` (B-4 + S-3 deferred to operator); dual-reviewer Codex APPROVED with 4 SQL/route bugs fixed in commit `c1ed1535` (table-level UNIQUE WHERE on 0290 — fresh migration would fail; expression UNIQUE on 0293 — fresh migration would fail; corrections route 400 short-circuit; benchRunService `agent_run_id` typo). Doc-sync PASS (Chunk 16 covered; no fix-loop convention impact). Handoff Phase 2 section appended to `tasks/builds/trust-verification-layer/handoff.md`. Branch HEAD `c1ed1535`, 41 commits ahead of main. **Operator open issues for Phase 3:** B-4 cross-entity bypass on POST corrections + S-3 cross-subaccount IDOR on agent scorecard detach + Stage 1 ACTION_REGISTRY backfill incomplete (TVL-DG-1) + scorecard `passMark`/`weight` divergence (TVL-DG-3) + scorecard schema field misses (TVL-DG-4..7). 8 migrations shipped 0288–0295 plus 0296/0297 added during build to fix 0293 schema gaps. **Recommended next action:** open new Claude Code session, type `launch finalisation`.
 
 **Just merged:** PR #273 — `consolidation-govern` (squash-commit `dfa53e58`, 2026-05-07T23:18:59Z). Govern surface — Knowledge / Spending / Connections consolidated UI shipped across 13 build chunks. Spec: `tasks/builds/consolidation-govern/spec.md`. Phase 3 handoff: `tasks/builds/consolidation-govern/handoff.md`. Pipeline: spec-conformance NON_CONFORMANT (18 directional gaps deferred) → pr-reviewer CHANGES_REQUESTED (5 blockers + 7 strong recommendations all fixed in `3d4f1cfe`) → adversarial-reviewer 3 findings deferred (CONSOL-GOV-DEF-17/18/19) → dual-reviewer commit `5566880c` → S2 sync (auto-resolved via finalisation-coordinator) → G4 regression-guard fixes in `997e940a` (App.tsx route handlers consolidated post-S2 with main's PR #271/#272 page-deletion pattern; migration 0286 → 0287 collision rename; architecture.md migration filename updated) → Phase 3 commit `9188981f` (KNOWLEDGE.md +4 patterns, handoff.md created, current-focus.md → MERGE_READY, CONSOL-GOV-DEF-9 closed) → ready-to-merge label applied → CI ALL GREEN → auto-merged. **chatgpt-pr-review SKIPPED** in Phase 3 (operator instructed autonomous mode, incompatible with manual ChatGPT-web loop). 4 KNOWLEDGE.md patterns appended: closed-enum service-boundary mapping, targeted onConflictDoNothing, migration-number collision after S2, App.tsx route regression after upstream page deletions. Doc-sync sweep complete (13 verdicts recorded). 1 todo item closed (CONSOL-GOV-DEF-9 testConnection error.code mapping shipped via Phase 2 pr-reviewer Blocker B-1). 18 spec-conformance directional gaps + 3 adversarial-reviewer findings deferred to post-merge backlog in `tasks/todo.md`.
 
@@ -78,7 +78,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-07T23:21:30Z
+**Last updated:** 2026-05-08T12:38:00Z
 
 ---
 
