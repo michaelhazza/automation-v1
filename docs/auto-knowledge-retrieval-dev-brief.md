@@ -1,6 +1,6 @@
 # Auto Knowledge Retrieval, Development Brief
 
-> **Status:** Rev 3. Pre-spec, mockups attached.
+> **Status:** Rev 4. Pre-spec, mockups attached. Considered final at brief level; further detail belongs in the spec.
 > **Date:** 2026-05-08
 > **Branch:** to be created (`claude/auto-knowledge-retrieval` or similar)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -18,6 +18,8 @@
 > - **Mockup 7:** [Bundle Edit modal](../prototypes/auto-knowledge-retrieval/bundle-edit-modal.html)
 >
 > **What's new in Rev 3:** Incorporates a thorough reviewer pass. Adds explicit retrieval ordering formula and invariants (§3), chunking model (§8), three new engineering-invariant sections (§9 retrieval observability, §10 tenant isolation, §11 lifecycle and re-embedding), elevates token-budget philosophy to a platform principle, strengthens bundle framing, reserves space for system-generated documents, and adds a §14 spec-risk areas section so the spec author knows where the booby-traps are.
+>
+> **What's new in Rev 4:** Three small high-leverage clarifiers from a final reviewer pass, plus one risk callout. Always-available documents participate in overall budgeting and must fail gracefully on overflow (§3). Retrieval injects relevant chunks, not whole documents by default (§8). Retrieval explainability is an operator-facing product principle, not just internal telemetry (§9). Reference-only mode must share infrastructure with Auto retrieval to avoid drift (§14). Brief is now considered final; further detail belongs in the implementation spec.
 
 ---
 
@@ -84,7 +86,7 @@ Retrieval is deterministic, in this order:
 **Hard invariants** the implementation must preserve:
 
 - **Scope is a tiebreaker, not a multiplier.** Scope bonuses are bounded and small. They MUST NEVER cause an irrelevant document to outrank a materially more relevant one. A highly-relevant agent-scope document beats a marginally-relevant org-pinned document; an org-pinned document only "wins ties" against documents at similar relevance scores.
-- **Always-available documents bypass threshold and ranking.** They load every run. They are the only category that ignores relevance.
+- **Always-available documents bypass threshold and ranking.** They load every run. They are the only category that ignores relevance. **They do, however, still participate in overall context budgeting.** If the always-available set alone exceeds safe context limits, the system must fail gracefully and surface operator guidance (rather than silently truncating or unbounded expansion). Always-available is a relevance bypass, not a budget bypass.
 - **Reference-only documents never enter the candidate pool.** Their manifest is added to the prompt; their content is fetched by the agent on demand via tool call.
 - **Operator pins are bounded too.** A user-pinned document gets a bonus, but the same hard rule applies: the bonus must never cause irrelevant content to outrank relevant content.
 
@@ -234,7 +236,7 @@ Critical decision the spec must lock: **retrieval operates on chunked semantic u
 
 - During ingestion, documents are split into semantically coherent chunks. Chunk size and boundaries are tuned for the embedding model in use; the spec author owns the tuning.
 - Each chunk gets its own embedding and is independently retrievable.
-- A chunk match retrieves its parent document; the document is then loaded into context (potentially with surrounding chunks for coherence).
+- **Retrieval operates at chunk granularity. The system may inject only the relevant portions of a document, not necessarily the entire document.** A chunk match identifies the relevant content; the system decides whether to inject just that chunk (with optional surrounding chunks for coherence) or the full document, based on size and relevance. The default is *inject the relevant portions, not the whole document* — full-document injection is the exception, not the rule.
 - Whole-document embeddings are NOT used. They scale poorly (embedding quality drops as documents get longer) and produce worse retrieval.
 
 This decision determines whether the system handles a 50-page playbook gracefully or chokes. The spec author should treat chunking as a first-class engineering concern with explicit tests for boundary conditions (very short documents, very long documents, mixed-content documents).
@@ -244,6 +246,8 @@ This decision determines whether the system handles a 50-page playbook gracefull
 ## 9. Retrieval observability
 
 Without this, debugging is guesswork and operators won't trust the system. **First-class concept, not an afterthought.**
+
+> **Operator-facing principle:** *Retrieval behaviour should be inspectable by operators. The system should explain why documents were or were not loaded.* Observability is not just internal telemetry; it is a product surface.
 
 For every agent run, the system must record:
 
@@ -364,6 +368,7 @@ The spec author and implementer should treat these as the messy areas. Each one 
 | Retrieval observability (§9) | Without it, debugging is impossible. Build it day one, not as a v1.1 follow-on. |
 | Tenant isolation (§10) | Security risk if RLS / authorization order is wrong. Must be explicitly tested with cross-tenant query attempts. |
 | "Always available" abuse | Cost blowout if users mark many documents as Always available. v1 has soft warning only; revisit hard caps if real abuse emerges. |
+| Reference-only as second retrieval system | Long term, "Reference only" tool-fetched docs and Auto retrieved docs may drift apart in quality, ranking, and observability. The spec should keep both paths on shared infrastructure: shared chunk store, shared ranking logic, shared authorization, shared observability. Otherwise operators eventually ask *"why can the tool find it but auto retrieval can't?"* |
 
 The spec author should produce explicit test cases for each of these. Where ambiguity remains after the spec, flag back to the brief author rather than guessing.
 
@@ -438,4 +443,6 @@ These decisions are visible in the mockups linked in the brief header. The mocku
 
 ---
 
-> **Note for the next reviewer.** This is Rev 3. Design decisions are in §13; UX is captured in §17 and the linked mockups. New in Rev 3: explicit retrieval ordering and invariants (§3), chunking model (§8), three engineering-invariant sections (§9 observability, §10 tenant isolation, §11 lifecycle), bundle conceptual framing (§5), system-generated documents reservation (§6), and §14 spec-risk areas. The remaining work is engineering: schema design, telemetry shape, and the implementation spec. The next move is creating a fresh branch (`claude/auto-knowledge-retrieval` or similar), invoking the architect agent against this brief, and producing a proper implementation spec.
+> **Brief is final at Rev 4.** Design decisions in §13; UX in §17 and the linked mockups. Architectural invariants in §3 (retrieval ordering), §8 (chunking), §9 (observability), §10 (tenant isolation), §11 (lifecycle). Risk surface in §14. The reviewer's final assessment was *"strategically coherent, product-complete for pre-spec, implementation-guiding, reviewer-friendly, architecturally safe to proceed without being overengineered."* Further conceptual revisions should arise only from new evidence, not from re-framing.
+>
+> **Next move:** create a fresh branch (`claude/auto-knowledge-retrieval` or similar), invoke the architect agent against this brief, and produce a proper implementation spec. After that ships, the agent workspace work in `docs/agent-cloud-compute-dev-brief.md` resumes on its branch with this foundation in place.
