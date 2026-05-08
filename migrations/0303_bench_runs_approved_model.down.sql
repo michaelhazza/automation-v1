@@ -1,4 +1,4 @@
--- 0296_bench_runs_approved_model.down.sql
+-- 0303_bench_runs_approved_model.down.sql
 
 ALTER TABLE bench_runs DROP COLUMN IF EXISTS approved_model_id;
 ALTER TABLE bench_runs DROP COLUMN IF EXISTS summary;

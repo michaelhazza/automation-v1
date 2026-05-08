@@ -91,8 +91,8 @@ The spec must apply this vocabulary consistently from day one. No use of "verify
 ### Stage 1 — Skill verification (foundational)
 
 **Migrations**
-- `0288_skills_runtime_check_columns.sql` — add `verify` (jsonb), `reversible` (boolean), `blast_radius` (text enum check) to `org_skills` and `subaccount_skills`. Backfill: `verify = NULL`, `reversible = false`, `blast_radius = 'self'` for safety.
-- `0289_runtime_check_results.sql` — create `runtime_check_results` table (per-step results) with FORCE RLS + manifest entry.
+- `0295_skills_runtime_check_columns.sql` — add `verify` (jsonb), `reversible` (boolean), `blast_radius` (text enum check) to `org_skills` and `subaccount_skills`. Backfill: `verify = NULL`, `reversible = false`, `blast_radius = 'self'` for safety.
+- `0296_runtime_check_results.sql` — create `runtime_check_results` table (per-step results) with FORCE RLS + manifest entry.
 
 **Code surface**
 - `shared/types/runtimeCheck.ts` — discriminated-union check kinds (`api_status_2xx`, `row_exists`, `field_match`, `external_returns`, `custom_handler`) plus `RuntimeCheckResult` shape.
@@ -113,11 +113,11 @@ The spec must apply this vocabulary consistently from day one. No use of "verify
 ### Stage 2 — Agent scorecards + library + model bench
 
 **Migrations**
-- `0290_scorecards.sql` — create `scorecards` table with three-scope ownership (`scope_type`, `scope_id`), `quality_checks` jsonb, `share_with_subaccounts` boolean, FORCE RLS + manifest entry.
-- `0291_agent_scorecard_attachments.sql` — create `agent_scorecard_attachments` (agent_id, scorecard_id, `attach_authority` enum, `grading_frequency` enum). FORCE RLS + manifest entry.
-- `0292_scorecard_judgements.sql` — create `scorecard_judgements` (run_id, scorecard_id, quality_check_slug, pass_mark, observed_score, verdict). FORCE RLS + manifest entry.
-- `0293_bench_runs.sql` — create `bench_runs` and `bench_results` tables (operator-triggered model comparison). FORCE RLS + manifest entries on both.
-- `0294_system_agents_scorecard_defaults.sql` — extend `system_agents` with `default_system_scorecard_slugs` jsonb, `default_org_scorecard_slugs` jsonb. Extend `agent_templates` with `default_scorecard_slugs` jsonb. Extend `organisations` with `org_mandatory_scorecard_slugs` jsonb. (No new tables.)
+- `0297_scorecards.sql` — create `scorecards` table with three-scope ownership (`scope_type`, `scope_id`), `quality_checks` jsonb, `share_with_subaccounts` boolean, FORCE RLS + manifest entry.
+- `0298_agent_scorecard_attachments.sql` — create `agent_scorecard_attachments` (agent_id, scorecard_id, `attach_authority` enum, `grading_frequency` enum). FORCE RLS + manifest entry.
+- `0299_scorecard_judgements.sql` — create `scorecard_judgements` (run_id, scorecard_id, quality_check_slug, pass_mark, observed_score, verdict). FORCE RLS + manifest entry.
+- `0300_bench_runs.sql` — create `bench_runs` and `bench_results` tables (operator-triggered model comparison). FORCE RLS + manifest entries on both.
+- `0301_system_agents_scorecard_defaults.sql` — extend `system_agents` with `default_system_scorecard_slugs` jsonb, `default_org_scorecard_slugs` jsonb. Extend `agent_templates` with `default_scorecard_slugs` jsonb. Extend `organisations` with `org_mandatory_scorecard_slugs` jsonb. (No new tables.)
 
 **Code surface**
 - `shared/types/scorecard.ts` — `Scorecard`, `QualityCheck`, `AttachAuthority`, `GradingFrequency`, `ScorecardJudgement`, `BenchRun`, `BenchResult`, `RegressionRisk` shapes.
@@ -142,7 +142,9 @@ The spec must apply this vocabulary consistently from day one. No use of "verify
 ### Stage 3 — Correction-sourced auto-memory
 
 **Migrations**
-- `0295_memory_blocks_operator_correction.sql` — extend `memory_blocks.captured_via` text enum check to allow `'operator_correction'`. No structural change.
+- `0302_memory_blocks_operator_correction.sql` — extend `memory_blocks.captured_via` text enum check to allow `'operator_correction'`. No structural change.
+
+(Two follow-on migrations 0303/0304 — `bench_runs_approved_model` and `bench_runs_state_awaiting` — added during build to close §6.6 + §10.7 schema gaps; see §5 inventory below.)
 
 **Code surface**
 - `shared/types/correction.ts` — `Correction`, `CorrectionDialogPayload`, `CorrectionPersistencePosture` shapes.
@@ -188,18 +190,22 @@ Why not reuse `memory_blocks` directly for scorecards: scorecards have numeric p
 
 ## 5. File inventory lock
 
-### New migrations (8 total, numbered 0288..0295)
+### New migrations (10 total, numbered 0295..0304)
+
+Original spec inventory locked 0288..0295 (8 migrations). After the merge of PR #274 (auto-knowledge-retrieval, which took 0288..0294) and the build's discovery of two §6.6 + §10.7 schema gaps in 0300_bench_runs requiring follow-on patches, the locked range is now 0295..0304 (10 migrations).
 
 | # | File | Stage |
 |---|---|---|
-| 0288 | `migrations/0288_skills_runtime_check_columns.sql` (+ down) | 1 |
-| 0289 | `migrations/0289_runtime_check_results.sql` (+ down) | 1 |
-| 0290 | `migrations/0290_scorecards.sql` (+ down) | 2 |
-| 0291 | `migrations/0291_agent_scorecard_attachments.sql` (+ down) | 2 |
-| 0292 | `migrations/0292_scorecard_judgements.sql` (+ down) | 2 |
-| 0293 | `migrations/0293_bench_runs.sql` (+ down) | 2 |
-| 0294 | `migrations/0294_system_agents_scorecard_defaults.sql` (+ down) | 2 |
-| 0295 | `migrations/0295_memory_blocks_operator_correction.sql` (+ down) | 3 |
+| 0295 | `migrations/0295_skills_runtime_check_columns.sql` (+ down) | 1 |
+| 0296 | `migrations/0296_runtime_check_results.sql` (+ down) | 1 |
+| 0297 | `migrations/0297_scorecards.sql` (+ down) | 2 |
+| 0298 | `migrations/0298_agent_scorecard_attachments.sql` (+ down) | 2 |
+| 0299 | `migrations/0299_scorecard_judgements.sql` (+ down) | 2 |
+| 0300 | `migrations/0300_bench_runs.sql` (+ down) | 2 |
+| 0301 | `migrations/0301_system_agents_scorecard_defaults.sql` (+ down) | 2 |
+| 0302 | `migrations/0302_memory_blocks_operator_correction.sql` (+ down) | 3 |
+| 0303 | `migrations/0303_bench_runs_approved_model.sql` (+ down) | 2 (build follow-on; closes §6.6 `summary` + `approved_model_id` gap; widens state to include `partial`) |
+| 0304 | `migrations/0304_bench_runs_state_awaiting.sql` (+ down) | 2 (build follow-on; widens state CHECK to include `awaiting_confirm` + `awaiting_approval` per §12.4 atomicity) |
 
 ### New schema files (Drizzle)
 

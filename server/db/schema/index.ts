@@ -281,11 +281,11 @@ export * from './securityAuditEvents.js';
 export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
 
-// Trust & Verification Layer — runtime check verdicts (migration 0289)
+// Trust & Verification Layer — runtime check verdicts (migration 0296)
 export * from './runtimeCheckResults.js';
 
 
-// Trust & Verification Layer — Stage 2: scorecards + bench (migrations 0290-0293)
+// Trust & Verification Layer — Stage 2: scorecards + bench (migrations 0297-0300)
 export * from './scorecards.js';
 export * from './agentScorecardAttachments.js';
 export * from './scorecardJudgements.js';

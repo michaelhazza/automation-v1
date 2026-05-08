@@ -1,4 +1,4 @@
--- 0297_bench_runs_state_awaiting.down.sql
+-- 0304_bench_runs_state_awaiting.down.sql
 
 ALTER TABLE bench_runs DROP CONSTRAINT IF EXISTS bench_runs_state_check;
 ALTER TABLE bench_runs

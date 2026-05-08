@@ -1,5 +1,5 @@
--- 0296_bench_runs_approved_model.sql
--- Extends bench_runs with approved_model_id and summary (spec §6.6 schema gap from 0293).
+-- 0303_bench_runs_approved_model.sql
+-- Extends bench_runs with approved_model_id and summary (spec §6.6 schema gap from 0300).
 -- Adds 'partial' to the state enum check constraint for partial completion.
 
 -- approved_model_id: set atomically during F5 approval (benchRunService.approve)

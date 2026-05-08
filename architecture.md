@@ -3645,12 +3645,12 @@ Three-stage quality layer: runtime skill checks (Stage 1), scoring + bench evalu
 | Stage 3 — correction pattern detector | `server/services/correctionPatternDetectorPure.ts`, `server/jobs/correctionPatternDetectorJob.ts` |
 | Stage 3 — Knowledge page integration | `client/src/pages/govern/KnowledgePage.tsx`, `client/src/components/knowledge/SourcePillKnowledge.tsx`, `client/src/lib/api/memoryBlocks.ts` (source filter) |
 | Stage 3 — Run-trace correction UI | `client/src/pages/operate/RunTracePage.tsx`, `client/src/pages/operate/components/RunTraceEventRenderer.tsx`, `client/src/components/correction/CorrectDialog.tsx` |
-| Schema migrations | `migrations/0290_trust_verification_layer.sql` — five new tables: `runtime_check_definitions`, `runtime_check_results`, `scorecards`, `agent_scorecard_attachments`, `scorecard_judgements`, `bench_runs`, `bench_results`; extends `memory_blocks` with `source_run_id`, `confidence`, `quality_score`, `captured_via` |
+| Schema migrations | Trust & Verification Layer ships ten migrations across the 0295–0304 range (renumbered from the original 0288–0297 plan after PR #274 took 0288–0294): `0295_skills_runtime_check_columns.sql` (skills runtime-check columns), `0296_runtime_check_results.sql`, `0297_scorecards.sql`, `0298_agent_scorecard_attachments.sql`, `0299_scorecard_judgements.sql`, `0300_bench_runs.sql` (bench_runs + bench_results), `0301_system_agents_scorecard_defaults.sql`, `0302_memory_blocks_operator_correction.sql`, `0303_bench_runs_approved_model.sql`, `0304_bench_runs_state_awaiting.sql` |
 | Shared contracts | `shared/types/agentExecutionLog.ts` (`correction.captured` event), `shared/types/correction.ts`, `shared/types/govern.ts` (`KnowledgeSourceFilter`, `capturedVia`) |
 
 ##### Permissions
 
-Six new permission keys (migration 0290):
+Six new permission keys (migration 0297):
 
 | Key | Scope | Granted action | Default roles |
 |-----|-------|---------------|---------------|

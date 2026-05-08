@@ -29,7 +29,7 @@ export type MemoryBlockStatus = 'active' | 'draft' | 'pending_review' | 'rejecte
 export type MemoryBlockSource = 'manual' | 'auto_synthesised';
 // Phase 5 / W3a types
 export type MemoryBlockPriority = 'low' | 'medium' | 'high';
-// 'operator_correction' added in migration 0295 (Trust & Verification Layer Stage 3).
+// 'operator_correction' added in migration 0302 (Trust & Verification Layer Stage 3).
 export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion' | 'operator_correction';
 export type MemoryBlockDeprecationReason = 'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted';
 

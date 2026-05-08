@@ -33,7 +33,7 @@ export const systemAgents = pgTable('system_agents', {
   // Org-visible skills suggested by default when org installs this agent
   defaultOrgSkillSlugs: jsonb('default_org_skill_slugs').$type<string[]>().default([]),
 
-  // ── Trust & Verification Layer (migration 0294) ──────────────────────────
+  // ── Trust & Verification Layer (migration 0301) ──────────────────────────
   // System-level scorecards applied to all agents built on this system agent.
   defaultSystemScorecardSlugs: jsonb('default_system_scorecard_slugs').$type<string[]>().default([]),
   // Org-visible scorecards suggested by default when org installs this agent.

@@ -1,4 +1,4 @@
--- migrations/0295_memory_blocks_operator_correction.sql
+-- migrations/0302_memory_blocks_operator_correction.sql
 -- Trust & Verification Layer spec §6.7, §10.1 — Stage 3 correction capture.
 -- Extends memory_blocks.captured_via enum to include 'operator_correction'.
 -- Adds partial unique index for per-run correction idempotency (last-write-wins).

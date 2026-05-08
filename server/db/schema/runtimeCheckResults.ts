@@ -5,7 +5,7 @@ import { agentRuns } from './agentRuns';
 import { agentExecutionEvents } from './agentExecutionEvents';
 
 // ---------------------------------------------------------------------------
-// Runtime Check Results — per-step verification verdicts (migration 0289)
+// Runtime Check Results — per-step verification verdicts (migration 0296)
 // Trust & Verification Layer spec §6.2, §7, §10.1
 // Tenant-isolated via canonical org-isolation RLS policy.
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
--- migrations/0295_memory_blocks_operator_correction.down.sql
--- Reverses migration 0295: remove 'operator_correction' from captured_via enum.
+-- migrations/0302_memory_blocks_operator_correction.down.sql
+-- Reverses migration 0302: remove 'operator_correction' from captured_via enum.
 
 DROP INDEX IF EXISTS memory_blocks_correction_run_uniq;
 

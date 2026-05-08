@@ -1,4 +1,4 @@
--- 0290_scorecards.sql
+-- 0297_scorecards.sql
 -- Trust & Verification Layer — Chunk 6, spec §6.3, §7, §12.1
 --
 -- Creates scorecards: evaluation rubrics scoped to system / org / subaccount.

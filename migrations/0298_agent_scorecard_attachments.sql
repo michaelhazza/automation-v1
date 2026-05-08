@@ -1,4 +1,4 @@
--- 0291_agent_scorecard_attachments.sql
+-- 0298_agent_scorecard_attachments.sql
 -- Trust & Verification Layer — Chunk 6, spec §6.4, §7
 --
 -- Creates agent_scorecard_attachments: many-to-many join of agents and

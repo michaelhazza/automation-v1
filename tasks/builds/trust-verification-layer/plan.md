@@ -49,11 +49,11 @@
 
 ## 1. Executor notes
 
-- **Phase 2 sequencing.** Stage 1 → Stage 2 → Stage 3 is forward-only at the schema + migration layer (0288 → 0295). Stage 3 has a soft dependency on Stage 2: the forced-grade hook on correction is a no-op when no scorecard is attached, so Stage 3 ships independently if Stage 2 slips.
+- **Phase 2 sequencing.** Stage 1 → Stage 2 → Stage 3 is forward-only at the schema + migration layer (0295 → 0304 post-merge with PR #274). Stage 3 has a soft dependency on Stage 2: the forced-grade hook on correction is a no-op when no scorecard is attached, so Stage 3 ships independently if Stage 2 slips.
 - **Chunk-level review cadence.** Per-chunk `pr-reviewer` after each chunk merge. Branch-level `dual-reviewer` (if Codex available) and `chatgpt-pr-review` after the last chunk. `adversarial-reviewer` auto-triggers per CLAUDE.md §5.1.2 (new permissions + 5 new RLS tables + multi-tenant scopes + new write paths).
 - **Mode-switching.** Three chunks are flagged as **mid-build Opus-escalation candidates**. Sonnet handles the rest. Per chunk, the executor decides whether to switch based on the local difficulty of the named decision, not the chunk as a whole.
 - **Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form. Targeted execution of unit tests authored within this plan is allowed; running the broader suite is not.**
-- **Migration numbering.** 0288–0295. Latest on `main` at plan time is 0287 (`0287_govern_auto_update_disabled.sql`). Per the migration discipline in DEVELOPMENT_GUIDELINES.md §6, numbers are claimed at merge time — use placeholder names if a parallel PR steals a number.
+- **Migration numbering.** 0295–0304 (post-merge with PR #274 auto-knowledge-retrieval, which took 0288–0294). Original plan-time range was 0288–0295; renumbered during finalisation merge resolution. Per the migration discipline in DEVELOPMENT_GUIDELINES.md §6, numbers are claimed at merge time — use placeholder names if a parallel PR steals a number.
 - **Defaults applied (from handoff §Open questions).** Q1 confirmed during chunk that backfills the registry; Q2 yes (Stage 3 stands alone); Q3 server-side cost cap via `BENCH_MAX_COST_CENTS` env var per spec §12.4 + UI confirmation; Q4 `N=3` corrections / `30-day` window via env; Q5 enabled, behind feature flag `scorecard_tightening_suggestions`; Q6 naming matches existing convention (`org.scorecards.view` shape).
 
 ---
@@ -76,15 +76,15 @@
 
 | Table | Migration | Stage | Purpose |
 |---|---|---|---|
-| `runtime_check_results` | 0289 | 1 | Per-step deterministic verification result; canonical source for runtime-check trend analytics. Denormalised projection of the `runtime_check.completed` event. |
-| `scorecards` | 0290 | 2 | Three-scope (system/org/subaccount) evaluation rubric with `quality_checks` JSONB and `share_with_subaccounts` boolean. |
-| `agent_scorecard_attachments` | 0291 | 2 | Many-to-many join of agents and scorecards; carries `attach_authority` and `grading_frequency`. |
-| `scorecard_judgements` | 0292 | 2 | Per-(run, scorecard, quality-check, trigger-source) judgement with snapshot provenance fields (F1 invariant). |
-| `bench_runs` + `bench_results` | 0293 | 2 | Operator-triggered model comparison with cost estimate + state machine. Single migration, two tables. |
+| `runtime_check_results` | 0296 | 1 | Per-step deterministic verification result; canonical source for runtime-check trend analytics. Denormalised projection of the `runtime_check.completed` event. |
+| `scorecards` | 0297 | 2 | Three-scope (system/org/subaccount) evaluation rubric with `quality_checks` JSONB and `share_with_subaccounts` boolean. |
+| `agent_scorecard_attachments` | 0298 | 2 | Many-to-many join of agents and scorecards; carries `attach_authority` and `grading_frequency`. |
+| `scorecard_judgements` | 0299 | 2 | Per-(run, scorecard, quality-check, trigger-source) judgement with snapshot provenance fields (F1 invariant). |
+| `bench_runs` + `bench_results` | 0300 | 2 | Operator-triggered model comparison with cost estimate + state machine. Single migration, two tables. |
 
-**One enum extension** (no new table): migration 0295 extends `memory_blocks.captured_via` to allow `'operator_correction'`. Layer 3 storage uses the existing memory subsystem.
+**One enum extension** (no new table): migration 0302 extends `memory_blocks.captured_via` to allow `'operator_correction'`. Layer 3 storage uses the existing memory subsystem.
 
-**Five existing-table modifications:** `org_skills` and `subaccount_skills` get `verify` jsonb / `reversible` boolean / `blast_radius` text (0288); `system_agents` gets `default_system_scorecard_slugs` and `default_org_scorecard_slugs` jsonb; `agent_templates` gets `default_scorecard_slugs` jsonb; `organisations` gets `org_mandatory_scorecard_slugs` jsonb (0294).
+**Five existing-table modifications:** `org_skills` and `subaccount_skills` get `verify` jsonb / `reversible` boolean / `blast_radius` text (0295); `system_agents` gets `default_system_scorecard_slugs` and `default_org_scorecard_slugs` jsonb; `agent_templates` gets `default_scorecard_slugs` jsonb; `organisations` gets `org_mandatory_scorecard_slugs` jsonb (0301).
 
 ### Service-layer additions
 
@@ -149,7 +149,7 @@ Stage 1 is a hard prerequisite of Stage 2 (the forced-grade-on-runtime-fail hook
 | **R4. Forced-grade hook silently skipped.** Stage 1 → Stage 2 hook (runtime-check fail → forced grade) fires only when a scorecard is attached AND the agent's blast_radius != 'self'. A wiring bug would silently drop the signal. | Trust analytics drift detection becomes incomplete. | Forced-grade enqueue is logged at `info` per call; idempotency key on (run_id, scorecard_id, quality_check_slug, trigger_source) makes re-enqueue safe. Pure unit test in Chunk 10 exercises hook path. | Chunk 10. |
 | **R5. Source-pill compression bug at sub-account scope.** Compression rule in §6.8 is the only thing preventing org-name leakage to subaccount viewers. A wrong branch leaks org names. | Cross-tenant copy leak (low impact, high embarrassment). | Pure function in `scorecardServicePure.compressSourcePill()`; pure-function permutation test (per §8.21) covers all four `(scope, viewerScope)` combinations. | Chunk 7. |
 | **R6. Authority resolution at attach time produces wrong `attachAuthority`.** Authority is computed (not operator-selected) per §6.4; a bug here lets a sub-account operator detach a system_mandatory row. | Privilege escalation against the lock-icon contract. | Pure function `resolveAttachAuthority` in `scorecardServicePure`; DB-level CHECK constraint enforces `system_mandatory` deletable only by system admin (route-layer), `org_mandatory` only by org admin. | Chunks 7, 8. |
-| **R7. Migration ordering at merge time.** 0288–0295 are reserved at plan time; a parallel PR can claim numbers in this range. | Merge conflict; off-by-one renumber risk. | Per DEVELOPMENT_GUIDELINES.md §6.2, claim numbers immediately before merge; rename files in same commit. The eight migrations in this build are append-only, so a renumber is mechanical. | All migration chunks; finalisation. |
+| **R7. Migration ordering at merge time.** 0288–0295 reserved at plan time; renumbered to 0295–0304 in finalisation after PR #274 (auto-knowledge-retrieval) took 0288–0294 ahead of merge. | Merge conflict; off-by-one renumber risk (realised). | Per DEVELOPMENT_GUIDELINES.md §6.2, claim numbers immediately before merge; rename files in same commit. The migrations in this build are append-only, so the renumber was mechanical. | All migration chunks; finalisation. |
 | **R8. Operator UI three-state collapse hides analytics signal.** The five internal runtime-check states collapse to three for operators; aggregating on the collapsed value would obscure timeout vs verify-null vs inconclusive. | Drift analytics / bench validity broken. | F6 invariant in §6.2: aggregations MUST use the internal `state` value. Pure function `runtimeCheckServicePure.collapseToOperatorBadge` is the ONLY render-time projection. Code-comment + `@analytics-internal-state` annotation on the column. | Chunks 2, 5. |
 | **R9. Retention growth.** `runtime_check_results`, `scorecard_judgements`, and `bench_results` grow unbounded; per §17 M1, retention windows MUST be pinned before Stage 2 GA — Stage-2 ship-blocker, not deferred-forever. | Disk + index bloat post-launch. | Default working assumption (subject to revision once telemetry shows real growth curves): 90-day hot retention for `runtime_check_results` and `scorecard_judgements`, 365-day for `bench_results`. Pin before Stage 2 GA. Logged as a doc-sync follow-up in Chunk 16. | Chunk 16 (doc-sync) + handoff to operator. |
 | **R10. Embedding model drift in Layer 3 clusterer.** The pattern detector reuses the existing memory-embedding model; a model swap upstream silently changes cluster boundaries. | Cluster size / threshold drift. | Single-source-of-truth comment on `correctionPatternDetectorPure` pointing at the embedding service. Default similarity 0.82 + min cluster size 3 are env-tunable so ops can re-tune without redeploy. | Chunk 14. |
@@ -239,15 +239,15 @@ Chunk 16 (doc-sync: capabilities.md, architecture.md key files per domain, KNOWL
 **spec_sections:** §3 Stage 1 migrations, §5 file inventory (new schema files + modified schema files), §7 RLS posture (runtime_check_results), §10.1 idempotency posture.
 
 **Files (new — 4):**
-- `migrations/0288_skills_runtime_check_columns.sql` (+ `.down.sql`)
-- `migrations/0289_runtime_check_results.sql` (+ `.down.sql`)
+- `migrations/0295_skills_runtime_check_columns.sql` (+ `.down.sql`)
+- `migrations/0296_runtime_check_results.sql` (+ `.down.sql`)
 - `server/db/schema/runtimeCheckResults.ts`
 
 **Files (modified — 4):**
 - `server/db/schema/orgSkills.ts` — add `verify` jsonb (nullable), `verify_null_justification` text (nullable), `reversible` boolean (default `false`), `blastRadius` text enum check (`'self' | 'tenant' | 'external'`, default `'self'`).
 - `server/db/schema/subaccountSkills.ts` — same four columns.
 - `server/db/schema/index.ts` — re-export `runtimeCheckResults`.
-- `server/config/rlsProtectedTables.ts` — append `runtime_check_results` entry pointing at `0289_runtime_check_results.sql`.
+- `server/config/rlsProtectedTables.ts` — append `runtime_check_results` entry pointing at `0296_runtime_check_results.sql`.
 
 **Contracts.**
 
@@ -467,11 +467,11 @@ CI gate `verify-runtime-check-coverage.sh`:
 **spec_sections:** §3 Stage 2 migrations, §5 file inventory, §6.3-§6.6 contracts (`Scorecard`, `AgentScorecardAttachment`, `ScorecardJudgement`, `BenchRun`/`BenchResult`), §7 RLS posture, §10.6 unique-constraint→HTTP mapping.
 
 **Files (new — 8):**
-- `migrations/0290_scorecards.sql` (+ down)
-- `migrations/0291_agent_scorecard_attachments.sql` (+ down)
-- `migrations/0292_scorecard_judgements.sql` (+ down)
-- `migrations/0293_bench_runs.sql` (+ down)
-- `migrations/0294_system_agents_scorecard_defaults.sql` (+ down)
+- `migrations/0297_scorecards.sql` (+ down)
+- `migrations/0298_agent_scorecard_attachments.sql` (+ down)
+- `migrations/0299_scorecard_judgements.sql` (+ down)
+- `migrations/0300_bench_runs.sql` (+ down)
+- `migrations/0301_system_agents_scorecard_defaults.sql` (+ down)
 - `server/db/schema/scorecards.ts`
 - `server/db/schema/agentScorecardAttachments.ts`
 - `server/db/schema/scorecardJudgements.ts`
@@ -836,7 +836,7 @@ Routes:
 **spec_sections:** §3 Stage 3 migration, §6.7 Correction capture payload + memory_block shape, §10.1 idempotency posture (memory_blocks correction unique), §13.1 Correct dialog, §13.2 capture flow.
 
 **Files (new — 6):**
-- `migrations/0295_memory_blocks_operator_correction.sql` (+ down)
+- `migrations/0302_memory_blocks_operator_correction.sql` (+ down)
 - `shared/types/correction.ts`
 - `server/services/correctionCaptureService.ts`
 - `server/routes/corrections.ts`
@@ -850,7 +850,7 @@ Routes:
 
 **Contracts.**
 
-Migration 0295: extend the `captured_via` text enum check on `memory_blocks` to allow `'operator_correction'`. No structural change. Add a partial unique index `(organisation_id, source_run_id) WHERE captured_via = 'operator_correction' AND deleted_at IS NULL` (per spec §10.1 — re-clicking Correct on the same step UPSERT-replaces).
+Migration 0302: extend the `captured_via` text enum check on `memory_blocks` to allow `'operator_correction'`. No structural change. Add a partial unique index `(organisation_id, source_run_id) WHERE captured_via = 'operator_correction' AND deleted_at IS NULL` (per spec §10.1 — re-clicking Correct on the same step UPSERT-replaces).
 
 `shared/types/correction.ts`:
 ```ts

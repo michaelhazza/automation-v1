@@ -4,7 +4,7 @@ import { organisations } from './organisations';
 
 // ---------------------------------------------------------------------------
 // Scorecards — evaluation rubrics scoped to system / org / subaccount.
-// Trust & Verification Layer spec §6.3, §7, §12.1 (migration 0290).
+// Trust & Verification Layer spec §6.3, §7, §12.1 (migration 0297).
 //
 // System-scope rows (organisation_id IS NULL) are readable cross-tenant via
 // the widened SELECT policy but are never writable from an org-context session.

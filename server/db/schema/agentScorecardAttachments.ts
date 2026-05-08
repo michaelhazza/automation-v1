@@ -5,7 +5,7 @@ import { scorecards } from './scorecards';
 
 // ---------------------------------------------------------------------------
 // Agent Scorecard Attachments — many-to-many join of agents and scorecards.
-// Trust & Verification Layer spec §6.4, §7 (migration 0291).
+// Trust & Verification Layer spec §6.4, §7 (migration 0298).
 // Tenant-isolated via canonical org-isolation RLS policy.
 // ---------------------------------------------------------------------------
 

@@ -20,11 +20,11 @@ FAIL=0
 
 declare -A TABLE_MIGRATIONS
 TABLE_MIGRATIONS=(
-  ["scorecards"]="0290_scorecards.sql"
-  ["agent_scorecard_attachments"]="0291_agent_scorecard_attachments.sql"
-  ["scorecard_judgements"]="0292_scorecard_judgements.sql"
-  ["bench_runs"]="0293_bench_runs.sql"
-  ["bench_results"]="0293_bench_runs.sql"
+  ["scorecards"]="0297_scorecards.sql"
+  ["agent_scorecard_attachments"]="0298_agent_scorecard_attachments.sql"
+  ["scorecard_judgements"]="0299_scorecard_judgements.sql"
+  ["bench_runs"]="0300_bench_runs.sql"
+  ["bench_results"]="0300_bench_runs.sql"
 )
 
 # ── Check each table ──────────────────────────────────────────────────────────

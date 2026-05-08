@@ -1,4 +1,4 @@
--- 0288_skills_runtime_check_columns.sql
+-- 0295_skills_runtime_check_columns.sql
 -- Trust & Verification Layer — Chunk 1, spec §6.1
 --
 -- Adds four columns to skills for runtime-check configuration:

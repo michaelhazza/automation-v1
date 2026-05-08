@@ -1,4 +1,4 @@
--- 0292_scorecard_judgements.sql
+-- 0299_scorecard_judgements.sql
 -- Trust & Verification Layer — Chunk 6, spec §6.5, §7, §10.6
 --
 -- Creates scorecard_judgements: per-(run, scorecard, quality-check, trigger)

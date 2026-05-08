@@ -5,7 +5,7 @@ import { agents } from './agents';
 
 // ---------------------------------------------------------------------------
 // Bench Runs + Bench Results — operator-triggered model comparison.
-// Trust & Verification Layer spec §6.6, §7, §12.2 (migration 0293).
+// Trust & Verification Layer spec §6.6, §7, §12.2 (migration 0300).
 // Migration 0296 adds: approved_model_id, summary, 'partial' state.
 // Migration 0297 adds: 'awaiting_confirm' and 'awaiting_approval' states.
 //

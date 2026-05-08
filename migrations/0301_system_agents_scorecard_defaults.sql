@@ -1,4 +1,4 @@
--- 0294_system_agents_scorecard_defaults.sql
+-- 0301_system_agents_scorecard_defaults.sql
 -- Trust & Verification Layer — Chunk 6, spec §3, §6.7
 --
 -- Adds scorecard default slug columns to system_agents and agent_templates,

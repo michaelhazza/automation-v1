@@ -1,4 +1,4 @@
--- 0297_bench_runs_state_awaiting.sql
+-- 0304_bench_runs_state_awaiting.sql
 -- Extends bench_runs state CHECK to include 'awaiting_confirm' and 'awaiting_approval'.
 -- Trust & Verification Layer spec §12.4 (F5 atomicity, estimate → confirm → run flow).
 --

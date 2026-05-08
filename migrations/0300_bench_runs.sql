@@ -1,4 +1,4 @@
--- 0293_bench_runs.sql
+-- 0300_bench_runs.sql
 -- Trust & Verification Layer — Chunk 6, spec §6.6, §7, §12.2
 --
 -- Creates bench_runs + bench_results: operator-triggered model comparison

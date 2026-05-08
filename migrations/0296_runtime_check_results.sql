@@ -1,4 +1,4 @@
--- 0289_runtime_check_results.sql
+-- 0296_runtime_check_results.sql
 -- Trust & Verification Layer — Chunk 1, spec §6.2, §7, §10.1
 --
 -- Creates runtime_check_results: per-step verification verdicts with

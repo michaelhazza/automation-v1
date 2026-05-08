@@ -5,7 +5,7 @@ import { scorecards } from './scorecards';
 
 // ---------------------------------------------------------------------------
 // Scorecard Judgements — per-(run, scorecard, quality-check, trigger) verdicts.
-// Trust & Verification Layer spec §6.5, §7, §10.6 (migration 0292).
+// Trust & Verification Layer spec §6.5, §7, §10.6 (migration 0299).
 //
 // Five F1 snapshot fields preserve rubric state at judgement time so that
 // historical verdicts remain auditable even when the scorecard is later edited.
