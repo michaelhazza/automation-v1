@@ -41,6 +41,9 @@ import {
   resolveLinkedEntityLabels,
   type PermissionMaskUserContext,
 } from '../lib/agentRunEditPermissionMask.js';
+import { applyEventToPresence } from './agentPresenceService.js';
+import { applyEvent as applyWorkingTimeEvent } from './agentWorkingTimeService.js';
+import type { ServicePrincipal } from './principal/types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,6 +160,32 @@ export async function appendEvent(input: AppendEventInput): Promise<void> {
         return;
       }
       emitEnvelope(persisted);
+
+      // Fire-and-forget embodiment pipeline — presence projection + working time.
+      // Uses the same org-scoped async context as the current call frame.
+      const embodimentCtx: ServicePrincipal = {
+        type: 'service',
+        id: 'agentExecutionEventService',
+        organisationId: persisted.event.organisationId,
+        subaccountId: persisted.event.subaccountId,
+        serviceId: 'agentExecutionEventService',
+        teamIds: [],
+      };
+      void applyEventToPresence(persisted.event, embodimentCtx).catch((err: unknown) => {
+        logger.warn('agentExecutionEventService.presence_apply_failed', {
+          runId: persisted.event.runId,
+          eventType: persisted.event.eventType,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+      void applyWorkingTimeEvent(persisted.event, embodimentCtx).catch((err: unknown) => {
+        logger.warn('agentExecutionEventService.working_time_apply_failed', {
+          runId: persisted.event.runId,
+          eventType: persisted.event.eventType,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+
       return;
     } catch (err) {
       lastErr = err;

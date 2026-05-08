@@ -96,7 +96,7 @@ export async function runWorkingTimeRollupCompact(): Promise<WorkingTimeRollupCo
                     DELETE FROM agent_working_time_rollups
                     WHERE organisation_id = ${org.id}::uuid
                       AND bucket_date < (CURRENT_DATE - INTERVAL '1 year')::date
-                    RETURNING id
+                    RETURNING bucket_date
                   )
                   INSERT INTO agent_working_time_rollups (organisation_id, agent_id, bucket_date, working_time_seconds, total_run_count, successful_runs)
                   SELECT organisation_id, agent_id, (month || '-01')::date, wts, trc, sr

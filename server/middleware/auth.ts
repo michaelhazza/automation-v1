@@ -187,6 +187,32 @@ export const authenticate = async (
   }
 };
 
+// ─── authenticateSSE ──────────────────────────────────────────────────────────
+
+/**
+ * Same as authenticate but also accepts the JWT via ?token= query param.
+ * Used for SSE endpoints where EventSource cannot set custom headers.
+ */
+export const authenticateSSE = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  const rawToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.substring(7)
+    : (req.query.token as string | undefined);
+
+  if (!rawToken) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  // Reuse the existing authenticate logic by temporarily injecting the header
+  req.headers.authorization = `Bearer ${rawToken}`;
+  return authenticate(req, res, next);
+};
+
 // ─── requireSystemAdmin ────────────────────────────────────────────────────────
 
 /** Allows only users with role = 'system_admin'. */

@@ -34,11 +34,16 @@ export async function append(
     throw { statusCode: 400, errorCode: 'observation_body_too_large', byteLength, limitBytes: 8192 };
   }
 
-  // 2. Idempotency key derivation
+  // 2. Idempotency key derivation — spec §1110: (event_id, source_id, observation_type, normalised_body_hash)
   const idempotencyKey = input.idempotencyKey
-    ?? createHash('sha256')
-        .update(`${input.agentId}:${input.eventId}:${input.observationType}`)
-        .digest('hex');
+    ?? (() => {
+        const normalisedBodyHash = createHash('sha256')
+          .update(input.body.trim().toLowerCase())
+          .digest('hex');
+        return createHash('sha256')
+          .update(`${input.eventId}:${input.metadata.source_id ?? ''}:${input.observationType}:${normalisedBodyHash}`)
+          .digest('hex');
+      })();
 
   // 3. Supersession cycle guard — DFS with FOR UPDATE row-locks (§7.3)
   if (input.supersedesObservationId) {

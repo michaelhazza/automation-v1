@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { agentPresenceProjections, agentExecutionEvents, agentRuns } from '../db/schema/index.js';
+import { fanOut, fanOutToWorkspace } from './agentPresenceStreamPublisher.js';
 import {
   resolvePresenceFromEvents,
   type PresenceInput,
@@ -76,9 +77,9 @@ export async function applyEventToPresence(
   const db = getOrgScopedDb('agentPresenceService.applyEventToPresence');
   const organisationId = ctx.organisationId;
 
-  // Resolve agentId from the run
+  // Resolve agentId and subaccountId from the run
   const runRows = await db
-    .select({ agentId: agentRuns.agentId })
+    .select({ agentId: agentRuns.agentId, subaccountId: agentRuns.subaccountId })
     .from(agentRuns)
     .where(
       and(
@@ -89,7 +90,7 @@ export async function applyEventToPresence(
     .limit(1);
 
   if (runRows.length === 0) return;
-  const agentId = runRows[0].agentId;
+  const { agentId, subaccountId } = runRows[0];
 
   // Fetch recent execution events for this agent to build PresenceInput.
   const recentEvents = await db
@@ -175,6 +176,7 @@ export async function applyEventToPresence(
     INSERT INTO agent_presence_projections (
       agent_id,
       organisation_id,
+      subaccount_id,
       presence_state,
       presence_subtitle,
       active_run_id,
@@ -190,6 +192,7 @@ export async function applyEventToPresence(
     ) VALUES (
       ${agentId}::uuid,
       ${organisationId}::uuid,
+      ${subaccountId}::uuid,
       ${newState},
       ${resolved.subtitle},
       ${resolved.activeRunId}::uuid,
@@ -204,6 +207,7 @@ export async function applyEventToPresence(
       NOW()
     )
     ON CONFLICT (agent_id) DO UPDATE SET
+      subaccount_id        = EXCLUDED.subaccount_id,
       presence_state       = EXCLUDED.presence_state,
       presence_subtitle    = EXCLUDED.presence_subtitle,
       active_run_id        = EXCLUDED.active_run_id,
@@ -223,4 +227,26 @@ export async function applyEventToPresence(
         AND EXCLUDED.last_event_id > agent_presence_projections.last_event_id
       )
   `);
+
+  const sseEvent = {
+    agentId,
+    eventTimestamp: typeof event.eventTimestamp === 'string'
+      ? event.eventTimestamp
+      : new Date(event.eventTimestamp).toISOString(),
+    serverNow: new Date().toISOString(),
+    eventId: event.id,
+    eventType: 'presence_state_changed' as const,
+    data: {
+      agentId,
+      presenceState: newState,
+      degradedBaseState: resolved.degradedBaseState ?? null,
+      nextRunAt: resolved.nextRunAt ?? null,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+
+  fanOut(sseEvent);
+  if (subaccountId) {
+    fanOutToWorkspace(subaccountId, sseEvent);
+  }
 }

@@ -29,7 +29,7 @@ export function openPresenceStream(
     onReconnecting: () => void;
     onError: (err: Event) => void;
   },
-  options?: { lastEventId?: string },
+  options?: { lastEventId?: string; token?: string },
 ): PresenceStreamSubscription {
   let url: string;
   if (scope.kind === 'agent') {
@@ -38,9 +38,12 @@ export function openPresenceStream(
     url = `/api/agent-presence/stream/workspace/${scope.subaccountId}`;
   }
 
-  if (options?.lastEventId) {
-    url += `?lastEventId=${encodeURIComponent(options.lastEventId)}`;
-  }
+  const params = new URLSearchParams();
+  if (options?.lastEventId) params.set('lastEventId', options.lastEventId);
+  const token = options?.token ?? localStorage.getItem('token') ?? '';
+  if (token) params.set('token', token);
+  const qs = params.toString();
+  if (qs) url += `?${qs}`;
 
   const eventSource = new EventSource(url);
 

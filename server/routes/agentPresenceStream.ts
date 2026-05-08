@@ -9,7 +9,10 @@
 
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { eq, and, isNull } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { agents } from '../db/schema/index.js';
+import { authenticateSSE, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
@@ -92,11 +95,19 @@ function attachStream(
 
 router.get(
   '/api/agent-presence/stream/:agentId',
-  authenticate,
+  authenticateSSE,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
   async (req: import('express').Request, res: import('express').Response) => {
     try {
+      const [agentRow] = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.id, req.params.agentId), eq(agents.organisationId, req.orgId!), isNull(agents.deletedAt)));
+      if (!agentRow) {
+        res.status(404).json({ error: 'Agent not found' });
+        return;
+      }
       sseSetup(res);
       const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId };
       attachStream(req, res, scope);
@@ -111,7 +122,7 @@ router.get(
 
 router.get(
   '/api/agent-presence/stream/workspace/:subaccountId',
-  authenticate,
+  authenticateSSE,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
   async (req: import('express').Request, res: import('express').Response) => {

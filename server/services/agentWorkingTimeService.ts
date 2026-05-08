@@ -1,18 +1,20 @@
-import { eq, and, between } from 'drizzle-orm';
+import { eq, and, between, lt, desc } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
-import { agentWorkingTimeEventLedger, agentWorkingTimeRollups, agentRuns } from '../db/schema/index.js';
+import { agentWorkingTimeEventLedger, agentWorkingTimeRollups, agentRuns, agentExecutionEvents } from '../db/schema/index.js';
 import { splitIntervalAcrossBuckets } from './agentWorkingTimeServicePure.js';
 import type { AgentExecutionEvent } from '../../shared/types/agentExecutionLog.js';
 import type { AgentWorkingTimeRollup } from '../db/schema/agentWorkingTimeRollups.js';
 import type { PrincipalContext } from './principal/types.js';
 
-// ---------------------------------------------------------------------------
-// In-process step-start time tracking for step_started/step_completed pairing.
-// Key: runId — stores the start timestamp (ms) of the current open step.
-// ---------------------------------------------------------------------------
-const stepStartMap = new Map<string, number>();
+function msToUtcDateString(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 // ---------------------------------------------------------------------------
 // applyEvent
@@ -57,37 +59,72 @@ export async function applyEvent(
     return;
   }
 
-  // 2. Only step_started / step_completed events produce working time
   const eventTypeStr = event.eventType as string;
+
+  // 2. step_started events are tracked only via the ledger — working time is
+  //    computed at step_completed time by querying the persisted start event.
   if (eventTypeStr === 'step_started') {
-    stepStartMap.set(event.runId, new Date(event.eventTimestamp).getTime());
     return;
   }
 
-  if (eventTypeStr !== 'step_completed') {
+  // 3. step_completed — retrieve the matching step_started from the events table
+  if (eventTypeStr === 'step_completed') {
+    const startRows = await db
+      .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
+      .from(agentExecutionEvents)
+      .where(
+        and(
+          eq(agentExecutionEvents.runId, event.runId),
+          eq(agentExecutionEvents.organisationId, organisationId),
+          eq(agentExecutionEvents.eventType, 'step_started'),
+          lt(agentExecutionEvents.sequenceNumber, event.sequenceNumber),
+        ),
+      )
+      .orderBy(desc(agentExecutionEvents.sequenceNumber))
+      .limit(1);
+
+    if (startRows.length === 0) {
+      logger.warn('working_time.step_completed_without_start', { runId: event.runId, eventId: event.id });
+      return;
+    }
+
+    const startMs = new Date(startRows[0].eventTimestamp as Date | string).getTime();
+    const endMs = new Date(event.eventTimestamp).getTime();
+    if (endMs <= startMs) return;
+
+    const contributions = splitIntervalAcrossBuckets(startMs, endMs);
+
+    for (const { bucketDate, contributionMs } of contributions) {
+      const contributionSeconds = Math.floor(contributionMs / 1000);
+      if (contributionSeconds <= 0) continue;
+
+      await db.execute(sql`
+        INSERT INTO agent_working_time_rollups (
+          organisation_id,
+          agent_id,
+          bucket_date,
+          working_time_seconds,
+          updated_at
+        ) VALUES (
+          ${organisationId}::uuid,
+          ${agentId}::uuid,
+          ${bucketDate}::date,
+          ${contributionSeconds},
+          NOW()
+        )
+        ON CONFLICT (organisation_id, agent_id, bucket_date) DO UPDATE SET
+          working_time_seconds = agent_working_time_rollups.working_time_seconds + EXCLUDED.working_time_seconds,
+          updated_at           = EXCLUDED.updated_at
+      `);
+    }
     return;
   }
 
-  // step_completed — pop the start time
-  const startMs = stepStartMap.get(event.runId);
-  if (startMs === undefined) {
-    // No matching step_started in memory — service restart or out-of-order delivery.
-    // Working time for this step is unrecoverable; log WARN so the gap is observable.
-    logger.warn('working_time.step_completed_without_start', { runId: event.runId, eventId: event.id });
-    return;
-  }
-  stepStartMap.delete(event.runId);
-
-  const endMs = new Date(event.eventTimestamp).getTime();
-  if (endMs <= startMs) return;
-
-  // 3. Bucket split
-  const contributions = splitIntervalAcrossBuckets(startMs, endMs);
-
-  // 4. Bucket upserts — all in the same transaction (the outer org-scoped tx)
-  for (const { bucketDate, contributionMs } of contributions) {
-    const contributionSeconds = Math.floor(contributionMs / 1000);
-    if (contributionSeconds <= 0) continue;
+  // 4. run.completed — increment run-count columns in the event's daily bucket
+  if (eventTypeStr === 'run.completed') {
+    const payload = event.payload as { finalStatus: string };
+    const isSuccess = payload.finalStatus === 'completed';
+    const bucketDate = msToUtcDateString(new Date(event.eventTimestamp).getTime());
 
     await db.execute(sql`
       INSERT INTO agent_working_time_rollups (
@@ -95,18 +132,29 @@ export async function applyEvent(
         agent_id,
         bucket_date,
         working_time_seconds,
+        successful_runs,
+        failed_runs,
+        partial_runs,
+        total_run_count,
         updated_at
       ) VALUES (
         ${organisationId}::uuid,
         ${agentId}::uuid,
         ${bucketDate}::date,
-        ${contributionSeconds},
+        0,
+        ${isSuccess ? 1 : 0},
+        ${isSuccess ? 0 : 1},
+        0,
+        1,
         NOW()
       )
       ON CONFLICT (organisation_id, agent_id, bucket_date) DO UPDATE SET
-        working_time_seconds = agent_working_time_rollups.working_time_seconds + EXCLUDED.working_time_seconds,
-        updated_at           = EXCLUDED.updated_at
+        successful_runs = agent_working_time_rollups.successful_runs + EXCLUDED.successful_runs,
+        failed_runs     = agent_working_time_rollups.failed_runs + EXCLUDED.failed_runs,
+        total_run_count = agent_working_time_rollups.total_run_count + EXCLUDED.total_run_count,
+        updated_at      = EXCLUDED.updated_at
     `);
+    return;
   }
 }
 
