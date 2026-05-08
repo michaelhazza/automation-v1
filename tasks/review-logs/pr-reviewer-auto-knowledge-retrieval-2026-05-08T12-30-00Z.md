@@ -178,3 +178,17 @@ The catch handles `23505` (unique violation → 409 DOCUMENT_ALREADY_LINKED) but
 Mechanical fixes applied in main session: 4 (B1, S1, S5, S7).
 
 The blocking design-decision items (B2, B3, S2) are facets of the same simplified-ranker / contract-shape question already deferred via AKR-CONF-1 and AKR-CONF-2. Re-running pr-reviewer after the mechanical fixes is expected to surface only the deferred-design items.
+
+---
+
+## Re-check 2026-05-08T12:50:00Z
+
+**Commit re-verified:** `384bd7cd`
+**Scope:** B1, S1, S5, S7 only (other findings routed to `tasks/todo.md`)
+
+- **B1** — `server/services/retrievalObservabilityService.ts:32` — CLOSED. `getOrgScopedDb()` now lives as the first line inside `try`; comment cites architecture pattern 5 and PR-REV-B1.
+- **S1** — `server/services/documentEmbeddingService.ts:23,128–141` — CLOSED. `EMBEDDING_INPUT_BYTE_LIMIT = 8192` exported; truncation moved upstream into `embedChunks` with a structured `documentEmbeddingService.input_truncated` warn-log carrying `versionId`, `chunkIndex`, `originalLength`, `truncatedLength`; the inline `.slice(0, 8192)` inside `callEmbeddingApi` is removed.
+- **S5** — `server/services/retrievalObservabilityServicePure.ts:30,36` — CLOSED. `aboveThreshold.items` and `belowThreshold.sample` spread-cloned before `.sort()`. `modeExcluded.items` correctly left unspread because it is only sliced (slice does not mutate).
+- **S7** — `server/services/documentDataSourceService.ts:47–49` — CLOSED. `23514` → `{ statusCode: 400, errorCode: 'INVALID_SCOPE_TIER_COMBINATION' }` added alongside `23505 → 409`; comment references migration 0290 CHECK constraint and PR-REV-S7.
+
+**Verdict:** APPROVED (all four mechanical fixes correctly close their findings; no regressions)
