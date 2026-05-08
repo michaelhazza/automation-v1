@@ -137,6 +137,88 @@ Pick the lowest-weight pattern that works. Do not mix three patterns on one scre
 
 ---
 
+## Recurring UI patterns
+
+Concrete, copy-once-paste-often patterns that came out of the auto-knowledge-retrieval mockup pass (May 2026). When designing a new screen, default to these unless you have a clear reason not to. Mockup references in `prototypes/auto-knowledge-retrieval/`.
+
+### Three-dot (⋮) context menus on rows
+
+- **Maximum 6 to 8 visible items.** If you have more, you're probably grouping wrong.
+- **Collapse grouped sub-options into a single item with a `›` chevron** that opens a flyout, instead of expanding inline as a multi-section block. Example: *"Change mode ›"* opens a flyout with Auto / Always available / Reference only. Do not list those three as inline items under a section header in the parent menu.
+- **Never show "Open" and "Edit" as two separate items.** Row-click opens the detail modal (which is both view and edit). The three-dots menu has *Edit* xor *Open*, never both.
+- **Reserve danger actions to the bottom**, separated by a divider, in red.
+
+Reference: `prototypes/auto-knowledge-retrieval/agent-data-sources.html`, `knowledge-documents-tab.html`.
+
+### Source / origin / provenance badges
+
+Don't badge the default case. Default-case badges are decoration, not signal.
+
+- For a list of items where most are *manually authored / uploaded by the operator*, do not show a "Manually authored" badge on every row. Only show a badge when the source is non-default ("From file", "Approved from auto-memory", "Uploaded PDF", etc.).
+- The default-case absence-of-badge becomes the visual carrier of *"this is normal."* Special badges become the visual carrier of *"this came from somewhere interesting."*
+
+### Token / cost / size information
+
+Hide by default. Only surface as a warning when it's actionable.
+
+- Do not show token counts, cost-per-run, retrieval latency, embedding size, or similar engineering metrics in default views.
+- Surface a small warning chip on the affected row when a threshold is crossed (e.g. "⚠ Large document" when a document exceeds the recommended size). The chip carries the action: *something here is unusual, you might want to look*.
+- Detail modals are an acceptable place for one expanded size widget (visual bar + qualitative label like "Small" / "Medium"), so users can self-debug if they want. Still no raw numbers as the primary information.
+
+### Stat tiles on list / table pages
+
+Maximum two stat tiles. The table itself is the data; tiles are for what the table can't show.
+
+- Good tile: *"Total documents: 23"* (a count the table doesn't aggregate).
+- Good tile: *"Most loaded: [name]"* (a top-1 the table doesn't sort to by default).
+- Bad tile: *"Avg per run: 2.4"* (operational metric, not actionable for the operator).
+- Bad tile: *"Last 30 days: $2.40"* (cost detail, hidden by default per the rule above).
+
+If a tile fails the "would the operator act on this?" check, cut it.
+
+### Explainer banners
+
+Useful for first-time users; must be dismissable.
+
+- Every explainer banner has a `×` close button. Closing persists per-user.
+- Do not ship permanent help copy at the top of every page. The banner is a one-time learning aid, not an instruction strip.
+- Footer notes that repeat what the banner just said are noise. Pick one, not both.
+
+### Admin-only controls
+
+Hide entirely from non-admin users. Do not render disabled; do not render with "you can't do this" copy.
+
+- Org-admin-only fields (e.g. a "Promote to org-wide" scope picker in a sub-account-scoped modal) are absent for sub-account admins. The field doesn't exist in their DOM.
+- Use a small "Org admin only" pill on the field label in the org-admin view itself, so the org admin understands the scope of their own action. Never show that pill to non-admins.
+
+### Default-case controls
+
+If a control has only one meaningful choice, hide it.
+
+- "Available to" radios with only one option ("All agents in this sub-account", because the user has no other sub-account) is a non-decision. Hide the radio entirely. The default action takes effect on save.
+- A "Restrict to specific agents" override lives behind an Advanced expander, not in the primary form.
+
+### Modal advanced expanders
+
+Default to collapsed.
+
+- A modal that asks for a title, scope, and an Advanced section should ship with Advanced collapsed and a single line ("Advanced: change loading mode" or similar). Most users complete the action without expanding.
+- Mockups should show the collapsed state by default. Show the expanded state only when the mockup is specifically demonstrating the advanced flow.
+
+### Em-dashes
+
+CLAUDE.md prohibits em-dashes in UI copy, labels, or app-facing text. Use commas, colons, or rewrite the sentence. This applies to mockup data (sample document names, sample agent names) too, not just chrome.
+
+### Sub-text on rows
+
+Trim aggressively.
+
+- Multi-fact sub-text strings ("Pinned to organisation · 2,300 tokens · last updated 5 days ago by Michael H.") become noise after the first row. Keep the most actionable single fact ("Updated 5 days ago"); push the rest to the detail modal.
+- Mime types are usually carried by the file icon. Don't repeat them in text.
+- Run identifiers ("produced during run #1284") are operator-debugging context. Show on hover or in detail, not in default rows.
+
+---
+
 ## Worked examples
 
 Three worked examples — drawn from origin-project features — live in [`frontend-design-examples.md`](./frontend-design-examples.md):
@@ -151,12 +233,25 @@ Read for method, not content. If you're adapting this framework to a new project
 
 Before committing any UI artifact (mockup, PR, component), run through this quickly:
 
+**The five hard rules:**
 - [ ] Did I start from the user's task, not the data model?
 - [ ] Is there exactly one primary action on this screen?
 - [ ] Is every element load-bearing for the primary task?
 - [ ] Have I deferred every monitoring / observability / diagnostic element that the task doesn't need?
 - [ ] If a non-technical operator landed here, would they know what to do in 3 seconds?
 - [ ] Am I under the complexity-budget caps?
+
+**The recurring-pattern rules** (per *Recurring UI patterns* section above):
+- [ ] Three-dot menus: under 8 items? Sub-options as flyouts not inline sections?
+- [ ] Source / provenance badges: only on non-default cases?
+- [ ] No token / cost / size numbers in default views? Warnings only as actionable chips?
+- [ ] Stat tiles: 2 maximum, each one the operator would act on?
+- [ ] Explainer banners: dismissable? No duplicate footer note?
+- [ ] Admin-only fields: absent (not disabled) for non-admins?
+- [ ] Single-choice "Available to" / "Apply to" controls hidden?
+- [ ] Modal advanced expander defaulted to collapsed?
+- [ ] No em-dashes in any UI copy or sample data?
+- [ ] Row sub-text trimmed to one most-actionable fact?
 
 If any answer is "no" or "not sure", cut before shipping. Shipping a fatter UI "just in case someone wants it" is how this product loses the consumer-simple positioning.
 

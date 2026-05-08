@@ -1,11 +1,26 @@
-# Auto Knowledge Retrieval — Development Brief
+# Auto Knowledge Retrieval, Development Brief
 
-> **Status:** Rev 1 — first draft. Pre-spec, pre-review.
+> **Status:** Rev 2. Pre-spec, mockups attached.
 > **Date:** 2026-05-08
 > **Branch:** to be created (`claude/auto-knowledge-retrieval` or similar)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
-> **Posture:** Product/strategic, not technical. Engineering detail belongs in the spec that follows.
-> **Relationship to other work:** This is **Phase 1** of the broader agent workspace strategy described in `docs/agent-cloud-compute-dev-brief.md`. It ships before agent workspace (Phase 2) because the workspace UI depends on this knowledge retrieval foundation working correctly. This brief stands on its own — auto knowledge retrieval is valuable independently of the agent workspace work.
+> **Posture:** Product / strategic, not technical. Engineering detail belongs in the spec that follows.
+> **Relationship to other work:** This is **Phase 1** of the broader agent workspace strategy described in `docs/agent-cloud-compute-dev-brief.md`. It ships before agent workspace (Phase 2) because the workspace UI depends on this knowledge retrieval foundation working correctly. This brief stands on its own; auto knowledge retrieval is valuable independently of the agent workspace work.
+>
+> **Mockups attached** (in `prototypes/auto-knowledge-retrieval/`):
+> - [Index of all mockups](../prototypes/auto-knowledge-retrieval/index.html)
+> - **Mockup 1:** [Knowledge: Files tab (new)](../prototypes/auto-knowledge-retrieval/knowledge-files-tab.html)
+> - **Mockup 2:** [Add to Knowledge modal](../prototypes/auto-knowledge-retrieval/add-to-knowledge-modal.html)
+> - **Mockup 3:** [Agent edit: Data Sources tab](../prototypes/auto-knowledge-retrieval/agent-data-sources.html)
+> - **Mockup 4:** [Knowledge: Documents tab refreshed](../prototypes/auto-knowledge-retrieval/knowledge-documents-tab.html)
+> - **Mockup 5:** [Document Detail modal](../prototypes/auto-knowledge-retrieval/document-detail-modal.html)
+> - **Mockup 6:** [Knowledge: Bundles sub-tab](../prototypes/auto-knowledge-retrieval/knowledge-bundles-tab.html)
+> - **Mockup 7:** [Bundle Edit modal](../prototypes/auto-knowledge-retrieval/bundle-edit-modal.html)
+>
+> **What's new in Rev 2:**
+> 1. Mockups produced for all primary surfaces and linked above.
+> 2. UX details added to §3 (modes), §6 (Add to Knowledge flow), and a new §6.1 (UI patterns established) reflecting decisions reached through three rounds of mockup feedback.
+> 3. Frontend design principles updated in `docs/frontend-design-principles.md` with the recurring patterns established here, so future mockup work starts closer to the optimum.
 
 ---
 
@@ -13,16 +28,17 @@
 
 1. What this brief is and the question it answers
 2. The problem we're solving
-3. The new model — Auto, Always available, Reference only
+3. The new model: Auto, Always available, Reference only
 4. The five-tier hierarchy
-5. Files vs Documents — how they relate
+5. Files vs Documents, how they relate
 6. The Add to Knowledge flow
 7. Memory blocks at additional tiers
 8. The shared retrieval engine
-9. What this enables (Phase 2 — agent workspace)
+9. What this enables (Phase 2, agent workspace)
 10. Decisions made
 11. Out of scope for v1
 12. Success criteria for v1
+13. UI patterns established through mockups
 
 ---
 
@@ -46,7 +62,7 @@ The current model has three failure modes:
 
 The fix is to extend the proven memory-block retrieval pattern to documents, add the missing scopes, and remove the user-facing eager/lazy concept entirely.
 
-## 3. The new model — Auto, Always available, Reference only
+## 3. The new model: Auto, Always available, Reference only
 
 Three modes. The default is Auto. The other two are escape hatches for the rare cases.
 
@@ -81,7 +97,7 @@ When an agent runs, the candidate pool is the union of documents at every tier t
 
 When relevant documents come from multiple tiers and the budget is tight, **more-specific scopes win ties** — task instance beats recurring task beats agent beats sub-account beats org. Specific knowledge beats general when relevance scores are close.
 
-## 5. Files vs Documents — how they relate
+## 5. Files vs Documents, how they relate
 
 Files and Documents are kept as **separate primitives** because they have fundamentally different roles in how the system works:
 
@@ -166,7 +182,7 @@ This abstraction is small but high-leverage:
 
 Cost per task at scale: under one cent of embedding overhead per run. End-to-end retrieval latency: under 100ms added per run. Already proven by memory blocks in production today.
 
-## 9. What this enables (Phase 2 — agent workspace)
+## 9. What this enables (Phase 2, agent workspace)
 
 This work ships as Phase 1 of the broader agent workspace strategy described in `docs/agent-cloud-compute-dev-brief.md`. It is valuable in its own right — smarter knowledge retrieval improves every agent run regardless of whether the workspace UI ever ships. But it is also a prerequisite for several Phase 2 surfaces:
 
@@ -234,6 +250,45 @@ A reasonable internal observer can:
 
 The competitive frame writes itself: *"Your agents see the right knowledge at the right moment, automatically. You curate; we route."*
 
+## 13. UI patterns established through mockups
+
+Three rounds of mockup feedback (May 2026) established a set of UI decisions for this feature. They are captured here so the spec author and the implementer don't re-litigate them, and so future surfaces in the product can adopt the same patterns. Many of these have been promoted into `docs/frontend-design-principles.md` as recurring patterns.
+
+**Decisions about controls and surfaces:**
+
+1. **Mode is changed via the three-dots menu, not via an inline dropdown.** Mode rarely changes after the initial choice. Inline dropdowns invited fiddling and added visual noise. The menu has a *"Change mode ›"* item that opens a flyout with Auto / Always available / Reference only.
+2. **Three-dots menus stay short** (6 to 8 items max). Grouped sub-options (mode, scope) collapse into single items with chevron flyouts, not expanded inline sections.
+3. **"Open document" and "Edit details" merge into one action.** Row-click opens the detail modal; the menu has *Edit*, never both.
+4. **Source / origin badges only appear for non-default cases.** "Manually authored" is the default and gets no badge. *"From file"*, *"Approved from auto-memory"*, *"Uploaded PDF"* are non-default and do get badges.
+
+**Decisions about modals:**
+
+5. **The Add to Knowledge modal is minimal by default.** Title, content preview, and (for org admins only) scope. Available-to and mode override live behind a collapsed *Advanced* expander. Most users complete the action with default everything.
+6. **Scope picker is hidden for non-org-admins.** The control is absent from the DOM, not disabled. Org admins see it with a small *"Org admin only"* pill on the field label.
+7. **Document Detail modal is a two-column layout.** Main column has editable fields (title, content, mode, scope, available to). Side panel has read-only metadata (tier, size widget, created info, linked agents with usage bars).
+8. **Bundle Edit modal shows per-document mode chips as read-only.** Mode is set on each document, not on the bundle. This is enforced by the UI and explicitly called out (dismissable) in the modal.
+
+**Decisions about token / cost / size information:**
+
+9. **Token counts are never shown by default.** No per-document token counts, no per-run cost tiles, no embedding-size detail in user-facing surfaces.
+10. **Size is shown only as a warning chip when over recommended.** A "⚠ Large document" chip appears on the doc name when a document exceeds the recommended size threshold. The chip carries the action: *something here is unusual, you might want to look*.
+11. **The Document Detail modal has one expanded size widget** (visual bar + qualitative label like "Small"). Acceptable because users opening the modal are doing so deliberately. Still no raw numbers as the primary information.
+
+**Decisions about page-level chrome:**
+
+12. **Stat tiles capped at 2 per list page.** Each one must be something the operator would act on. Operational metrics (avg per run, cost MTD) do not qualify.
+13. **Explainer banners are dismissable.** All info banners ship with a `×` close button that persists per-user. Permanent help copy is not shipped.
+14. **Filter pills appear when collection size justifies them** (rough threshold: more than 8 items). Below that, search alone is enough.
+15. **Footer notes are avoided** when a banner above already covers the same content.
+
+**Decisions about copy and content:**
+
+16. **No em-dashes in any UI copy or sample data.** Use commas, colons, or rewrite. Applies to mockup data (sample document names) too.
+17. **Row sub-text is trimmed to one most-actionable fact.** Mime types, run identifiers, and verbose author / version metadata do not appear in default rows.
+18. **"Used by" copy drops the contextual scope when the breadcrumb already provides it.** *"9 agents"* not *"9 agents in Acme Corp"*.
+
+These decisions are visible in the mockups linked in the brief header. The mockups should be considered the authoritative reference for any disagreement between this list and the implementation.
+
 ---
 
-> **Note for the next reviewer.** This is Rev 1. Decisions reached through three reviewer rounds; all 20 decisions in §10 are approved. The remaining work is engineering — schema design, migration plan, telemetry shape, UX polish, and the spec that drives implementation. The next move is creating a fresh branch (`claude/auto-knowledge-retrieval` or similar), invoking the architect agent against this brief, and producing a proper implementation spec. After that ships, the agent workspace work in `docs/agent-cloud-compute-dev-brief.md` can resume on its branch with this foundation in place.
+> **Note for the next reviewer.** This is Rev 2. All 20 design decisions in §10 are approved; mockups capture the UX in §13 and are linked in the header. The remaining work is engineering: schema design, migration plan, telemetry shape, and the implementation spec. The next move is creating a fresh branch (`claude/auto-knowledge-retrieval` or similar), invoking the architect agent against this brief, and producing a proper implementation spec. After that ships, the agent workspace work in `docs/agent-cloud-compute-dev-brief.md` can resume on its branch with this foundation in place.
