@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agent Workspace: Mockups</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; }
+  body { padding: 40px 48px; max-width: 1100px; margin: 0 auto; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe;
+    border-radius: 5px; padding: 3px 8px; margin-bottom: 12px;
+  }
+  h1 { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .desc { font-size: 14px; color: #64748b; max-width: 720px; line-height: 1.6; margin-bottom: 32px; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .card {
+    background: white; border: 1px solid #e8ecf0; border-radius: 12px; padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all 0.15s; position: relative;
+  }
+  .card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
+  .card-title-link { color: #0f172a; font-size: 15px; font-weight: 700; text-decoration: none; }
+  .card-title-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }
+  .card-num { font-size: 11px; font-weight: 700; color: #94a3b8; margin-bottom: 4px; }
+  .card-file {
+    display: inline-block; font-size: 11px; font-family: monospace; color: #94a3b8;
+    background: #f1f5f9; border-radius: 4px; padding: 2px 7px; margin-top: 8px;
+  }
+  .card-desc { font-size: 12.5px; color: #64748b; line-height: 1.55; margin-top: 8px; }
+
+  a { text-decoration: none; }
+  .info {
+    background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 28px; font-size: 12.5px; color: #78350f; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Phase 2: Agent Workspace (post Phase 1 split)</div>
+  <h1>Mockups for review</h1>
+  <p class="desc">
+    Five mockups demonstrating the agent workspace embodiment surface remaining on this branch
+    after the auto-knowledge-retrieval feature was split out as Phase 1. Brief: <code>docs/agent-workspace-implementation-brief.md</code>.
+    Strategic spine: <code>docs/agent-cloud-compute-dev-brief.md</code> (Rev 5, locked).
+  </p>
+
+  <div class="info">
+    <strong>Reading order:</strong> 1 (Home, workspace-level presence) → 2 (Agent Overview active, the centerpiece)
+    → 3 (Overview idle) → 4 (Overview first-run, identity instantiation) → 5 (Run trace with file lineage).
+  </div>
+
+  <div class="card-grid">
+
+    <div class="card">
+      <div class="card-num">MOCKUP 1</div>
+      <a href="home-active-agents.html" class="card-title-link">Home: Active Agents widget enhancement</a>
+      <div class="card-file">home-active-agents.html</div>
+      <div class="card-desc">
+        Replaces the current single-number Active Agents tile with a live status list per running agent
+        (current focus in plain language, elapsed time, pulsing dot) plus scheduled-next agents below.
+        Workspace-level presence surface.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 2</div>
+      <a href="agent-overview-active.html" class="card-title-link">Agent Overview: active state</a>
+      <div class="card-file">agent-overview-active.html</div>
+      <div class="card-desc">
+        New default landing tab on Agent edit. Agent is currently working. Hero shows status pill, current focus,
+        elapsed time. Recent observations, recent activity feed, files snapshot, knowledge in use, schedule peek,
+        connections health, performance. The centerpiece of the brief.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 3</div>
+      <a href="agent-overview-idle.html" class="card-title-link">Agent Overview: idle state</a>
+      <div class="card-file">agent-overview-idle.html</div>
+      <div class="card-desc">
+        Same shell, agent is not currently running. Hero shifts to last-seen and next-scheduled. Activity feed
+        prominent. Active goal callout makes the surface feel alive even when nothing is executing.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 4</div>
+      <a href="agent-overview-first-run.html" class="card-title-link">Agent Overview: first-run state</a>
+      <div class="card-file">agent-overview-first-run.html</div>
+      <div class="card-desc">
+        Brand-new agent with no run history. Welcome banner, three quick actions, setup checklist, identity card,
+        and empty states with helpful copy. The agent feels like an entity that already exists, not a placeholder.
+        Identity instantiation demo per the strategic spine.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 5</div>
+      <a href="run-trace-lineage.html" class="card-title-link">Run trace: inline file lineage</a>
+      <div class="card-file">run-trace-lineage.html</div>
+      <div class="card-desc">
+        Existing Run trace surface gets file chips inline on each step that produced a file. Click the chip
+        to deep-link into the file in Knowledge: Files (Phase 1 surface). Small visual change, big workflow win.
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

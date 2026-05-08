@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<!--
+  Mockup 1: Home page Active Agents widget enhancement
+  Agent Workspace, Implementation Brief
+  Replaces the current single-number Active Agents tile with a live
+  status list per running agent (current focus, elapsed, pulsing dot)
+  plus scheduled-next agents below.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home: Active Agents widget | Agent Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  .sidebar-pad { padding: 14px 16px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sidebar-item { padding: 8px 16px; color: rgba(255,255,255,0.78); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-500); padding-left: 13px; }
+
+  .topbar { background: white; border-bottom: 1px solid var(--border); padding: 12px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
+  .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
+  .breadcrumb-sep { color: var(--slate-300); }
+
+  .page-content { padding: 28px 32px; max-width: 1240px; margin: 0 auto; }
+  .greeting { font-size: 26px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
+  .greeting-sub { font-size: 13.5px; color: var(--slate-500); margin-bottom: 22px; }
+
+  .kpi-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin-bottom: 22px; }
+  .kpi-card { background: white; border: 1px solid var(--slate-200); border-radius: 10px; padding: 16px; }
+  .kpi-icon { width: 32px; height: 32px; border-radius: 7px; display: flex; align-items: center;
+    justify-content: center; font-size: 15px; margin-bottom: 9px; }
+  .kpi-icon.bell { background: #fef2f2; color: #dc2626; }
+  .kpi-icon.users { background: #fef3c7; color: #b45309; }
+  .kpi-icon.bot { background: var(--indigo-50); color: var(--indigo-600); }
+  .kpi-icon.runs { background: #ecfdf5; color: #059669; }
+  .kpi-label { font-size: 11px; font-weight: 600; color: var(--slate-500); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
+  .kpi-value { font-size: 22px; font-weight: 800; color: var(--slate-900); line-height: 1; }
+  .kpi-sub { font-size: 11.5px; color: var(--slate-500); margin-top: 4px; }
+
+  /* Active Agents widget */
+  .widget {
+    background: white; border: 1px solid var(--slate-200); border-radius: 12px;
+    margin-bottom: 16px;
+  }
+  .widget-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .widget-title { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+  .widget-link { font-size: 12px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .widget-link:hover { text-decoration: underline; }
+
+  .widget-section-label {
+    font-size: 10.5px; font-weight: 700; color: var(--slate-400); letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 12px 18px 6px;
+  }
+
+  .agent-row {
+    display: grid; grid-template-columns: 12px 1fr auto; gap: 12px;
+    align-items: center; padding: 10px 18px;
+    border-bottom: 1px solid var(--slate-100);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .agent-row:hover { background: var(--slate-50); }
+  .agent-row:last-child { border-bottom: none; }
+
+  .status-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+  }
+  .status-dot.active {
+    background: var(--indigo-500);
+    box-shadow: 0 0 0 0 rgba(99,102,241,0.6);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .status-dot.scheduled { background: var(--slate-300); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+    50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); }
+  }
+
+  .agent-name { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 1px; }
+  .agent-focus { font-size: 11.5px; color: var(--slate-500); }
+  .agent-focus.muted { color: var(--slate-400); }
+  .agent-focus em { font-style: normal; color: var(--slate-700); font-weight: 500; }
+
+  .agent-elapsed {
+    font-size: 12px; color: var(--slate-700); font-weight: 600;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .agent-elapsed.muted { color: var(--slate-500); font-weight: 500; }
+
+  .stat-line {
+    padding: 10px 18px 14px; font-size: 12px; color: var(--slate-500);
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .stat-line strong { color: var(--slate-800); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div style="width:28px;height:28px;border-radius:7px;background:var(--indigo-500);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:14px;">S</div>
+        <div style="color:white;font-weight:700;font-size:14px;">Synthetos</div>
+      </div>
+    </div>
+    <div class="sidebar-pad">Work</div>
+    <div class="sidebar-item active" style="color:white;">Home</div>
+    <div class="sidebar-item">Inbox</div>
+    <div class="sidebar-item">Activity</div>
+    <div class="sidebar-item">Recurring tasks</div>
+    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-item">Knowledge</div>
+    <div class="sidebar-item">Connections</div>
+    <div class="sidebar-pad">Agents</div>
+    <div class="sidebar-item">Outreach Agent</div>
+    <div class="sidebar-item">Research Agent</div>
+    <div class="sidebar-item">CRM Hygiene Agent</div>
+  </aside>
+
+  <main style="flex:1;min-width:0;">
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span>Acme Corp</span>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Home</span>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <div class="greeting">Good morning, Michael</div>
+      <div class="greeting-sub">3 of 18 agents working now. 5 more scheduled today.</div>
+
+      <!-- KPI tiles (existing pattern) -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-icon bell">!</div>
+          <div class="kpi-label">Pending Approval</div>
+          <div class="kpi-value">7</div>
+          <div class="kpi-sub">3 client, 2 config, 2 internal</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon users">⚠</div>
+          <div class="kpi-label">Clients Needing Attention</div>
+          <div class="kpi-value">2</div>
+          <div class="kpi-sub">of 12 clients</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon bot">🤖</div>
+          <div class="kpi-label">Active Agents</div>
+          <div class="kpi-value">9</div>
+          <div class="kpi-sub">3 working, 6 idle</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon runs">↗</div>
+          <div class="kpi-label">Runs (7 days)</div>
+          <div class="kpi-value">142</div>
+          <div class="kpi-sub">95% success rate</div>
+        </div>
+      </div>
+
+      <!-- ENHANCED Active Agents widget -->
+      <div class="widget">
+        <div class="widget-head">
+          <div>
+            <div class="widget-title">Active agents</div>
+          </div>
+          <div class="widget-link">All agents →</div>
+        </div>
+
+        <div class="stat-line"><strong>3 of 18 working now</strong> · 5 scheduled today · 10 idle</div>
+
+        <!-- Working agents -->
+        <div class="widget-section-label">Working now</div>
+
+        <div class="agent-row">
+          <div class="status-dot active"></div>
+          <div>
+            <div class="agent-name">Outreach Agent</div>
+            <div class="agent-focus">Step 7 of 14: <em>awaiting HITL approval on draft email to Acme Corp</em></div>
+          </div>
+          <div class="agent-elapsed">0:42</div>
+        </div>
+
+        <div class="agent-row">
+          <div class="status-dot active"></div>
+          <div>
+            <div class="agent-name">Research Agent</div>
+            <div class="agent-focus">Step 3 of 6: <em>summarising recent earnings reports for TerraForm Partners</em></div>
+          </div>
+          <div class="agent-elapsed">0:08</div>
+        </div>
+
+        <div class="agent-row">
+          <div class="status-dot active"></div>
+          <div>
+            <div class="agent-name">CRM Hygiene Agent</div>
+            <div class="agent-focus">Step 12 of 12: <em>writing enrichment results back to CRM (412 records)</em></div>
+          </div>
+          <div class="agent-elapsed">1:14</div>
+        </div>
+
+        <!-- Scheduled next -->
+        <div class="widget-section-label">Scheduled next</div>
+
+        <div class="agent-row">
+          <div class="status-dot scheduled"></div>
+          <div>
+            <div class="agent-name">Reporting Agent</div>
+            <div class="agent-focus muted">Weekly client digest · runs at 9:00am tomorrow</div>
+          </div>
+          <div class="agent-elapsed muted">in 18h</div>
+        </div>
+
+        <div class="agent-row">
+          <div class="status-dot scheduled"></div>
+          <div>
+            <div class="agent-name">Pipeline Health Agent</div>
+            <div class="agent-focus muted">Daily pipeline check · runs at 8:00am tomorrow</div>
+          </div>
+          <div class="agent-elapsed muted">in 17h</div>
+        </div>
+
+        <div class="agent-row">
+          <div class="status-dot scheduled"></div>
+          <div>
+            <div class="agent-name">Lead Qualification Agent</div>
+            <div class="agent-focus muted">Triggers on new lead · last fired 2h ago</div>
+          </div>
+          <div class="agent-elapsed muted">on event</div>
+        </div>
+
+      </div>
+
+      <!-- Bottom-row stats placeholder -->
+      <div style="font-size:12px;color:var(--slate-400);text-align:center;padding:20px;">
+        (Runs chart and Recent activity widgets continue below, unchanged)
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

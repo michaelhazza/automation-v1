@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<!--
+  Mockup 4: Agent Overview tab, first-run / empty state
+  Agent Workspace, Implementation Brief
+  A brand-new agent has no run history. The page must still feel like
+  an entity that exists, not a placeholder. Hero shows "just created",
+  empty states have helpful copy and clear next actions, but the
+  agent's identity is already real (name, role, schedule if configured).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Account Health Agent: Overview, just created | Agent Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  .sidebar-pad { padding: 14px 16px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sidebar-item { padding: 8px 16px; color: rgba(255,255,255,0.78); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-500); padding-left: 13px; }
+  .sidebar-item-new { background: rgba(16,185,129,0.16); color: white; border-left: 3px solid var(--emerald-500); padding-left: 13px; position: relative; }
+  .sidebar-item-new::after {
+    content: 'NEW'; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    background: var(--emerald-500); color: white; padding: 1px 5px; border-radius: 4px;
+  }
+
+  .topbar { background: white; border-bottom: 1px solid var(--border); padding: 12px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
+  .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
+  .breadcrumb-sep { color: var(--slate-300); }
+
+  .page-content { padding: 24px 32px; max-width: 1240px; margin: 0 auto; padding-bottom: 80px; }
+  .page-h1 { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
+  .page-sub { font-size: 13px; color: var(--slate-500); margin-bottom: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .agent-status-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 12px;
+    font-size: 11.5px; font-weight: 600;
+  }
+  .pill-new { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .pill-new .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald-500); }
+
+  /* Tab strip */
+  .agent-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 20px; overflow-x: auto; }
+  .agent-tab {
+    background: none; border: none; padding: 10px 14px; font-size: 13px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .agent-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .agent-tab-count { font-size: 10.5px; padding: 1px 6px; border-radius: 10px; background: var(--slate-100); color: var(--slate-500); }
+  .agent-tab.active .agent-tab-count { background: var(--indigo-100); color: var(--indigo-700); }
+
+  /* Welcome hero */
+  .welcome-hero {
+    background: linear-gradient(135deg, var(--emerald-50) 0%, var(--sky-50) 100%);
+    border: 1px solid #a7f3d0; border-radius: 12px; padding: 22px 26px; margin-bottom: 18px;
+    position: relative;
+  }
+  .welcome-eyebrow {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--emerald-600); margin-bottom: 6px;
+  }
+  .welcome-title {
+    font-size: 18px; font-weight: 700; color: var(--slate-900); line-height: 1.4; margin-bottom: 8px;
+  }
+  .welcome-text {
+    font-size: 13px; color: var(--slate-700); line-height: 1.55; max-width: 640px;
+  }
+  .welcome-text em { font-style: normal; color: var(--slate-900); font-weight: 600; }
+  .welcome-dismiss {
+    position: absolute; top: 12px; right: 12px; background: none; border: none;
+    color: var(--slate-400); cursor: pointer; font-size: 18px; width: 24px; height: 24px;
+    border-radius: 5px; display: flex; align-items: center; justify-content: center;
+  }
+  .welcome-dismiss:hover { background: rgba(0,0,0,0.05); }
+
+  /* Quick actions */
+  .quick-actions {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px;
+  }
+  .quick-action {
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    padding: 16px; cursor: pointer; transition: all 0.12s; display: flex; gap: 12px; align-items: flex-start;
+  }
+  .quick-action:hover { border-color: var(--indigo-300); box-shadow: 0 4px 12px rgba(99,102,241,0.08); transform: translateY(-1px); }
+  .qa-icon {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .qa-icon.run { background: var(--indigo-50); color: var(--indigo-600); }
+  .qa-icon.docs { background: var(--violet-50); color: var(--violet-500); }
+  .qa-icon.sched { background: #fef3c7; color: #b45309; }
+  .qa-title { font-size: 13px; font-weight: 700; color: var(--slate-900); margin-bottom: 2px; }
+  .qa-desc { font-size: 11.5px; color: var(--slate-500); line-height: 1.45; }
+
+  /* 2-column grid */
+  .overview-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+  .card { background: white; border: 1px solid var(--slate-200); border-radius: 10px; }
+  .card-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .card-title { font-size: 13px; font-weight: 700; color: var(--slate-900); }
+  .card-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .card-link:hover { text-decoration: underline; }
+
+  /* Empty state inside cards */
+  .empty {
+    padding: 28px 18px; text-align: center; color: var(--slate-500); font-size: 12.5px; line-height: 1.5;
+  }
+  .empty-icon {
+    font-size: 22px; margin-bottom: 8px; opacity: 0.6;
+  }
+  .empty-title { font-size: 13px; font-weight: 600; color: var(--slate-700); margin-bottom: 3px; }
+  .empty-text { font-size: 11.5px; color: var(--slate-500); line-height: 1.5; max-width: 280px; margin: 0 auto; }
+  .empty-action { margin-top: 10px; font-size: 12px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .empty-action:hover { text-decoration: underline; }
+
+  /* Identity card, only on first-run, makes the agent feel real */
+  .identity-card {
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .identity-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 8px 0; border-bottom: 1px dashed var(--slate-200);
+  }
+  .identity-row:last-child { border-bottom: none; }
+  .identity-label { font-size: 11.5px; color: var(--slate-500); }
+  .identity-value { font-size: 12.5px; color: var(--slate-800); font-weight: 500; text-align: right; }
+  .identity-edit { font-size: 11px; color: var(--indigo-600); font-weight: 600; cursor: pointer; margin-left: 8px; }
+
+  /* Config readiness checklist */
+  .checklist {
+    padding: 0;
+  }
+  .check-row {
+    padding: 10px 16px; display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center;
+    border-bottom: 1px solid var(--slate-100); font-size: 12.5px;
+  }
+  .check-row:last-child { border-bottom: none; }
+  .check-icon {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+  }
+  .check-icon.done { background: var(--emerald-500); color: white; }
+  .check-icon.todo { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-300); }
+  .check-text { color: var(--slate-700); }
+  .check-text.done { color: var(--slate-500); text-decoration: line-through; }
+  .check-action { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .check-action:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div style="width:28px;height:28px;border-radius:7px;background:var(--indigo-500);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:14px;">S</div>
+        <div style="color:white;font-weight:700;font-size:14px;">Synthetos</div>
+      </div>
+    </div>
+    <div class="sidebar-pad">Work</div>
+    <div class="sidebar-item">Home</div>
+    <div class="sidebar-item">Inbox</div>
+    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-item">Knowledge</div>
+    <div class="sidebar-item">Connections</div>
+    <div class="sidebar-pad">Agents</div>
+    <div class="sidebar-item">Outreach Agent</div>
+    <div class="sidebar-item">Research Agent</div>
+    <div class="sidebar-item-new" style="color:white;">Account Health Agent</div>
+  </aside>
+
+  <main style="flex:1;min-width:0;">
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span>Acme Corp</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>Agents</span>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Account Health Agent</span>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <h1 class="page-h1">Account Health Agent</h1>
+      <div class="page-sub">
+        <span class="agent-status-pill pill-new"><span class="dot"></span> Just created</span>
+        <span>Created 4 minutes ago</span>
+        <span>·</span>
+        <span>Role: Account Health Manager</span>
+      </div>
+
+      <!-- Tab strip -->
+      <div class="agent-tabs">
+        <button class="agent-tab active">Overview</button>
+        <button class="agent-tab">Configure</button>
+        <button class="agent-tab">Behaviour</button>
+        <button class="agent-tab">Personality</button>
+        <button class="agent-tab">Skills</button>
+        <button class="agent-tab">Data sources</button>
+        <button class="agent-tab">Schedule</button>
+        <button class="agent-tab">Budget</button>
+        <button class="agent-tab">Runs</button>
+      </div>
+
+      <!-- Welcome hero (dismissable) -->
+      <div class="welcome-hero">
+        <div class="welcome-eyebrow">Welcome to your new agent</div>
+        <div class="welcome-title">Account Health Agent is ready to start work.</div>
+        <div class="welcome-text">
+          The agent has been created with the <em>Account Health Manager</em> role. It's not running yet, because we want you to point it at the right context first. The three steps below will get you to a first run; everything else can be added later.
+        </div>
+        <button class="welcome-dismiss" title="Dismiss">×</button>
+      </div>
+
+      <!-- Quick actions, the three obvious next steps -->
+      <div class="quick-actions">
+        <div class="quick-action">
+          <div class="qa-icon docs">📚</div>
+          <div>
+            <div class="qa-title">Link some documents</div>
+            <div class="qa-desc">Give the agent context: account playbooks, brand voice, ICP rules. Goes to Data sources.</div>
+          </div>
+        </div>
+        <div class="quick-action">
+          <div class="qa-icon sched">⏰</div>
+          <div>
+            <div class="qa-title">Set a schedule</div>
+            <div class="qa-desc">Decide when the agent should run. Daily, weekly, or on a specific event.</div>
+          </div>
+        </div>
+        <div class="quick-action">
+          <div class="qa-icon run">▶</div>
+          <div>
+            <div class="qa-title">Run a test</div>
+            <div class="qa-desc">Try a single run end-to-end before going live. Inline test runner.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2-column grid -->
+      <div class="overview-grid">
+
+        <!-- LEFT COLUMN -->
+        <div>
+          <!-- Setup checklist -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Setup checklist</div>
+              <div class="card-link">Skip all →</div>
+            </div>
+            <div class="checklist">
+              <div class="check-row">
+                <div class="check-icon done">✓</div>
+                <div class="check-text done">Pick a role (Account Health Manager)</div>
+                <div></div>
+              </div>
+              <div class="check-row">
+                <div class="check-icon done">✓</div>
+                <div class="check-text done">Choose a model (auto-selected: Sonnet 4.6)</div>
+                <div></div>
+              </div>
+              <div class="check-row">
+                <div class="check-icon todo">3</div>
+                <div class="check-text">Link knowledge documents</div>
+                <div class="check-action">Go to Data sources →</div>
+              </div>
+              <div class="check-row">
+                <div class="check-icon todo">4</div>
+                <div class="check-text">Configure schedule or trigger</div>
+                <div class="check-action">Go to Schedule →</div>
+              </div>
+              <div class="check-row">
+                <div class="check-icon todo">5</div>
+                <div class="check-text">Run a test</div>
+                <div class="check-action">Open test runner →</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Activity feed, empty state -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Recent activity</div>
+            </div>
+            <div class="empty">
+              <div class="empty-icon">📭</div>
+              <div class="empty-title">No activity yet</div>
+              <div class="empty-text">Once the agent runs for the first time, you'll see what it's done here. Schedule a run or trigger one manually to get started.</div>
+              <div class="empty-action">Run a test now →</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div>
+          <!-- Identity card, the agent feels real -->
+          <div class="identity-card">
+            <div class="card-title" style="margin-bottom:8px;">Identity</div>
+            <div class="identity-row">
+              <span class="identity-label">Name</span>
+              <span class="identity-value">Account Health Agent <span class="identity-edit">edit</span></span>
+            </div>
+            <div class="identity-row">
+              <span class="identity-label">Role</span>
+              <span class="identity-value">Account Health Manager</span>
+            </div>
+            <div class="identity-row">
+              <span class="identity-label">Reports to</span>
+              <span class="identity-value">CEO Agent</span>
+            </div>
+            <div class="identity-row">
+              <span class="identity-label">Sub-account</span>
+              <span class="identity-value">Acme Corp</span>
+            </div>
+          </div>
+
+          <!-- Schedule, empty -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Schedule</div>
+              <div class="card-link">Set up →</div>
+            </div>
+            <div class="empty">
+              <div class="empty-text">No schedule yet. The agent will only run when you trigger it manually.</div>
+            </div>
+          </div>
+
+          <!-- Files, empty -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Files</div>
+            </div>
+            <div class="empty">
+              <div class="empty-text">No files yet. Files the agent produces during runs will appear here.</div>
+            </div>
+          </div>
+
+          <!-- Knowledge, empty but actionable -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Knowledge</div>
+              <div class="card-link">Link documents →</div>
+            </div>
+            <div class="empty">
+              <div class="empty-text">No documents linked yet. Even one or two account playbooks will significantly improve agent decisions.</div>
+            </div>
+          </div>
+
+          <!-- Connections, inherited from sub-account -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Connections</div>
+              <div class="card-link">Manage →</div>
+            </div>
+            <div style="padding:12px 16px;font-size:12px;color:var(--slate-700);line-height:1.5;">
+              Inheriting <strong>3 connections</strong> from Acme Corp sub-account: HubSpot CRM, Gmail, LinkedIn Sales Navigator. All healthy.
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

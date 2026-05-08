@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<!--
+  Mockup 2: Agent Overview tab, active state
+  Agent Workspace, Implementation Brief
+  New default landing tab on Agent edit. The agent is currently working.
+  Hero shows status pill, current focus, elapsed time. Active session card,
+  recent observations, recent activity, schedule peek, files snapshot,
+  memory snapshot, performance.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outreach Agent: Overview, working | Agent Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  .sidebar-pad { padding: 14px 16px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sidebar-item { padding: 8px 16px; color: rgba(255,255,255,0.78); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-500); padding-left: 13px; }
+
+  .topbar { background: white; border-bottom: 1px solid var(--border); padding: 12px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
+  .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
+  .breadcrumb-sep { color: var(--slate-300); }
+
+  .page-content { padding: 24px 32px; max-width: 1240px; margin: 0 auto; padding-bottom: 80px; }
+  .page-h1 { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
+  .page-sub { font-size: 13px; color: var(--slate-500); margin-bottom: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .agent-status-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 12px;
+    font-size: 11.5px; font-weight: 600;
+  }
+  .pill-working { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+  .pill-working .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--indigo-500);
+    animation: pulse 1.6s ease-in-out infinite;
+    box-shadow: 0 0 0 0 rgba(99,102,241,0.5);
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+    50% { box-shadow: 0 0 0 5px rgba(99,102,241,0); }
+  }
+
+  /* Agent edit tab strip */
+  .agent-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 20px; overflow-x: auto; }
+  .agent-tab {
+    background: none; border: none; padding: 10px 14px; font-size: 13px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .agent-tab:hover { color: var(--slate-700); }
+  .agent-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .agent-tab-count { font-size: 10.5px; padding: 1px 6px; border-radius: 10px; background: var(--slate-100); color: var(--slate-500); }
+  .agent-tab.active .agent-tab-count { background: var(--indigo-100); color: var(--indigo-700); }
+
+  /* Hero / presence card */
+  .presence-hero {
+    background: linear-gradient(135deg, var(--indigo-50) 0%, var(--violet-50) 100%);
+    border: 1px solid var(--indigo-200); border-radius: 12px; padding: 18px 22px; margin-bottom: 16px;
+  }
+  .presence-eyebrow {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--indigo-700); margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+  }
+  .presence-eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--indigo-500);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .presence-focus {
+    font-size: 17px; font-weight: 600; color: var(--slate-900); line-height: 1.4; margin-bottom: 8px;
+  }
+  .presence-focus em { font-style: normal; color: var(--indigo-700); }
+  .presence-meta {
+    display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--slate-600); flex-wrap: wrap;
+  }
+  .presence-meta-item { display: flex; align-items: center; gap: 4px; }
+  .presence-meta-item strong { color: var(--slate-900); font-weight: 600; }
+  .presence-link { font-size: 12px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .presence-link:hover { text-decoration: underline; }
+
+  /* 2-column grid */
+  .overview-grid {
+    display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px;
+  }
+
+  /* Card */
+  .card {
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+  }
+  .card-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .card-title { font-size: 13px; font-weight: 700; color: var(--slate-900); }
+  .card-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .card-link:hover { text-decoration: underline; }
+  .card-body { padding: 12px 16px; }
+
+  /* Recent observations list */
+  .obs-list { display: flex; flex-direction: column; gap: 0; }
+  .obs-item {
+    padding: 10px 16px; border-bottom: 1px solid var(--slate-100);
+    font-size: 12.5px; color: var(--slate-700); line-height: 1.55;
+  }
+  .obs-item:last-child { border-bottom: none; }
+  .obs-time { font-size: 11px; color: var(--slate-400); margin-bottom: 2px; }
+  .obs-text strong { color: var(--slate-900); font-weight: 600; }
+
+  /* Activity feed */
+  .activity-list { display: flex; flex-direction: column; }
+  .activity-item {
+    display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center;
+    padding: 9px 16px; border-bottom: 1px solid var(--slate-100); font-size: 12px;
+  }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-icon {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
+    color: white;
+  }
+  .ai-run { background: var(--emerald-500); }
+  .ai-fail { background: var(--red-500); }
+  .ai-mem { background: var(--indigo-500); }
+  .ai-file { background: var(--violet-500); }
+  .ai-trigger { background: var(--slate-400); }
+  .activity-text { color: var(--slate-700); }
+  .activity-text strong { color: var(--slate-900); font-weight: 600; }
+  .activity-time { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+
+  /* Files snapshot mini-list */
+  .files-mini { display: flex; flex-direction: column; }
+  .file-mini {
+    display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center;
+    padding: 8px 16px; border-bottom: 1px solid var(--slate-100); font-size: 12px;
+  }
+  .file-mini:last-child { border-bottom: none; }
+  .file-icon-mini {
+    width: 26px; height: 26px; border-radius: 5px; color: white; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-csv { background: var(--emerald-500); }
+  .icon-md { background: var(--indigo-500); }
+  .icon-pdf { background: #dc2626; }
+  .file-mini-name { font-weight: 600; color: var(--slate-800); }
+  .file-mini-sub { font-size: 11px; color: var(--slate-500); }
+  .file-mini-time { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+
+  /* Memory snapshot */
+  .memory-list { display: flex; flex-direction: column; }
+  .memory-item {
+    padding: 9px 16px; border-bottom: 1px solid var(--slate-100); font-size: 12px; color: var(--slate-700); line-height: 1.5;
+  }
+  .memory-item:last-child { border-bottom: none; }
+  .memory-cat {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 9px;
+    font-size: 10px; font-weight: 600; margin-right: 6px;
+  }
+  .memcat-fact { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .memcat-pref { background: #fdf4ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+  .memcat-rule { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
+  /* Schedule peek */
+  .sched-row {
+    padding: 10px 16px; border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between; font-size: 12px;
+  }
+  .sched-row:last-child { border-bottom: none; }
+  .sched-label { color: var(--slate-700); }
+  .sched-when { color: var(--slate-500); font-weight: 500; }
+
+  /* Connections health */
+  .conn-row {
+    padding: 8px 16px; border-bottom: 1px solid var(--slate-100);
+    display: grid; grid-template-columns: 8px 1fr auto; gap: 8px; align-items: center; font-size: 12px;
+  }
+  .conn-row:last-child { border-bottom: none; }
+  .conn-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .conn-dot.ok { background: var(--emerald-500); }
+  .conn-dot.warn { background: var(--amber-500); }
+  .conn-name { color: var(--slate-700); }
+  .conn-status { font-size: 11px; color: var(--slate-500); }
+
+  /* Performance */
+  .perf-grid {
+    padding: 12px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .perf-stat-label { font-size: 10.5px; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; margin-bottom: 4px; }
+  .perf-stat-value { font-size: 18px; font-weight: 700; color: var(--slate-900); }
+  .perf-stat-sub { font-size: 11px; color: var(--slate-500); margin-top: 1px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div style="width:28px;height:28px;border-radius:7px;background:var(--indigo-500);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:14px;">S</div>
+        <div style="color:white;font-weight:700;font-size:14px;">Synthetos</div>
+      </div>
+    </div>
+    <div class="sidebar-pad">Work</div>
+    <div class="sidebar-item">Home</div>
+    <div class="sidebar-item">Inbox</div>
+    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-item">Knowledge</div>
+    <div class="sidebar-item">Connections</div>
+    <div class="sidebar-pad">Agents</div>
+    <div class="sidebar-item active" style="color:white;">Outreach Agent</div>
+    <div class="sidebar-item">Research Agent</div>
+    <div class="sidebar-item">CRM Hygiene Agent</div>
+  </aside>
+
+  <main style="flex:1;min-width:0;">
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span>Acme Corp</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>Agents</span>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Outreach Agent</span>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <h1 class="page-h1">Outreach Agent</h1>
+      <div class="page-sub">
+        <span class="agent-status-pill pill-working"><span class="dot"></span> Working</span>
+        <span>0 minutes 42 seconds elapsed</span>
+        <span>·</span>
+        <span>142 runs in last 30 days</span>
+      </div>
+
+      <!-- Tab strip with Overview as default -->
+      <div class="agent-tabs">
+        <button class="agent-tab active">Overview</button>
+        <button class="agent-tab">Configure</button>
+        <button class="agent-tab">Behaviour</button>
+        <button class="agent-tab">Personality</button>
+        <button class="agent-tab">Skills <span class="agent-tab-count">7</span></button>
+        <button class="agent-tab">Data sources <span class="agent-tab-count">9</span></button>
+        <button class="agent-tab">Schedule</button>
+        <button class="agent-tab">Budget</button>
+        <button class="agent-tab">Runs <span class="agent-tab-count">142</span></button>
+      </div>
+
+      <!-- Hero / presence card -->
+      <div class="presence-hero">
+        <div class="presence-eyebrow"><span class="dot"></span> Working now</div>
+        <div class="presence-focus">
+          Step 7 of 14: <em>awaiting HITL approval on draft outreach email to Acme Corp VP of Operations</em>
+        </div>
+        <div class="presence-meta">
+          <span class="presence-meta-item"><strong>0:42</strong> elapsed</span>
+          <span class="presence-meta-item">Run started <strong>2 minutes ago</strong></span>
+          <span class="presence-meta-item">Triggered by <strong>weekly heartbeat</strong></span>
+          <span class="presence-link">View live trace →</span>
+        </div>
+      </div>
+
+      <!-- 2-column grid -->
+      <div class="overview-grid">
+
+        <!-- LEFT COLUMN -->
+        <div>
+          <!-- Recent observations -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Recent observations</div>
+              <div class="card-link">All observations →</div>
+            </div>
+            <div class="obs-list">
+              <div class="obs-item">
+                <div class="obs-time">3 minutes ago</div>
+                <div class="obs-text">Found <strong>23 high-priority contacts</strong> at Acme Corp. Two flagged with no recent engagement (re-engagement candidates).</div>
+              </div>
+              <div class="obs-item">
+                <div class="obs-time">12 minutes ago</div>
+                <div class="obs-text">Detected that <strong>Acme Corp's VP of Ops changed roles 3 weeks ago</strong>. Previous draft references stale title; flagging for revision.</div>
+              </div>
+              <div class="obs-item">
+                <div class="obs-time">35 minutes ago</div>
+                <div class="obs-text">Discovered <strong>Acme Corp recently announced SOC 2 Type II compliance</strong>. Worth referencing in outreach for the IT director persona.</div>
+              </div>
+              <div class="obs-item">
+                <div class="obs-time">2 hours ago</div>
+                <div class="obs-text">Pattern: outreach from this agent gets <strong>2.4x reply rate when ICP filter is applied vs. generic</strong>. Reinforced ICP-first approach.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent activity -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Recent activity</div>
+              <div class="card-link">Full history →</div>
+            </div>
+            <div class="activity-list">
+              <div class="activity-item">
+                <div class="activity-icon ai-trigger">⏰</div>
+                <div class="activity-text"><strong>Started run #1284</strong>, weekly heartbeat against Acme Corp contacts</div>
+                <div class="activity-time">2 min ago</div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon ai-mem">M</div>
+                <div class="activity-text">Auto-memory entry suggested: <strong>"Acme Corp VP of Ops changed roles"</strong></div>
+                <div class="activity-time">12 min ago</div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon ai-file">F</div>
+                <div class="activity-text">Produced file: <strong>acme-discovery-call-summary-may-7.md</strong></div>
+                <div class="activity-time">35 min ago</div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon ai-run">✓</div>
+                <div class="activity-text">Completed run #1283, <strong>47 emails drafted, 12 queued for HITL</strong></div>
+                <div class="activity-time">2 hours ago</div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon ai-run">✓</div>
+                <div class="activity-text">Completed run #1282, contact enrichment for TerraForm Partners</div>
+                <div class="activity-time">yesterday</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div>
+          <!-- Schedule peek -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Schedule</div>
+              <div class="card-link">Edit →</div>
+            </div>
+            <div>
+              <div class="sched-row">
+                <span class="sched-label">Weekly heartbeat</span>
+                <span class="sched-when">Mondays 9:00am</span>
+              </div>
+              <div class="sched-row">
+                <span class="sched-label">Triggered by new lead</span>
+                <span class="sched-when">on event</span>
+              </div>
+              <div class="sched-row">
+                <span class="sched-label">Manual trigger</span>
+                <span class="sched-when">always available</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Files snapshot -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Recent files</div>
+              <div class="card-link">All files →</div>
+            </div>
+            <div class="files-mini">
+              <div class="file-mini">
+                <div class="file-icon-mini icon-md">MD</div>
+                <div>
+                  <div class="file-mini-name">acme-discovery-call-summary-may-7.md</div>
+                  <div class="file-mini-sub">Linked to Knowledge</div>
+                </div>
+                <div class="file-mini-time">35m ago</div>
+              </div>
+              <div class="file-mini">
+                <div class="file-icon-mini icon-csv">CSV</div>
+                <div>
+                  <div class="file-mini-name">acme-contacts-enriched-2026-05-06.csv</div>
+                  <div class="file-mini-sub">412 rows</div>
+                </div>
+                <div class="file-mini-time">2 days ago</div>
+              </div>
+              <div class="file-mini">
+                <div class="file-icon-mini icon-pdf">PDF</div>
+                <div>
+                  <div class="file-mini-name">brand-voice-guidelines.pdf</div>
+                  <div class="file-mini-sub">3 days ago</div>
+                </div>
+                <div class="file-mini-time">3d ago</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Memory snapshot -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Knowledge in use</div>
+              <div class="card-link">Data sources →</div>
+            </div>
+            <div class="memory-list">
+              <div class="memory-item">
+                <span class="memory-cat memcat-rule">rule</span> Avoid SMB deals under 50 seats
+              </div>
+              <div class="memory-item">
+                <span class="memory-cat memcat-fact">fact</span> Primary buyer persona is VP Ops or Head of RevOps
+              </div>
+              <div class="memory-item">
+                <span class="memory-cat memcat-pref">preference</span> Never reference competitor by name
+              </div>
+              <div class="memory-item" style="font-size:11px;color:var(--slate-400);text-align:center;padding:7px;">
+                + 6 more loaded for this task
+              </div>
+            </div>
+          </div>
+
+          <!-- Connections -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Connections</div>
+              <div class="card-link">Manage →</div>
+            </div>
+            <div>
+              <div class="conn-row">
+                <span class="conn-dot ok"></span>
+                <span class="conn-name">HubSpot CRM</span>
+                <span class="conn-status">healthy</span>
+              </div>
+              <div class="conn-row">
+                <span class="conn-dot ok"></span>
+                <span class="conn-name">Gmail</span>
+                <span class="conn-status">healthy</span>
+              </div>
+              <div class="conn-row">
+                <span class="conn-dot warn"></span>
+                <span class="conn-name">LinkedIn Sales Navigator</span>
+                <span class="conn-status">re-auth in 3 days</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Performance -->
+          <div class="card" style="margin-top:14px;">
+            <div class="card-head">
+              <div class="card-title">Performance, last 30 days</div>
+            </div>
+            <div class="perf-grid">
+              <div>
+                <div class="perf-stat-label">Runs</div>
+                <div class="perf-stat-value">142</div>
+                <div class="perf-stat-sub">95% success rate</div>
+              </div>
+              <div>
+                <div class="perf-stat-label">Avg run time</div>
+                <div class="perf-stat-value">2m 18s</div>
+                <div class="perf-stat-sub">trending steady</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>
