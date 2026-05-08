@@ -21,7 +21,6 @@ CREATE INDEX document_promotion_audit_org_idx
 ALTER TABLE document_promotion_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_promotion_audit FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY document_promotion_audit_org_isolation
-  ON document_promotion_audit
+CREATE POLICY document_promotion_audit_org_isolation ON document_promotion_audit
   USING (organisation_id = current_setting('app.organisation_id', true)::uuid)
   WITH CHECK (organisation_id = current_setting('app.organisation_id', true)::uuid);
