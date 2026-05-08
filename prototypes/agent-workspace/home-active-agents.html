@@ -99,6 +99,7 @@
   .agent-row:last-child { border-bottom: none; }
   .status-dot { width: 9px; height: 9px; border-radius: 50%; }
   .status-dot.active { background: var(--indigo-500); animation: pulse 1.6s ease-in-out infinite; }
+  .status-dot.waiting { background: var(--amber-500); }
   .status-dot.scheduled { background: var(--slate-300); }
   @keyframes pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
@@ -197,7 +198,7 @@
 
     <div class="page-content">
       <div class="greeting">Good morning, Sarah</div>
-      <div class="greeting-sub">3 agents running now, 18 total. 7 items in your inbox need attention.</div>
+      <div class="greeting-sub">2 agents working, 1 waiting on you, 5 scheduled today. 7 items in your inbox.</div>
 
       <div class="change-note">
         <strong>What's changing on this page:</strong> only the Active Agents widget. Everything else
@@ -256,18 +257,9 @@
             <span class="widget-link">All agents</span>
           </div>
           <div class="widget-body tight">
-            <div class="agents-stat"><strong>3 of 18 working now</strong> · 5 scheduled today · 10 idle</div>
+            <div class="agents-stat"><strong>2 working</strong> · 1 waiting on you · 5 scheduled today · 10 idle</div>
 
-            <div class="agents-section-label">Working now</div>
-
-            <div class="agent-row">
-              <div class="status-dot active"></div>
-              <div>
-                <div class="agent-name">Outreach Agent</div>
-                <div class="agent-focus">Step 7 of 14: <em>awaiting HITL approval on draft email to Acme Corp VP Operations</em></div>
-              </div>
-              <div class="agent-elapsed">0:42</div>
-            </div>
+            <div class="agents-section-label">Working</div>
 
             <div class="agent-row">
               <div class="status-dot active"></div>
@@ -285,6 +277,17 @@
                 <div class="agent-focus">Step 12 of 12: <em>writing enrichment results back to CRM (412 records)</em></div>
               </div>
               <div class="agent-elapsed">1:14</div>
+            </div>
+
+            <div class="agents-section-label">Waiting on you</div>
+
+            <div class="agent-row">
+              <div class="status-dot waiting"></div>
+              <div>
+                <div class="agent-name">Outreach Agent</div>
+                <div class="agent-focus">Step 7 of 14: <em>awaiting HITL approval on draft email to Acme Corp VP Operations</em></div>
+              </div>
+              <div class="agent-elapsed muted">0:42 paused</div>
             </div>
 
             <div class="agents-section-label">Scheduled next</div>

@@ -39,6 +39,8 @@
     animation: pulse 1.6s ease-in-out infinite;
     box-shadow: 0 0 0 0 rgba(99,102,241,0.5);
   }
+  .pill-waiting { background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a; }
+  .pill-waiting .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber-500); }
   @keyframes pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
     50% { box-shadow: 0 0 0 5px rgba(99,102,241,0); }
@@ -276,8 +278,8 @@
     <div class="page-content">
       <h1 class="page-h1">Outreach Agent</h1>
       <div class="page-sub">
-        <span class="agent-status-pill pill-working"><span class="dot"></span> Working</span>
-        <span>0 minutes 42 seconds elapsed</span>
+        <span class="agent-status-pill pill-waiting"><span class="dot"></span> Waiting</span>
+        <span>0:42 paused on operator approval</span>
         <span>·</span>
         <span>142 runs in last 30 days</span>
       </div>
@@ -297,13 +299,13 @@
       </div>
 
       <!-- Hero / presence card -->
-      <div class="presence-hero">
-        <div class="presence-eyebrow"><span class="dot"></span> Working now</div>
+      <div class="presence-hero" style="background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);border-color:#fde68a;">
+        <div class="presence-eyebrow" style="color:var(--amber-700);"><span class="dot" style="background:var(--amber-500);animation:none;"></span> Waiting on you</div>
         <div class="presence-focus">
-          Step 7 of 14: <em>awaiting HITL approval on draft outreach email to Acme Corp VP of Operations</em>
+          Step 7 of 14: <em style="color:var(--amber-700);">awaiting HITL approval on draft outreach email to Acme Corp VP of Operations</em>
         </div>
         <div class="presence-meta">
-          <span class="presence-meta-item"><strong>0:42</strong> elapsed</span>
+          <span class="presence-meta-item"><strong>0:42</strong> paused (not consuming compute)</span>
           <span class="presence-meta-item">Run started <strong>2 minutes ago</strong></span>
           <span class="presence-meta-item">Triggered by <strong>weekly heartbeat</strong></span>
           <span class="presence-link">View live trace →</span>
@@ -559,7 +561,7 @@
             </div>
           </div>
 
-          <!-- Memory snapshot -->
+          <!-- Knowledge in use, with why-surfaced metadata -->
           <div class="card" style="margin-top:14px;">
             <div class="card-head">
               <div class="card-title">Knowledge in use</div>
@@ -567,13 +569,16 @@
             </div>
             <div class="memory-list">
               <div class="memory-item">
-                <span class="memory-cat memcat-rule">rule</span> Avoid SMB deals under 50 seats
+                <div><span class="memory-cat memcat-rule">rule</span> Avoid SMB deals under 50 seats</div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;">Pinned behavioural rule · used in last 3 runs</div>
               </div>
               <div class="memory-item">
-                <span class="memory-cat memcat-fact">fact</span> Primary buyer persona is VP Ops or Head of RevOps
+                <div><span class="memory-cat memcat-fact">fact</span> Primary buyer persona is VP Ops or Head of RevOps</div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;">Referenced during outreach drafting</div>
               </div>
               <div class="memory-item">
-                <span class="memory-cat memcat-pref">preference</span> Never reference competitor by name
+                <div><span class="memory-cat memcat-pref">preference</span> Never reference competitor by name</div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;">Pinned behavioural rule</div>
               </div>
               <div class="memory-item" style="font-size:11px;color:var(--slate-400);text-align:center;padding:7px;">
                 + 6 more loaded for this task

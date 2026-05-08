@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 4. Pre-spec, mockups attached. Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, and reviewer pass on §5/§6/§8.
+> **Status:** Rev 5. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, and two reviewer passes on §5/§6/§8.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -145,6 +145,7 @@ Two surfaces composed onto one page:
 **State surface** (what the agent has):
 - **Identity card** (first-run only or always-visible compact form): name, role, reports-to, sub-account. Establishes the agent as an entity from the moment it is created, before any history exists. See Mockup 4.
 - **Knowledge in use**, top entries the agent uses most. Surfaces as the "Knowledge in use" card. Renamed from earlier draft "Memory snapshot" because *Knowledge in use* is clearer, less anthropomorphic, and is the term we standardised on in mockups. Linked out to the workspace Knowledge page filtered by this agent.
+  - **Each entry shows contextual metadata: why this entry is surfaced.** Without metadata, the card looks archival; with it, the card looks active. Examples: *"Used in last 3 runs"*, *"Referenced during outreach drafting"*, *"Pinned behavioural rule"*, *"Recently updated"*. The metadata comes from the retrieval observability layer (Phase 1's `retrieval.summary` events, §11 of the auto-knowledge-retrieval spec). Keep the metadata short (under 30 chars per entry).
 - **Files snapshot**, recent files this agent produced or used, with a link to Knowledge → Files filtered by this agent.
 - **Tools the agent uses**, qualitative usage bands rather than precise counts. Three bands: *Frequently used*, *Occasionally used*, *Rarely used*, classified from rolling 30-day usage. Precise numbers stay available on hover and in the Skills tab for the rare cases an operator wants exact data. Rationale: rolling usage windows shift fast, and exact counts ("28 of 30 runs") cause unstable mental models week-to-week. Qualitative bands are stable enough to anchor a mental model and still informative enough to spot drift.
 - **Schedule peek**, when the agent runs next, what triggers it.
@@ -153,7 +154,13 @@ Two surfaces composed onto one page:
 - **Performance**, small stat block as a compact summary alongside the chart.
 
 **Presence surface** (what the agent is doing or about to do):
-- **Status pill**: *Working*, *Idle*, *Scheduled*, *Failing*. Single source of truth for liveness.
+- **Status pill** (5 states, closed taxonomy):
+  - *Working* — actively executing a step. The agent is consuming compute and producing output right now.
+  - *Waiting* — run is in flight but paused. HITL approval pending, external API call in progress, dependency lock waiting. **Distinct from Working** because the agent is NOT consuming budget; this matters for cost-visibility at scale ("3 agents Working" vs "2 Working + 1 Waiting on humans" tells very different stories about consumption).
+  - *Idle* — no run in flight, has recent history. Last seen X minutes ago.
+  - *Scheduled* — no run in flight, next run is upcoming and known.
+  - *Failing* — terminal error state requiring operator attention. Distinct from a one-off failed run within an otherwise healthy agent (that's surfaced in the activity feed, not the pill).
+  - **Why split Working from Waiting**: Most competitor surfaces conflate them, which inflates apparent utilisation and obscures HITL bottlenecks. Splitting them is a structural decision that pays off as soon as agencies run >5 agents concurrently.
 - **Current focus**, one-line plain-language summary of what the agent is thinking about *right now*. Backed by the latest step in the active run (if any) or the next scheduled action. **First-class invariants pinned in §5.1.**
 - **Live elapsed time**, for active runs.
 - **Recent observations**, last 3-5 typed entries the agent has surfaced. **Type-discriminated** (closed enum, no freeform):
@@ -182,8 +189,26 @@ Current focus is the emotional centre of the product. If it drifts, lags, or bec
   - *"Idle between steps"* if the run is in-flight but in a known wait state.
   - *"No recent activity"* with the actual last-event timestamp, if the run appears stalled.
 - **Hard rule**: never display focus copy older than 60 seconds while status is *Working*. After 60s without an event, the status pill flips to *Failing* (or *Idle* if the run actually completed and the UI just hadn't caught up).
-- **Verbosity ceiling.** Focus copy is a single sentence. No multi-line summaries. Truncate at ~140 characters.
+- **Verbosity ceiling.** Focus copy is a single sentence. No multi-line summaries.
+- **Truncation discipline (hard).** The focus line is **1-line ellipsis** by default. Full text on hover (tooltip). Click expands inline OR navigates to the run trace step that produced the focus. Truncation length: **140 characters before ellipsis** for desktop; tighter on narrower viewports per the existing responsive pattern. This prevents layout blowout on long company names, localised copy, and dense agent rows.
 - **No marketing-language drift.** Copy is operator-readable plain English ("Drafting email body using retrieved contact data") not anthropomorphic ("The agent is thinking carefully about Sarah Chen's preferences"). Mockup 2 is the tone reference.
+
+### 5.2 Presence degradation states (infrastructure-aware)
+
+§5.1 covers the happy path. This subsection covers the unhappy path: when the event stream is delayed, the worker is unhealthy, or orchestration is disconnected. **Without these states, users will interpret infra problems as agent behaviour problems**, which destroys the embodiment-layer trust quickly.
+
+The Overview tab and the Home Active Agents widget MUST surface degradation explicitly. Closed list of degraded conditions and their UI behaviour:
+
+| Condition | Detection | UI behaviour |
+|---|---|---|
+| Event stream delayed >10 seconds | No new event from this run for 10s while we expect activity | Status pill stays at current state; subtitle shows *"Presence delayed…"*; elapsed timer paused with a small dotted underline indicating uncertainty |
+| Worker heartbeat stale (>30s) | The IEE worker handling this run has not pinged in 30s | Status pill shows *"Status uncertain"* (visually similar to Failing but distinct copy); operator-facing toast suggests viewing the run trace |
+| Focus source unavailable | The latest event has no summarisable content (e.g. raw tool dump that the summariser couldn't parse) | Focus line falls back to the last successful focus snapshot with a small "as of X ago" suffix |
+| Orchestration disconnected | Connection between client and run-event stream lost | Freeze all timers, show a degraded pill (*"Reconnecting…"*) at the page level (not per-agent), retry connection, snap back to live state on reconnect |
+
+These states are visible to the operator. They are NOT silent fallbacks. Trust depends on the system being honest about uncertainty. Spec author should mock each degraded state explicitly.
+
+The status pill values from §5 (Working / Waiting / Idle / Scheduled / Failing) remain closed; degradation states attach as **subtitles or auxiliary indicators**, not as new pill values. This keeps the primary taxonomy clean.
 
 ### Three states the tab must handle
 
@@ -208,11 +233,14 @@ Implementation consequences:
 |---|---|
 | "Pick a role" | "Role: Account Health Manager" *(presented as already assigned, not asked)* |
 | "Choose a model" | (omit from operator-facing checklist; the agent is already cognitively capable) |
+| "Cognitively ready (Sonnet 4.6)" | *"Reasoning system ready"* (model-neutral) |
 | "Link knowledge documents" | "Teach the agent" |
 | "Configure schedule or trigger" | "Decide when it should work" |
 | "Run a test" | "Watch it work" |
 
 The shift is from *"this software needs configuring"* to *"this entity exists and is ready; here is how to give it context, decide its working hours, and see it in action."* The setup checklist still exists as a guide, but the verbs are about teaching, deciding, and watching, not picking and configuring. Mockup 4 is the canonical reference.
+
+**Critical: do not couple model branding to the identity layer.** Earlier draft had "Cognitively ready (Sonnet 4.6)" on the first-run state. That was emotionally effective but introduces a fragile coupling: when the underlying model changes (Sonnet 4.6 → 4.7 → GPT → local model → multi-model routing), the identity-layer copy needs updating too, and the user's mental model of *"my agent's personhood is tied to which model is under the hood"* gets disrupted on every migration. **Identity-layer copy stays model-neutral.** Operator-facing language references *reasoning system*, *inference engine*, or *core cognition*, never the specific model brand. The exact model lives in the Configure or Behaviour tab where it belongs.
 
 ### What the tab is NOT
 
@@ -278,7 +306,8 @@ Small. The existing Run trace surface (`prototypes/consolidation-2026-05-06/run-
 
 **Chip wrapping and row-height constraints (hard).** Without explicit caps, worst-case event rows (8+ files, long filenames, sub-agent outputs, Trust badges, Correct hover) get visually noisy fast. Spec must pin:
 
-- **Maximum visible chips per event**: 4. Beyond 4, render the first 4 chips followed by *"+N more"* that expands inline on click. Sort: most recent first.
+- **Maximum visible chips per event**: 4. Beyond 4, render the first 4 chips followed by *"+N more"* that expands inline on click.
+- **Chronological ordering invariant** (hard). Chips render in **causal order**: the order in which the parent event produced them. **NEVER alphabetically. NEVER grouped by file type / MIME.** Causality is the more useful axis for a run trace; alphabetisation destroys the operator's ability to reason about *what happened, then what happened next* on this step.
 - **Filename truncation**: 36 characters. Truncate from the middle (preserving extension): `acme-contacts-enriched-2026-...csv`. Tooltip on hover shows full filename.
 - **Maximum event-row height before overflow**: 3 lines of content. Beyond that, content is truncated with a *"Show more"* affordance that expands inline.
 - **Detail panel is the spillover.** Selecting an event in the trace opens the right-hand detail panel where the full set of produced files, full filenames, full content, and Trust runtime-check details all live un-truncated. The inline event row is a scan-friendly summary, not a complete record.
@@ -412,6 +441,7 @@ The implementation spec author should treat these as the messy areas. Each is mo
 - **Active Session drill-in modal** as a separate surface. The existing Run trace page already handles live runs; if the operator wants step-by-step detail, they click through.
 - **Multi-agent shared workspaces** (a workspace shared by N agents on the same task). Distinct from per-agent embodiment; future work.
 - **Per-agent memory editing surface.** Memory editing happens at the workspace level on the Knowledge page; per-agent slice is read-only in Overview.
+- **Confidence surface** (future-native concept; breadcrumbs only). The system is becoming increasingly trust-mediated: typed observations, retrieval observability, Trust verification, lineage, HITL gates. Eventually operators will want to see *"how certain is this agent about what it thinks?"* — qualitative bands like *Verified / Inferred / Assumed / Conflicted*, not raw probabilities. This is **not built in v1**, but the architecture should accommodate it: the typed Recent observations enum (§5) and the Trust judgement events (Trust spec Stage 2) are the two anchors that a future confidence surface will read from. Schema additions for confidence are deferred. Spec author should not foreclose the option (e.g. don't make `observation_type` a closed string check that's hard to extend; use an enum table).
 
 ## 14. Success criteria for v1
 
