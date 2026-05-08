@@ -200,6 +200,9 @@ import clientErrorsRouter from './routes/clientErrors.js';
 import baselinesRouter from './routes/baselines.js';
 // Consolidation Build C3 — recurring tasks aggregator
 import recurringTasksRouter from './routes/recurringTasks.js';
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach
+import scorecardsRouter from './routes/scorecards.js';
+import agentScorecardsRouter from './routes/agentScorecards.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -446,6 +449,9 @@ app.use(clientErrorsRouter);
 app.use(baselinesRouter);
 // Consolidation Build C3 — recurring tasks aggregator
 app.use(recurringTasksRouter);
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach
+app.use(scorecardsRouter);
+app.use(agentScorecardsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
