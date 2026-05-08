@@ -3154,7 +3154,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           if (actionDef !== undefined) {
             await evaluateRuntimeCheck({
               runId,
-              eventId: runId, // placeholder — skill.completed event id not available at this point
+              eventId: null,
               sequenceNumber: totalToolCalls,
               skillSlug: toolCall.name,
               organisationId: request.organisationId,

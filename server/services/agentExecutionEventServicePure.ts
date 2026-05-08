@@ -369,7 +369,7 @@ export function validateEventPayload(
       return { ok: true };
 
     case 'runtime_check.completed': {
-      if (!isStr(p.runId) || !isStr(p.eventId) || !isNonNegInt(p.sequenceNumber) || !isStr(p.skillSlug)) {
+      if (!isStr(p.runId) || (p.eventId !== null && p.eventId !== undefined && !isStr(p.eventId)) || !isNonNegInt(p.sequenceNumber) || !isStr(p.skillSlug)) {
         return { ok: false, reason: 'runtime_check.completed_missing_id_fields' };
       }
       if (!isStr(p.state) || !['pass', 'fail', 'inconclusive', 'pending', 'not_applicable'].includes(p.state)) {
