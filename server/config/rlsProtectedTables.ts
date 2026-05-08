@@ -1067,6 +1067,41 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0289_runtime_check_results.sql',
     rationale: 'Per-step runtime check verdict with blast-radius and reversibility metadata — contains action verification outcomes that are scoped per org and must not leak cross-tenant.',
   },
+  // 0290 — Trust & Verification Layer Stage 2: scorecards
+  {
+    tableName: 'scorecards',
+    schemaFile: 'scorecards.ts',
+    policyMigration: '0290_scorecards.sql',
+    rationale: 'Evaluation rubrics with quality checks — may encode org-specific grading criteria and proprietary performance expectations.',
+  },
+  // 0291 — Trust & Verification Layer Stage 2: agent-scorecard join
+  {
+    tableName: 'agent_scorecard_attachments',
+    schemaFile: 'agentScorecardAttachments.ts',
+    policyMigration: '0291_agent_scorecard_attachments.sql',
+    rationale: 'Many-to-many agent-scorecard links with authority level — reveals which scorecards are mandatory vs suggested for each agent.',
+  },
+  // 0292 — Trust & Verification Layer Stage 2: judgement verdicts
+  {
+    tableName: 'scorecard_judgements',
+    schemaFile: 'scorecardJudgements.ts',
+    policyMigration: '0292_scorecard_judgements.sql',
+    rationale: 'LLM grading verdicts per run+quality-check — contains scoring reasoning and snapshot rubric data that is org-scoped.',
+  },
+  // 0293 — Trust & Verification Layer Stage 2: bench runs
+  {
+    tableName: 'bench_runs',
+    schemaFile: 'benchRuns.ts',
+    policyMigration: '0293_bench_runs.sql',
+    rationale: 'Model comparison bench job records — reveals which candidate models an org is evaluating and their cost estimates.',
+  },
+  // 0293 — Trust & Verification Layer Stage 2: bench results
+  {
+    tableName: 'bench_results',
+    schemaFile: 'benchRuns.ts',
+    policyMigration: '0293_bench_runs.sql',
+    rationale: 'Per-candidate per-sample bench outcomes — contains raw LLM outputs and verdicts scoped per org.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

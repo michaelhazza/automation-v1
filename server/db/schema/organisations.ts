@@ -67,6 +67,10 @@ export const organisations = pgTable(
     // retention purge job deletes them. Default 90 days. Consumed by the
     // shadow charge retention purge job (spec §14, §17 Chunk 16).
     shadowChargeRetentionDays: integer('shadow_charge_retention_days').notNull().default(90),
+    // ── Trust & Verification Layer (migration 0294) ──────────────────────
+    // Scorecard slugs mandated for all org-linked agents. Always-array;
+    // DB CHECK enforces jsonb_typeof = 'array'.
+    orgMandatoryScorecardSlugs: jsonb('org_mandatory_scorecard_slugs').notNull().default([]).$type<string[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

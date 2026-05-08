@@ -137,6 +137,9 @@ run_gate "$SCRIPT_DIR/__tests__/derived-data-null-safety/run-fixture-self-test.s
 # blocking (exit 1 in the .mjs) once all entries have verify coverage.
 run_gate "$SCRIPT_DIR/gates/verify-runtime-check-coverage.sh"
 
+# ── Trust & Verification Layer Stage 2 — scorecard RLS coverage ──
+run_gate "$SCRIPT_DIR/gates/verify-scorecard-rls.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

@@ -35,6 +35,9 @@ export const agentTemplates = pgTable('agent_templates', {
   // Execution mode preference (metadata only — not enforced until headless available)
   executionMode: text('execution_mode').notNull().default('api'), // 'api' | 'headless'
 
+  // ── Trust & Verification Layer (migration 0294) ──────────────────────
+  defaultScorecardSlugs: jsonb('default_scorecard_slugs').notNull().default([]).$type<string[]>(),
+
   // Publishing
   isPublished: boolean('is_published').notNull().default(false),
   version: integer('version').notNull().default(1),
