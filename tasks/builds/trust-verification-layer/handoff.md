@@ -196,3 +196,54 @@ PR #274 (auto-knowledge-retrieval) merged to `main` 2026-05-08 after TVL Phase 2
 **phase_status preserved at PHASE_2_COMPLETE.** current-focus.md status remains `REVIEWING` per the chunk's stated invariant. Finalisation-coordinator will move it to `MERGE_READY` after Phase 3 completes.
 
 **Recommended next action:** re-launch `finalisation-coordinator` in a new Claude Code session — type `launch finalisation`. The S2 collision is now resolved; finalisation can resume from G4 regression-guard onwards.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #275
+**PR URL:** https://github.com/michaelhazza/automation-v1/pull/275
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-trust-verification-layer-2026-05-08T21-11-04Z.md`
+**Round count:** 1
+**Round 1 disposition:** APPROVED — round-2 not requested
+**spec_deviations reviewed:** yes (TVL-DG-2 migration range, TVL-DG-4..7 scorecard schema field divergences, TVL-DG-8/9, TVL-AM-1/2 — all surfaced to ChatGPT and remain operator-deferred to Stage-2-GA)
+
+**Branch state at finalisation start:** `d0ae8c57`, 51 commits ahead of `main`, 0 behind, pushed to `origin`. Steps 0-4 completed in the prior session (context loaded, S2 sync no-op since 0 behind, G4 regression-guard PASS, PR #275 already created).
+
+**chatgpt-pr-review Round 1 verifications (5 of 5 PASS, no code changes):**
+
+1. **Idempotency / retry consistency** — every TVL primitive has row-level idempotency at the DB layer (5 UNIQUE constraints across `runtime_check_results`, `scorecards`, `scorecard_judgements`, `bench_runs`, `bench_results`); per-handler `MAX_JSON_RETRIES = 3`; all 5 workers use `teamConcurrency: 1`; `benchExecuteJob` enforces `FOR UPDATE SKIP LOCKED` single-writer.
+2. **Retention strategy exists** — spec §17 line 1073 commits 90/365-day retention as a Stage-2-GA ship-blocker (M1).
+3. **RLS coverage** — all 6 TVL tables in `server/config/rlsProtectedTables.ts` (lines 1086-1124) with correct migration refs (0296-0300); enforced by `verify-rls-coverage.sh` and `rls.context-propagation.test.ts`.
+4. **Deterministic replay** — F1 snapshot at judgement time, M2 judge≠candidate via `benchRunService.estimateCost()`, M3 server-side cost cap throwing `BENCH_COST_CAP_EXCEEDED` 422.
+5. **Queue dedupe** — DB row-level uniqueness (V1 above) is stronger than `singletonKey`; `correction:pattern-detect` uses `boss.schedule()` daily cron.
+
+**Doc-sync sweep verdicts** (per `docs/doc-sync.md`, full feature change-set, cross-check of chatgpt-pr-review):
+- `architecture.md`: no — already updated in Phase 2 chunk 16 (commit `1f60a440`); 8 file-mapping rows + 5 permission keys + 2 queue entries present; grepped for all TVL terms — current.
+- `docs/capabilities.md`: no — already updated in Phase 2 chunk 16; vendor-neutral entries present.
+- `docs/integration-reference.md`: n/a — no integration scope/skill/auth-method change.
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md`: no — no build-discipline change; framework-sync upstream commit `7eeb1e5d` aligned both with canonical agent fleet.
+- `CONTRIBUTING.md`: no — no contributor-convention change.
+- `docs/frontend-design-principles.md`: no — Round 1 produced no UI changes; new pages reuse existing primitives.
+- `KNOWLEDGE.md`: no — 12 TVL-related entries already present (8 from Phase 2 chunk 16, 3 from fix-loop, 1 from merge-resolution); Round 1 produced no new pattern.
+- `docs/decisions/`: n/a — no durable architectural choice locked in Round 1.
+- `docs/context-packs/`: n/a — no anchor change.
+- `references/test-gate-policy.md`: n/a — no test-gate posture change.
+- `references/spec-review-directional-signals.md`: n/a — chatgpt-pr-review session, not spec-review.
+- `docs/spec-context.md`: n/a — spec-review-only doc.
+- `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md`: n/a — no framework-level change.
+
+**KNOWLEDGE.md entries added (this session):** 0 new. Round 1 produced no fixes; existing 12 TVL entries (Phase 2 chunk 16 + fix-loop + merge-resolution) already cover the patterns.
+
+**tasks/todo.md items removed (this session):** 0 (the build's own deferred items were marked `[x]` during Phase 2 fix-loop already; Phase 3 added 5 new entries).
+
+**tasks/todo.md items added (this session):** 4 new + 1 consolidated:
+- `CHATGPT-R1-RISK-1` — Orchestration fragmentation across 5 TVL jobs (Stage-2-GA)
+- `CHATGPT-R1-RISK-2` — "Corrections" semantic overload (taxonomy ADR pre-req for any second meaning)
+- `CHATGPT-R1-RISK-3` — Bench / scorecard separation invariant — protect via ADR
+- `CHATGPT-R1-RISK-4` — DB growth without retention — consolidated into existing M1 deferral
+- `CHATGPT-R1-RISK-5` — UI complexity creep — folded into a future "Govern simplify pass" build
+
+**ready-to-merge label applied at:** 2026-05-08T22:44:51Z
+
+**Final phase status:** PHASE_3_COMPLETE. CI runs G5 on label apply. Operator drives the merge sequence per the end-of-phase prompt: update `current-focus.md` to NONE on the feature branch first → commit → push → `gh pr merge 275 --squash --delete-branch`. finalisation-coordinator does NOT auto-merge.

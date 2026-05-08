@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/trust-verification-layer/spec.md
-active_plan: tasks/builds/trust-verification-layer/plan.md
-build_slug: trust-verification-layer
-branch: claude/synthetos-work-primitive-improvements-P17SD
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-08
+last_merge_ready_pr: #275
+last_merge_ready_slug: trust-verification-layer
+last_merge_ready_branch: claude/synthetos-work-primitive-improvements-P17SD
 last_merged_pr: #273
 last_merged_slug: consolidation-govern
 last_merged_branch: ui-consolidation-govern
@@ -24,11 +27,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/trust-verification-layer/spec.md`
-**Active plan:** `tasks/builds/trust-verification-layer/plan.md`
-**Active build slug:** `trust-verification-layer`
-**Branch:** `claude/synthetos-work-primitive-improvements-P17SD`
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-08. All 16 chunks built; G2 PASS; spec-conformance CONFORMANT_AFTER_FIXES (13 directional gaps in `tasks/todo.md`); adversarial-reviewer HOLES_FOUND (1 confirmed + 3 likely routed to backlog); pr-reviewer CHANGES_REQUESTED → 4 blockers + 3 strong fixed in commit `999ec0bf` (B-4 + S-3 deferred to operator); dual-reviewer Codex APPROVED with 4 SQL/route bugs fixed in commit `c1ed1535` (table-level UNIQUE WHERE on 0290 — fresh migration would fail; expression UNIQUE on 0293 — fresh migration would fail; corrections route 400 short-circuit; benchRunService `agent_run_id` typo). Doc-sync PASS (Chunk 16 covered; no fix-loop convention impact). Handoff Phase 2 section appended to `tasks/builds/trust-verification-layer/handoff.md`. Branch HEAD `c1ed1535`, 41 commits ahead of main. **Operator open issues for Phase 3:** B-4 cross-entity bypass on POST corrections + S-3 cross-subaccount IDOR on agent scorecard detach + Stage 1 ACTION_REGISTRY backfill incomplete (TVL-DG-1) + scorecard `passMark`/`weight` divergence (TVL-DG-3) + scorecard schema field misses (TVL-DG-4..7). 8 migrations shipped 0288–0295 plus 0296/0297 added during build to fix 0293 schema gaps. **Recommended next action:** open new Claude Code session, type `launch finalisation`.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete 2026-05-08. PR #275 — `trust-verification-layer` — `ready-to-merge` label applied at 2026-05-08T22:44:51Z; CI runs G5. chatgpt-pr-review Round 1 closed APPROVED (no code changes; 5/5 verifications PASS — idempotency, retention strategy commitment, RLS coverage, deterministic replay, queue dedupe). 4 forward-looking strategic risks deferred to Stage-2-GA backlog (`CHATGPT-R1-RISK-1/2/3/5`); `CHATGPT-R1-RISK-4` consolidated into existing M1 retention deferral. Doc-sync sweep: 13 verdicts recorded (no doc updates required this round; Phase 2 chunk 16 already covered architecture.md + capabilities.md + KNOWLEDGE.md). Phase 3 handoff section appended to `tasks/builds/trust-verification-layer/handoff.md`. Branch HEAD at finalisation: `d0ae8c57`, 51 commits ahead of `main`, 0 behind. **Recommended next action — when CI is green and the operator says "merge":** update `tasks/current-focus.md` ON THE FEATURE BRANCH to clear `last_merge_ready_*` keys + set `last_merged_*` keys + status `MERGE_READY → NONE`; commit; push; then `gh pr merge 275 --squash --delete-branch`. Order matters: doc update → commit → push → merge. finalisation-coordinator does NOT auto-merge.
 
 **Just merged:** PR #273 — `consolidation-govern` (squash-commit `dfa53e58`, 2026-05-07T23:18:59Z). Govern surface — Knowledge / Spending / Connections consolidated UI shipped across 13 build chunks. Spec: `tasks/builds/consolidation-govern/spec.md`. Phase 3 handoff: `tasks/builds/consolidation-govern/handoff.md`. Pipeline: spec-conformance NON_CONFORMANT (18 directional gaps deferred) → pr-reviewer CHANGES_REQUESTED (5 blockers + 7 strong recommendations all fixed in `3d4f1cfe`) → adversarial-reviewer 3 findings deferred (CONSOL-GOV-DEF-17/18/19) → dual-reviewer commit `5566880c` → S2 sync (auto-resolved via finalisation-coordinator) → G4 regression-guard fixes in `997e940a` (App.tsx route handlers consolidated post-S2 with main's PR #271/#272 page-deletion pattern; migration 0286 → 0287 collision rename; architecture.md migration filename updated) → Phase 3 commit `9188981f` (KNOWLEDGE.md +4 patterns, handoff.md created, current-focus.md → MERGE_READY, CONSOL-GOV-DEF-9 closed) → ready-to-merge label applied → CI ALL GREEN → auto-merged. **chatgpt-pr-review SKIPPED** in Phase 3 (operator instructed autonomous mode, incompatible with manual ChatGPT-web loop). 4 KNOWLEDGE.md patterns appended: closed-enum service-boundary mapping, targeted onConflictDoNothing, migration-number collision after S2, App.tsx route regression after upstream page deletions. Doc-sync sweep complete (13 verdicts recorded). 1 todo item closed (CONSOL-GOV-DEF-9 testConnection error.code mapping shipped via Phase 2 pr-reviewer Blocker B-1). 18 spec-conformance directional gaps + 3 adversarial-reviewer findings deferred to post-merge backlog in `tasks/todo.md`.
 
