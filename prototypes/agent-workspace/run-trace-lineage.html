@@ -1,10 +1,22 @@
 <!DOCTYPE html>
 <!--
-  Mockup 5: Run trace with inline file lineage
+  Mockup 5 (revised): Run trace with inline file lineage
   Agent Workspace, Implementation Brief
-  Existing Run trace surface gets a small enhancement: when a step
-  produced a file, show it inline as a thin file chip (icon + name)
-  that deep-links to the file in Knowledge -> Files.
+
+  IMPORTANT: This is a small COMPLEMENTARY enhancement to the existing
+  Run trace page (prototypes/consolidation-2026-05-06/run-trace.html), NOT
+  a replacement.
+
+  The existing Run trace page already has: run chain on left, event list in
+  middle (event-row with seq, type-dot, type-label, content, time), event
+  detail panel on right (model, tokens, latency, prompt/response previews),
+  live/historical mode toggle, Trace/Delegation graph tabs.
+
+  This mockup uses the SAME visual structure as the existing prototype.
+  The only addition is the file-chip row that appears inline beneath any
+  event that produced a file. Click the chip to deep-link into the file
+  in Knowledge: Files (Phase 1 surface). All other run trace functionality
+  is unchanged and shown here for context.
 -->
 <html lang="en">
 <head>
@@ -23,89 +35,123 @@
     display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
   .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
-  .breadcrumb-sep { color: var(--slate-300); }
 
-  .page-content { padding: 24px 32px; max-width: 1100px; margin: 0 auto; padding-bottom: 80px; }
-  .page-h1 { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
-  .page-sub {
-    font-size: 13px; color: var(--slate-500); margin-bottom: 18px;
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  .mode-toggle {
+    display: inline-flex; gap: 0; border: 1px solid var(--slate-200); border-radius: 6px; overflow: hidden;
   }
-  .agent-status-pill {
-    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 12px;
-    font-size: 11.5px; font-weight: 600;
-    background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0;
+  .mode-toggle button {
+    padding: 4px 10px; background: white; border: none; font-size: 11.5px; font-weight: 500;
+    color: var(--slate-600); cursor: pointer;
+    border-right: 1px solid var(--slate-200);
+  }
+  .mode-toggle button:last-child { border-right: none; }
+  .mode-toggle button.selected { background: var(--indigo-50); color: var(--indigo-700); }
+
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 5px; background: var(--emerald-50); color: var(--emerald-600);
+    border: 1px solid #a7f3d0; border-radius: 12px; padding: 2px 8px; font-size: 11px; font-weight: 600;
+  }
+  .live-dot {
+    width: 6px; height: 6px; background: var(--emerald-500); border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+    50% { box-shadow: 0 0 0 5px rgba(16,185,129,0); }
   }
 
-  /* Run summary card */
-  .run-summary {
-    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
-    padding: 14px 18px; margin-bottom: 16px;
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  /* 3-column trace layout */
+  .trace-layout {
+    display: grid; grid-template-columns: 220px 1fr 360px; height: calc(100vh - 53px);
   }
-  .summary-stat-label { font-size: 10.5px; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; margin-bottom: 4px; }
-  .summary-stat-value { font-size: 16px; font-weight: 700; color: var(--slate-900); }
-  .summary-stat-sub { font-size: 11px; color: var(--slate-500); margin-top: 1px; }
+  .col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .col-left { background: white; border-right: 1px solid var(--slate-200); }
+  .col-mid { background: white; }
+  .col-right { background: var(--slate-50); border-left: 1px solid var(--slate-200); }
 
-  /* Step list */
-  .steps-card {
-    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
-  }
-  .steps-head {
-    padding: 12px 18px; border-bottom: 1px solid var(--slate-200);
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  }
-  .steps-title { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+  .col-head { padding: 14px 18px; border-bottom: 1px solid var(--slate-200); flex-shrink: 0; }
+  .col-head h3 { font-size: 11px; font-weight: 700; color: var(--slate-500); letter-spacing: 0.05em; text-transform: uppercase; }
+  .col-scroll { flex: 1; overflow-y: auto; }
 
-  .step {
-    padding: 14px 18px; border-bottom: 1px solid var(--slate-100);
-    display: grid; grid-template-columns: 32px 1fr; gap: 14px;
+  /* Run chain (left) */
+  .run-chain-item {
+    padding: 10px 18px; border-bottom: 1px solid var(--slate-100); cursor: pointer;
+    font-size: 12px; transition: background 0.1s;
   }
-  .step:last-child { border-bottom: none; }
-  .step-num {
-    width: 28px; height: 28px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 700; color: white;
-    background: var(--emerald-500);
-  }
-  .step-num.failed { background: var(--red-500); }
-  .step-num.in-progress { background: var(--indigo-500); }
+  .run-chain-item:hover { background: var(--slate-50); }
+  .run-chain-item.selected { background: var(--indigo-50); border-left: 3px solid var(--indigo-500); padding-left: 15px; }
+  .run-chain-name { font-weight: 600; color: var(--slate-800); margin-bottom: 2px; }
+  .run-chain-meta { font-size: 11px; color: var(--slate-500); display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+  .run-chain-meta .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 4px; }
+  .dot-running { background: var(--indigo-500); animation: pulse 1.5s infinite; }
+  .dot-done { background: var(--emerald-500); }
+  .chain-section { padding: 10px 18px 4px; font-size: 10px; font-weight: 700; color: var(--slate-400); letter-spacing: 0.05em; text-transform: uppercase; }
 
-  .step-body { min-width: 0; }
-  .step-title {
-    font-size: 13.5px; font-weight: 600; color: var(--slate-900); margin-bottom: 4px;
+  /* Mid column: header + event list */
+  .run-header {
+    padding: 16px 22px 12px; border-bottom: 1px solid var(--slate-200);
   }
-  .step-meta {
-    display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--slate-500); flex-wrap: wrap;
-    margin-bottom: 6px;
+  .run-header h2 { font-size: 17px; font-weight: 700; color: var(--slate-900); margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
+  .run-header-meta {
+    display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate-500); margin-top: 6px;
   }
-  .step-tool {
-    display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 9px;
-    background: var(--slate-100); color: var(--slate-700); font-size: 10.5px; font-weight: 600;
-    font-family: 'JetBrains Mono', monospace;
+  .run-header-meta strong { color: var(--slate-800); font-weight: 600; }
+  .trace-tabs { display: flex; gap: 0; padding: 0 22px; border-bottom: 1px solid var(--slate-200); }
+  .trace-tab {
+    padding: 8px 14px; background: none; border: none; border-bottom: 2px solid transparent;
+    font-size: 12px; font-weight: 500; color: var(--slate-500); cursor: pointer;
   }
-  .step-summary {
-    font-size: 12.5px; color: var(--slate-700); line-height: 1.5;
-  }
-  .step-summary strong { color: var(--slate-900); font-weight: 600; }
+  .trace-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
 
-  /* Inline file chip, the new bit */
-  .step-outputs {
-    margin-top: 8px;
-    display: flex; flex-wrap: wrap; gap: 6px;
+  /* Event list */
+  .event-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 9px 22px; border-bottom: 1px solid var(--slate-100);
+    cursor: pointer; transition: background 0.1s; font-size: 12.5px;
+  }
+  .event-row:hover { background: var(--slate-50); }
+  .event-row.selected { background: var(--indigo-50); }
+  .event-seq { font-family: monospace; font-size: 11px; color: var(--slate-400); width: 28px; flex-shrink: 0; padding-top: 2px; }
+  .event-type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .event-body { flex: 1; min-width: 0; }
+  .event-type-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+  .event-content { color: var(--slate-700); line-height: 1.4; }
+  .event-time { font-size: 11px; color: var(--slate-400); flex-shrink: 0; padding-top: 2px; }
+
+  /* Event type colours */
+  .etype-llm_call     { color: var(--indigo-500); }
+  .etype-tool_call    { color: var(--sky-500); }
+  .etype-tool_result  { color: var(--emerald-500); }
+  .etype-run_start    { color: var(--slate-400); }
+  .etype-delegation   { color: var(--violet-500); }
+  .dot-llm     { background: var(--indigo-500); }
+  .dot-tool    { background: var(--sky-500); }
+  .dot-result  { background: var(--emerald-500); }
+  .dot-meta    { background: var(--slate-400); }
+  .dot-deleg   { background: var(--violet-500); }
+
+  /* === FILE LINEAGE CHIPS, the new bit === */
+  .file-outputs {
+    margin-top: 6px; padding-left: 0;
+    display: flex; flex-wrap: wrap; gap: 5px;
+  }
+  .file-output-label {
+    font-size: 9.5px; font-weight: 700; color: #4f46e5; letter-spacing: 0.06em; text-transform: uppercase;
+    align-self: center; margin-right: 2px; background: var(--indigo-50); border: 1px solid var(--indigo-200);
+    padding: 2px 6px; border-radius: 5px;
   }
   .file-chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 9px 4px 5px; border-radius: 7px;
-    background: var(--slate-50); border: 1px solid var(--slate-200);
-    font-size: 11.5px; color: var(--slate-700); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px 3px 4px; border-radius: 6px;
+    background: white; border: 1px solid var(--indigo-200);
+    font-size: 11px; color: var(--slate-700); cursor: pointer;
     transition: all 0.1s;
   }
   .file-chip:hover {
-    border-color: var(--indigo-300); background: var(--indigo-50); color: var(--indigo-700);
+    border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700);
   }
   .file-chip-icon {
-    width: 18px; height: 18px; border-radius: 4px; color: white; font-size: 9px; font-weight: 700;
+    width: 16px; height: 16px; border-radius: 4px; color: white; font-size: 8px; font-weight: 700;
     display: flex; align-items: center; justify-content: center;
   }
   .icon-csv { background: var(--emerald-500); }
@@ -113,22 +159,28 @@
   .icon-json { background: var(--amber-600); }
   .icon-pdf { background: #dc2626; }
   .file-chip-name { font-weight: 500; }
-  .file-chip-arrow { color: var(--slate-400); font-size: 10px; }
+  .file-chip-arrow { color: var(--slate-400); font-size: 9px; }
   .file-chip:hover .file-chip-arrow { color: var(--indigo-500); }
 
-  /* Output label */
-  .output-label {
-    font-size: 10px; color: var(--slate-400); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-    margin-right: 4px; align-self: center;
-  }
-
-  /* Annotation note explaining the new pattern */
+  /* New annotation explaining what's added */
   .annotation {
-    background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px;
-    padding: 10px 14px; margin-bottom: 16px;
-    font-size: 12px; color: #78350f; line-height: 1.5;
+    background: #fef3c7; border-bottom: 1px solid #fde68a;
+    padding: 9px 22px; font-size: 11.5px; color: #78350f; line-height: 1.5;
   }
   .annotation strong { color: #92400e; }
+  .annotation .accent {
+    background: white; border: 1px solid var(--indigo-200); padding: 1px 5px; border-radius: 4px;
+    color: var(--indigo-700); font-weight: 600;
+  }
+
+  /* Event detail panel (right) */
+  .detail-section { padding: 14px 18px; border-bottom: 1px solid var(--slate-200); }
+  .detail-eyebrow { font-size: 10px; font-weight: 700; color: var(--slate-400); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; }
+  .detail-title { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+  .detail-sub { font-size: 11px; color: var(--slate-500); margin-top: 2px; }
+  .detail-label { font-size: 10.5px; font-weight: 700; color: var(--slate-500); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 5px; }
+  .detail-value { font-size: 12px; color: var(--slate-700); font-family: 'JetBrains Mono', monospace; }
+  .detail-preview { font-size: 11.5px; color: var(--slate-700); line-height: 1.5; padding: 8px 10px; background: white; border: 1px solid var(--slate-200); border-radius: 6px; max-height: 80px; overflow: hidden; }
 </style>
 </head>
 <body>
@@ -145,202 +197,266 @@
     <div class="sidebar-item">Home</div>
     <div class="sidebar-item">Inbox</div>
     <div class="sidebar-item active" style="color:white;">Activity</div>
-    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-pad">Build</div>
+    <div class="sidebar-item">Agents</div>
     <div class="sidebar-item">Knowledge</div>
-    <div class="sidebar-item">Connections</div>
-    <div class="sidebar-pad">Agents</div>
-    <div class="sidebar-item">Outreach Agent</div>
-    <div class="sidebar-item">Research Agent</div>
-    <div class="sidebar-item">CRM Hygiene Agent</div>
   </aside>
 
-  <main style="flex:1;min-width:0;">
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;">
     <div class="topbar">
       <div class="breadcrumb">
         <span>Acme Corp</span>
-        <span class="breadcrumb-sep">/</span>
-        <span>Activity</span>
-        <span class="breadcrumb-sep">/</span>
-        <span class="breadcrumb-current">Run #1283: Outreach Agent</span>
+        <span style="color:var(--slate-300);">/</span>
+        <span>Agents</span>
+        <span style="color:var(--slate-300);">/</span>
+        <span>Outreach Agent</span>
+        <span style="color:var(--slate-300);">/</span>
+        <span class="breadcrumb-current">Run details</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div class="mode-toggle">
+          <button class="selected">Live run</button>
+          <button>Historical</button>
+        </div>
       </div>
     </div>
 
-    <div class="page-content">
-      <h1 class="page-h1">Run #1283: Outreach Agent</h1>
-      <div class="page-sub">
-        <span class="agent-status-pill">✓ Completed</span>
-        <span>Outreach Agent</span>
-        <span>·</span>
-        <span>Triggered by weekly heartbeat</span>
-        <span>·</span>
-        <span>2 hours ago</span>
-      </div>
+    <!-- 3-column trace layout (matches existing prototype) -->
+    <div class="trace-layout">
 
-      <div class="annotation">
-        <strong>What's new:</strong> When a step produces a file, the file appears inline below the step as a chip. Click the chip to open the file in Knowledge: Files. No more navigating away to find what the agent created.
-      </div>
+      <!-- LEFT: Run chain -->
+      <aside class="col col-left">
+        <div class="col-head"><h3>Run chain</h3></div>
+        <div class="col-scroll">
+          <div class="run-chain-item selected">
+            <div class="run-chain-name">Outreach Agent</div>
+            <div class="run-chain-meta"><span><span class="dot dot-running"></span> running</span><span>+5m 32s</span></div>
+          </div>
+          <div class="run-chain-item">
+            <div class="run-chain-name" style="padding-left:14px;">CRM sub-agent</div>
+            <div class="run-chain-meta" style="padding-left:14px;"><span><span class="dot dot-done"></span> completed</span><span>+1m 12s</span></div>
+          </div>
+          <div class="chain-section">Parent run</div>
+          <div class="run-chain-item">
+            <div class="run-chain-name">CRM Orchestrator</div>
+            <div class="run-chain-meta"><span><span class="dot dot-done"></span> completed</span><span>Apr 28</span></div>
+          </div>
+        </div>
+      </aside>
 
-      <!-- Run summary -->
-      <div class="run-summary">
-        <div>
-          <div class="summary-stat-label">Duration</div>
-          <div class="summary-stat-value">2m 14s</div>
-          <div class="summary-stat-sub">14 of 14 steps completed</div>
-        </div>
-        <div>
-          <div class="summary-stat-label">Files produced</div>
-          <div class="summary-stat-value">3</div>
-          <div class="summary-stat-sub">CSV, MD, JSON</div>
-        </div>
-        <div>
-          <div class="summary-stat-label">Outputs</div>
-          <div class="summary-stat-value">47 emails</div>
-          <div class="summary-stat-sub">12 queued for HITL approval</div>
-        </div>
-        <div>
-          <div class="summary-stat-label">Cost</div>
-          <div class="summary-stat-value">$0.31</div>
-          <div class="summary-stat-sub">within budget</div>
-        </div>
-      </div>
-
-      <!-- Step list -->
-      <div class="steps-card">
-        <div class="steps-head">
-          <div class="steps-title">Trace</div>
-          <div style="font-size:11.5px;color:var(--slate-500);">Click any step for full detail</div>
-        </div>
-
-        <!-- Step 1 -->
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">Load Acme Corp account context</div>
-            <div class="step-meta">
-              <span class="step-tool">retrieve_data_source</span>
-              <span>3 documents loaded</span>
-              <span>0.4s</span>
-            </div>
-            <div class="step-summary">
-              Loaded <strong>Acme Corp Account Context</strong>, <strong>ICP and disqualification rules</strong>, and <strong>Synthetos Brand Voice Playbook</strong> as the most relevant documents for this task.
-            </div>
+      <!-- MIDDLE: Trace -->
+      <section class="col col-mid">
+        <div class="run-header">
+          <h2>Outreach Agent: Run #4827 <span class="live-pill"><span class="live-dot"></span> Live</span></h2>
+          <div class="run-header-meta">
+            <span>Started: <strong>May 6 2026, 2:14:32pm</strong>, 5 min ago</span>
+            <span>·</span>
+            <span>Duration: <strong>5m 32s</strong></span>
+            <span>·</span>
+            <span>Status: <strong>Running</strong></span>
+            <span>·</span>
+            <span><strong>47 events</strong></span>
           </div>
         </div>
 
-        <!-- Step 2 -->
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">Pull current Acme Corp contact list from CRM</div>
-            <div class="step-meta">
-              <span class="step-tool">hubspot_query_contacts</span>
-              <span>412 contacts returned</span>
-              <span>1.8s</span>
+        <div class="trace-tabs">
+          <button class="trace-tab active">Trace</button>
+          <button class="trace-tab">Delegation graph</button>
+        </div>
+
+        <!-- The annotation showing what's new on this page -->
+        <div class="annotation">
+          <strong>What's new on this page:</strong> the existing Run trace structure is unchanged. The only addition is the
+          <span class="accent">📎 Outputs</span> chip row that appears inline below any event that produced a file. Click a file
+          chip to deep-link into the file on the Knowledge: Files tab (Phase 1). All other run trace functionality (event detail
+          panel, live tail, run chain, trace/graph tabs, runtime checks if present) is unchanged.
+        </div>
+
+        <div class="col-scroll">
+
+          <!-- Event 1: RUN_START -->
+          <div class="event-row">
+            <div class="event-seq">1</div>
+            <div class="event-type-dot dot-meta"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-run_start">run_start</div>
+              <div class="event-content">Run initiated. Input: "Draft follow-up email to Sarah Chen at Acme Corp..."</div>
             </div>
-            <div class="step-summary">
-              Pulled active contacts for Acme Corp. 23 high-priority, 86 mid-priority, 303 low-priority based on ICP scoring.
+            <div class="event-time">+0s</div>
+          </div>
+
+          <!-- Event 2: LLM_CALL -->
+          <div class="event-row">
+            <div class="event-seq">2</div>
+            <div class="event-type-dot dot-llm"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-llm_call">llm_call</div>
+              <div class="event-content">Planning step: identified 3 required actions, retrieve memory, draft email, confirm send.</div>
             </div>
-            <!-- File chip output -->
-            <div class="step-outputs">
-              <span class="output-label">Produced:</span>
-              <a class="file-chip">
-                <span class="file-chip-icon icon-csv">CSV</span>
-                <span class="file-chip-name">acme-contacts-snapshot-2026-05-08.csv</span>
-                <span class="file-chip-arrow">↗</span>
-              </a>
+            <div class="event-time">+3s</div>
+          </div>
+
+          <!-- Event 3: TOOL_CALL -->
+          <div class="event-row">
+            <div class="event-seq">3</div>
+            <div class="event-type-dot dot-tool"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-tool_call">tool_call: search_crm</div>
+              <div class="event-content">Querying HubSpot for "Sarah Chen" at "Acme Corp"</div>
             </div>
+            <div class="event-time">+4s</div>
+          </div>
+
+          <!-- Event 4: TOOL_RESULT (with file output) -->
+          <div class="event-row selected">
+            <div class="event-seq">4</div>
+            <div class="event-type-dot dot-result"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-tool_result">tool_result: search_crm</div>
+              <div class="event-content">Found 1 contact. Sarah Chen, VP Operations, sarah.chen@acmecorp.com. Last contacted Apr 28.</div>
+              <!-- INLINE FILE OUTPUT, the new bit -->
+              <div class="file-outputs">
+                <span class="file-output-label">📎 Output</span>
+                <a class="file-chip">
+                  <span class="file-chip-icon icon-json">JSON</span>
+                  <span class="file-chip-name">sarah-chen-contact-snapshot.json</span>
+                  <span class="file-chip-arrow">↗</span>
+                </a>
+              </div>
+            </div>
+            <div class="event-time">+6s</div>
+          </div>
+
+          <!-- Event 5: LLM_CALL (drafting email, with file output) -->
+          <div class="event-row">
+            <div class="event-seq">5</div>
+            <div class="event-type-dot dot-llm"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-llm_call">llm_call</div>
+              <div class="event-content">Drafting email body using retrieved contact data and memory blocks (brand voice, key stakeholders, competitor context).</div>
+              <!-- INLINE FILE OUTPUT -->
+              <div class="file-outputs">
+                <span class="file-output-label">📎 Output</span>
+                <a class="file-chip">
+                  <span class="file-chip-icon icon-md">MD</span>
+                  <span class="file-chip-name">draft-email-sarah-chen-q2-followup.md</span>
+                  <span class="file-chip-arrow">↗</span>
+                </a>
+              </div>
+            </div>
+            <div class="event-time">+9s</div>
+          </div>
+
+          <!-- Event 6: TOOL_CALL: SEND_EMAIL -->
+          <div class="event-row">
+            <div class="event-seq">6</div>
+            <div class="event-type-dot dot-tool"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-tool_call">tool_call: send_email</div>
+              <div class="event-content">Preparing email to sarah.chen@acmecorp.com, subject "Following up on our Q2 proposal"</div>
+            </div>
+            <div class="event-time">+18s</div>
+          </div>
+
+          <!-- Event 7: HITL_GATE -->
+          <div class="event-row">
+            <div class="event-seq">7</div>
+            <div class="event-type-dot dot-meta"></div>
+            <div class="event-body">
+              <div class="event-type-label" style="color:var(--amber-700);">hitl_gate: send_email</div>
+              <div class="event-content">Awaiting operator approval before sending. Email queued in review.</div>
+            </div>
+            <div class="event-time">+19s</div>
+          </div>
+
+          <!-- Event 8: DELEGATION (sub-agent producing files) -->
+          <div class="event-row">
+            <div class="event-seq">8</div>
+            <div class="event-type-dot dot-deleg"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-delegation">delegation: crm-enrichment-agent</div>
+              <div class="event-content">Delegating contact enrichment to CRM sub-agent. Sub-run completed; produced enrichment artifacts.</div>
+              <!-- Sub-agent produced files surface here too -->
+              <div class="file-outputs">
+                <span class="file-output-label">📎 From sub-agent</span>
+                <a class="file-chip">
+                  <span class="file-chip-icon icon-csv">CSV</span>
+                  <span class="file-chip-name">acme-contacts-enriched-2026-05-06.csv</span>
+                  <span class="file-chip-arrow">↗</span>
+                </a>
+                <a class="file-chip">
+                  <span class="file-chip-icon icon-json">JSON</span>
+                  <span class="file-chip-name">enrichment-confidence-scores.json</span>
+                  <span class="file-chip-arrow">↗</span>
+                </a>
+              </div>
+            </div>
+            <div class="event-time">+28s</div>
+          </div>
+
+          <div style="text-align:center;color:var(--slate-400);font-size:12px;padding:14px;">
+            Events 9 through 46 (38 additional events) ...
+          </div>
+
+          <!-- Event 47: LLM_CALL streaming -->
+          <div class="event-row">
+            <div class="event-seq">47</div>
+            <div class="event-type-dot dot-llm"></div>
+            <div class="event-body">
+              <div class="event-type-label etype-llm_call">llm_call</div>
+              <div class="event-content" style="color:var(--slate-400);">Streaming...</div>
+            </div>
+            <div class="event-time">+5m 32s</div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- RIGHT: Event detail (existing panel, unchanged) -->
+      <aside class="col col-right">
+        <div class="detail-section">
+          <div class="detail-eyebrow">Event #4 of 47, tool_result</div>
+          <div class="detail-title">search_crm result</div>
+          <div class="detail-sub">+6s into run, 5 hours ago</div>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-label">Tool</div>
+          <div class="detail-value">search_crm (HubSpot)</div>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-label">Latency</div>
+          <div class="detail-value">2,140 ms</div>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-label">Result preview</div>
+          <div class="detail-preview">{
+  "contact": {
+    "name": "Sarah Chen",
+    "title": "VP Operations",
+    "email": "sarah.chen@acmecorp.com",
+    "last_contacted": "2026-04-28"
+  }
+}</div>
+        </div>
+
+        <div class="detail-section" style="background:var(--indigo-50);border-bottom:none;">
+          <div class="detail-label" style="color:var(--indigo-700);">📎 Produced file</div>
+          <div style="margin-top:6px;">
+            <a class="file-chip" style="border-color:var(--indigo-300);">
+              <span class="file-chip-icon icon-json">JSON</span>
+              <span class="file-chip-name">sarah-chen-contact-snapshot.json</span>
+              <span class="file-chip-arrow">↗</span>
+            </a>
+          </div>
+          <div style="font-size:11px;color:var(--slate-600);margin-top:8px;line-height:1.4;">
+            Click to open in Knowledge: Files. From there you can pin, promote to Knowledge, or download.
           </div>
         </div>
+      </aside>
 
-        <!-- Step 3 -->
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-body">
-            <div class="step-title">Score contacts against ICP and segment</div>
-            <div class="step-meta">
-              <span class="step-tool">llm_classify</span>
-              <span>412 evaluated, 47 flagged for outreach</span>
-              <span>12.3s</span>
-            </div>
-            <div class="step-summary">
-              <strong>47 contacts</strong> matched the high-confidence outreach criteria. <strong>365 dropped</strong> for: stale title (89), wrong persona (143), recently engaged (87), explicit do-not-contact (46).
-            </div>
-            <!-- File chip output -->
-            <div class="step-outputs">
-              <span class="output-label">Produced:</span>
-              <a class="file-chip">
-                <span class="file-chip-icon icon-json">JSON</span>
-                <span class="file-chip-name">contacts-scored-with-reasons.json</span>
-                <span class="file-chip-arrow">↗</span>
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <!-- Step 4 -->
-        <div class="step">
-          <div class="step-num">4</div>
-          <div class="step-body">
-            <div class="step-title">Detect role changes and stale data</div>
-            <div class="step-meta">
-              <span class="step-tool">llm_reason</span>
-              <span>2 anomalies surfaced</span>
-              <span>3.1s</span>
-            </div>
-            <div class="step-summary">
-              Detected <strong>Acme Corp's VP of Operations changed roles 3 weeks ago</strong>. Flagged for memory update. Detected <strong>2 contacts with stale phone numbers</strong>; flagged for CRM cleanup.
-            </div>
-          </div>
-        </div>
-
-        <!-- Step 5 -->
-        <div class="step">
-          <div class="step-num">5</div>
-          <div class="step-body">
-            <div class="step-title">Draft personalized outreach emails</div>
-            <div class="step-meta">
-              <span class="step-tool">llm_compose</span>
-              <span>47 emails drafted</span>
-              <span>54.2s</span>
-            </div>
-            <div class="step-summary">
-              Composed 47 outreach emails using the Synthetos brand voice. <strong>12 high-stakes drafts</strong> (revenue >$500k contacts) routed to HITL approval queue. <strong>35 lower-stakes drafts</strong> queued for autonomous send.
-            </div>
-            <!-- File chip output -->
-            <div class="step-outputs">
-              <span class="output-label">Produced:</span>
-              <a class="file-chip">
-                <span class="file-chip-icon icon-md">MD</span>
-                <span class="file-chip-name">outreach-drafts-batch-1283.md</span>
-                <span class="file-chip-arrow">↗</span>
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <!-- Step 6 (truncated) -->
-        <div class="step">
-          <div class="step-num">6</div>
-          <div class="step-body">
-            <div class="step-title">Submit drafts to approval queue and Gmail outbox</div>
-            <div class="step-meta">
-              <span class="step-tool">approval_submit</span>
-              <span class="step-tool">gmail_queue</span>
-              <span>0.8s</span>
-            </div>
-            <div class="step-summary">
-              12 drafts submitted to HITL approval channel <strong>#sales-outreach-review</strong>. 35 drafts queued for staggered send over the next 4 hours per anti-spam policy.
-            </div>
-          </div>
-        </div>
-
-        <!-- Truncated rows -->
-        <div class="step" style="text-align:center;color:var(--slate-400);font-size:12px;">
-          <div></div>
-          <div>+ 8 more steps. <a style="color:var(--indigo-600);font-weight:600;cursor:pointer;">Expand all</a></div>
-        </div>
-
-      </div>
     </div>
   </main>
 </div>

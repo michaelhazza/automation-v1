@@ -57,24 +57,27 @@
   <div class="card-grid">
 
     <div class="card">
-      <div class="card-num">MOCKUP 1</div>
+      <div class="card-num">MOCKUP 1 (revised)</div>
       <a href="home-active-agents.html" class="card-title-link">Home: Active Agents widget enhancement</a>
       <div class="card-file">home-active-agents.html</div>
       <div class="card-desc">
-        Replaces the current single-number Active Agents tile with a live status list per running agent
-        (current focus in plain language, elapsed time, pulsing dot) plus scheduled-next agents below.
-        Workspace-level presence surface.
+        Faithful copy of the existing Home prototype layout (Inbox preview, Runs chart with timeframe pills,
+        Spend, Recent activity, Quick actions). The only widget changing is the Active Agents widget,
+        highlighted in indigo with a "NEW" badge. Today it ships as a single number tile; this expands
+        it into a per-agent live status list per the consolidation prototype that was specced but not built.
       </div>
     </div>
 
     <div class="card">
-      <div class="card-num">MOCKUP 2</div>
+      <div class="card-num">MOCKUP 2 (revised)</div>
       <a href="agent-overview-active.html" class="card-title-link">Agent Overview: active state</a>
       <div class="card-file">agent-overview-active.html</div>
       <div class="card-desc">
-        New default landing tab on Agent edit. Agent is currently working. Hero shows status pill, current focus,
-        elapsed time. Recent observations, recent activity feed, files snapshot, knowledge in use, schedule peek,
-        connections health, performance. The centerpiece of the brief.
+        New default landing tab on Agent edit. <strong>There is no current Overview tab</strong>;
+        today the page lands on Configure. This mockup adds Overview as the leftmost tab. Now includes a
+        Working Time chart with timeframe pills (Today / This week / This month / This quarter), plus the
+        presence hero, recent observations, recent activity, files / memory / schedule / connections snapshots,
+        and performance.
       </div>
     </div>
 
@@ -100,12 +103,15 @@
     </div>
 
     <div class="card">
-      <div class="card-num">MOCKUP 5</div>
+      <div class="card-num">MOCKUP 5 (rebuilt)</div>
       <a href="run-trace-lineage.html" class="card-title-link">Run trace: inline file lineage</a>
       <div class="card-file">run-trace-lineage.html</div>
       <div class="card-desc">
-        Existing Run trace surface gets file chips inline on each step that produced a file. Click the chip
-        to deep-link into the file in Knowledge: Files (Phase 1 surface). Small visual change, big workflow win.
+        Now uses the existing Run trace 3-column structure (run chain on left, event list in middle,
+        event detail panel on right) faithfully matching <code>prototypes/consolidation-2026-05-06/run-trace.html</code>.
+        <strong>Complementary, not a replacement.</strong> The only addition is a "📎 Output" chip row that
+        appears inline beneath any event that produced a file. Coexists with the verification work landing on
+        the other branch (Pass/Fail markers, Correct this output button, etc).
       </div>
     </div>
 

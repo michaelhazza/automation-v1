@@ -98,7 +98,8 @@ If Phase 1 slips, the Agent Overview tab can ship a degraded version (no per-doc
 
 - **Name:** "Overview" (per the existing `frontend-design-principles.md` Recurring UI Patterns guidance, neutral term that doesn't collide with "Workspace" already used in the ViewModeSwitcher).
 - **Position:** Leftmost tab on the per-agent edit page tab strip. Default landing.
-- **Tab strip after change:** Overview, Configure, Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs.
+- **Tab strip today** (per `prototypes/consolidation-2026-05-06/agent-edit.html` and shipped code): Configure (default), Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs. **There is no current Overview tab.** The page today lands on Configure, which is an authoring surface, not a status surface.
+- **Tab strip after change:** Overview (new default), Configure, Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs.
 
 ### What the tab shows
 
@@ -109,7 +110,8 @@ Two surfaces composed onto one page:
 - Files snapshot, recent files this agent produced or used, with a link to Knowledge → Files filtered by this agent.
 - Schedule peek, when the agent runs next, what triggers it.
 - Connections health, at-a-glance status of the credentials this agent depends on.
-- Performance, small stat block (runs in last 30 days, success rate, last error if any).
+- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter), matching the visual pattern of the Home page Runs widget. Shows when the agent has been working, with success/failure colouring on bars. Compact stat row underneath: runs in period, total working time, success rate, average run duration. Gives the operator a single visual answer to "how busy is this agent and how is it trending?"
+- Performance, small stat block as a compact summary alongside the chart.
 
 **Presence surface** (what the agent is doing or about to do):
 - **Status pill**: *Working*, *Idle*, *Scheduled*, *Failing*. Single source of truth for liveness.
@@ -171,11 +173,13 @@ This is the highest-risk piece in the brief. Container lifecycle is hairy: heart
 
 ## 8. Run trace inline file lineage
 
-Small. The existing Run trace surface shows steps; some steps produce files. Today, those files are not visible inline; you have to navigate to a separate surface.
+Small. The existing Run trace surface (`prototypes/consolidation-2026-05-06/run-trace.html`) is a 3-column layout: run chain on the left, event list in the middle, event detail panel on the right. Each event shows seq, type, content, time. Some events produce files. Today, those files are not visible inline; you have to navigate to a separate surface.
 
-**Change:** when a step produced a file, show it inline with a thin file chip (icon + filename), clickable, that deep-links to the file in Knowledge → Files (Phase 1 surface).
+**Change:** when an event produced a file, show a "📎 Output" chip row inline below the event content. Each chip is a clickable file (icon + filename) that deep-links to the file in Knowledge → Files (Phase 1 surface). Sub-agent events that produced files surface them too (labeled "📎 From sub-agent"). The Event detail panel on the right also surfaces produced files in a dedicated section so they are visible whether you scan or drill in.
 
-**Coordination with verification work:** the verification team is also touching Run trace. Both changes are additive composition (file chips on the left, verification markers on the right, or similar). Whoever lands second adapts to whatever shipped first. No blocking conflict.
+**This is complementary, not a replacement.** The existing run trace structure (run chain, event types, event detail panel, live/historical mode toggle, Trace/Delegation graph tabs) is unchanged. The file lineage is one additional row inside the `event-row`. See Mockup 5 for the visual.
+
+**Coordination with verification work:** the verification team is also touching Run trace (adding Pass/Fail/Pending markers per event, runtime check summary, "Correct this output" action). Both changes are additive composition: file chips appear in the event content area; verification markers appear next to the event type label or in the detail panel. No blocking conflict.
 
 ## 9. Decisions made
 

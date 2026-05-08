@@ -86,6 +86,38 @@
     display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px;
   }
 
+  /* Working-time chart */
+  .chart-card {
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    margin-bottom: 14px;
+  }
+  .chart-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .chart-title { font-size: 13px; font-weight: 700; color: var(--slate-900); }
+  .tf-pills { display: flex; gap: 4px; }
+  .tf-pill {
+    padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600); background: white; cursor: pointer;
+  }
+  .tf-pill.active { background: var(--slate-900); color: white; border-color: var(--slate-900); }
+  .chart-area {
+    padding: 14px 18px; height: 140px; display: flex; align-items: flex-end; gap: 3px;
+  }
+  .chart-bar { flex: 1; background: var(--indigo-200); border-radius: 2px 2px 0 0; min-height: 4px; transition: background 0.15s; }
+  .chart-bar:hover { background: var(--indigo-400); }
+  .chart-bar.now { background: var(--indigo-500); }
+  .chart-bar.failed { background: var(--red-300); }
+  .chart-meta {
+    padding: 0 18px 12px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 14px; font-size: 11.5px; color: var(--slate-500);
+  }
+  .chart-stat { display: flex; flex-direction: column; gap: 2px; }
+  .chart-stat-value { font-size: 16px; font-weight: 700; color: var(--slate-900); font-variant-numeric: tabular-nums; }
+  .chart-stat-label { font-size: 10.5px; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .chart-axis { padding: 0 18px 8px; display: flex; justify-content: space-between; font-size: 10px; color: var(--slate-400); }
+
   /* Card */
   .card {
     background: white; border: 1px solid var(--slate-200); border-radius: 10px;
@@ -258,6 +290,64 @@
           <span class="presence-meta-item">Run started <strong>2 minutes ago</strong></span>
           <span class="presence-meta-item">Triggered by <strong>weekly heartbeat</strong></span>
           <span class="presence-link">View live trace →</span>
+        </div>
+      </div>
+
+      <!-- Working-time / activity chart with timeframe pills -->
+      <div class="chart-card">
+        <div class="chart-head">
+          <span class="chart-title">Working time</span>
+          <div class="tf-pills">
+            <button class="tf-pill active">Today</button>
+            <button class="tf-pill">This week</button>
+            <button class="tf-pill">This month</button>
+            <button class="tf-pill">This quarter</button>
+          </div>
+        </div>
+        <div class="chart-area">
+          <div class="chart-bar" style="height:25%;"></div>
+          <div class="chart-bar" style="height:32%;"></div>
+          <div class="chart-bar" style="height:45%;"></div>
+          <div class="chart-bar" style="height:60%;"></div>
+          <div class="chart-bar" style="height:38%;"></div>
+          <div class="chart-bar" style="height:50%;"></div>
+          <div class="chart-bar" style="height:42%;"></div>
+          <div class="chart-bar" style="height:67%;"></div>
+          <div class="chart-bar failed" style="height:18%;"></div>
+          <div class="chart-bar" style="height:78%;"></div>
+          <div class="chart-bar" style="height:85%;"></div>
+          <div class="chart-bar" style="height:71%;"></div>
+          <div class="chart-bar" style="height:64%;"></div>
+          <div class="chart-bar now" style="height:55%;"></div>
+          <div class="chart-bar" style="height:8%;background:var(--slate-200);"></div>
+          <div class="chart-bar" style="height:8%;background:var(--slate-200);"></div>
+          <div class="chart-bar" style="height:8%;background:var(--slate-200);"></div>
+          <div class="chart-bar" style="height:8%;background:var(--slate-200);"></div>
+        </div>
+        <div class="chart-axis">
+          <span>12am</span>
+          <span>6am</span>
+          <span>12pm</span>
+          <span>6pm</span>
+          <span>now</span>
+        </div>
+        <div class="chart-meta">
+          <div class="chart-stat">
+            <span class="chart-stat-label">Runs today</span>
+            <span class="chart-stat-value">14</span>
+          </div>
+          <div class="chart-stat">
+            <span class="chart-stat-label">Working time</span>
+            <span class="chart-stat-value">48m</span>
+          </div>
+          <div class="chart-stat">
+            <span class="chart-stat-label">Success rate</span>
+            <span class="chart-stat-value">93%</span>
+          </div>
+          <div class="chart-stat">
+            <span class="chart-stat-label">Avg run</span>
+            <span class="chart-stat-value">2m 18s</span>
+          </div>
         </div>
       </div>
 
