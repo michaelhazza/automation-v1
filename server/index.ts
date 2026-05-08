@@ -59,6 +59,7 @@ import systemAgentsRouter from './routes/systemAgents.js';
 import systemSkillsRouter from './routes/systemSkills.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
+import agentOverviewRouter from './routes/agentOverview.js';
 import memoryBlocksRouter from './routes/memoryBlocks.js';
 import workspaceMemoryRouter from './routes/workspaceMemory.js';
 import knowledgeRouter from './routes/knowledge.js';
@@ -332,6 +333,7 @@ app.use(systemAgentsRouter);
 app.use(systemSkillsRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
+app.use(agentOverviewRouter);
 app.use(memoryBlocksRouter);
 app.use(workspaceMemoryRouter);
 app.use(deliveryChannelsRouter);
@@ -742,6 +744,10 @@ async function start() {
   } catch (err) {
     console.warn('[boot] system-agent registry drift check could not run:', err);
   }
+
+  // Agent Workspace — files-snapshot cache invalidation subscribers (Chunk 5)
+  const { subscribeFilesSnapshotInvalidators } = await import('./services/agentOverviewAggregator.js');
+  subscribeFilesSnapshotInvalidators();
 
   initWebSocket(httpServer);
 
