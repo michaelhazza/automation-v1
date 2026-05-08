@@ -1433,6 +1433,32 @@ export const queueService = {
         }
       });
 
+      // Trust & Verification Layer — bench execute worker (spec §12.4)
+      await (boss as any).work('bench:execute', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { benchExecuteJobHandler } = await import('../jobs/benchExecuteJob.js');
+          await withTimeout(benchExecuteJobHandler(job).then(() => undefined), 300_000); // 5 min
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'bench:execute', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — bench regression replay worker (spec §12.4)
+      await (boss as any).work('bench:regression-replay', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { benchRegressionReplayJobHandler } = await import('../jobs/benchRegressionReplayJob.js');
+          await withTimeout(benchRegressionReplayJobHandler(job).then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'bench:regression-replay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

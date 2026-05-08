@@ -6,11 +6,24 @@ import { agents } from './agents';
 // ---------------------------------------------------------------------------
 // Bench Runs + Bench Results — operator-triggered model comparison.
 // Trust & Verification Layer spec §6.6, §7, §12.2 (migration 0293).
+// Migration 0296 adds: approved_model_id, summary, 'partial' state.
+// Migration 0297 adds: 'awaiting_confirm' and 'awaiting_approval' states.
 //
-// bench_runs: the job record (state machine: pending → running → completed/failed).
+// State machine:
+//   awaiting_confirm → running → awaiting_approval → completed
+//                             → partial (some samples failed)
+//                             → failed  (catastrophic)
+//   any non-terminal → cancelled
+//
+// bench_runs: the job record (state machine above).
 // bench_results: per-candidate per-sample outcome rows.
 // Both tables are tenant-isolated via canonical org-isolation RLS policy.
 // ---------------------------------------------------------------------------
+
+export interface BenchSummary {
+  recommendedModelId: string | null;
+  reason: string;
+}
 
 export const benchRuns = pgTable(
   'bench_runs',
@@ -22,12 +35,14 @@ export const benchRuns = pgTable(
     targetSkillSlug: text('target_skill_slug'),
     state: text('state')
       .notNull()
-      .default('pending')
-      .$type<'pending' | 'running' | 'completed' | 'failed' | 'cancelled'>(),
+      .default('awaiting_confirm')
+      .$type<'pending' | 'awaiting_confirm' | 'running' | 'awaiting_approval' | 'completed' | 'partial' | 'failed' | 'cancelled'>(),
     candidateModelIds: jsonb('candidate_model_ids').notNull().default([]).$type<string[]>(),
     sampleCount: integer('sample_count').notNull().default(10),
     estimatedCostCents: integer('estimated_cost_cents'),
     actualCostCents: integer('actual_cost_cents'),
+    approvedModelId: text('approved_model_id'),  // 0296: set during F5 approve
+    summary: jsonb('summary').$type<BenchSummary>(),  // 0296: written by benchExecuteJob
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     failureReason: text('failure_reason'),
