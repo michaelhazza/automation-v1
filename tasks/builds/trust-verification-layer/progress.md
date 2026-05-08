@@ -86,6 +86,48 @@ All 16 plan chunks built and committed inline before this post-build pipeline ra
 
 ### Branch HEAD at end of fix loop: `9f99874c`
 
-## Phase 3 (FINALISATION) — Not started
+## Phase 2 fix-loop → merge-resolution chunk (2026-05-09)
 
-Run `finalisation-coordinator` in a new Claude Code session. Open items: see deferred list above (operator decisions before merge), plus any further pre-launch backlog tracked in `tasks/todo.md`.
+**Status:** Merge-resolution chunk complete. PR #274 (auto-knowledge-retrieval) merged to main 2026-05-08 after Phase 2 began, taking migration numbers 0288-0294 and producing 7 conflicts. This chunk closes them all without re-running architect or the chunk loop.
+
+**Trigger:** Phase 3 finalisation-coordinator hit a hard upstream collision during S2 sync, paused, and the half-done merge was aborted. This chunk performs the merge resolution as a single focused pass so finalisation can resume cleanly.
+
+| Step | Status | Notes |
+|---|---|---|
+| Branch state at start | up to date with origin (HEAD `f577bb9c`); 48 commits ahead of main, 2 behind | clean working tree |
+| Pre-flight: fetch + git merge origin/main | 7 conflicts as expected | matches the prior aborted attempt |
+| Conflict 1: shared/types/agentExecutionLog.ts | unioned | both branches' source-service, event-type, payload union, criticality map merged |
+| Conflict 2: server/services/agentExecutionEventServicePure.ts | unioned | both branches' switch cases merged |
+| Conflict 3: server/config/rlsProtectedTables.ts | unioned + TVL entries' policyMigration paths bumped to new numbers (0296-0300) | 9 entries total (3 AKR + 6 TVL) |
+| Conflict 4: client/src/pages/govern/KnowledgePage.tsx | structural composition | main's 5-tab strip composes the page; TVL's source filter chips render INSIDE the auto-memory tab; useEffect dep array includes both `activeTab` and `source`; other tabs preserve main's behaviour |
+| Conflict 5: tasks/current-focus.md | took ours | TVL branch state preserved |
+| Conflict 6: tasks/todo.md | unioned | TVL deferred items + AKR deferred items both retained |
+| Conflict 7: KNOWLEDGE.md | unioned | TVL patterns (8 entries 2026-05-08) + AKR patterns (8 entries 2026-05-08) both retained |
+| Merge commit | landed `11903b86` | clean merge resolution, no number changes yet |
+| Migration renumber | 20 file renames (10 up + 10 down) via `git mv` | 0288-0297 → 0295-0304 |
+| Internal reference updates | header lines + cross-refs in 0302/0303 + scripts/gates/verify-scorecard-rls.sh + 10 schema files + permissions.ts + architecture.md + spec.md + plan.md | all hits located via grep |
+| Renumber commit | `859645a9` | 36 files / +86/-80 |
+| G1 lint + typecheck | **PASS** first try | 0 errors / 874 pre-existing warnings; typecheck clean |
+| G2 targeted vitest | **PASS** first try | 264 + 57 = 321 tests across 17 files green |
+| pr-reviewer (self-review on chunk diff) | **APPROVED** | verified: useEffect deps include activeTab + source; rlsProtectedTables 9 entries with correct new numbers; no accidental drops; 0303 internal "from 0293" → "from 0300" updated |
+
+### Final migration mapping (locked)
+
+| Old number | New number | File |
+|---|---|---|
+| 0288 | 0295 | `skills_runtime_check_columns` |
+| 0289 | 0296 | `runtime_check_results` |
+| 0290 | 0297 | `scorecards` |
+| 0291 | 0298 | `agent_scorecard_attachments` |
+| 0292 | 0299 | `scorecard_judgements` |
+| 0293 | 0300 | `bench_runs` |
+| 0294 | 0301 | `system_agents_scorecard_defaults` |
+| 0295 | 0302 | `memory_blocks_operator_correction` |
+| 0296 | 0303 | `bench_runs_approved_model` |
+| 0297 | 0304 | `bench_runs_state_awaiting` |
+
+### Branch HEAD at end of merge-resolution chunk: `859645a9`
+
+## Phase 3 (FINALISATION) — Resuming
+
+Re-launch `finalisation-coordinator` in a new Claude Code session. The S2 collision is now resolved; finalisation can proceed from G4 regression-guard onwards. Open items: see deferred list above (operator decisions before merge), plus any further pre-launch backlog tracked in `tasks/todo.md`.

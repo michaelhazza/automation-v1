@@ -146,3 +146,53 @@ Filed in `tasks/todo.md`. **Update 2026-05-08 (post Phase 2 fix-loop): four orig
 **Branch HEAD at handoff:** `9f99874c` (post fix-loop + Codex dual-reviewer P1/P2 commits). Branch is 47 commits ahead of `origin/main`.
 
 **Recommended next action:** open a new Claude Code session and type `launch finalisation` to begin Phase 3. The four originally-flagged items are now closed; the remaining 11 directional gaps + 2 ambiguous items are operator-deferred and can ship to merge with a documented decision in the Phase 3 handoff (or be deferred further to a Stage 2 GA polish PR).
+
+---
+
+## Phase 2 fix-loop → merge-resolution chunk (2026-05-09)
+
+PR #274 (auto-knowledge-retrieval) merged to `main` 2026-05-08 after TVL Phase 2 began, taking migration numbers 0288-0294 and producing 7 conflicts at the S2 sync step of finalisation. Phase 3 finalisation-coordinator hit the collision and paused; the half-done merge was aborted by the main session. A focused merge-resolution chunk (this one) was run inline to close the collision so finalisation can resume.
+
+**Outcome:** clean merge with `origin/main` plus a TVL migration renumber. Branch is now ready for Phase 3 to resume.
+
+**Migration range now locked at 0295-0304** (was 0288-0297 before merge):
+
+- 0295 `skills_runtime_check_columns` (was 0288)
+- 0296 `runtime_check_results` (was 0289)
+- 0297 `scorecards` (was 0290)
+- 0298 `agent_scorecard_attachments` (was 0291)
+- 0299 `scorecard_judgements` (was 0292)
+- 0300 `bench_runs` (was 0293)
+- 0301 `system_agents_scorecard_defaults` (was 0294)
+- 0302 `memory_blocks_operator_correction` (was 0295)
+- 0303 `bench_runs_approved_model` (was 0296)
+- 0304 `bench_runs_state_awaiting` (was 0297)
+
+**Conflict resolutions (7 conflicts, all closed):**
+
+- `shared/types/agentExecutionLog.ts` — unioned source-service, event-type, payload, criticality map.
+- `server/services/agentExecutionEventServicePure.ts` — unioned switch cases.
+- `server/config/rlsProtectedTables.ts` — unioned (3 AKR + 6 TVL = 9 entries); TVL `policyMigration` paths updated to new numbers.
+- `client/src/pages/govern/KnowledgePage.tsx` — structural composition: main's 5-tab strip composes the page; TVL source-filter chips render inside the Auto-memory tab; useEffect deps include both `activeTab` and `source`.
+- `tasks/current-focus.md` — took ours.
+- `tasks/todo.md` — unioned (TVL deferred items + AKR deferred items both retained).
+- `KNOWLEDGE.md` — unioned (TVL + AKR 2026-05-08 patterns both retained).
+
+**Internal reference updates** (renumber commit): 20 file renames + 36 file edits across schema files, permissions.ts, architecture.md, spec.md, plan.md, scripts/gates/verify-scorecard-rls.sh, and the rlsProtectedTables manifest.
+
+**Gates after merge-resolution chunk:**
+
+- G1 lint + typecheck: PASS first try (0 errors, 874 pre-existing warnings; typecheck clean).
+- G2 targeted vitest: PASS first try (321 tests across 17 files green).
+- pr-reviewer (self-review on chunk diff): APPROVED — no findings.
+
+**Commits added to branch:**
+
+- `11903b86` — `merge: resolve PR #274 (auto-knowledge-retrieval) into trust-verification-layer`.
+- `859645a9` — `rename: TVL migrations 0288-0297 → 0295-0304 + update internal refs`.
+
+**Branch HEAD at end of merge-resolution chunk:** `859645a9`. Branch is now ahead of `origin/main` by ~50 commits (including the merge); 0 behind.
+
+**phase_status preserved at PHASE_2_COMPLETE.** current-focus.md status remains `REVIEWING` per the chunk's stated invariant. Finalisation-coordinator will move it to `MERGE_READY` after Phase 3 completes.
+
+**Recommended next action:** re-launch `finalisation-coordinator` in a new Claude Code session — type `launch finalisation`. The S2 collision is now resolved; finalisation can resume from G4 regression-guard onwards.
