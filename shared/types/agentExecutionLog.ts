@@ -22,7 +22,8 @@ export type AgentExecutionSourceService =
   | 'llmRouter'
   | 'runContextLoader'
   | 'orchestratorFromTaskJob'
-  | 'requestClarification';
+  | 'requestClarification'
+  | 'correctionCaptureService';
 
 // ---------------------------------------------------------------------------
 // Linked-entity taxonomy
@@ -85,7 +86,8 @@ export type AgentExecutionEventType =
   | 'tool.error'
   | 'run.terminal.summary_missing'
   | 'run.terminal.extracted_with_errorMessage'
-  | 'runtime_check.completed';
+  | 'runtime_check.completed'
+  | 'correction.captured';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -271,6 +273,16 @@ export type AgentExecutionEventPayload =
       blastRadius: RuntimeCheckBlastRadius;
       reversible: boolean;
       suggestedFix: string | null;
+    }
+  | {
+      /** Trust & Verification Layer §13: operator correction captured to memory. */
+      eventType: 'correction.captured';
+      critical: false;
+      sourceRunId: string;
+      sourceEventId: string;
+      skillSlug: string;
+      memoryBlockId: string;
+      forcedGradeEnqueued: boolean;
     };
 
 // ---------------------------------------------------------------------------
@@ -302,6 +314,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'run.terminal.summary_missing': false,
   'run.terminal.extracted_with_errorMessage': false,
   'runtime_check.completed': false,
+  'correction.captured': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

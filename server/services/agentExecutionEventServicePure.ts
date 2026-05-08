@@ -393,6 +393,16 @@ export function validateEventPayload(
       return { ok: true };
     }
 
+    case 'correction.captured': {
+      if (!isStr(p.sourceRunId) || !isStr(p.sourceEventId) || !isStr(p.skillSlug) || !isStr(p.memoryBlockId)) {
+        return { ok: false, reason: 'correction.captured_missing_fields' };
+      }
+      if (!isBool(p.forcedGradeEnqueued)) {
+        return { ok: false, reason: 'correction.captured_missing_forced_grade_flag' };
+      }
+      return { ok: true };
+    }
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

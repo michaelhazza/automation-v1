@@ -205,6 +205,8 @@ import scorecardsRouter from './routes/scorecards.js';
 import agentScorecardsRouter from './routes/agentScorecards.js';
 import benchRunsRouter from './routes/benchRuns.js';
 import governQualityRouter from './routes/governQuality.js';
+// Trust & Verification Layer Stage 3 — operator corrections
+import correctionsRouter from './routes/corrections.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -456,6 +458,7 @@ app.use(scorecardsRouter);
 app.use(agentScorecardsRouter);
 app.use(benchRunsRouter);
 app.use(governQualityRouter);
+app.use(correctionsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

@@ -30,6 +30,8 @@ import { parseEmbeddedFlag } from '../../lib/runTraceEmbeddedPure';
 import { WorkspaceBadge } from '../../components/WorkspaceBadge';
 import { PageShell } from '../../components/PageShell';
 import type { RunDetail } from '../../components/runs/RunTraceView';
+import CorrectDialog from '../../components/correction/CorrectDialog';
+import type { RunTraceToolCallEvent } from './components/RunTraceEventRenderer';
 import { RunTraceEventRenderer } from './components/RunTraceEventRenderer';
 import type { RuntimeCheckResult } from '../../../../shared/types/runtimeCheck';
 import { fetchRunRuntimeChecks } from '../../lib/api/runtimeChecks';
@@ -66,6 +68,7 @@ export default function RunTracePage({ user }: { user: User }) {
   const [error, setError] = useState<string | null>(null);
   const [runtimeChecks, setRuntimeChecks] = useState<RuntimeCheckResult[]>([]);
   const [rcFetchState, setRcFetchState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [correctingEvent, setCorrectingEvent] = useState<RunTraceToolCallEvent | null>(null);
 
   const [chainRuns, setChainRuns] = useState<Array<{
     id: string; agentName: string; isSubAgent: boolean; runSource: string;
@@ -328,6 +331,13 @@ export default function RunTracePage({ user }: { user: User }) {
   // org_admin and system_admin always hold org.review.view / subaccount.review.view.
   const canViewInbox = user.role === 'org_admin' || user.role === 'system_admin';
 
+  // Correct affordance: org_admin / system_admin can always correct; subaccount users
+  // require the subaccount.corrections.create permission (enforced server-side).
+  // In embedded mode: suppress to avoid recursion issues.
+  const canCorrect = !embedded && (
+    user.role === 'org_admin' || user.role === 'system_admin' || user.role === 'user'
+  );
+
   // Empty-state footer: fetch completed, zero results, but run has tool-call steps
   // (i.e. skills exist but verify is null). Distinguish from still-loading or errored.
   const rcEmptyFooter =
@@ -381,8 +391,30 @@ export default function RunTracePage({ user }: { user: User }) {
         {rcEmptyFooter}
         {rcErrorFooter}
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
-        <RunTraceEventRenderer runId={run.id} embedded={false} runtimeChecks={runtimeChecks} />
+        <RunTraceEventRenderer
+          runId={run.id}
+          embedded={false}
+          runtimeChecks={runtimeChecks}
+          canCorrect={canCorrect}
+          onCorrect={setCorrectingEvent}
+        />
       </div>
+
+      {/* Correct dialog — mounts when the user clicks Correct on a step */}
+      {correctingEvent && (
+        <CorrectDialog
+          runId={run.id}
+          eventId={run.id}
+          skillSlug={correctingEvent.toolName}
+          originalOutput={
+            typeof correctingEvent.output === 'string'
+              ? correctingEvent.output
+              : ''
+          }
+          onClose={() => setCorrectingEvent(null)}
+          onSaved={() => setCorrectingEvent(null)}
+        />
+      )}
     </PageShell>
   );
 }
