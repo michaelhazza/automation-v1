@@ -3881,8 +3881,10 @@ On reconnect: the SSE route calls `replaySinceLastEventId(lastEventId)` to repla
 **No Redis or message bus.** Single-node only in v1. Multi-node fan-out broker is an explicitly deferred concern (see spec §18).
 
 Routes: `server/routes/agentPresenceStream.ts`
-- `GET /api/agent-presence/stream/:agentId` — agent-scope SSE
-- `GET /api/agent-presence/stream/workspace/:subaccountId` — workspace-scope SSE
+- `GET /api/agent-presence/stream/:agentId` — agent-scope SSE; verifies agent ownership (`resolveAgent`) before `res.flushHeaders()`.
+- `GET /api/agent-presence/stream/workspace/:subaccountId` — workspace-scope SSE; verifies subaccount ownership (`resolveSubaccount`) before `res.flushHeaders()`.
+
+**SSE auth:** Both routes use `authenticateSSE` (not the standard `authenticate`). `EventSource` cannot set custom headers, so `authenticateSSE` accepts the JWT via `?token=<jwt>` query param as a fallback; it injects the token into `Authorization: Bearer` before delegating to `authenticate`. The client (`client/src/lib/agentPresenceStream.ts`) appends `?token=` automatically from `localStorage`. Avoid logging `req.url` for SSE routes — the token is in the query string.
 
 Client hook: `client/src/hooks/useAgentPresence.ts` — SSE + snapshot; server-authoritative only; elapsed timer may tick client-side for visual smoothness but is never persisted or sent back.
 

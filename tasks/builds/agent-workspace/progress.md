@@ -76,13 +76,32 @@ Audit found **7 mechanical gaps** across 6 of the 8 surfaces. All fixed. Surface
 | chatgpt-plan-review (manual) — Round 1 | done | Verdict: **APPROVED with tightenings — no structural redesign**. 8 mechanical tightenings auto-applied as Rev 3 (all chunk-level invariant pinning; zero operator-judgement findings). Verbatim review at `tasks/review-logs/chatgpt-plan-review-agent-workspace-2026-05-08T12-40-27Z.md`. |
 | **architect revision (Rev 3)** | **done** | **plan revised in place; Rev 3 block added to Revision history; 8 tightenings applied to Chunks 3, 5, 6, 9, 10, 11; self-consistency pass updated to enumerate the new pinned invariants; spec text remains LOCKED** |
 | **Plan gate** | **done** | **Operator approved Rev 3 on 2026-05-08. No Round 2 review — verdict "diminishing returns, not missing structural rigor." Proceed to per-chunk builder loop on Sonnet.** |
-| Per-chunk loop | pending | starts after plan gate |
-| G2 integrated-state static-check gate | pending | |
-| Branch-level review pass | pending | |
-| Doc-sync gate | pending | |
+| Per-chunk loop | done | 13 of 14 chunks built and committed (Chunk 12 deferred per spec — HARD-BLOCKED on Phase 1 contract lock). See per-chunk table below. |
+| G2 integrated-state static-check gate | done | lint 0 errors, typecheck clean. 1 attempt. |
+| Branch-level review pass | in_progress | spec-conformance: CONFORMANT_AFTER_FIXES (1 mech fix, 6 directional gaps deferred AGW-DEF-1..6, log `tasks/review-logs/spec-conformance-log-agent-workspace-2026-05-08T22-10-41Z.md`, commits `7ee4f417` + `06da5000`). adversarial-reviewer: HOLES_FOUND (1 confirmed-hole AGW-ADV-1 cross-tenant SSE leak; 2 likely-holes AGW-ADV-2 working-time split-brain, AGW-ADV-3 unbounded pagination; log `tasks/review-logs/adversarial-review-log-agent-workspace-2026-05-08T22-28-13Z.md`). pr-reviewer next. |
+| Doc-sync gate | pending | Verdicts already recorded in this file under `## Chunk 14 doc-sync verdicts` — verify completeness. |
 | Handoff write (Phase 2 section) | pending | |
 | current-focus.md → REVIEWING | pending | |
 | End-of-phase prompt | pending | |
+
+### Per-chunk loop
+
+| Chunk | Title | Commit | Status |
+|---|---|---|---|
+| 1 | Migration 0295 + Drizzle schemas + RLS manifest | `fbcca141` | done |
+| 2 | Pure helper modules + their unit tests | `fbcca141` | done |
+| 3 | Tenant-aware service layer (presence, observation, working time, session-skeleton) | `fbcca141` | done |
+| 4 | Event emitter extension + observation-emit hook (+ chunk4 quality `ac6e821a`) | `fbcca141` / `ac6e821a` | done |
+| 5 | Migration 0296 + Overview aggregator + Overview routes | `d6df3ef8` | done |
+| 6 | AgentEditPage Overview tab shell + identity card + presence hero + hooks | `be6f3e47` | done |
+| 7 | Overview cards batch A (recent observations, knowledge in use, files snapshot) | `94b821d7` | done |
+| 8 | Overview cards batch B (active goals, tools, connections, schedule, working time chart, activity feed, first-run, hook) | `8570f914` / `a30e29c9` | done |
+| 9 | SSE publisher + presence stream + Home widget (+ Chunk 9 spec compliance `d03de2cd`) | `8069eb04` / `d03de2cd` | done |
+| 10 | IEE session lifecycle + run-engine integration | `44895b39` | done |
+| 11 | Maintenance jobs (orphan cleanup, prune, compact) | `27dcf0f3` | done |
+| 12 | Run trace lineage chips | n/a | **deferred — HARD-BLOCKED on Phase 1 contract lock per spec § Chunk 12** |
+| 13 | Capabilities + positioning rewrite | `5f178264` | done |
+| 14 | Architecture.md doc-sync + KNOWLEDGE.md patterns (+ Chunk 14 review fixes `5e223147`) | `7dfd7985` / `5e223147` | done |
 
 ## ChatGPT-web plan review — Round 1 (2026-05-08)
 
@@ -104,6 +123,27 @@ Verbatim review at `tasks/review-logs/chatgpt-plan-review-agent-workspace-2026-0
 **No findings required directional / operator-judgement decisions.** All 8 were chunk-level invariant pinning (existing intent made self-evident at the contract surface). Spec text remains LOCKED. ChatGPT explicitly called out the Chunk 12 hard-block handling as the correct discipline — left untouched.
 
 Operator option: proceed to plan gate on Rev 3, OR run Round 2 verification pass against the Rev 3 changes (similar pattern to spec review).
+
+## Phase 2 — Branch review fix-loop (2026-05-09)
+
+### Fix-loop pass 1 (commit 2f2a3ed3)
+All 8 pr-reviewer blocking issues (B1–B8) from the prior review (`pr-review-log-agent-workspace-2026-05-08T22-41-57Z.md`) addressed:
+- B1: agent ownership check before SSE stream setup (cross-tenant leak)
+- B2: wire `applyEventToPresence` + `applyWorkingTimeEvent` from `agentExecutionEventService`; `agentPresenceService` calls `fanOut`/`fanOutToWorkspace` after upsert
+- B3: `authenticateSSE` middleware accepting `?token=` query param; client appends from localStorage
+- B4: `RETURNING bucket_date` (was `RETURNING id` — non-existent column)
+- B5: `run.completed` handler in `agentWorkingTimeService` increments run-count columns
+- B6: replaced module-level `stepStartMap` with DB query for matching `step_started` event
+- B7: idempotency key 4-tuple per spec §1110 including normalised body hash
+- B8: `subaccount_id` resolved from run and included in presence projection upsert
+
+### Fix-loop pass 2 (commit 54796eb9)
+Second pr-reviewer pass (`pr-review-log-agent-workspace-2026-05-09T05-18-00Z.md`) found 1 new blocker (NEW-B9) and 1 convention violation (NEW-S7):
+- NEW-B9: gated `fanOut`/`fanOutToWorkspace` on `upsertResult.rowCount === 1` to prevent stale-state events when watermark predicate blocks the write
+- NEW-S7: extracted agent ownership lookup to `server/lib/resolveAgent.ts`; removed direct `db` import from route; also fixed 404 propagation through both SSE route catch blocks
+- NEW-N6 (doc sync): updated `architecture.md` SSE section to document `authenticateSSE` + `?token=` convention
+
+**Phase 2 branch review fix-loop complete.** Ready for Phase 3 (finalisation-coordinator).
 
 ## Phase 3 (FINALISE)
 
