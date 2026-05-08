@@ -3055,3 +3055,19 @@ When a feature lets operators flag documents as "always available" (loaded on ev
 **Pattern:** the primary surface is preventive, in the configuration tab. Soft warning fires at thresholds well below the runtime cliff (`doc_count >= 30` OR `token_cost >= 30000` for v1) and surfaces in the Documents tab as an inline chip. The runtime degradation path still exists as the last-line-of-defence safety net, but operators see the chip first and reconfigure before any run degrades. Constants live in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred to a post-launch amendment once production telemetry exists to inform tuning.
 
 **Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
+
+### [2026-05-09] Correction — chatgpt-pr-review is iterative until operator says done; never auto-close after a single APPROVED round
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #275 (slug: trust-verification-layer) Phase 3 finalisation. Round 1 was auto-closed by finalisation-coordinator with disposition `APPROVED — round-2 not requested` after a single round, without pausing for operator input. Operator pointed out that the agent contract is iterative.
+
+The `chatgpt-pr-review` agent is **operator-driven on cadence** — there is no auto-finalise on a single APPROVED round, even when the round produces no findings. Per `.claude/agents/chatgpt-pr-review.md` line 230 ("Empty findings array AND verdict APPROVED → log and ask the user whether to finalise or run another round") and `.claude/agents/finalisation-coordinator.md` line 237 ("Coordinator pauses inside this sub-agent for the operators full ChatGPT loop. No time cap. Operator drives cadence."), the coordinator MUST pause after every round and wait for the operator to either:
+
+- paste the next ChatGPT response (round N+1), or
+- say `done` (close the loop and proceed to step 6 doc-sync sweep).
+
+**Why:** even when ChatGPT returns APPROVED with no findings, the operator may want to run a second round at a different prompting angle (strategic risks, security framing, ergonomics). Auto-closing after a single round denies that option and silently truncates the review.
+
+**Detection heuristic.** When running finalisation Step 5, the coordinator must surface BOTH options at the end of every round, regardless of disposition: "say `done` to close the loop, or paste another ChatGPT response to run another round." Never write `APPROVED — round-N+1 not requested` as a self-decided verdict — that field is set only when the operator explicitly says done.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Step 5; `.claude/agents/chatgpt-pr-review.md` per-round loop step 9 (round summary). Both files are correct in their text — this entry exists to lock in the discipline against future drift.

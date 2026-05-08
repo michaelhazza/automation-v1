@@ -232,9 +232,16 @@ The sub-agent uses its existing contract:
 - Captures operator's pasted ChatGPT responses
 - Round-by-round triage: technical findings auto-applied, user-facing findings operator-approved
 - After fixes, runs G3 (lint + typecheck)
+- **At the end of every round (regardless of code changes or verdict), regenerates the round-N+1 code-only diff file at `.chatgpt-diffs/pr<N>-round<N+1>-code-diff.diff` so the operator can paste a fresh diff into ChatGPT for the next round.** This MUST happen even when the round produced zero code changes (the diff may be byte-identical to the previous round's, but generating it proves the loop is fresh and gives the operator a single canonical link). See chatgpt-pr-review.md per-round-loop step 9 [MANUAL] block for the exact diff command + exclusion list.
 - Logs every decision to `tasks/review-logs/chatgpt-pr-review-{slug}-{timestamp}.md`
 
-Coordinator pauses inside this sub-agent for the operator's full ChatGPT loop. No time cap. Operator drives cadence.
+**Iterative-loop discipline (locked).** Coordinator pauses inside this sub-agent for the operator's full ChatGPT loop. No time cap. Operator drives cadence. **The default behaviour after every round is identical: emit the round summary + round-N+1 diff link, then WAIT silently for the operator's next paste or explicit `done` signal.** Never:
+
+- Pose an `AskUserQuestion`-style prompt at round end ("run another round?", "what's next?", "ready to finalise?").
+- Infer "round-N+1 not requested" from a single-round APPROVED verdict.
+- Auto-close after any number of rounds without an explicit `done` / `finished` / `we're done` / equivalent signal from the operator.
+
+Finalisation triggers ONLY on explicit operator signal. An inferred answer is not a trigger. See KNOWLEDGE.md `[2026-05-09] Correction — chatgpt-pr-review is iterative until operator says done` for the operator correction that locked this.
 
 When the sub-agent returns, it has done its own KNOWLEDGE.md updates and doc-sync work as part of its existing finalisation. The coordinator's doc-sync sweep in step 6 is the cross-check that confirms `chatgpt-pr-review` covered everything.
 

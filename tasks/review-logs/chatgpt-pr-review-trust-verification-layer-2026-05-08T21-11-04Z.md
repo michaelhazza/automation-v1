@@ -155,13 +155,65 @@ The 5 "Key Risks / Concerns" raised by ChatGPT are out-of-scope strategic concer
 
 `APPROVED — round-2 not requested`. No specific bugs, no regressions, no security holes flagged. All 5 verifications close clean. The 5 forward-looking risks are deferred to the Stage-2-GA / strategic backlog with cross-references where appropriate.
 
+## Round 2 — 2026-05-09T08:55:00Z
+
+Status: CLOSED — disposition `APPROVED — operator drives further-round cadence`.
+
+**Operator correction:** Round 1's "round-2 not requested" disposition was premature. Per chatgpt-pr-review.md line 230 and finalisation-coordinator.md line 237, the agent must pause and let the operator drive cadence — there is no auto-finalise on a single approved round. Round 2 reopened the loop on operator paste-back. Logged in `KNOWLEDGE.md` as a correction so the failure mode does not recur.
+
+### ChatGPT Feedback (raw, operator-pasted)
+
+> A few final observations now that the PR is effectively at merge-ready state.
+>
+> 1. **This is now a platform capability, not a feature.** Trust & Verification is no longer "QA tooling"; it is becoming a governance substrate, an agent reliability framework, an execution certification layer, a future autonomous optimisation loop. Future features will naturally start depending on it. Treat runtime checks / scorecards / bench infrastructure / judgement pipelines / correction capture as foundational primitives from this point forward; that changes the architectural bar for future modifications.
+>
+> 2. **You are entering "meta-system" territory.** This PR introduces systems that evaluate other systems. That creates second-order complexity: evaluation drift, policy drift, benchmark staleness, recursive orchestration, replay determinism, judge consistency, trust calibration. You are now building infrastructure that determines whether infrastructure is trustworthy — a major maturity transition for the platform.
+>
+> 3. **The biggest future scaling bottleneck is likely orchestration state, not inference cost.** Most assume LLM cost becomes the bottleneck. In systems like this, the real scaling pain usually becomes workflow coordination / retries / replay semantics / partial-failure recovery / queue pressure / event consistency / state synchronisation. The number of orchestration surfaces added here is the strongest signal of future complexity growth. Probably the point where a unified execution-state model, standard lifecycle contracts, and platform-wide orchestration primitives become worth formalising.
+>
+> 4. **The "operator correction" pathway is strategically very important.** This may end up being the highest-leverage part of the whole PR. Why: captures human judgement, creates future training signals, enables institutional memory, allows HITL refinement, creates explainability surfaces, becomes future RL / reward data. Do not let operator corrections become "random comments". They want to evolve into structured interventions, typed remediation signals, reusable correction patterns, organisation-level learning assets. If done properly, this becomes one of the most defensible parts of the platform.
+>
+> 5. **You should strongly consider a future "Trust Kernel".** Not now, but eventually. Right now trust logic is distributed across checks / scorecards / corrections / judges / governance / bench systems. Eventually you may want a formalised core layer that owns trust state / verification state / certification state / escalation policy / execution confidence / approval gating / replay guarantees. Think of it like a reliability operating system inside the automation operating system. You are beginning to accumulate enough primitives for that concept to become real.
+>
+> 6. **The review process itself is becoming a competitive advantage.** Spec conformance / adversarial review / Codex dual-review / ChatGPT review / invariant grep gates / RLS verification / migration validation / CI verification / architecture hardening — approaching enterprise-grade engineering governance. Most AI-agent startups are nowhere near this level of operational rigour. That matters because agentic systems are probabilistic by nature; strong governance becomes a moat.
+>
+> 7. **Final recommendation.** Merge it, stabilise it, observe it, avoid immediately stacking another giant governance subsystem on top. You've crossed an architectural threshold with this PR. The next phase should focus on operational learnings / observability / workflow ergonomics / scaling characteristics / governance usability / orchestration normalisation rather than immediately adding another major abstraction layer. One of the more important foundational merges in the repo so far.
+
+**Triage stance.** Round 2 is entirely strategic / framing — zero specific bugs, zero contract violations, zero security findings. Three of the seven items are duplicates or near-duplicates of Round 1 deferrals (Item 3 → CHATGPT-R1-RISK-1 orchestration sprawl; Item 1 / 2 / 6 are observation-only with no actionable change); auto-apply prior decision per agent line 233 (duplicate detection rule). Two items are new strategic deferrals (Item 4 operator-correction taxonomy enrichment; Item 5 future "Trust Kernel" core layer). Item 7 is the explicit `APPROVED + merge` verdict.
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None. Round 2 produced no code changes — strategic / framing observations only.
+
+### Triage table
+
+| # | Item | Type | Decision | Cross-reference |
+|---|---|---|---|---|
+| 1 | Platform capability not feature | Observation | No action | n/a |
+| 2 | Meta-system territory | Observation | No action | n/a |
+| 3 | Orchestration state bottleneck | Risk (duplicate) | Auto-apply prior decision (defer) | `CHATGPT-R1-RISK-1` |
+| 4 | Operator correction → structured interventions, typed remediation signals, reusable patterns | Risk (new) | Defer to Stage-2-GA backlog | `CHATGPT-R2-RISK-1` |
+| 5 | Future "Trust Kernel" core layer | Risk (new) | Defer to Stage-2-GA backlog | `CHATGPT-R2-RISK-2` |
+| 6 | Review process competitive advantage | Observation | No action | n/a |
+| 7 | Final recommendation: merge it, stabilise, observe | Verdict | APPROVED | n/a |
+
+### Deferrals routed (2 new entries)
+
+| Risk | Tag | Routing |
+|---|---|---|
+| Operator-correction taxonomy enrichment (typed remediation signals + reusable patterns + org-level learning) | `CHATGPT-R2-RISK-1` | New entry; cross-references `CHATGPT-R1-RISK-2` (corrections semantic-overload taxonomy ADR) |
+| Future "Trust Kernel" — formalised core layer for trust / verification / certification / escalation / approval / replay state | `CHATGPT-R2-RISK-2` | New entry; long-horizon, only relevant after orchestration sprawl materialises (`CHATGPT-R1-RISK-1`) |
+
+### Verdict
+
+`APPROVED — operator drives further-round cadence`. No specific bugs, no regressions, no security holes flagged. 2 new strategic deferrals routed; 1 duplicate auto-applied; 4 framing observations recorded with no action. Operator decides whether to run another round (paste another ChatGPT response) or close out the chatgpt-pr-review loop.
+
 ## Final Summary
 
-- **Round count:** 1
-- **Disposition:** `APPROVED — round-2 not requested`
-- **Code changes applied this round:** none
-- **Verifications:** 5 / 5 PASS
-- **Deferrals routed:** 4 new (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`) + 1 consolidated (`Risk-4` → existing M1 / TVL-DG-2 / TVL-DG-7)
+- **Round count:** 2 (Round 1 closed `APPROVED — round-2 not requested` (incorrectly auto-decided; corrected); Round 2 closed `APPROVED — operator drives further-round cadence`)
+- **Code changes applied across all rounds:** none (Round 1 verifications passed clean; Round 2 framing-only)
+- **Verifications:** 5 / 5 PASS (Round 1)
+- **Deferrals routed:** 4 from Round 1 (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`) + 1 consolidated (`Risk-4` → existing M1 / TVL-DG-2 / TVL-DG-7) + 2 new from Round 2 (`CHATGPT-R2-RISK-1`, `-2`)
 - **G3 after fixes:** n/a (no code changes)
 
 ### Doc-sync sweep verdicts (per `docs/doc-sync.md` registered docs)
@@ -183,4 +235,5 @@ Investigation procedure ran for each doc per `docs/doc-sync.md`. Branch-diff can
 - **.claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated:** n/a — no framework-level change this round.
 
 ### Decision log
-- 2026-05-09T00:00:00Z — Round 1 closed `APPROVED — round-2 not requested`. All 5 "approve after" verifications PASS with file-read + grep evidence. 4 new deferrals routed (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`); Risk-4 consolidated into existing M1 retention deferral.
+- 2026-05-09T00:00:00Z — Round 1 closed `APPROVED — round-2 not requested` (incorrectly auto-decided; corrected by operator). All 5 "approve after" verifications PASS with file-read + grep evidence. 4 new deferrals routed (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`); Risk-4 consolidated into existing M1 retention deferral.
+- 2026-05-09T08:55:00Z — Round 2 reopened by operator paste-back per the iterative-loop contract. Round 2 entirely strategic / framing — 7 items: 4 observation-only (1, 2, 6, 7), 1 duplicate auto-applied (3 → CHATGPT-R1-RISK-1), 2 new deferrals (CHATGPT-R2-RISK-1 operator-correction taxonomy enrichment; CHATGPT-R2-RISK-2 future Trust Kernel). Verdict `APPROVED — operator drives further-round cadence`. No code changes. Operator decides next-round vs finalise.
