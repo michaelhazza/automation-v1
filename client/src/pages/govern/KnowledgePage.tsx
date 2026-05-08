@@ -1,6 +1,7 @@
 // client/src/pages/govern/KnowledgePage.tsx
 // Govern surface — Knowledge page.
 // Spec: tasks/builds/consolidation-govern/spec.md §4.1, §4.7, §4.8, §4.12, §4.13, §4.14
+//       tasks/builds/auto-knowledge-retrieval/plan.md Chunk 5D
 
 import { useEffect, useMemo, useState } from 'react';
 import { PageShell } from '../../components/PageShell';
@@ -18,6 +19,18 @@ import { getUserRole, getActiveClientId } from '../../lib/auth';
 import type { KnowledgeEntry } from '../../../../shared/types/govern.js';
 import { KnowledgeRow } from './components/KnowledgeRow';
 import { KnowledgeOverrideDialog } from './components/KnowledgeOverrideDialog';
+import { KnowledgeFilesTab } from './components/KnowledgeFilesTab';
+import { KnowledgeDocumentsTab } from './components/KnowledgeDocumentsTab';
+
+type Tab = 'authored-memory' | 'auto-memory' | 'documents' | 'files' | 'bundles';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'authored-memory', label: 'Authored memory' },
+  { id: 'auto-memory', label: 'Auto-memory' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'files', label: 'Files' },
+  { id: 'bundles', label: 'Bundles' },
+];
 
 function canWriteKnowledge(): boolean {
   const role = getUserRole();
@@ -25,6 +38,7 @@ function canWriteKnowledge(): boolean {
 }
 
 export default function KnowledgePage() {
+  const [activeTab, setActiveTab] = useState<Tab>('auto-memory');
   const { viewMode, availableModes, setViewMode } = useViewMode();
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<KnowledgeEntry[] | null>(null);
@@ -38,6 +52,7 @@ export default function KnowledgePage() {
   const hasWritePerm = canWriteKnowledge();
 
   useEffect(() => {
+    if (activeTab !== 'auto-memory') return;
     setRows(null);
     setError(null);
     const isWorkspace = viewMode !== 'org';
@@ -51,7 +66,7 @@ export default function KnowledgePage() {
     listKnowledge({ scope: isWorkspace ? 'workspace' : 'org', subaccountId, q })
       .then((r) => setRows(r.rows))
       .catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
-  }, [viewMode, q, fetchKey]);
+  }, [activeTab, viewMode, q, fetchKey]);
 
   const columns: ColumnDef<KnowledgeEntry>[] = useMemo(() => {
     const baseColumns: ColumnDef<KnowledgeEntry>[] = [
@@ -119,7 +134,26 @@ export default function KnowledgePage() {
     return baseColumns;
   }, [viewMode, hasWritePerm]);
 
-  if (error) {
+  const tabStrip = (
+    <div className="flex border-b border-slate-200">
+      {TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setActiveTab(tab.id)}
+          className={
+            activeTab === tab.id
+              ? 'border-b-2 border-indigo-600 text-indigo-600 font-semibold px-4 py-2.5 text-sm'
+              : 'border-b-2 border-transparent text-slate-500 hover:text-slate-700 px-4 py-2.5 text-sm'
+          }
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (activeTab === 'auto-memory' && error) {
     return (
       <PageShell
         header={
@@ -128,6 +162,7 @@ export default function KnowledgePage() {
           </div>
         }
       >
+        {tabStrip}
         <ErrorState error={error} retry={() => setFetchKey((k) => k + 1)} />
       </PageShell>
     );
@@ -138,7 +173,18 @@ export default function KnowledgePage() {
       header={
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h1 className="text-lg font-semibold text-slate-900">Knowledge</h1>
-          <div className="flex items-center gap-3">
+        </div>
+      }
+    >
+      {tabStrip}
+
+      {activeTab === 'authored-memory' && (
+        <div className="p-6 text-sm text-slate-500">Authored memory tab — coming soon.</div>
+      )}
+
+      {activeTab === 'auto-memory' && (
+        <>
+          <div className="flex items-center justify-end gap-3 px-6 py-3 border-b border-slate-100">
             <ViewModeSwitcher
               value={viewMode}
               onChange={setViewMode}
@@ -150,56 +196,63 @@ export default function KnowledgePage() {
               placeholder="Search entries, agent, run ID..."
             />
           </div>
-        </div>
-      }
-    >
-      {rows === null ? (
-        <div className="text-sm text-slate-500 py-8 px-6">Loading...</div>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="No entries match your filters"
-          body={q ? 'Try a different search term or clear the search.' : 'No knowledge entries found.'}
-          primaryAction={q ? { label: 'Clear search', onClick: () => setQ('') } : undefined}
-        />
-      ) : (
-        <SortableTable
-          rows={rows}
-          columns={columns}
-          rowKey={(r) => r.id}
-          persistKey={`knowledge-${viewMode}`}
-          initialSort={{ key: 'status', dir: 'asc' }}
-        />
+          {rows === null ? (
+            <div className="text-sm text-slate-500 py-8 px-6">Loading...</div>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title="No entries match your filters"
+              body={q ? 'Try a different search term or clear the search.' : 'No knowledge entries found.'}
+              primaryAction={q ? { label: 'Clear search', onClick: () => setQ('') } : undefined}
+            />
+          ) : (
+            <SortableTable
+              rows={rows}
+              columns={columns}
+              rowKey={(r) => r.id}
+              persistKey={`knowledge-${viewMode}`}
+              initialSort={{ key: 'status', dir: 'asc' }}
+            />
+          )}
+
+          {overrideTarget && (
+            <KnowledgeOverrideDialog
+              entry={overrideTarget}
+              onClose={() => setOverrideTarget(null)}
+              onSaved={() => {
+                setOverrideTarget(null);
+                setFetchKey((k) => k + 1);
+              }}
+            />
+          )}
+
+          {rejectTarget && (
+            <ConfirmDialog
+              title="Reject knowledge entry?"
+              message="Reject this knowledge entry? It will be moved to ignored."
+              confirmLabel="Reject"
+              onCancel={() => setRejectTarget(null)}
+              onConfirm={async () => {
+                if (rejectBusy) return;
+                setRejectBusy(true);
+                try {
+                  await rejectKnowledge(rejectTarget.id);
+                  setRejectTarget(null);
+                  setFetchKey((k) => k + 1);
+                } finally {
+                  setRejectBusy(false);
+                }
+              }}
+            />
+          )}
+        </>
       )}
 
-      {overrideTarget && (
-        <KnowledgeOverrideDialog
-          entry={overrideTarget}
-          onClose={() => setOverrideTarget(null)}
-          onSaved={() => {
-            setOverrideTarget(null);
-            setFetchKey((k) => k + 1);
-          }}
-        />
-      )}
+      {activeTab === 'documents' && <KnowledgeDocumentsTab />}
 
-      {rejectTarget && (
-        <ConfirmDialog
-          title="Reject knowledge entry?"
-          message="Reject this knowledge entry? It will be moved to ignored."
-          confirmLabel="Reject"
-          onCancel={() => setRejectTarget(null)}
-          onConfirm={async () => {
-            if (rejectBusy) return;
-            setRejectBusy(true);
-            try {
-              await rejectKnowledge(rejectTarget.id);
-              setRejectTarget(null);
-              setFetchKey((k) => k + 1);
-            } finally {
-              setRejectBusy(false);
-            }
-          }}
-        />
+      {activeTab === 'files' && <KnowledgeFilesTab />}
+
+      {activeTab === 'bundles' && (
+        <div className="p-6 text-sm text-slate-500">Bundles — coming soon.</div>
       )}
     </PageShell>
   );

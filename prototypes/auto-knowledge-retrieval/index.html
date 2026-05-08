@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Auto Knowledge Retrieval: Mockups</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; }
+  body { padding: 40px 48px; max-width: 1100px; margin: 0 auto; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe;
+    border-radius: 5px; padding: 3px 8px; margin-bottom: 12px;
+  }
+  h1 { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .desc { font-size: 14px; color: #64748b; max-width: 720px; line-height: 1.6; margin-bottom: 32px; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .card {
+    background: white; border: 1px solid #e8ecf0; border-radius: 12px; padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all 0.15s; position: relative;
+  }
+  .card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
+  .card-title-link { color: #0f172a; font-size: 15px; font-weight: 700; text-decoration: none; }
+  .card-title-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }
+  .card-num { font-size: 11px; font-weight: 700; color: #94a3b8; margin-bottom: 4px; }
+  .card-file {
+    display: inline-block; font-size: 11px; font-family: monospace; color: #94a3b8;
+    background: #f1f5f9; border-radius: 4px; padding: 2px 7px; margin-top: 8px;
+  }
+  .card-desc { font-size: 12.5px; color: #64748b; line-height: 1.55; margin-top: 8px; }
+
+  a { text-decoration: none; }
+  .info {
+    background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 28px; font-size: 12.5px; color: #78350f; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Phase 1: Auto Knowledge Retrieval</div>
+  <h1>Mockups for review</h1>
+  <p class="desc">
+    Seven mockups demonstrating the new knowledge model: Files alongside Documents on the Knowledge page,
+    a one-click promotion flow from Files to Documents, the refreshed per-agent Data Sources tab with smart
+    loading indicators, the Documents tab with scope and mode visibility, the Document Detail modal,
+    the Bundles sub-tab, and the Bundle Edit modal.
+    Brief: <code>docs/auto-knowledge-retrieval-dev-brief.md</code>.
+  </p>
+
+  <div class="info">
+    <strong>Reading order:</strong> 1 (Files tab on Knowledge) → 2 (Add to Knowledge modal) → 4 (Documents tab) →
+    5 (Document Detail modal, what opens when you click Edit) → 6 (Bundles sub-tab) → 3 (per-agent view of how it all comes together).
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-num">MOCKUP 1</div>
+      <a href="knowledge-files-tab.html" class="card-title-link">Knowledge: Files tab (new)</a>
+      <div class="card-file">knowledge-files-tab.html</div>
+      <div class="card-desc">
+        Knowledge page with the new Files tab alongside Authored memory, Auto-memory, and Documents.
+        Shows agent-produced artifacts with three-dots menu open showing the "Add to Knowledge" action.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 2</div>
+      <a href="add-to-knowledge-modal.html" class="card-title-link">Add to Knowledge modal</a>
+      <div class="card-file">add-to-knowledge-modal.html</div>
+      <div class="card-desc">
+        The promotion flow: file becomes a Document. Title, content preview, scope (defaulted from context),
+        apply-to (defaulted to all agents), advanced expander with Auto / Always available / Reference only.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 3</div>
+      <a href="agent-data-sources.html" class="card-title-link">Agent edit: Data Sources tab</a>
+      <div class="card-file">agent-data-sources.html</div>
+      <div class="card-desc">
+        Per-agent view of all linked documents across all five tiers (org / sub-account / agent / recurring task).
+        No eager/lazy controls. Mode chips (Auto / Always available / Reference only) and a relevance bar
+        showing how often each document is actually loaded.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 4</div>
+      <a href="knowledge-documents-tab.html" class="card-title-link">Knowledge: Documents tab refreshed</a>
+      <div class="card-file">knowledge-documents-tab.html</div>
+      <div class="card-desc">
+        Documents tab with new tier and mode chips, source provenance, and "used by N agents" indicator.
+        Mode is editable inline (matches Agent Data Sources). One row shows the three-dots action menu open
+        with the full set of options.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 5</div>
+      <a href="document-detail-modal.html" class="card-title-link">Document Detail modal</a>
+      <div class="card-file">document-detail-modal.html</div>
+      <div class="card-desc">
+        The full edit surface that opens when you click three-dots → Edit details on any document.
+        Shows title, content, mode picker, scope, available-to controls, source provenance,
+        and a side panel with linked agents and usage signal.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 6</div>
+      <a href="knowledge-bundles-tab.html" class="card-title-link">Knowledge: Bundles sub-tab</a>
+      <div class="card-file">knowledge-bundles-tab.html</div>
+      <div class="card-desc">
+        Bundles in the new model. One bundle's three-dots menu is open showing the actions
+        (Open / Edit / Edit documents / Promote / Apply / Duplicate / Delete). One bundle is shown
+        expanded with its mini documents table.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 7</div>
+      <a href="bundle-edit-modal.html" class="card-title-link">Bundle Edit modal</a>
+      <div class="card-file">bundle-edit-modal.html</div>
+      <div class="card-desc">
+        The full edit surface for a bundle. Name, description, scope (org-admin only), and the
+        documents list with add/remove. Mode chips are shown read-only inside the bundle.
+        Per-document mode is set on the document itself, not on the bundle.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -95,6 +95,10 @@ router.post('/api/agents/:id/data-sources/upload', authenticate, requireOrgPermi
 }));
 
 router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateBody(createDataSourceBody, 'warn'), asyncHandler(async (req, res) => {
+  if (req.body?.loadingMode !== undefined) {
+    res.status(400).json({ errorCode: 'LOADING_MODE_DEPRECATED', message: 'Use /api/reference-documents/:id/mode instead' });
+    return;
+  }
   const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, connectionId } = req.body;
   if (!name || !sourceType) {
     res.status(400).json({ error: 'Validation failed', details: 'name and sourceType are required' });

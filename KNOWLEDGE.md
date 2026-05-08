@@ -2873,3 +2873,108 @@ When a parallel branch lands a UI consolidation that deletes pages, the feature 
 - the new page component, registered under the new canonical route — for the canonical destination itself
 
 Always cross-check against the consolidating branch's App.tsx (`git show origin/main:client/src/App.tsx`) for the canonical mapping; do not invent route names. After the rewrite, also remove any duplicate redirect elsewhere in the file (e.g. an old `<Route path="/agents" element={<Navigate to="/" />} />` that conflicts with the new canonical `<Route path="/agents" element={<AgentsListPage />} />`).
+
+### [2026-05-08] Pattern — Workers that opt out of `createWorker` auto-org-tx must wrap FORCE-RLS reads in a short org-scoped tx before any external I/O
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); dual-reviewer iter 1 (3 P1 fixes in `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`).
+
+When a pg-boss handler is built with `createWorker({ resolveOrgContext: () => null, ... })` (because the spec mandates the embedding API call run OUTSIDE any DB tx, e.g. spec §1.5 #9 in auto-knowledge-retrieval), it explicitly opts OUT of the auto-org-tx wrapper. Any `db.select(...)` against a FORCE-RLS table that the worker issues at module-top scope will then run with no `app.organisation_id` GUC — and FORCE-RLS policies that require `current_setting('app.organisation_id', true) <> ''` return **zero rows silently**. The worker then short-circuits with a `version_not_found` warn or similar, and the job is dead in the water for that document forever.
+
+**Pattern:** for workers that opt out of auto-org-tx, every FORCE-RLS read MUST be inside a short org-scoped read tx that explicitly sets the GUC, BEFORE the I/O the spec wants to keep tx-free:
+
+```ts
+const { row } = await db.transaction(async (tx) => {
+  await tx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
+  const [row] = await tx.select(...).from(forceRlsTable).where(...);
+  return { row };
+});
+// embedding API call / external I/O happens HERE, outside any tx.
+```
+
+Combine multiple back-to-back FORCE-RLS reads into one tx where possible — they share the same GUC scope and a single tx is cheaper than multiple short ones. Spec invariants like "embedding API call runs outside any DB tx" are PRESERVED because the read tx ends before the I/O starts.
+
+**Detection heuristic.** Grep the worker for `db.select(` / `db.transaction(` and confirm: (a) the file contains `resolveOrgContext: () => null`, AND (b) every read against a FORCE-RLS table is inside a tx that issues `set_config('app.organisation_id', ...)` as the first statement. If a worker has (a) but a read fails (b), it is the bug. The adversarial-reviewer's "Additional observations" section may flag this without routing it as a tracked finding — promote to a fix anyway.
+
+This is a stricter form of the existing 2026-05-04 (cleanup jobs need `withAdminConnection`) and 2026-05-05 (`db.transaction()` must set the GUC) patterns. The new wrinkle: workers can legitimately opt out of `withOrgTx` (because the spec mandates I/O outside tx), but that opt-out CANNOT extend to reads against FORCE-RLS tables — those still need their own short-lived org-scoped tx.
+
+### [2026-05-08] Pattern — Embedding inputs must NEVER be silently truncated — log when they are
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); pr-reviewer Strong-1 (8192 magic-number truncation in `documentEmbeddingService.embedChunks`).
+
+Embedding services frequently apply a per-call byte cap to avoid provider 4xx errors (OpenAI text-embedding-3 at 8192 tokens, ~32k chars worst case, but the input cap can be set lower for cost). When the chunker produces semantically-coherent chunks but a non-Latin / sentence-resistant chunk hits the byte-window fallback path and exceeds the cap, the embedding represents only the first N chars while the chunk row persists FULL content. Result: vector search returns the chunk's truncated-text similarity, the agent loads the full chunk, and operators have no signal that retrieval quality has silently regressed.
+
+**Pattern:** every embedding-input cap must (a) live as an exported constant (`EMBEDDING_INPUT_BYTE_LIMIT = 8192` etc.), NOT a magic number, AND (b) emit a structured `logger.warn('document.embed.input_truncated', { chunkIndex, originalLength, truncatedLength, embeddingModel })` on every truncation event. Without the log, the regression is invisible. With it, ops can dashboard `truncation_rate_per_org` and tune chunk size before quality degrades.
+
+**Detection heuristic.** Grep `\.slice\(0, \d+\)` and `\.substring\(0, \d+\)` inside any service that emits an embedding call. Every hit is a candidate truncation site — if no `logger.warn` fires alongside, route it as a Strong recommendation.
+
+This generalises beyond embeddings: the same pattern applies to summary inputs, search-query truncation, ranker payloads. Silent truncation is always a quality regression hiding in the metrics.
+
+### [2026-05-08] Pattern — Pure helpers used for their return value MUST have their return value consumed; side-effect-free helpers called for "side effects" are the bug
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); pr-reviewer Blocker B-2 (`groupCandidatesByDocument` called with return value discarded in `retrievalService.ts`).
+
+A frequent bug shape during ranker / pure-helper refactors: a function declared as `(input: T[]) => U[]` is called for what looks like a side effect — but pure helpers HAVE no side effects. If the return value is not assigned, used, or written, the pure helper has done nothing the caller observed. The spec's intended invariant (e.g. "document-level relevance is `MAX(chunk.finalScore)`") is therefore not delivered at runtime, even though the pure helper was implemented correctly and tested correctly.
+
+**Detection heuristic.** During PR review, grep the changed services for `^\s*<helperName>\(` (helper call as a statement, not as an assignment / argument). Every hit needs justification: if the helper's signature shows a non-void return, the call is almost certainly a bug. Pure-helper Convention §8 already says "pure helpers must be deterministic and side-effect-free" — combine that with: "if you call one as a statement, you have written a no-op."
+
+This complements the existing pure-helper-input-mutation entries in KNOWLEDGE.md: the inverse failure mode is **calling a pure helper for side effects that don't exist** (this entry); the dual is **mutating an input expecting it to be returned later** (covered earlier). Both are reviewable mechanically — either no return value is consumed, or an input is mutated.
+
+### [2026-05-08] Pattern — Retrieval-version completeness invariant requires an active production read-path filter, not just a write-side guard
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); pr-reviewer Blocker B-3 (`filterDocumentChunks` exists + tested but not called from `retrievalService`).
+
+When the spec says "X invariant must hold at read time" (e.g. auto-knowledge-retrieval §13.1: "`retrieval_version_id` MUST always reference a version whose full chunk set exists for `active_embedding_model`"), implementing the invariant ONLY in the chunking job's atomic-swap commit path is insufficient. A test that exercises the pure helper that enforces the invariant (e.g. `documentRetrievalServicePure.filterDocumentChunks`) but is never wired into the production read path passes green — and the read path silently does its own inline filter that checks pointer alignment but NOT chunk-count completeness. Result: a partial-write race window or any future invariant deviation goes undetected.
+
+**Pattern:** for any spec invariant that includes "must hold at read time", the doc-conformance check is "find every read site for this data and confirm it routes through the canonical filter." The pure helper having a green test is necessary but not sufficient. PR reviewers should ALWAYS grep the production read path for the canonical filter call — if the test exists but the production call doesn't, the test is dead.
+
+This is closely related to the existing "test coverage that doesn't exercise production paths" anti-pattern, but framed for invariant-enforcement specifically: a write-side guard is fine, a read-side guard is fine, both is best, and a tested-pure-helper-without-production-wiring is the bug.
+
+### [2026-05-08] Pattern — Document-promotion atomicity needs an audit-row idempotency anchor inside the inline transaction
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); architectural pattern from spec §6.5 + adversarial-reviewer AKR-ADV-6 + dual-reviewer §3 (FORCE-RLS reads on `document_promotion_audit`).
+
+When a one-click "promote source X to durable Y" flow has both an inline tx (for the user-visible "marked durable" instant feedback) and a post-commit job (for slow side effects like flipping `expires_at` to NULL or far-future), there is a race window: if the post-commit job runs after the source row's expiry sweep also fires, the source could be pruned before the durability flip lands. The promotion path then re-runs (UI retry, idempotency replay, etc.), and the system either creates a duplicate target row or 23505s.
+
+**Pattern:** write an append-only audit-ledger row inside the inline tx with `UNIQUE (file_id) WHERE deleted_at IS NULL`. The audit row IS the idempotency anchor — its existence proves promotion already started, and the post-commit job reads it under the same RLS context to know whether to flip durability. Auto-knowledge-retrieval's `document_promotion_audit` table (migration 0294) is the canonical implementation: written inside the same tx as the new `reference_documents` row + link rows, then read by `documentPromotionFinaliseJob` (in a short org-scoped read tx — see the worker-opt-out pattern above) to prove the promotion is real before flipping `execution_files.expiresAt`.
+
+**Detection heuristic.** Any "instant durability + post-commit side effects" pattern needs the audit-ledger anchor. If you see `promotionService.promote` followed by a fire-and-forget `enqueueFinaliseJob`, ask: how does the finalise job know the inline tx committed and isn't a phantom retry? The answer should be a row in an audit table, written inline, with a UNIQUE constraint that idempotency-keys the source-id.
+
+### [2026-05-08] Pattern — Retrieval rankers should share a generic core; primitive-specific filters wrap it
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); spec decision §3.3.3 (extract generic ranker, keep block-specific filters).
+
+When a project gains a second knowledge primitive that needs ranking (auto-knowledge-retrieval added document chunks alongside the pre-existing memory blocks), the temptation is to copy the ranker. Don't. Extract the generic ranker into a pure module that operates on a polymorphic `RetrievalCandidate` shape (id, kind, scope-tier columns, embedding, tokenCount, finalScore inputs); leave primitive-specific FILTERS (mode handling, version pinning, owner-agent semantics, divergence flags) in the primitive's own service that wraps the generic ranker.
+
+This is what `retrievalServicePure.ts` (generic ranker) + `documentRetrievalServicePure.ts` (document-specific filter) + `memoryBlockRetrievalServicePure.ts` (block-specific filter) shipped together in PR #274. Future cross-encoder re-ranking, learned thresholds, and new knowledge primitives all benefit from concentrating the algorithm.
+
+**Convention:** any new knowledge-style primitive that needs ranking goes through `retrievalServicePure`. Primitive-specific code lives upstream (pre-ranking filter) or downstream (post-ranking truncation / formatting). The comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` is locked — `id ASC` is the determinism anchor. Tests in `retrievalServicePure.test.ts` pin it; reordering or dropping a column is a spec amendment.
+
+### [2026-05-08] Pattern — Bounded observability payloads with deterministic top-N truncation are the right shape for retrieval traces
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); spec §11.4 + §10.8 (ranking determinism), `retrievalObservabilityService` design.
+
+Retrieval traces tempt unbounded JSON payloads (every candidate, every score component, every rejection reason). Two failure modes:
+1. Storage cost grows linearly with candidate-pool size, which itself grows with org maturity.
+2. Replay determinism fails: a re-emit with `JSON.stringify` of the same candidate set produces a different byte sequence if Map iteration order or floating-point serialisation drifts.
+
+**Pattern:** every retrieval-trace event has a strict byte-bound contract — top-N items per array (sort + slice, fixed N), constants exported from the observability service, and replays MUST be byte-identical given the same candidate set. Tests assert `Buffer.byteLength(emit) === Buffer.byteLength(replay)`. Truncation is silent in the payload (no per-event "5 more truncated" wording — the constant is the contract); a separate truncation-indicator-rate metric tells ops when caps need raising via the documented escalation path (migrate to a dedicated `retrieval_events` table — DON'T raise the inline cap).
+
+This is the spec §11.4 design pinned in `retrievalObservabilityServicePure.test.ts`. Mirror it for any future high-cardinality observability event (rule-firing trace, capability-discovery trace, etc.) — bounded payload + dedicated escalation path beats unbounded inline payload every time.
+
+### [2026-05-08] Pattern — Always-available document budget needs a preventive UI surface, not a runtime safety net
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); spec §11.5 + chatgpt-spec-review item A (operator chose option a — telemetry-driven preventive surface).
+
+When a feature lets operators flag documents as "always available" (loaded on every run, bypassing relevance ranking), there's a temptation to handle starvation at runtime: degrade gracefully when the always-available block alone exceeds budget. That works mid-run, but it's the WRONG primary surface — operators only learn about the misconfiguration after a degraded run lands, and they have no signal in the configuration UI to tell them they're approaching the cliff.
+
+**Pattern:** the primary surface is preventive, in the configuration tab. Soft warning fires at thresholds well below the runtime cliff (`doc_count >= 30` OR `token_cost >= 30000` for v1) and surfaces in the Documents tab as an inline chip. The runtime degradation path still exists as the last-line-of-defence safety net, but operators see the chip first and reconfigure before any run degrades. Constants live in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred to a post-launch amendment once production telemetry exists to inform tuning.
+
+**Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
