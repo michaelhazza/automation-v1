@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Create / Duplicate scorecard (Round 2, new screen)
+
+  Focused form for creating a new scorecard or duplicating an existing one.
+  Duplicate pre-fills all fields with a note at top.
+
+  Fields:
+    - Duplicate note (if duplicating)
+    - Scope: read-only line (Organisation or This subaccount)
+    - Name (required)
+    - Description
+    - Share with sub-accounts toggle (org scope only, default on)
+    - Visibility estimate next to Save
+    - Quality checks list (each: name, description, pass mark %, enabled toggle, remove)
+    - Add quality check button
+
+  Primary action: Save scorecard
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create scorecard | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .form-wrap {
+    max-width: 680px; margin: 0 auto;
+    padding: 28px 28px 110px 28px;
+  }
+
+  .section-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 14px; overflow: hidden;
+  }
+  .section-card-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50); display: flex; align-items: center; justify-content: space-between;
+  }
+  .section-card-header h3 { font-size: 13px; font-weight: 600; color: var(--slate-700); }
+  .section-card-body { padding: 18px; }
+
+  /* ── Duplicate note ── */
+  .dup-note {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; color: var(--slate-600);
+  }
+  .dup-note strong { color: var(--slate-800); }
+
+  /* ── Scope badge ── */
+  .scope-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-200);
+    border-radius: 7px; padding: 5px 10px; font-size: 12px; color: var(--indigo-700); font-weight: 600;
+  }
+
+  /* ── Toggle ── */
+  .toggle-wrap { display: flex; align-items: center; gap: 8px; }
+  .toggle-input { display: none; }
+  .toggle-track {
+    width: 36px; height: 20px; border-radius: 10px;
+    background: var(--slate-200); cursor: pointer;
+    position: relative; transition: background 0.15s;
+  }
+  .toggle-input:checked + .toggle-track { background: var(--indigo-600); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: white;
+    transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-input:checked + .toggle-track::after { left: 18px; }
+
+  /* ── Quality checks table ── */
+  .qc-list { border: 1px solid var(--slate-200); border-radius: 10px; overflow: hidden; }
+  .qc-header-row {
+    display: grid; grid-template-columns: 160px 1fr 90px 48px 36px;
+    padding: 8px 14px;
+    background: var(--slate-50); border-bottom: 1px solid var(--slate-200);
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--slate-400); gap: 10px;
+  }
+  .qc-row {
+    display: grid; grid-template-columns: 160px 1fr 90px 48px 36px;
+    align-items: start; gap: 10px;
+    padding: 12px 14px; border-bottom: 1px solid var(--slate-100); background: white;
+  }
+  .qc-row:last-child { border-bottom: none; }
+  .qc-row:hover { background: var(--slate-50); }
+
+  /* Pass mark input with % suffix */
+  .pass-mark-wrap { display: flex; align-items: center; gap: 4px; }
+  .pass-mark-wrap input {
+    width: 56px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--slate-300);
+    font-size: 12.5px; font-weight: 600; color: var(--indigo-700); text-align: right; outline: none;
+  }
+  .pass-mark-wrap input:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+  .pass-mark-pct { font-size: 12.5px; color: var(--slate-500); font-weight: 600; }
+
+  /* ── Fixed footer ── */
+  .form-footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: white; border-top: 1px solid var(--border);
+    padding: 14px 0; z-index: 100; box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  }
+  .form-footer-inner {
+    max-width: 680px; margin: 0 auto; padding: 0 28px; box-sizing: border-box;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  /* ── Visibility estimate ── */
+  .visibility-note {
+    font-size: 12px; color: var(--slate-500); margin-left: auto;
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 80px; right: 24px;
+    background: var(--slate-900); color: white;
+    font-size: 12.5px; font-weight: 500;
+    padding: 10px 16px; border-radius: 8px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25); z-index: 9999;
+    animation: toastIn 0.2s ease; max-width: 360px;
+  }
+  .toast.hidden { display: none; }
+  @keyframes toastIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'govern-quality.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Govern</span>
+        <span style="color:#cbd5e1">/</span>
+        <span>Quality</span>
+        <span style="color:#cbd5e1">/</span>
+        <span>Scorecards</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current" id="page-title-crumb">Create scorecard</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="scorecard-library.html" class="btn btn-sm btn-secondary">Back to library</a>
+    </div>
+
+    <div class="form-wrap">
+
+      <!-- Duplicate note (shown when duplicating) -->
+      <div class="dup-note" id="dup-note" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--slate-400)" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        Duplicated from: <strong id="dup-source">Outreach tone and voice (Organisation)</strong>. This is now an independent copy. Changes here do not affect the original.
+      </div>
+
+      <!-- Scope -->
+      <div class="section-card">
+        <div class="section-card-header"><h3>Scope</h3><span style="font-size:12px;color:var(--slate-400);">Set by your current access level</span></div>
+        <div class="section-card-body">
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <span class="scope-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2z"/></svg>
+              Scope: Organisation
+            </span>
+            <span style="font-size:12px;color:var(--slate-500);">Scorecards you create are owned by your organisation and can be attached by agents in any subaccount.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Name and description -->
+      <div class="section-card">
+        <div class="section-card-header"><h3>Scorecard details</h3></div>
+        <div class="section-card-body">
+          <div class="form-group" style="margin-bottom:16px;">
+            <label class="form-label">Name <span style="color:var(--red-500);">*</span></label>
+            <input type="text" class="form-input" id="sc-name" placeholder="e.g. Outreach tone and voice" style="margin-top:5px;" oninput="updateVisibility()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description <span style="font-weight:400;color:var(--slate-400);">(optional)</span></label>
+            <input type="text" class="form-input" placeholder="One-line purpose of this scorecard" style="margin-top:5px;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Share with sub-accounts -->
+      <div class="section-card">
+        <div class="section-card-header"><h3>Visibility</h3></div>
+        <div class="section-card-body">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Share with sub-accounts</div>
+              <div class="form-hint" style="margin-top:4px;">When on, subaccount admins can attach this scorecard to their agents. Turn off to keep it organisation-internal.</div>
+            </div>
+            <div class="toggle-wrap">
+              <input type="checkbox" id="share-tog" class="toggle-input" checked onchange="updateVisibility()">
+              <label for="share-tog" class="toggle-track"></label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quality checks -->
+      <div class="section-card">
+        <div class="section-card-header">
+          <h3>Quality checks</h3>
+          <span style="font-size:12px;color:var(--slate-400);">Each check is scored 0-100% by the judge model</span>
+        </div>
+        <div class="section-card-body" style="padding:0;">
+          <div class="qc-list" style="border:none;border-radius:0;" id="qc-list">
+            <div class="qc-header-row">
+              <div>Name</div>
+              <div>What the judge checks</div>
+              <div>Pass mark</div>
+              <div style="text-align:center;">On</div>
+              <div></div>
+            </div>
+
+            <!-- Row 1 -->
+            <div class="qc-row" id="qcrow-1">
+              <input type="text" class="form-input" value="Tone match" style="font-size:12.5px;">
+              <input type="text" class="form-input" placeholder="Describe what the judge should check..." value="Output tone matches brand voice: warm, direct, not corporate." style="font-size:12px;">
+              <div class="pass-mark-wrap">
+                <input type="number" value="80" min="1" max="100" step="5">
+                <span class="pass-mark-pct">%</span>
+              </div>
+              <div style="display:flex;justify-content:center;">
+                <input type="checkbox" id="qc-tog-1" class="toggle-input" checked>
+                <label for="qc-tog-1" class="toggle-track" style="width:30px;height:17px;"></label>
+              </div>
+              <button onclick="removeQC('qcrow-1')" style="background:none;border:none;color:var(--slate-300);cursor:pointer;font-size:18px;padding:2px;" title="Remove">&#215;</button>
+            </div>
+
+            <!-- Row 2 -->
+            <div class="qc-row" id="qcrow-2">
+              <input type="text" class="form-input" value="Hook strength" style="font-size:12.5px;">
+              <input type="text" class="form-input" placeholder="Describe what the judge should check..." value="Subject line or opening creates a reason to read on. Specific, not generic." style="font-size:12px;">
+              <div class="pass-mark-wrap">
+                <input type="number" value="70" min="1" max="100" step="5">
+                <span class="pass-mark-pct">%</span>
+              </div>
+              <div style="display:flex;justify-content:center;">
+                <input type="checkbox" id="qc-tog-2" class="toggle-input" checked>
+                <label for="qc-tog-2" class="toggle-track" style="width:30px;height:17px;"></label>
+              </div>
+              <button onclick="removeQC('qcrow-2')" style="background:none;border:none;color:var(--slate-300);cursor:pointer;font-size:18px;padding:2px;" title="Remove">&#215;</button>
+            </div>
+
+            <!-- Row 3 -->
+            <div class="qc-row" id="qcrow-3">
+              <input type="text" class="form-input" value="Length discipline" style="font-size:12.5px;">
+              <input type="text" class="form-input" placeholder="Describe what the judge should check..." value="Body under 180 words. Gets to the point within the first two sentences." style="font-size:12px;">
+              <div class="pass-mark-wrap">
+                <input type="number" value="75" min="1" max="100" step="5">
+                <span class="pass-mark-pct">%</span>
+              </div>
+              <div style="display:flex;justify-content:center;">
+                <input type="checkbox" id="qc-tog-3" class="toggle-input" checked>
+                <label for="qc-tog-3" class="toggle-track" style="width:30px;height:17px;"></label>
+              </div>
+              <button onclick="removeQC('qcrow-3')" style="background:none;border:none;color:var(--slate-300);cursor:pointer;font-size:18px;padding:2px;" title="Remove">&#215;</button>
+            </div>
+
+          </div>
+          <div style="padding:12px 14px;border-top:1px solid var(--slate-100);">
+            <button class="btn btn-sm btn-secondary" onclick="addQC()">+ Add quality check</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /form-wrap -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- Fixed footer -->
+<div class="form-footer">
+  <div class="form-footer-inner">
+    <button class="btn btn-secondary" onclick="window.location='scorecard-library.html'">Cancel</button>
+    <button class="btn btn-primary" onclick="saveScorecard()">Save scorecard</button>
+    <div class="visibility-note" id="visibility-note">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      Visible to: 7 agents in 3 subaccounts
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="toast-text">Scorecard saved.</span>
+</div>
+
+<script>
+// Detect duplicate mode from URL params
+var params = new URLSearchParams(window.location.search);
+var dupSource = params.get('duplicate');
+var editSource = params.get('edit');
+
+if (dupSource) {
+  document.getElementById('dup-note').style.display = 'flex';
+  document.getElementById('dup-source').textContent = decodeURIComponent(dupSource) + ' (Organisation)';
+  document.getElementById('page-title-crumb').textContent = 'Duplicate scorecard';
+  document.getElementById('sc-name').value = 'Copy of ' + decodeURIComponent(dupSource);
+} else if (editSource) {
+  document.getElementById('page-title-crumb').textContent = 'Edit scorecard';
+  document.getElementById('sc-name').value = decodeURIComponent(editSource);
+}
+
+function updateVisibility() {
+  var shareOn = document.getElementById('share-tog').checked;
+  var note = document.getElementById('visibility-note');
+  if (shareOn) {
+    note.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Visible to: 7 agents in 3 subaccounts';
+    note.style.color = 'var(--slate-500)';
+  } else {
+    note.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Visible to: this organisation only';
+    note.style.color = 'var(--slate-400)';
+  }
+}
+
+var qcCount = 3;
+
+function addQC() {
+  qcCount++;
+  var id = 'qcrow-' + qcCount;
+  var row = document.createElement('div');
+  row.className = 'qc-row';
+  row.id = id;
+  row.innerHTML =
+    '<input type="text" class="form-input" placeholder="Quality check name" style="font-size:12.5px;">' +
+    '<input type="text" class="form-input" placeholder="What the judge should look for..." style="font-size:12px;">' +
+    '<div class="pass-mark-wrap"><input type="number" value="75" min="1" max="100" step="5"><span class="pass-mark-pct">%</span></div>' +
+    '<div style="display:flex;justify-content:center;"><input type="checkbox" id="qc-tog-' + qcCount + '" class="toggle-input" checked><label for="qc-tog-' + qcCount + '" class="toggle-track" style="width:30px;height:17px;"></label></div>' +
+    '<button onclick="removeQC(\'' + id + '\')" style="background:none;border:none;color:var(--slate-300);cursor:pointer;font-size:18px;padding:2px;">&#215;</button>';
+  // Insert before the add button footer
+  var list = document.getElementById('qc-list');
+  list.appendChild(row);
+}
+
+function removeQC(id) {
+  var row = document.getElementById(id);
+  if (row) row.remove();
+}
+
+function saveScorecard() {
+  var name = document.getElementById('sc-name').value.trim();
+  if (!name) {
+    document.getElementById('sc-name').focus();
+    document.getElementById('sc-name').style.borderColor = 'var(--red-500)';
+    return;
+  }
+  showToast('Scorecard "' + name + '" saved.');
+  setTimeout(function() { window.location = 'scorecard-library.html'; }, 1800);
+}
+
+function showToast(msg) {
+  document.getElementById('toast-text').textContent = msg;
+  var t = document.getElementById('toast');
+  t.classList.remove('hidden');
+  setTimeout(function() { t.classList.add('hidden'); }, 3500);
+}
+</script>
+</body>
+</html>

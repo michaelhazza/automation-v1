@@ -55,9 +55,9 @@
   .proto-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
   .proto-card-file { font-size: 11px; font-family: monospace; color: #94a3b8; background: #f1f5f9; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
   .proto-card-desc { font-size: 12.5px; color: #64748b; line-height: 1.5; margin-bottom: 8px; }
-  .proto-card-footer { display: flex; align-items: center; justify-content: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f1f5f9; gap: 8px; }
+  .proto-card-footer { display: flex; align-items: center; justify-content: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f1f5f9; gap: 8px; flex-wrap: wrap; }
 
-  .layer-badge {
+  .badge {
     display: inline-flex; align-items: center;
     font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
     border-radius: 4px; padding: 2px 7px; white-space: nowrap;
@@ -66,6 +66,7 @@
   .layer-2 { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
   .layer-3 { background: #fdf4ff; color: #6d28d9; border: 1px solid #ddd6fe; }
   .layer-new { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+  .badge-r2 { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 
   .decisions-box {
     background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
@@ -89,23 +90,23 @@
 <div class="masthead">
   <div class="masthead-eyebrow">Trust Verification Layer</div>
   <h1>Trust Verification Layer Prototype</h1>
-  <p>Six screens extending the post-consolidation IA with three trust layers: skill verification (Layer 1), agent scorecards and model bench (Layer 2), and correction-sourced auto-memory (Layer 3). No new top-level navigation. All surfaces extend existing pages.</p>
+  <p>Ten screens extending the post-consolidation IA with three trust layers: skill verification (Layer 1), agent scorecards and model bench (Layer 2), and correction-sourced auto-memory (Layer 3). No new top-level navigation. All surfaces extend existing pages or add focused creation flows.</p>
   <div class="meta-row">
-    <div class="meta-item"><strong>Date:</strong> 2026-05-07</div>
-    <div class="meta-item"><strong>Status:</strong> Round 1, awaiting operator review</div>
+    <div class="meta-item"><strong>Date:</strong> 2026-05-08</div>
+    <div class="meta-item"><strong>Status:</strong> Round 2, awaiting operator review</div>
     <div class="meta-item"><strong>Base prototypes:</strong> <a href="../consolidation-2026-05-06/index.html" style="color:#4f46e5;font-weight:600;">Consolidation 2026-05-06</a></div>
   </div>
 </div>
 
 <div class="decisions-box">
-  <h3>Round 1 design decisions</h3>
+  <h3>Round 2 design decisions</h3>
   <ul>
-    <li>model-bench is a focused page (not a modal): bench has a results + approval step that benefits from full-width table layout. Modal would be cramped.</li>
-    <li>Scorecard config is a new tab on agent-edit (not a section), consistent with the tab-per-domain pattern already established (Skills, Data sources, Budget, etc.).</li>
-    <li>Source filter added only to Auto-memory tab on Knowledge. Authored memory tab is manual-only by definition so the filter is redundant there.</li>
-    <li>home.html trust tile skipped: the existing 2x3 widget grid would be disrupted by a third column or an extra row. Brief permits this skip when the tile would crowd the design. Entry through Inbox + Govern / Quality is sufficient.</li>
-    <li>Verify summary bar added above the event list on run-trace as a quick scan strip (pass / fail / inconclusive counts). Adds no vertical height to individual rows.</li>
-    <li>Govern / Quality sidebar entry is a stub in the copied _sidebar.js; the operator reaches it from the topbar breadcrumb or direct link in this prototype.</li>
+    <li>"Override pass marks for this agent" deferred to Round 3. Multi-level nesting (collapsed section inside collapsible card inside tab) violates complexity budget. Will ship as an "Advanced" disclosure per attached scorecard once base multi-attach flow is validated.</li>
+    <li>scorecard-library.html renders as a standalone page with the same tab strip as govern-quality.html. The govern-quality.html Scorecards tab shows an iframe for prototype navigation, reflecting how the tab would work in-product.</li>
+    <li>Bench history tab in govern-quality.html shows approved/overridden/rejected outcomes. "Overridden" means the operator selected a different model than the recommended one — a real-world scenario worth showing.</li>
+    <li>agent-create.html uses two path tabs (System Agent / Template) on one page to make the inheritance story concrete without requiring the operator to navigate between two separate screens.</li>
+    <li>skill-create.html: "Advanced" code block defaults collapsed. The plain-English verify check is the primary surface; code is progressive disclosure for technical users.</li>
+    <li>govern-quality.html Scorecards tab: clicking opens scorecard-library.html as its own page (not an iframe). For the prototype, an iframe preview is also included in the Scorecards tab panel for convenience.</li>
   </ul>
 </div>
 
@@ -115,7 +116,7 @@
 <div class="section">
   <div class="section-heading">
     <span>Layer 1: Skill verification</span>
-    <span class="section-heading-desc">Verify badges on every run step</span>
+    <span class="section-heading-desc">Verify badges on every run step + custom skill creation flow</span>
   </div>
   <div class="card-grid">
 
@@ -125,14 +126,28 @@
         <div class="proto-card-file">run-trace.html</div>
       </div>
       <div class="proto-card-desc">
-        Adds two trust affordances to the existing run trace layout:
-        <strong>Verify badge</strong> per step (pass / fail / inconclusive / n/a) with hover tooltip showing the reason.
-        <strong>Correct action</strong> on LLM-generated outputs (hover menu on llm_call and tool_result rows), opening a modal: original output (read-only), edited output, optional reason. After save, shows a "captured as auto-memory" toast.
+        Verify badge per step (pass / fail / inconclusive / n/a) with hover tooltip showing the reason.
+        Correct action on LLM-generated outputs: opens modal with original output (read-only), edited output, optional reason. After save, shows a "captured as auto-memory" toast.
       </div>
       <div class="proto-card-footer">
-        <span class="layer-badge layer-1">Layer 1</span>
-        <span class="layer-badge layer-3">Layer 3</span>
+        <span class="badge layer-1">Layer 1</span>
+        <span class="badge layer-3">Layer 3</span>
         <a href="../consolidation-2026-05-06/run-trace.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="skill-create.html" class="proto-card-title-link">Create custom skill (new)</a>
+        <div class="proto-card-file">skill-create.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Two-step focused form. Step 1: name, description, API endpoint, parameters, blast radius (Self / Tenant / External), reversible toggle.
+        Step 2: verify check with auto-generated plain-English suggestion, three options (Use / Edit / No check possible), advanced disclosure with pseudocode, and a Run-trace preview showing the verify badge.
+      </div>
+      <div class="proto-card-footer">
+        <span class="badge layer-1">Layer 1</span>
+        <span class="badge badge-r2">Round 2 new</span>
       </div>
     </div>
 
@@ -145,49 +160,93 @@
 <div class="section">
   <div class="section-heading">
     <span>Layer 2: Agent scorecards + model bench</span>
-    <span class="section-heading-desc">Quality tracking and model comparison</span>
+    <span class="section-heading-desc">Quality tracking, scorecard library, bench, and creation flows</span>
   </div>
   <div class="card-grid">
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <a href="agent-edit-scorecard.html" class="proto-card-title-link">Agent edit: Scorecard tab (extended)</a>
+        <a href="agent-create.html" class="proto-card-title-link">Agent create (new)</a>
+        <div class="proto-card-file">agent-create.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Shows scorecard pre-attachment at agent creation. Two paths via tabs: Install a System Agent (Content Director) and Create from Template (Content Writer).
+        System agent path: required scorecards are locked and read-only; suggested scorecards are checked by default. Template path: all recommended scorecards are checked by default; "Don't include any scorecards" option available. Evaluation settings on both paths.
+      </div>
+      <div class="proto-card-footer">
+        <span class="badge layer-2">Layer 2</span>
+        <span class="badge badge-r2">Round 2 new</span>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="agent-edit-scorecard.html" class="proto-card-title-link">Agent edit: Scorecard tab (updated)</a>
         <div class="proto-card-file">agent-edit-scorecard.html</div>
       </div>
       <div class="proto-card-desc">
-        New Scorecard tab on the agent edit page. Contains: scorecard dimensions list (name, description, floor threshold 0-1, enabled toggle, Add dimension button), sampling rate slider (default 20%), judge model selector, Run bench link, and a recent score summary strip (last 50 runs, mean per dimension, inline sparklines, drift warning).
+        Round 2 update: multi-attach scorecard list replaces single dimension list. Each attached scorecard has a header (name, Source pill, View link, Detach button) and collapsible body showing read-only quality checks with pass marks as percentages. Provenance banner at top shows system agent origin. "Run bench" button removed (bench lives on Govern / Quality). "How often to grade" slider with one-line help text. Recent score summary shows per scorecard, per quality check, 7-day mean as percentage with sparklines and drift warnings.
       </div>
       <div class="proto-card-footer">
-        <span class="layer-badge layer-2">Layer 2</span>
+        <span class="badge layer-2">Layer 2</span>
+        <span class="badge badge-r2">Round 2 updated</span>
         <a href="../consolidation-2026-05-06/agent-edit.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
       </div>
     </div>
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <a href="govern-quality.html" class="proto-card-title-link">Govern / Quality (new page)</a>
+        <a href="govern-quality.html" class="proto-card-title-link">Govern / Quality (updated)</a>
         <div class="proto-card-file">govern-quality.html</div>
       </div>
       <div class="proto-card-desc">
-        New fourth Govern primitive. Sortable table of agents with: attached scorecard, 7-day mean score, 7-day sparkline trend, scored / total runs (sampling %), drift indicator (arrow + delta), last bench date. Filters: scorecard attached, drift state. Row click opens drawer with 30-day per-dimension trend chart, recent low-scoring runs (deep-link to trace), and Run bench action. Empty state when no scorecards exist.
+        Round 2 update: three tabs at top (Agents / Scorecards / Bench history). Agents tab: multi-scorecard column, percentage scores, "Run bench" button visible on hover for drifting rows. Scorecards tab: links to scorecard-library.html. Bench history tab: list of past benches with model recommended, approved, outcome (Approved / Rejected / Overridden). Drawer updated to show quality check names in sentence case.
       </div>
       <div class="proto-card-footer">
-        <span class="layer-badge layer-new">New page</span>
-        <span class="layer-badge layer-2">Layer 2</span>
+        <span class="badge layer-2">Layer 2</span>
+        <span class="badge badge-r2">Round 2 updated</span>
       </div>
     </div>
 
     <div class="proto-card">
       <div class="proto-card-header">
-        <a href="model-bench.html" class="proto-card-title-link">Model bench (new page)</a>
+        <a href="scorecard-library.html" class="proto-card-title-link">Scorecard library (new)</a>
+        <div class="proto-card-file">scorecard-library.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Scorecards tab inside Govern / Quality. Sortable table: scorecard name, Source pill (System / Organisation / This subaccount), quality checks count, attach count (clickable, shows which agents), Share with sub-accounts toggle (on System and Org rows; absent on subaccount rows), actions menu (View, Duplicate, Edit, Delete based on ownership). Filters: source chips and search. "Create scorecard" button top-right.
+      </div>
+      <div class="proto-card-footer">
+        <span class="badge layer-2">Layer 2</span>
+        <span class="badge badge-r2">Round 2 new</span>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="scorecard-create.html" class="proto-card-title-link">Create / duplicate scorecard (new)</a>
+        <div class="proto-card-file">scorecard-create.html</div>
+      </div>
+      <div class="proto-card-desc">
+        Focused form for creating or duplicating a scorecard. Duplicate mode pre-fills all fields and shows an independence note ("this is now an independent copy"). Scope shown as a read-only badge. Share with sub-accounts toggle (org scope, default on) with live visibility estimate next to Save. Quality checks list: each row has name, description, pass mark (percentage input), enabled toggle, remove button. Add quality check button below.
+      </div>
+      <div class="proto-card-footer">
+        <span class="badge layer-2">Layer 2</span>
+        <span class="badge badge-r2">Round 2 new</span>
+      </div>
+    </div>
+
+    <div class="proto-card">
+      <div class="proto-card-header">
+        <a href="model-bench.html" class="proto-card-title-link">Model bench (updated)</a>
         <div class="proto-card-file">model-bench.html</div>
       </div>
       <div class="proto-card-desc">
-        Focused page (not a modal) for the bench workflow. Three states navigable via tabs at top: Setup (candidate model chips, sample count, scorecard preview, Run bench button), Running (progress bars per model, live mean score, cost so far, Cancel), Results (table with mean score, variance, latency, cost-per-task, composite winner highlighted, Approve as default per row).
+        Round 2 update: mode switcher at top (Agent bench / Skill bench). Test inputs section with three radio options: Recent real runs (default, with preview table and Re-roll), Specific date range (date pickers), Paste in (textarea, for cold starts). Estimated cost shown before Run bench fires (format: "$4.20 to $5.80 (3 models x 15 samples x judge)"). Skill bench mode shows a skill picker. "Approve as default" toast text updated: "Sonnet 4.6 set as default for this agent. Bench result saved." Results show scores as percentages.
       </div>
       <div class="proto-card-footer">
-        <span class="layer-badge layer-new">New page</span>
-        <span class="layer-badge layer-2">Layer 2</span>
+        <span class="badge layer-2">Layer 2</span>
+        <span class="badge badge-r2">Round 2 updated</span>
       </div>
     </div>
 
@@ -210,11 +269,11 @@
         <div class="proto-card-file">run-trace.html</div>
       </div>
       <div class="proto-card-desc">
-        The Correct action on run-trace is also the Layer 3 capture point. See Layer 1 card above for full description. The Correct button appears on LLM-generated step outputs; after save it shows a "captured as auto-memory" toast with a link to Knowledge.
+        The Correct action on run-trace is also the Layer 3 capture point. See Layer 1 card above. After save, shows a "captured as auto-memory" toast with a link to Knowledge.
       </div>
       <div class="proto-card-footer">
-        <span class="layer-badge layer-3">Layer 3</span>
-        <span class="layer-badge layer-1">Layer 1</span>
+        <span class="badge layer-3">Layer 3</span>
+        <span class="badge layer-1">Layer 1</span>
       </div>
     </div>
 
@@ -224,10 +283,10 @@
         <div class="proto-card-file">knowledge.html</div>
       </div>
       <div class="proto-card-desc">
-        Extends the existing Knowledge page with: Source filter chip in the Auto-memory tab (All / From runs / From corrections / Manual), Source column on every entry card showing the source label, two seed rows with source "From corrections" (one tone correction, one subject-line correction) demonstrating the full approve / edit-and-override / reject lifecycle. Authored memory tab is unchanged.
+        Extends the existing Knowledge page with: Source filter chip in the Auto-memory tab (All / From runs / From corrections / Manual), Source column on every entry card, two seed rows with source "From corrections" demonstrating the full approve / edit-and-override / reject lifecycle.
       </div>
       <div class="proto-card-footer">
-        <span class="layer-badge layer-3">Layer 3</span>
+        <span class="badge layer-3">Layer 3</span>
         <a href="../consolidation-2026-05-06/knowledge.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
       </div>
     </div>
@@ -241,7 +300,7 @@
 <div class="section">
   <div class="section-heading">
     <span>Skipped / deferred</span>
-    <span class="section-heading-desc">Decisions made in Round 1 with rationale</span>
+    <span class="section-heading-desc">Decisions with rationale</span>
   </div>
   <div class="card-grid">
     <div class="proto-card" style="border-style:dashed;background:#fafbfc;">
@@ -250,7 +309,16 @@
         <div class="proto-card-file">home.html</div>
       </div>
       <div class="proto-card-desc" style="color:#64748b;">
-        Skipped per brief guidance: "If adding the tile would crowd the page or disrupt the existing design, skip this screen entirely." The existing home uses a fixed 2-column, 3-row widget grid. Adding a third tile to a row would require grid restructuring that disrupts the established layout. Entry through Inbox (verify failures appear as items) and Govern / Quality is sufficient.
+        Skipped per brief guidance. The existing home uses a fixed 2-column, 3-row widget grid. Entry through Inbox (verify failures appear as items) and Govern / Quality is sufficient.
+      </div>
+    </div>
+    <div class="proto-card" style="border-style:dashed;background:#fafbfc;">
+      <div class="proto-card-header">
+        <span class="proto-card-title-link" style="cursor:default;color:#475569;">Override pass marks per agent</span>
+        <div class="proto-card-file">agent-edit-scorecard.html</div>
+      </div>
+      <div class="proto-card-desc" style="color:#64748b;">
+        Deferred to Round 3. Implementing editable fields inside a collapsible section inside a collapsible card inside a tab creates 3 nesting levels that violate the complexity budget. Will ship as an "Advanced" disclosure per attached scorecard.
       </div>
     </div>
   </div>
