@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 9. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, a simplification pass, a differentiator-coverage pass (Rev 7), an architectural-invariants pass (Rev 8), and a final operational-contracts pass (Rev 9) that pinned the Overview freshness matrix (§5.5), the anti-optimistic-UI synthesis invariant (§5.6), the retention policy for presence projections (§5.7), the degraded-state recovery semantics (§5.2), the session multiplicity invariant (§7), and operator-cognitive-load + accessibility + section-collapse rules (§10).
+> **Status:** Rev 10 — **LOCKED**, ready to hand to architect. Pre-spec, mockups attached. Audited across nine prior revisions covering strategic spine, simplification, differentiator coverage, architectural invariants, operational contracts, and a final correctness-edge pass (Rev 10) that pinned the canonical event clock (§5.3), the event-application ordering and idempotent replay rules (§5.2), the append-only invariant on Recent observations (§5), the Overview payload budget (§5.8), and a forward-looking presence-privacy-redaction breadcrumb (§13). Further conceptual revisions should arise only from implementation evidence; the next move is the architect, not the editor.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -205,6 +205,7 @@ Two surfaces composed onto one page:
   - *Flagged* — something the agent paused on for review ("3 contacts have stale phone numbers")
   - *Produced* — an artifact the agent generated ("Drafted 47 outreach emails")
   - **Provenance invariant**: every observation MUST trace to a concrete source: a `agent_execution_events` row id (a step in the run trace), a `retrieval.summary` event id, a structured tool result, or a memory_block insert. Freeform LLM summarisation is NOT the source of truth. The category guides the LLM-side summarisation but the underlying event id is the canonical anchor.
+  - **Append-only invariant (hard).** Observation rows are immutable. A later summarisation pass MUST NOT rewrite an earlier observation in place. Corrections create a *superseding* observation row that links back via `supersedes_observation_id`; the original stays in the audit log. The Overview surface displays the latest non-superseded row in each thread; the run trace and audit views can show the full history. **Why hard:** mutating in place collapses provenance into "the model's current opinion" and silently weakens the audit-trust signal that the typed-observations system exists to provide. Append-only is also what makes the §5.2 replay rules safe — no replayed write can clobber a later correction.
   - **Why typed**: vague summaries damage the alive-and-trustworthy feeling; categories force the agent to actually have something to say; the trace-back lets the operator drill in and confirm.
 - **Active goals**, open task or schedule the agent is currently advancing toward. Visible even when the agent is idle, so the workspace never feels empty.
 - **Recent activity feed**, short timeline: *3 minutes ago started run X*, *2 hours ago completed task Y*, *yesterday updated memory entry Z*. Capped at 5 rows in any state (active / idle / first-run); *"View all"* in the card head links to full activity.
@@ -261,6 +262,10 @@ Entry into `degraded` is fast and decisive. Exit is debounced.
 - **Hysteresis window.** Minimum 10 seconds in `degraded` before the state can transition back to its primary value. This prevents a one-packet network blip from flapping the pill between *Working* and *Status uncertain*.
 - **Anti-oscillation rule.** If `degraded → healthy → degraded` happens twice within a 30-second window, the agent stays in `degraded` for the full 60-second hysteresis period regardless of subsequent healthy heartbeats. The operator sees a stable degraded pill, not a strobe.
 - **Replay semantics on reconnect.** When the event stream resyncs, the client requests events since the last seen `event_id`. Missed events replay in chronological order. The UI applies them in one render pass and snaps back to live state in a single transition; no per-event flicker, no incremental scroll-up, no false activity bursts.
+- **Event application ordering (idempotent + monotonic).** Events apply strictly in `(event_timestamp, event_id)` order, where `event_timestamp` is the server-side monotonic clock per §5.3. The projection is idempotent:
+  - Duplicate events (same `event_id` arriving twice — common during reconnect / load-balancer flap) are detected and ignored on the second arrival. The projection MUST be safe to replay any subset of events any number of times.
+  - **Older replayed events never overwrite newer resolved state.** If a replayed event with `event_timestamp = T1` arrives after the projection has already advanced past `T2 > T1`, the event is recorded for audit but is NOT re-applied to the live presence projection. This rule prevents replay-induced state regression on flaky connections.
+  - Out-of-order arrival within a batch is fine; the projection sorts before applying. The hard rule is *no rollback by replay*.
 - **State on resolution.** When `degraded` clears, the agent transitions to whatever its underlying primary state actually is, derived fresh from the §5.3 resolution order — not to whatever it was before the degradation began. If the agent finished its run while telemetry was degraded, the resolved state is `idle`, not the prior `running`.
 
 ### 5.3 Source-of-truth hierarchy (cross-cutting invariant)
@@ -301,6 +306,16 @@ The focus line MUST NEVER be synthesised from raw event content the summariser c
 - Synthesising *Current focus* from activity-feed text (drifts from real run state, lags, lies).
 - Treating *configured knowledge* as *Knowledge in use* (looks active, isn't, destroys the why-did-the-agent-do-that signal).
 - Inferring *Recent observations* from LLM summaries of the run trace (no provenance, no trace-back, breaks operator trust the moment they try to drill in).
+
+**Clock authority (hard).** Canonical ordering and elapsed-duration calculations use **server-side monotonic event timestamps only**. The client clock is presentation-only and never authoritative. Concretely:
+
+- Every `agent_execution_events` row carries a server-assigned monotonic timestamp; that timestamp is the only source for ordering, replay, recovery decisions, and Working Time accounting.
+- Elapsed-time tickers in the UI are computed as `now_server - event_timestamp_server`, not from `Date.now()`. The server's "now" is propagated with each push so the client can render without trusting its own clock.
+- Cross-service ordering (run lifecycle, retrieval observability, scheduler) reconciles on a single monotonic series for each agent. Multi-worker / multi-region writes must funnel through a single ordering authority before becoming visible to projections.
+- The §5.5 freshness targets are measured **server-to-client**, not by the client measuring against its own clock. A client with a skewed clock or a paused tab still sees correct elapsed time on resume.
+- Forbidden: client-clock-derived "this happened X seconds ago" for any presence-aware surface; locally-incremented event sequence numbers; UI logic that branches on `Date.now()` differences from server-issued timestamps.
+
+This invariant is what makes replay (§5.2) and the freshness matrix (§5.5) actually work. Without it, browser-tab pauses, daylight-saving transitions, and reconnect storms all introduce silent drift.
 
 Spec author should treat this section as load-bearing. If a future surface needs a piece of presence-shaped data and the source isn't named here, the answer is to extend §5.3, not to invent a side channel.
 
@@ -392,6 +407,29 @@ The brief depends on observations, retrieval summaries, focus snapshots, activit
 - Pruning a projection MUST NOT invalidate any user-visible surface. If the Overview tab references data older than the projection retention, the surface fails closed (shows "older than X days, view in Run trace") rather than rendering stale or wrong data.
 - Retention windows are configurable per workspace within tight bounds (operator can extend, never shorten below the defaults above).
 - Spec author should call out any surface that depends on a longer window than the table allows; the retention rule extends to meet the surface, not the other way around.
+
+### 5.8 Overview payload budget
+
+The Overview tab now aggregates presence, observations, retrieval summaries, activity, working-time rollups, files, tools, connections, and schedule. Without an explicit payload budget, eventually someone ships full observation bodies, embedded trace payloads, or large retrieval metadata blobs inline; first paint slows; the embodiment-layer feel evaporates. Pin the budget now.
+
+- **Initial payload target: ≤150 KB compressed.** Measured at the `/agents/:id/overview` (or equivalent) endpoint. First paint completes off this payload and only this payload. Budget includes JSON, embedded thumbnails, and any inline metadata; excludes static asset bundles already cached.
+- **Above-the-fold priority** (must fit in the initial payload):
+  - Identity card.
+  - `AgentPresenceState` + Current focus + elapsed time + status subtitle.
+  - Working Time chart for the active timeframe (today by default), bucket containing "now".
+  - Active goals (1-2 lines).
+  - Top 3 Recent observations (per §5 default).
+  - Top 3 Knowledge-in-use entries with their metadata (per §5 mechanical constraints).
+- **Lazy-load after first paint:**
+  - Recent observations beyond the default 3 (the *"Show 2 more"* expand fetches them).
+  - Full Files snapshot beyond top 3.
+  - Tools usage bands beyond top entries.
+  - Activity feed beyond first 5 rows (subsequent rows fetch on scroll or on *"View all"*).
+  - Connections health detail (the row icons load with the page; per-connection diagnostic detail loads on hover/click).
+  - Working Time chart for non-active timeframes (Week / Month / Quarter fetch on tab-pill click).
+- **No inline blobs.** Activity-feed rows reference `event_id` only; full event content is fetched on click. Recent-observation rows reference `observation_id`; expanded detail loads on expand. Knowledge-in-use entries hold the metadata and reference the source document by id, never embedding source text inline. Run-trace lineage chips reference the four-tuple from §8 only; no file contents in the Overview payload.
+- **Worst-case profiling.** Spec author MUST profile at least the *50-runs-today, 200-pinned-observations, 30-knowledge-entries-loaded* worst case before declaring the layout shippable. The 150 KB target holds at the 95th-percentile worst case; design for graceful degradation (more aggressive lazy-loading) above it rather than blowing the budget.
+- **PR review check.** Every new Overview surface added later asserts a payload-impact note in its PR. The §5.5 freshness matrix and §5.8 budget are paired contracts: every new surface picks one row in each.
 
 ### Three states the tab must handle
 
@@ -705,6 +743,7 @@ The implementation spec author should treat these as the messy areas. Each is mo
 - **Multi-agent shared workspaces** (a workspace shared by N agents on the same task). Distinct from per-agent embodiment; future work.
 - **Per-agent memory editing surface.** Memory editing happens at the workspace level on the Knowledge page; per-agent slice is read-only in Overview.
 - **Confidence surface** (future-native concept; breadcrumbs only). The system is becoming increasingly trust-mediated: typed observations, retrieval observability, Trust verification, lineage, HITL gates. Eventually operators will want to see *"how certain is this agent about what it thinks?"* — qualitative bands like *Verified / Inferred / Assumed / Conflicted*, not raw probabilities. This is **not built in v1**, but the architecture should accommodate it: the typed Recent observations enum (§5) and the Trust judgement events (Trust spec Stage 2) are the two anchors that a future confidence surface will read from. Schema additions for confidence are deferred. Spec author should not foreclose the option (e.g. don't make `observation_type` a closed string check that's hard to extend; use an enum table).
+- **Presence privacy redaction** (future-work; breadcrumbs only). Today, presence surfaces inherit the existing organisation / sub-account / agent visibility boundaries — if a user can see the agent, they see its full presence (status, focus, observations, file lineage, HITL reasons). At agency scale, role-based redaction WITHIN those boundaries will eventually be required: contractors who shouldn't see specific clients' focus lines, junior operators who shouldn't see HITL-pause reasons containing sensitive data, sub-agent presence that should be opaque to non-operators of the parent. **Not built in v1**, but the architecture should accommodate it: the focus-line resolution chain (§5.3), the typed observation rows (§5), the file-lineage tuple (§8), and the SSE/WebSocket channel topology should not foreclose the option of attaching a redaction policy. Forbidden assumptions during v1 design: "all org members see all focus lines", "every observation is universally readable within the workspace", "the SSE channel topology is public per agent". Schema additions for redaction are deferred; the channel topology and event schema should leave the door open.
 
 ## 14. Success criteria for v1
 
@@ -728,4 +767,24 @@ The competitive frame, plain English: *"Open your agent and see it working. Or s
 
 ---
 
-> **Brief is final at Rev 9, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here, with the architectural-invariants pass (Rev 8) pinning the unified `AgentPresenceState`, the source-of-truth hierarchy (§5.3), the Working Time accounting rule (§5.4), and the immutable file-lineage tuple (§8); and the operational-contracts pass (Rev 9) pinning the Overview freshness matrix (§5.5), the anti-optimistic-UI rule (§5.6), retention (§5.7), degraded recovery (§5.2), session multiplicity (§7), and cognitive-load + accessibility + section-collapse rules (§10). Positioning-rewrite deliverables and non-UI dependencies are itemised in §3. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
+> **Brief is LOCKED at Rev 10.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`.
+>
+> **Implementation invariants** (load-bearing for spec):
+> - §5.1 Current focus invariants + anti-fake-progress rule.
+> - §5.2 Presence degradation states + recovery semantics + idempotent monotonic event application.
+> - §5.3 Source-of-truth hierarchy + canonical event clock authority.
+> - §5.4 Working Time accounting (formal definition + reconciliation invariant).
+> - §5.5 Overview freshness matrix.
+> - §5.6 Anti-optimistic UI synthesis.
+> - §5.7 Retention policy for presence projections.
+> - §5.8 Overview payload budget.
+> - §6 Home widget deterministic ordering.
+> - §7 Session multiplicity invariant.
+> - §8 Run-trace immutable file-lineage tuple `(run_id, event_id, produced_file_id, produced_version_id)`.
+> - §10 Operator cognitive load + accessibility + section-collapse rules.
+>
+> **Non-UI deliverables** (§3 positioning-rewrite acceptance criteria, §3 non-UI dependencies tracked elsewhere) ride alongside the build, not after it.
+>
+> **Risk surface** is in §12. **Mockups linked in the header capture the UX** and are the canonical visual reference for the architect; the spec must design TO the mockups, not just to this brief's text.
+>
+> The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec. Further conceptual revisions to this brief should arise only from implementation evidence — not from re-framing the existing argument. The framings have been worked.
