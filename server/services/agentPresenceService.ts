@@ -171,8 +171,10 @@ export async function applyEventToPresence(
     return;
   }
 
-  // §11.1 watermark upsert — latest-wins, with last_event_id as tiebreaker
-  await db.execute(sql`
+  // §11.1 watermark upsert — latest-wins, with last_event_id as tiebreaker.
+  // rowCount = 0 means the WHERE predicate blocked the update (out-of-order event);
+  // SSE fanOut must only fire when the projection was actually written.
+  const upsertResult = await db.execute(sql`
     INSERT INTO agent_presence_projections (
       agent_id,
       organisation_id,
@@ -227,6 +229,11 @@ export async function applyEventToPresence(
         AND EXCLUDED.last_event_id > agent_presence_projections.last_event_id
       )
   `);
+
+  if ((upsertResult as { rowCount?: number }).rowCount !== 1) {
+    // Out-of-order event — projection row not updated; do not leak stale state to SSE subscribers.
+    return;
+  }
 
   const sseEvent = {
     agentId,

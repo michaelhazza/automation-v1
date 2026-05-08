@@ -9,11 +9,9 @@
 
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { agents } from '../db/schema/index.js';
 import { authenticateSSE, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { resolveAgent } from '../lib/resolveAgent.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -100,18 +98,13 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
   async (req: import('express').Request, res: import('express').Response) => {
     try {
-      const [agentRow] = await db
-        .select({ id: agents.id })
-        .from(agents)
-        .where(and(eq(agents.id, req.params.agentId), eq(agents.organisationId, req.orgId!), isNull(agents.deletedAt)));
-      if (!agentRow) {
-        res.status(404).json({ error: 'Agent not found' });
-        return;
-      }
+      await resolveAgent(req.params.agentId, req.orgId!);
       sseSetup(res);
       const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId };
       attachStream(req, res, scope);
     } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status === 404) { res.status(404).json({ error: 'Agent not found' }); return; }
       logger.error('presence_stream.agent.error', { error: err });
       res.status(500).end();
     }
@@ -132,6 +125,8 @@ router.get(
       const scope: PresenceScope = { kind: 'workspace', subaccountId: req.params.subaccountId };
       attachStream(req, res, scope);
     } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status === 404) { res.status(404).json({ error: 'Workspace not found' }); return; }
       logger.error('presence_stream.workspace.error', { error: err });
       res.status(500).end();
     }
