@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 6. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, and a final simplification pass that removed redundant cards and scaffolding without losing capability.
+> **Status:** Rev 7. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, a simplification pass that removed redundant cards and scaffolding, and a final differentiator-coverage pass that itemised the §10.4 positioning rewrite, surfaced the cost-attribution narrative inline on the Working Time chart, and named the non-UI deliverables explicitly so the brief is self-contained for spec.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -85,6 +85,28 @@ For full reasoning see `docs/agent-cloud-compute-dev-brief.md` (Rev 5, locked).
 - Dedicated Agent Runtime tier (Rev 5 §10.5). Reserved for validated future demand. Not in v1.
 - Validation interviews (Rev 5 §15 Phase 0). Run separately by product, not implemented as code.
 
+### Positioning rewrite, what "shipped" means
+
+§10.4 of the Rev 5 strategic brief calls for a capabilities and positioning rewrite. This brief lists it as in scope above; "shipped" means the following concrete deliverables, all of which land in the same PR cycle as the Overview tab. They are non-negotiable; without them, the differentiator argument in §11 of the strategic brief stays internal and never reaches the buyer.
+
+| Deliverable | Where | What changes |
+|---|---|---|
+| Persistent Agent Workspace capability section | New top-level entry in `docs/capabilities.md` | Names the workspace as a first-class product. Composes Workspace UI, Memory, Files, Connections, Tools, Schedule, Run History, Continuity. |
+| IEE intro reframe | Existing IEE entry in `docs/capabilities.md` | Lead with *"on-demand sandboxed compute that picks up where the last run left off"*, not *"Docker containers for browser automation"*. |
+| Replaces / Consolidates row for hosted-VM-per-agent platforms | New row in `docs/capabilities.md § Replaces / Consolidates` | Addresses Manus, OpenClaw, and equivalents directly with the positive pitch: *"Persistent workspace, on-demand compute. Your agent remembers, continues, and only burns compute when work happens."* No anti-VM language; the row leads with what we have, not what they have. |
+| Always-on capability reframe | Existing entry in `docs/capabilities.md` | Reframed as schedule + workspace state, not idle compute. The 24/7 promise is delivered through schedulers + persistent identity, made visible by the Home Active Agents widget (§6) and the Schedule peek on Overview (§5). |
+| Marketing-language audit on customer surfaces | Sales decks, product copy, blog drafts touching the workspace | Sweep for any mention of *container*, *runtime*, *VM*, *scheduler*, *job* in customer surfaces; replace with workspace-language equivalents per the Rev 5 §10.1 language discipline. Engineering surfaces (run logs, IEE diagnostics, cost breakdowns) keep their precise terms. |
+| Sales-conversation enablement one-pager | Internal note for the buyer who asks *"do you give the agent its own VM?"* | Single-paragraph answer that pivots to workspace + on-demand compute without ever using the words *"we don't have VMs"*. Follows Rev 5 §14.1 discipline. |
+
+**Acceptance criterion:** a non-technical reviewer can read the updated `docs/capabilities.md` and answer *"what does Synthetos give my agent?"* in workspace-language, without reaching for infrastructure language. A second reviewer can read the same surface and locate the answer to *"how does this compare to Manus / OpenClaw?"* without finding any sentence that begins *"we don't have…"*.
+
+### Non-UI dependencies tracked elsewhere
+
+Two non-UI tracks ride alongside this brief and are explicitly NOT in v1 scope here. Naming them so the spec author and the reviewer know where they live, and so this brief does not silently absorb work it can't carry.
+
+- **Language discipline review on PRs touching customer-facing surfaces.** Per-PR check that any change to `docs/capabilities.md`, customer-visible product copy, marketing pages, or sales decks does not drift back into infrastructure language. Owned by docs-sync (`docs/doc-sync.md`) and the `chatgpt-pr-review` agent's pattern-extraction step. Mechanism, not deliverable.
+- **Capability-depth tracking.** Rev 5 §12.2 and §16.13 flag that the workspace abstraction only wins if underlying agent capability stays competitive (planning, autonomy, reliability, long-horizon goal pursuit). This brief operationalises the embodiment layer; capability depth is a separate roadmap track. The Overview tab's UX expectation ceiling (Rev 5 §12.2 last bullet) means **every component shipped here implicitly commits the agent to behave consistent with the surface**. If capability depth slips, the surface needs to be ratcheted back, not the other way around. Owned by the agent-capability roadmap, not by this brief; flagged here so spec author and reviewer know the dependency exists.
+
 ### Coverage of the Rev 5 strategic brief
 
 This implementation brief delivers the strategic concepts from `docs/agent-cloud-compute-dev-brief.md` (Rev 5, locked) as follows:
@@ -106,11 +128,11 @@ This implementation brief delivers the strategic concepts from `docs/agent-cloud
 | Local / edge execution trajectory | Not addressed (out of scope) | Future work. Architectural separation in this brief preserves the option. |
 | Reversibility | Honoured | Sessions are bounded; no idle compute commitments; Dedicated Runtime tier is an additive future option. |
 | Architectural separation (memory in DB, credentials in Connections, runtime ephemeral, skills separate) | Honoured | All four primitives stay separate; Overview composes them in the UI without collapsing them. |
-| Cost-of-goods advantage / no idle compute | Honoured | Sessions tear down on idle (§7); no always-on compute primitives introduced. |
+| Cost-of-goods advantage / no idle compute | Honoured + visible in product | Sessions tear down on idle (§7); no always-on compute primitives introduced. The Working Time chart caption (§5) makes the no-idle-compute pitch visible inline, every time the operator opens Overview. |
 | Ephemeral compute as evolved architecture | Honoured | Session-scoped runtime is on-demand by design; positioning rewrite (§3) reframes IEE in these terms. |
 | "Always-on" via schedulers + persistent state | Honoured | Schedule peek (Overview) and Scheduled-next agents (Home widget) make this visible without idle compute. |
 | Embodiment language discipline (no container / runtime / VM in customer surfaces) | Honoured | Mockups use Files / Tools / Memory / Schedule / Knowledge in use. Engineering language sits behind operator surfaces. |
-| Internal discipline: this is not a "workspace UI project" | Honoured at scope level | This implementation brief is UI-heavy by nature, but the strategic spine in §2 keeps the framing as identity-layer-first. |
+| Internal discipline: this is not a "workspace UI project" | Honoured at scope level + non-UI deliverables itemised | Strategic spine in §2 keeps the framing as identity-layer-first. The non-UI work (positioning rewrite, capabilities-doc reframe, language audit, sales-conversation enablement) is itemised in §3 *Positioning rewrite, what "shipped" means*. The capability-depth and language-discipline-review tracks that ride alongside this brief are named in §3 *Non-UI dependencies tracked elsewhere*. |
 | Coordination with Trust & Verification Layer | Captured in §11 with concrete spec details | Run-trace, Agent edit tab order, and Inbox feed all coordinated. Trust owns its surfaces; cloud compute owns its surfaces; both compose without shared state. |
 | Coordination with Phase 1 (auto knowledge retrieval) | Captured in §11 with concrete spec details | Phase 1 ships Files / Documents / Data sources surfaces; cloud compute consumes them via deep links. Phase 1 ships the retrieval observability events that power cloud compute's Overview Knowledge-in-use card. |
 
@@ -150,7 +172,11 @@ Two surfaces composed onto one page:
 - **Tools the agent uses**, qualitative usage bands rather than precise counts. Three bands: *Frequently used*, *Occasionally used*, *Rarely used*, classified from rolling 30-day usage. Precise numbers stay available on hover and in the Skills tab for the rare cases an operator wants exact data. Rationale: rolling usage windows shift fast, and exact counts ("28 of 30 runs") cause unstable mental models week-to-week. Qualitative bands are stable enough to anchor a mental model and still informative enough to spot drift.
 - **Schedule peek**, when the agent runs next, what triggers it.
 - **Connections health**, at-a-glance status of the credentials this agent depends on.
-- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter). **Caption mandatory**: *"Time spent actively executing runs"*, surfaced under the chart title so semantic ambiguity (runs vs minutes vs CPU vs success-weighted work) is closed before the operator infers wrong. Bar colour: indigo for successful execution, red overlay for failed. Compact stat row underneath: runs in period, total working time, success rate, average run duration. **The chart's stat row is the single source of performance metrics on Overview**, no separate Performance card. Earlier draft had both; the chart already covers the same ground at every timeframe, so a parallel Performance card was redundant.
+- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter). **Caption mandatory** (two lines):
+  - Line 1: *"Time spent actively executing runs"*, surfaced under the chart title so semantic ambiguity (runs vs minutes vs CPU vs success-weighted work) is closed before the operator infers wrong.
+  - Line 2: *"You're billed for this time only, not while the agent is idle."* This is the in-product surface of Rev 5's *"you only pay when work happens"* differentiator. Without it, the cost-attribution narrative lives only in the Capabilities doc and the operator never sees it inline. With it, the chart becomes the visible expression of the no-idle-compute pitch, every time anyone opens the Overview tab.
+  - Bar colour: indigo for successful execution, red overlay for failed.
+  - Compact stat row underneath: runs in period, total working time, success rate, average run duration. **The chart's stat row is the single source of performance metrics on Overview**, no separate Performance card. Earlier draft had both; the chart already covers the same ground at every timeframe, so a parallel Performance card was redundant.
 
 **Presence surface** (what the agent is doing or about to do):
 - **Status pill** (5 states, closed taxonomy):
@@ -464,6 +490,7 @@ A non-technical operator can:
 - Open a brand-new agent and feel that the agent is *a thing that exists*, not *a placeholder that will exist once configured*.
 - Drill from a current focus line into the live run trace and back without losing context.
 - See files this agent recently produced, with one click to the full Files tab.
+- Articulate, after one look at the Overview tab, that compute is billed only for time the agent is actively working, not while it sits idle. The Working Time chart caption is the surface where this lands.
 
 A reasonable internal observer can:
 
@@ -476,4 +503,4 @@ The competitive frame, plain English: *"Open your agent and see it working. Or s
 
 ---
 
-> **Brief is final at Rev 1, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
+> **Brief is final at Rev 7, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here. Positioning-rewrite deliverables and non-UI dependencies are itemised in §3. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
