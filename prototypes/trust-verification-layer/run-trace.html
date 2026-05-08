@@ -11,12 +11,21 @@
        edited output (textarea), optional reason (one-line), Save / Cancel.
        After save, a small "captured as auto-memory" toast appears with a link to Knowledge.
 
+  Round 5 additions:
+    3. "About this correction" metadata block inside the Correct modal — three labelled rows:
+       Scope, Persistence, Confidence. Read-only panel with grey background so it reads as
+       system metadata, not editable content. Placed after the Reason field, before the footer.
+       Addresses reviewer feedback: "captured as auto-memory" alone is too vague; operators
+       need to see scope, persistence, and confidence before confirming.
+
   Design decisions:
     - Verify badge placed between event label and content, with a small gap. Stays inline,
       zero extra vertical space on non-hovered rows.
     - Correct button only appears in hover overlay; not permanently visible (avoids clutter).
     - Modal uses the .modal-overlay / .modal-card primitives from _shared.css.
     - Toast is a fixed bottom-right chip, auto-dismiss 4s.
+    - Correction metadata block uses light grey background with subtle border to distinguish
+      from editable content. Row-level separators (thin border-bottom) without heavy borders.
 -->
 <html lang="en">
 <head>
@@ -249,6 +258,28 @@
   }
   .modal-section { margin-bottom: 16px; }
   .char-hint { font-size: 11px; color: var(--slate-400); margin-top: 3px; }
+
+  /* ── Correction metadata block ─────────────────────────────────── */
+  .correction-meta {
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 0;
+  }
+  .correction-meta-heading {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 8px;
+  }
+  .correction-meta-row {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 12px; line-height: 1.5;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .correction-meta-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .correction-meta-key {
+    font-weight: 600; color: var(--slate-600);
+    min-width: 90px; flex-shrink: 0;
+  }
+  .correction-meta-val { color: var(--slate-700); }
 
   /* ── Toast ──────────────────────────────────────────────────────── */
   .toast {
@@ -632,9 +663,26 @@
         <textarea class="form-textarea" id="correct-edited" rows="5" style="min-height:100px;"></textarea>
         <div class="char-hint">This will be saved as a high-signal memory entry for the Outreach Agent.</div>
       </div>
-      <div class="modal-section" style="margin-bottom:0;">
+      <div class="modal-section">
         <div class="modal-section-label">Reason <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);">(optional)</span></div>
         <input class="form-input" type="text" id="correct-reason" placeholder="e.g. Tone was too formal for this contact">
+      </div>
+      <div class="modal-section" style="margin-bottom:0;">
+        <div class="correction-meta">
+          <div class="correction-meta-heading">About this correction</div>
+          <div class="correction-meta-row">
+            <span class="correction-meta-key">Scope</span>
+            <span class="correction-meta-val">This agent only</span>
+          </div>
+          <div class="correction-meta-row">
+            <span class="correction-meta-key">Persistence</span>
+            <span class="correction-meta-val">Active on next run</span>
+          </div>
+          <div class="correction-meta-row">
+            <span class="correction-meta-key">Confidence</span>
+            <span class="correction-meta-val">High signal — applied immediately, listed under Knowledge (Source: from corrections) where you can edit, override, or reject</span>
+          </div>
+        </div>
       </div>
     </div>
     <div class="modal-footer" style="flex-direction:column;align-items:flex-start;gap:10px;">

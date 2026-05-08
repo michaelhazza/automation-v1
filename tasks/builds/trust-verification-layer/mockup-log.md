@@ -169,3 +169,29 @@ Files CREATED:
 - `prototypes/trust-verification-layer/agent-create.html` (3a: section header renamed; 3b: PII row added; footer count updated)
 - `prototypes/trust-verification-layer/index.html` (status, decisions box, card descriptions, badges)
 - `tasks/builds/trust-verification-layer/mockup-log.md` (this entry)
+
+---
+
+## Round 5 — 2026-05-08 16:00
+**Operator feedback:** External reviewer raised two operator-trust gaps: (1) "captured as auto-memory" alone is too vague — operators need to see scope, persistence, and confidence before confirming corrections; (2) enterprise users fear hidden output degradation — bench results should surface variance as a plain-English risk indicator.
+
+**Changes made:**
+- `run-trace.html`: Added "About this correction" metadata block inside the Correct modal. Placed after the Reason field, before the modal footer. Three labelled rows: Scope (This agent only), Persistence (Active on next run), Confidence (High signal — applied immediately, listed under Knowledge where you can edit, override, or reject). Rendered as a compact grey-background panel (`.correction-meta`) with a subheading and row separators to visually distinguish system metadata from editable fields. CSS classes added: `.correction-meta`, `.correction-meta-heading`, `.correction-meta-row`, `.correction-meta-key`, `.correction-meta-val`. Header comment updated to document Round 5 addition.
+- `model-bench.html`: Added Regression risk column to the results table. Column placed between Variance and Mean latency. Three pill values: Low (green, `risk-low`), Medium (amber, `risk-medium`), High (red, `risk-high`). Demo values: Sonnet 4.6 (winner) = Low, Opus 4.7 = Medium, Haiku 4.5 = High. Column header includes an inline `?` tooltip explaining derivation: "Derived from observed score variance across the sample. High variance means inconsistent outputs and elevated risk of edge-case regressions." CSS classes added: `.risk-pill`, `.risk-low`, `.risk-medium`, `.risk-high`. Header comment updated.
+- `index.html`: Status updated to "Round 5 (post-review polish)". Round 5 decisions box added (yellow, active). Round 4 decisions box archived (red/pink style). `badge-r5` CSS class added. Card descriptions updated for run-trace.html and model-bench.html to describe Round 5 additions. Round 5 green badges added to both updated cards.
+- `tasks/builds/trust-verification-layer/mockup-log.md`: this entry.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — the correction metadata block answers "what will happen when I save?" which is load-bearing information before the operator commits. The regression risk column answers "is this model safe to promote?" which is the primary decision in the results view.
+- Default to hidden: yes — the metadata block appears only inside the modal that the operator explicitly opened. The regression risk column adds one column; no new panels, sidebars, or dashboards added.
+- One primary action: yes — Correct modal retains "Save correction" / "Cancel" as its sole action pair. Results table retains "Approve as default" as the primary action per row. No new actions added.
+- Inline state: yes — scope/persistence/confidence are inline system metadata within the modal, not a separate view. Regression risk is an inline badge on the same row as the model data, not a separate risk dashboard.
+- Re-check passed: yes — a non-technical operator opening the Correct dialog can now read three plain-English lines before saving; they know exactly where the correction goes, when it takes effect, and how strongly it is weighted. An enterprise operator reviewing bench results can read "High" under Regression risk on Haiku 4.5 and understand the cost-vs-stability tradeoff without knowing what variance means statistically.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/trust-verification-layer/run-trace.html` (About this correction block added to Correct modal)
+- `prototypes/trust-verification-layer/model-bench.html` (Regression risk column added to results table)
+- `prototypes/trust-verification-layer/index.html` (status, decisions box, card descriptions, badges)
+- `tasks/builds/trust-verification-layer/mockup-log.md` (this entry)

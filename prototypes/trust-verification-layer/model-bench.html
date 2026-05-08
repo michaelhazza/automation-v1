@@ -244,6 +244,16 @@
     font-size: 10.5px; font-weight: 700;
   }
 
+  /* ── Regression risk pills ── */
+  .risk-pill {
+    display: inline-flex; align-items: center;
+    font-size: 10.5px; font-weight: 700;
+    border-radius: 4px; padding: 2px 8px; white-space: nowrap;
+  }
+  .risk-low    { background: var(--emerald-50); color: var(--emerald-700); border: 1px solid #a7f3d0; }
+  .risk-medium { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+  .risk-high   { background: var(--red-50); color: var(--red-700); border: 1px solid #fecaca; }
+
   /* ── Toast ── */
   .toast {
     position: fixed; bottom: 24px; right: 24px;
@@ -621,6 +631,10 @@
                   <th>Model</th>
                   <th>Mean score</th>
                   <th>Variance</th>
+                  <th style="white-space:nowrap;">
+                    Regression risk
+                    <span title="Derived from observed score variance across the sample. High variance means inconsistent outputs and elevated risk of edge-case regressions." style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:var(--slate-200);color:var(--slate-500);font-size:9px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle;font-style:normal;">?</span>
+                  </th>
                   <th>Mean latency</th>
                   <th>Cost / task</th>
                   <th>Composite</th>
@@ -641,6 +655,7 @@
                     <div style="font-size:10.5px;color:var(--emerald-600);margin-top:2px;">all checks pass</div>
                   </td>
                   <td style="font-size:12px;color:var(--slate-500);">+/-4%</td>
+                  <td><span class="risk-pill risk-low">Low</span></td>
                   <td style="font-size:12.5px;">1,840 ms</td>
                   <td style="font-size:13px;font-weight:600;">$0.0087</td>
                   <td style="font-size:12px;color:var(--emerald-600);font-weight:600;">Cheapest, clears all pass marks</td>
@@ -656,6 +671,7 @@
                     <div style="font-size:10.5px;color:var(--emerald-600);margin-top:2px;">all checks pass</div>
                   </td>
                   <td style="font-size:12px;color:var(--slate-500);">+/-3%</td>
+                  <td><span class="risk-pill risk-medium">Medium</span></td>
                   <td style="font-size:12.5px;">3,410 ms</td>
                   <td style="font-size:13px;font-weight:600;">$0.0145</td>
                   <td style="font-size:12px;color:var(--slate-400);font-style:italic;">Passes but 67% costlier than winner</td>
@@ -671,6 +687,7 @@
                     <div style="font-size:10.5px;color:var(--red-600);margin-top:2px;">Hook strength: 63%</div>
                   </td>
                   <td style="font-size:12px;color:var(--slate-500);">+/-9%</td>
+                  <td><span class="risk-pill risk-high">High</span></td>
                   <td style="font-size:12.5px;">620 ms</td>
                   <td style="font-size:13px;font-weight:600;">$0.0006</td>
                   <td style="font-size:12px;color:var(--red-500);font-style:italic;">Fails Hook strength pass mark (70%)</td>
