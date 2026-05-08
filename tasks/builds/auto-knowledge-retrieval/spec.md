@@ -145,6 +145,8 @@ A document attaches at exactly one of these scopes per link row:
 
 A single document can have multiple link rows (one per scope). Mode is set on the document, not on the link, so all attachments of the same document share the same mode (see §6.4 for the source-of-truth rule).
 
+**Invariant (exactly one scope tier per row):** Exactly one scope tier may be active per `reference_document_data_sources` row. **Organisation scope is represented by all scope FK columns being NULL** (`subaccount_id`, `agent_id`, `scheduled_task_id`, `task_instance_id` all NULL). The other four tiers each have exactly one of those columns non-NULL. This is enforced by a CHECK constraint at the table level (Phase 1 migration `0290`); the constraint shape names the four FK columns explicitly so a future tier addition is a deliberate spec amendment, not an emergent shape. Named nullable FK columns are preferred to a polymorphic `scope_type` + `scope_id` because RLS policies stay straightforward, query plans are understandable, tier-specific partial indexes are possible, and debugging is easier.
+
 ### 4.2 The four tiers (memory blocks)
 
 Memory blocks gain `scheduled_task_id`. They do **not** gain `task_instance_id` (brief §7, persistent memory at an ephemeral scope is a category error).
@@ -435,6 +437,8 @@ Idempotent (state-based: predicate `WHERE mode <> :mode`). Returns the new mode.
 
 **Storage: `agent_execution_events`.** A new event type is added to the existing ledger (`shared/types/agentExecutionLog.ts -> AGENT_EXECUTION_EVENT_CRITICALITY`). New `criticality` entry: `'observability'`. New event-shape `'retrieval.summary'` carrying the `RetrievalResult` shape from §6.2 verbatim (document-level identity for document rows, chunk-level fan-out nested under `loaded[i].chunkIds`). Emission begins in Phase 4; the partial unique index in `0291b_agent_execution_events_retrieval_summary_unique.sql` (§10.4) enforces the exactly-one-per-run invariant.
 
+Payload bounding is non-negotiable: see §11.4 for the deterministic truncation contract that every emitter must satisfy before persisting an event.
+
 A dedicated `retrieval_events` table is **deferred** (see §15) — splitting events into a separate table is reconsidered only if Phase 7 telemetry shows event volume swamping the existing ledger. Any future split must preserve the Phase-4 emission point and the terminal-event uniqueness guarantee with equivalent DB-level mechanisms; it is not a v1 decision.
 
 ### 6.8 Bundle attachment contract (no change)
@@ -570,7 +574,7 @@ Every retrieval has exactly one terminal observability event (`retrieval.summary
 
 The "always-available bypass-but-still-budget-bound" rule (brief §3) is the trickiest place. The contract is:
 
-- If `sum(alwaysAvailable token_cost) > context_budget`, the system flags the run as `degraded` in the retrieval result and emits operator guidance via `RetrievalResult.alwaysAvailable[i].degraded = true`. It does NOT silently truncate; the agent execution continues but the run-summary surface marks it. Operator-facing copy in the UI reads "Some always-available documents could not be loaded due to context limits."
+- If `sum(alwaysAvailable token_cost) > context_budget`, the system flags the run as `degraded` in the retrieval result and emits operator guidance via `RetrievalResult.alwaysAvailable[i].degraded = true`. It does NOT silently truncate; the agent execution continues but the run-summary surface marks it. Operator-facing copy in the UI reads "Context limits prevented some always-available documents from loading."
 - Threshold-passing documents that don't fit the remaining budget are tracked in `rejected.aboveThreshold[i].reason = 'budget_exhausted'` so the "why wasn't this loaded?" drill-in (§11) can surface the truth.
 
 ### 10.6 Unique-constraint-to-HTTP mapping
@@ -589,6 +593,23 @@ The `mode` enum is closed: `auto | always_available | reference_only`. Adding a 
 `summary_stale` is a boolean (`true` after version write, `false` after summarisation completes). Forbidden transitions: none; the column is a flag, not a multi-state machine.
 
 `reference_document_data_sources` rows have a soft-delete model (`deleted_at IS NULL` filter). Forbidden transitions: re-creating a deleted link must use a fresh row, not un-deleting (audit-friendly). The unique index applies only to `WHERE deleted_at IS NULL`.
+
+### 10.8 Ranking determinism (hard invariant)
+
+`retrievalServicePure` produces a strictly deterministic ordering of candidates. Two replays of the same input MUST produce byte-identical `RetrievalResult.loaded`, `rejected.aboveThreshold`, and `rejected.belowThreshold.sample` arrays.
+
+**Final comparator chain (in order):**
+
+1. `finalScore` DESC
+2. `scopeTier` DESC (task instance > recurring task > agent > sub-account > organisation; encoded as integer rank 5..1)
+3. `updatedAt` DESC (the candidate's underlying-row updated_at)
+4. `id` ASC (chunk id for documents, memory_block id for memory blocks; the final tiebreaker, guaranteed unique)
+
+The `id` ASC tiebreaker is the determinism anchor. Without it, two candidates with identical scores and identical updatedAt produce non-deterministic ordering and replay-divergent observability payloads.
+
+**Document-level relevance (hard invariant):** Document relevance is determined by the **highest-scoring chunk**, not by aggregate chunk scores. Implementations MUST NOT average, sum, or otherwise overweight documents with more chunks. Concretely: when documents and memory blocks compete in the same ranking pass, the document's `finalScore` IS the maximum `finalScore` across its chunks, and only that best chunk participates in the comparator chain above. Other chunks of the same document carry their own scores but do not contribute additional ranking weight at the document level. Tested at the pure-function boundary by constructing a document with one high-scoring chunk + many low-scoring chunks and asserting the document does not outrank a single high-scoring memory block.
+
+The comparator chain and the best-of-chunk rule together remove every implementation-discretion surface in the ranker. Future builders inherit one ordering, not several.
 
 ## 11. Retrieval observability
 
@@ -616,6 +637,22 @@ Engineering-only:
 - Retrieval drift detection (week-over-week candidate-pool size and rejection-reason distribution).
 
 These surfaces are not gated behind the new `knowledge` permission; they're admin-only.
+
+### 11.4 Bounded payload constraint (hard invariant)
+
+`retrieval.summary` payloads MUST be bounded. Retrieval payloads are structurally large (loaded set, rejected candidates, manifests, scores, chunk ids, reasons) and the brief §9 invariant places this event on the agent run's hot path; if payloads grow unbounded, the existing `agent_execution_events` ledger (§6.7) suffers DB bloat, slow trace reads, oversized WAL, and future retention pain. Since Phase 7 aggregates query this ledger directly, payload growth is also a Phase 7 query-cost multiplier.
+
+The contract:
+
+- **Loaded array:** unbounded by design (the budget already caps it; typical run loads single-digit documents).
+- **`rejected.aboveThreshold`:** truncated to top-N by `finalScore` DESC, default N = 50. Truncation indicator emitted as `rejected.aboveThreshold_truncated: { total: number, retained: number }` so the drill-in can render "showing top 50 of 230 budget-rejected candidates".
+- **`rejected.belowThreshold.sample`:** truncated to top-N by `bestChunkScore` DESC, default N = 20 (already named in §6.2). The full count remains in `rejected.belowThreshold.count`.
+- **`rejected.modeExcluded`:** truncated to top-N by document `updated_at` DESC, default N = 50.
+- **`alwaysAvailable`:** unbounded (operator-pinned set; growth is bounded by operator action, not retrieval).
+- **`referenceOnlyManifest`:** unbounded but per-entry token cost capped (see §18 question 4).
+- **`loaded[i].chunkIds`:** unbounded per loaded document (chunk count is bounded by document size).
+
+The truncation rule is **deterministic** (sort + slice) so two replays of the same input produce identical payloads. The N values are constants in `retrievalObservabilityService`; tuning is a code change, not a per-org configuration. If telemetry shows payload size is still problematic, the next move is the deferred dedicated `retrieval_events` table (§15) — not raising the caps.
 
 ## 12. Tenant isolation invariants
 
@@ -652,6 +689,8 @@ Brief §11. Knowledge artefacts are versioned and re-indexable; embedding genera
 6. **Atomic retrieval swap:** when the chunking job has committed every chunk for the new version (and embedded them), it updates `reference_documents.retrieval_version_id = current_version_id` and `last_chunked_at = now()` in a single statement. The next agent run reads the new chunks. Old chunks are retained (audit / history) but `version_id != retrieval_version_id` excludes them from retrieval.
 
 The two-pointer split (`current_version_id` for content, `retrieval_version_id` for retrieval) is the source-of-truth contract noted in §6.4. Without it, either content reads return stale data or retrieval reads against an empty chunk set.
+
+**Invariant (retrieval-version completeness):** `reference_documents.retrieval_version_id` MUST always reference a version whose **full chunk set exists for `active_embedding_model`**. The chunking job MUST NOT flip the pointer until every chunk for the new version has been embedded under the active generation. This invariant prevents partial chunk visibility, half-embedded generations, and accidental pointer flips during in-flight re-embedding sweeps. Tested at the pure-function boundary by asserting that `documentRetrievalServicePure` rejects any `(retrieval_version_id, active_embedding_model)` tuple whose chunk count is below the version's expected total.
 
 ### 13.2 Source-file change (e.g. underlying CSV updated)
 
@@ -758,6 +797,10 @@ Per checklist §8. Read pass complete. Findings:
   - "Always-available bypasses threshold but participates in budget" -> mechanism: `RetrievalResult.alwaysAvailable[i].degraded` flag and operator-facing copy (§10.5).
   - "Mode is a property of the document, not the link" -> mechanism: `mode` column on `reference_documents`, not on `reference_document_data_sources` (§4.3, §6.4).
   - "Bundles are organisational only" -> mechanism: bundle attachments are deduplicated against direct attachments at retrieval time; mode chip is read-only in the bundle edit modal (§6.8, §14.8).
+  - "Ranking is deterministic and replay-stable" -> mechanism: §10.8 four-step comparator chain (`finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC`) plus best-of-chunk document relevance.
+  - "Observability payloads are bounded" -> mechanism: §11.4 deterministic top-N truncation per array with truncation indicators.
+  - "Exactly one scope tier per link row" -> mechanism: §4.1 CHECK constraint at table level; org scope = all FK columns NULL.
+  - "Retrieval pointer always names a complete chunk set" -> mechanism: §13.1 invariant; chunking job flips `retrieval_version_id` only after every chunk for the new version is embedded under `active_embedding_model`.
 
 No contradictions found at this draft pass. The spec author expects `spec-reviewer` and `chatgpt-spec-review` to surface gaps not visible to the author.
 
@@ -766,7 +809,7 @@ No contradictions found at this draft pass. The spec author expects `spec-review
 Per checklist §9. Aligned with `docs/spec-context.md` framing.
 
 - **Pure-function tests** (Vitest, runtime tests allowed for pure functions per `runtime_tests: pure_function_only`):
-  - `retrievalServicePure.test.ts`, ranker correctness, scope-bonus bounding (irrelevant doc never outranks relevant doc), threshold filtering, budget capping, deterministic tiebreak.
+  - `retrievalServicePure.test.ts`, ranker correctness, scope-bonus bounding (irrelevant doc never outranks relevant doc), threshold filtering, budget capping, deterministic tiebreak (§10.8 comparator chain), best-of-chunk document relevance (§10.8: many-low-chunks document does not outrank single-high-chunk memory block).
   - `documentRetrievalServicePure.test.ts`, mode resolution, version pinning, chunk grouping.
   - `documentChunkingServicePure.test.ts`, boundary correctness, edge cases (very short docs, very long docs, mixed content).
   - Cross-tenant defence-in-depth: ranker with mixed-org candidates filters by `organisationId`.
