@@ -7,6 +7,7 @@
 // Import and re-export EventOrigin for use within this file and by callers.
 import type { EventOrigin } from './workflowStepGate.js';
 export type { EventOrigin };
+import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.js';
 
 // ---------------------------------------------------------------------------
 // Source-service tag
@@ -83,7 +84,8 @@ export type AgentExecutionEventType =
   | 'run.completed'
   | 'tool.error'
   | 'run.terminal.summary_missing'
-  | 'run.terminal.extracted_with_errorMessage';
+  | 'run.terminal.extracted_with_errorMessage'
+  | 'runtime_check.completed';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -253,6 +255,22 @@ export type AgentExecutionEventPayload =
       eventType: 'run.terminal.extracted_with_errorMessage';
       critical: false;
       errorMessageLength: number;
+    }
+  | {
+      /** Trust & Verification Layer §11: per-step deterministic verification result. */
+      eventType: 'runtime_check.completed';
+      critical: false;
+      runId: string;
+      eventId?: string | null;
+      sequenceNumber: number;
+      skillSlug: string;
+      state: RuntimeCheckState;
+      reasonCode: string;
+      reasonText: string;
+      impact: 'blocking' | 'informational';
+      blastRadius: RuntimeCheckBlastRadius;
+      reversible: boolean;
+      suggestedFix: string | null;
     };
 
 // ---------------------------------------------------------------------------
@@ -283,6 +301,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'tool.error': false,
   'run.terminal.summary_missing': false,
   'run.terminal.extracted_with_errorMessage': false,
+  'runtime_check.completed': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

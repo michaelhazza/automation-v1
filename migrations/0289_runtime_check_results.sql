@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS runtime_check_results (
   organisation_id         uuid        NOT NULL REFERENCES organisations (id),
   subaccount_id           uuid        REFERENCES subaccounts (id),
   run_id                  uuid        NOT NULL REFERENCES agent_runs (id),
-  event_id                uuid        NOT NULL REFERENCES agent_execution_events (id),
+  event_id                uuid        REFERENCES agent_execution_events (id),
   sequence_number         integer     NOT NULL,
   skill_slug              text        NOT NULL,
   attempt_number          integer     NOT NULL DEFAULT 1,

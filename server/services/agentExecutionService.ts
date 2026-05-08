@@ -105,7 +105,8 @@ import type { ThreadContextReadModel } from '../../shared/types/conversationThre
 import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServicePure.js';
 import { spendingBudgets } from '../db/schema/spendingBudgets.js';
 import { spendingPolicies } from '../db/schema/spendingPolicies.js';
-import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
+import { SPEND_ACTION_ALLOWED_SLUGS, getActionDefinition } from '../config/actionRegistry.js';
+import { evaluate as evaluateRuntimeCheck } from './runtimeCheckService.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -3143,6 +3144,31 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           if (r._created_deliverable) deliverablesCreated++;
         }
       }
+
+      // Runtime check hook — fire and forget, never fails the run.
+      // Observational only: evaluate the post-action state and persist the
+      // result for trust analytics and Run-trace badge rendering.
+      void (async () => {
+        try {
+          const actionDef = getActionDefinition(toolCall.name);
+          if (actionDef !== undefined) {
+            await evaluateRuntimeCheck({
+              runId,
+              eventId: runId, // placeholder — skill.completed event id not available at this point
+              sequenceNumber: totalToolCalls,
+              skillSlug: toolCall.name,
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? null,
+              checkKind: actionDef.verify ?? null,
+              toolResult: result,
+              blastRadius: actionDef.blastRadius ?? 'self',
+              reversible: actionDef.reversible ?? false,
+            });
+          }
+        } catch {
+          // Never throw into the agent loop.
+        }
+      })();
 
       const toolDurationMs = Date.now() - toolStart;
 

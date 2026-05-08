@@ -23,7 +23,6 @@ export const runtimeCheckResults = pgTable(
       .notNull()
       .references(() => agentRuns.id),
     eventId: uuid('event_id')
-      .notNull()
       .references(() => agentExecutionEvents.id),
     sequenceNumber: integer('sequence_number').notNull(),
     skillSlug: text('skill_slug').notNull(),
