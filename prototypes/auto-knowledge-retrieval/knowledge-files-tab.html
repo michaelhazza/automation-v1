@@ -56,7 +56,7 @@
   .file-row {
     background: white; border: 1px solid var(--slate-200); border-radius: 8px;
     padding: 12px 16px;
-    display: grid; grid-template-columns: auto 1fr auto auto auto auto auto; gap: 14px;
+    display: grid; grid-template-columns: auto 1fr auto auto auto auto; gap: 14px;
     align-items: center; transition: all 0.1s; cursor: pointer;
   }
   .file-row:hover { border-color: var(--slate-300); background: var(--slate-50); }
@@ -218,7 +218,7 @@
       <div class="page-sub">Everything your agents know, learn, and produce in this workspace.</div>
 
       <!-- Page intro / explainer (helps users understand new model) -->
-      <div class="page-intro">
+      <div class="page-intro" style="position:relative;">
         <div class="page-intro-icon">i</div>
         <div>
           <div class="page-intro-title">Files now live alongside Documents and Memory</div>
@@ -226,6 +226,7 @@
             Every file your agents produce shows up here automatically. You can add any of them to your knowledge base in one click — no need to upload again. Files you don't add are kept for 60 days, then expire automatically.
           </div>
         </div>
+        <button style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--slate-400);cursor:pointer;font-size:18px;width:24px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;" title="Dismiss">×</button>
       </div>
 
       <!-- ── Tab strip ────────────────────────────────────────────────── -->
@@ -243,9 +244,7 @@
       <div class="tab-toolbar">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span class="filter-pill active">All (187)</span>
-          <span class="filter-pill">Last 7 days (24)</span>
           <span class="filter-pill">Linked to Knowledge (12)</span>
-          <span class="filter-pill">Expiring soon (8)</span>
         </div>
         <div class="tab-toolbar-right">
           <input class="search-input" type="text" placeholder="Search files...">
@@ -269,7 +268,7 @@
               acme-discovery-call-summary-may-7.md
               <span class="linked-pill">● Linked to Knowledge</span>
             </div>
-            <div class="file-sub">14 KB · markdown · produced during run #1284</div>
+            <div class="file-sub">14 KB</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -283,10 +282,6 @@
             <div class="col-label">Lifecycle</div>
             <div class="col-val"><span class="ttl-pill durable">Kept indefinitely</span></div>
           </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val">"Acme Corp account context"</div>
-          </div>
           <button class="three-dot-btn">⋮</button>
         </div>
 
@@ -297,7 +292,7 @@
             <div class="file-name">
               acme-contacts-enriched-2026-05-06.csv
             </div>
-            <div class="file-sub">86 KB · 412 rows · produced during run #1281</div>
+            <div class="file-sub">86 KB · 412 rows</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -310,10 +305,6 @@
           <div>
             <div class="col-label">Lifecycle</div>
             <div class="col-val"><span class="ttl-pill">Expires in 58 days</span></div>
-          </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val muted">— not linked —</div>
           </div>
           <div style="position:relative;">
             <button class="three-dot-btn" style="background:var(--slate-100);color:var(--slate-700);">⋮</button>
@@ -352,7 +343,7 @@
           <div class="file-icon icon-pdf">PDF</div>
           <div class="file-meta">
             <div class="file-name">brand-voice-guidelines-extracted.pdf</div>
-            <div class="file-sub">421 KB · 18 pages · produced during run #1278</div>
+            <div class="file-sub">421 KB · 18 pages</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -366,10 +357,6 @@
             <div class="col-label">Lifecycle</div>
             <div class="col-val"><span class="ttl-pill">Expires in 57 days</span></div>
           </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val muted">— not linked —</div>
-          </div>
           <button class="three-dot-btn">⋮</button>
         </div>
 
@@ -381,7 +368,7 @@
               q1-pipeline-analysis-summary.md
               <span class="linked-pill">● Linked to Knowledge</span>
             </div>
-            <div class="file-sub">8 KB · markdown · produced during run #1271</div>
+            <div class="file-sub">8 KB</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -395,10 +382,6 @@
             <div class="col-label">Lifecycle</div>
             <div class="col-val"><span class="ttl-pill durable">Kept indefinitely</span></div>
           </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val">"Q1 pipeline insights"</div>
-          </div>
           <button class="three-dot-btn">⋮</button>
         </div>
 
@@ -407,7 +390,7 @@
           <div class="file-icon icon-json">JSON</div>
           <div class="file-meta">
             <div class="file-name">terraform-partners-discovery-notes.json</div>
-            <div class="file-sub">4 KB · 23 entries · produced during run #1112</div>
+            <div class="file-sub">4 KB · 23 entries</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -421,10 +404,6 @@
             <div class="col-label">Lifecycle</div>
             <div class="col-val warn"><span class="ttl-pill warn">Expires in 7 days</span></div>
           </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val muted">— not linked —</div>
-          </div>
           <button class="three-dot-btn">⋮</button>
         </div>
 
@@ -433,7 +412,7 @@
           <div class="file-icon icon-img">PNG</div>
           <div class="file-meta">
             <div class="file-name">acme-pipeline-chart-may-5.png</div>
-            <div class="file-sub">182 KB · 1920x1080 · produced during run #1265</div>
+            <div class="file-sub">182 KB · 1920x1080</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -447,10 +426,6 @@
             <div class="col-label">Lifecycle</div>
             <div class="col-val"><span class="ttl-pill">Expires in 53 days</span></div>
           </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val muted">— not linked —</div>
-          </div>
           <button class="three-dot-btn">⋮</button>
         </div>
 
@@ -459,7 +434,7 @@
           <div class="file-icon icon-txt">TXT</div>
           <div class="file-meta">
             <div class="file-name">crm-cleanup-log-2026-05-04.txt</div>
-            <div class="file-sub">22 KB · 514 lines · produced during run #1259</div>
+            <div class="file-sub">22 KB · 514 lines</div>
           </div>
           <div>
             <div class="col-label">Created by</div>
@@ -472,10 +447,6 @@
           <div>
             <div class="col-label">Lifecycle</div>
             <div class="col-val"><span class="ttl-pill">Expires in 56 days</span></div>
-          </div>
-          <div>
-            <div class="col-label">Linked doc</div>
-            <div class="col-val muted">— not linked —</div>
           </div>
           <button class="three-dot-btn">⋮</button>
         </div>

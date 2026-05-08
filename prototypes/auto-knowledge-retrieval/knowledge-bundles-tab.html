@@ -226,30 +226,25 @@
         <span class="sub-tab active">Bundles</span>
       </div>
 
-      <!-- Info banner explaining bundles in the new model -->
-      <div class="info-banner">
+      <!-- Info banner explaining bundles in the new model (dismissable) -->
+      <div class="info-banner" style="position:relative;">
         <div class="info-icon">i</div>
         <div>
           <div class="info-title">Bundles are groupings, not loading rules</div>
           <div class="info-body">
-            A bundle is a curatorial collection of documents you can attach to an agent or task in one action.
-            Each document inside a bundle still has its own loading mode (Auto, Always available, Reference only)
-            and is loaded into context per its own rules. Smart loading applies per-document, regardless of bundle.
+            A bundle is a collection of documents you can attach to an agent or task in one action.
+            Each document inside still loads on its own mode. Smart loading applies per-document.
           </div>
         </div>
+        <button style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--slate-400);cursor:pointer;font-size:18px;width:24px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;" title="Dismiss">×</button>
       </div>
 
-      <!-- Toolbar -->
+      <!-- Toolbar (filter pills omitted at this scale; only 4 bundles) -->
       <div class="toolbar">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <span class="filter-pill active">All bundles (4)</span>
-          <span class="filter-pill">Org-wide (1)</span>
-          <span class="filter-pill">Sub-account (3)</span>
-        </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <input class="search-input" type="text" placeholder="Search bundles...">
-          <button class="btn btn-primary">+ New bundle</button>
         </div>
+        <button class="btn btn-primary">+ New bundle</button>
       </div>
 
       <!-- Bundle grid -->
@@ -302,8 +297,8 @@
           </div>
         </div>
 
-        <!-- Bundle 3 (EXPANDED — shows mini documents table inside) -->
-        <div class="bundle-card expanded">
+        <!-- Bundle 3 (collapsed — clicking opens the Edit Bundle modal) -->
+        <div class="bundle-card">
           <div class="bundle-head">
             <div>
               <div class="bundle-title">Compliance evidence: SOC 2</div>
@@ -316,65 +311,6 @@
             <span class="bundle-meta-item">12 documents</span>
             <span class="bundle-meta-item">Used by Compliance Agent</span>
             <span class="bundle-meta-item">Updated 3 weeks ago</span>
-          </div>
-
-          <!-- Expanded view: bundle contents -->
-          <div class="bundle-expanded-body">
-            <div class="bundle-expanded-head">
-              <div class="bundle-expanded-title">Documents in this bundle (12)</div>
-              <button class="btn btn-secondary" style="padding:4px 10px;font-size:11.5px;">+ Add document to bundle</button>
-            </div>
-
-            <table class="docs-mini">
-              <thead>
-                <tr>
-                  <th>Document</th>
-                  <th style="width:130px;">Mode</th>
-                  <th class="r" style="width:120px;">Loaded in</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><div class="name">SOC 2 Type II — Latest Audit Report</div></td>
-                  <td><span class="mode-chip mode-always">! Always available</span></td>
-                  <td class="r">28 of 30 runs</td>
-                </tr>
-                <tr>
-                  <td><div class="name">Access control policy and procedures</div></td>
-                  <td><span class="mode-chip mode-auto">A Auto</span></td>
-                  <td class="r">14 of 30 runs</td>
-                </tr>
-                <tr>
-                  <td><div class="name">Data handling and retention policy</div></td>
-                  <td><span class="mode-chip mode-auto">A Auto</span></td>
-                  <td class="r">11 of 30 runs</td>
-                </tr>
-                <tr>
-                  <td><div class="name">Vendor risk management procedures</div></td>
-                  <td><span class="mode-chip mode-auto">A Auto</span></td>
-                  <td class="r">8 of 30 runs</td>
-                </tr>
-                <tr>
-                  <td><div class="name">SOC 2 evidence — Quarterly access reviews</div></td>
-                  <td><span class="mode-chip mode-reference">R Reference only</span></td>
-                  <td class="r">Fetched 0 of 30</td>
-                </tr>
-                <tr>
-                  <td><div class="name">SOC 2 evidence — Pen test reports (full archive)</div></td>
-                  <td><span class="mode-chip mode-reference">R Reference only</span></td>
-                  <td class="r">Fetched 1 of 30</td>
-                </tr>
-                <tr>
-                  <td colspan="3" style="text-align:center;color:var(--slate-400);font-size:11.5px;padding:8px;">
-                    + 6 more documents
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            <div class="applied-to">
-              <strong>Applied to:</strong> Compliance Agent (always-available rules + auto-loaded policies + reference-only evidence)
-            </div>
           </div>
         </div>
 
@@ -397,11 +333,6 @@
 
       </div>
 
-      <!-- Footer note -->
-      <div style="margin-top:24px;padding:14px 18px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">
-        <strong style="color:var(--slate-800);">When to use a bundle:</strong>
-        Bundles are useful when you have a logical group of documents you want to attach to multiple agents at once (compliance kits, product packs, etc.) or when you want to clone a curated collection across sub-accounts. The smart loading model still decides what gets loaded per task.
-      </div>
     </div>
   </main>
 </div>

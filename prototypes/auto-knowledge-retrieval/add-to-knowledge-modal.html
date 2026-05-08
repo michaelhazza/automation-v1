@@ -215,81 +215,24 @@
         <div class="field-help">We auto-extracted text from the file. Edit before adding if you want to clean it up.</div>
       </div>
 
-      <!-- Scope -->
-      <div class="field-group">
+      <!-- Scope (org-admin only — hidden for sub-account admins) -->
+      <div class="field-group" style="position:relative;">
+        <div style="position:absolute;top:-12px;right:0;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#7c3aed;background:#fdf4ff;border:1px solid #ddd6fe;padding:2px 8px;border-radius:10px;">Org admin only</div>
         <label class="field-label">Scope</label>
         <div class="scope-segmented">
           <button class="scope-seg active">This sub-account (Acme Corp)</button>
           <button class="scope-seg">Org-wide</button>
         </div>
-        <div class="field-help">Defaulted to this sub-account because that's where the file was created. Org-wide makes the document available to every client. (Org-admin only.)</div>
+        <div class="field-help">Sub-account admins don't see this control — the document stays in their sub-account.</div>
       </div>
 
-      <!-- Available to -->
-      <div class="field-group">
-        <label class="field-label">Available to</label>
-        <div class="field-help" style="margin-top:0;margin-bottom:8px;">
-          By default, every agent in this sub-account can pick this up. Each agent decides whether to actually use it based on the task it's running. Restrict to specific agents only if you want to limit access.
-        </div>
-        <div class="radio-group">
-          <div class="radio-row selected">
-            <div class="radio-circle"></div>
-            <div>
-              <div class="radio-text">All agents in Acme Corp</div>
-              <div class="radio-help">Recommended. Every agent in this sub-account can use this when relevant.</div>
-            </div>
-          </div>
-          <div class="radio-row">
-            <div class="radio-circle"></div>
-            <div>
-              <div class="radio-text">Specific agents only</div>
-              <div class="radio-help">Restrict access. Use only when you want to limit which agents can see this.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- How this works -->
-      <div class="cost-preview">
-        <div class="cost-icon">i</div>
-        <div>
-          <div class="cost-title">How this works</div>
-          <div class="cost-body">
-            Documents in Auto mode load into agent context only when relevant to the task being run. The agent decides per task. You don't need to manage what's loaded when.
-          </div>
-        </div>
-      </div>
-
-      <!-- Advanced expander -->
+      <!-- Advanced expander (collapsed by default) -->
       <div class="advanced">
         <div class="advanced-head">
-          <span>Advanced — change loading mode</span>
+          <span>Advanced — restrict access or change loading mode</span>
           <span class="chevron">›</span>
         </div>
-        <!-- Visible to demonstrate; in real UI it would collapse by default -->
-        <div class="advanced-body" style="display:block;">
-          <div class="mode-option active">
-            <div class="mode-icon auto">A</div>
-            <div>
-              <div class="mode-name">Auto <span style="font-weight:500;color:var(--slate-500);">(recommended)</span></div>
-              <div class="mode-desc">The system loads this only when it's relevant to the task being run.</div>
-            </div>
-          </div>
-          <div class="mode-option">
-            <div class="mode-icon always">!</div>
-            <div>
-              <div class="mode-name">Always available</div>
-              <div class="mode-desc">Loads into context every run, even when not directly relevant. Use for rules the agent must always follow (compliance, brand voice).</div>
-            </div>
-          </div>
-          <div class="mode-option">
-            <div class="mode-icon reference">R</div>
-            <div>
-              <div class="mode-name">Reference only</div>
-              <div class="mode-desc">Never auto-loaded. The agent will fetch this only when it explicitly decides it needs to. Use for large manuals or reference material.</div>
-            </div>
-          </div>
-        </div>
+        <!-- Collapsed by default in production. Click expands to show Available-to + Loading mode controls. -->
       </div>
 
     </div>

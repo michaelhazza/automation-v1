@@ -312,17 +312,6 @@
         <button class="agent-tab">Runs <span class="agent-tab-count">142</span></button>
       </div>
 
-      <!-- Info banner -->
-      <div class="info-banner">
-        <div class="info-icon">i</div>
-        <div>
-          <div class="info-title">Smart loading is on</div>
-          <div class="info-body">
-            This agent has access to 9 documents across all scopes. The system loads only the most relevant ones into each task. You don't need to choose what's loaded when — the system decides per task based on what the agent is working on.
-          </div>
-        </div>
-      </div>
-
       <!-- Stats -->
       <div class="stats-row">
         <div class="stat-card">
@@ -331,19 +320,9 @@
           <div class="stat-sub">across all scopes</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Avg per run</div>
-          <div class="stat-value">2.4</div>
-          <div class="stat-sub">most relevant ones</div>
-        </div>
-        <div class="stat-card">
           <div class="stat-label">Most loaded</div>
-          <div class="stat-value">Acme Corp</div>
-          <div class="stat-sub">Account Context · 29 of 30</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Last loaded</div>
-          <div class="stat-value">2 min ago</div>
-          <div class="stat-sub">Outreach email templates</div>
+          <div class="stat-value">Acme Corp Account Context</div>
+          <div class="stat-sub">29 of 30 runs</div>
         </div>
       </div>
 
@@ -375,7 +354,6 @@
           <thead>
             <tr>
               <th>Document</th>
-              <th class="col-size">Size</th>
               <th class="col-tier">Tier</th>
               <th class="col-mode">Mode</th>
               <th class="col-loaded">Loaded in</th>
@@ -388,12 +366,6 @@
               <td>
                 <div class="doc-name">Synthetos Agency — Master Brand Voice Playbook</div>
                 <div class="doc-sub">Pinned to organisation · last updated 5 days ago</div>
-              </td>
-              <td>
-                <div class="size-cell">
-                  <div class="size-bar-track"><div class="size-bar-fill normal" style="width:23%;"></div></div>
-                  <div class="size-label">Small</div>
-                </div>
               </td>
               <td><span class="tier-chip tier-org">Org-wide</span></td>
               <td><span class="mode-chip mode-always">! Always available</span></td>
@@ -411,12 +383,6 @@
                 <div class="doc-name">Acme Corp — Account Context</div>
                 <div class="doc-sub">Pinned to Acme Corp sub-account · last updated 2 days ago</div>
               </td>
-              <td>
-                <div class="size-cell">
-                  <div class="size-bar-track"><div class="size-bar-fill normal" style="width:18%;"></div></div>
-                  <div class="size-label">Small</div>
-                </div>
-              </td>
               <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
               <td><span class="mode-chip mode-auto">A Auto</span></td>
               <td class="cell-loaded">
@@ -429,17 +395,9 @@
                 <div class="three-dot-wrap">
                   <button class="three-dot-btn" style="background:var(--slate-100);color:var(--slate-700);">⋮</button>
                   <div class="menu open">
-                    <div class="menu-item"><span class="menu-item-icon">↗</span> Open document</div>
-                    <div class="menu-item"><span class="menu-item-icon">✎</span> Edit details</div>
-                    <div class="menu-divider"></div>
-                    <div class="menu-section-label">Change mode</div>
-                    <div class="menu-item"><span class="menu-item-icon">A</span> Auto <span style="margin-left:auto;color:var(--indigo-600);">●</span></div>
-                    <div class="menu-item"><span class="menu-item-icon">!</span> Always available</div>
-                    <div class="menu-item"><span class="menu-item-icon">R</span> Reference only</div>
-                    <div class="menu-divider"></div>
-                    <div class="menu-section-label">Change scope</div>
-                    <div class="menu-item"><span class="menu-item-icon">↑</span> Promote to org-wide</div>
-                    <div class="menu-item"><span class="menu-item-icon">→</span> Move to specific agents</div>
+                    <div class="menu-item"><span class="menu-item-icon">✎</span> Edit</div>
+                    <div class="menu-item"><span class="menu-item-icon">A</span> Change mode <span style="margin-left:auto;color:var(--slate-400);">›</span></div>
+                    <div class="menu-item"><span class="menu-item-icon">↕</span> Change scope <span style="margin-left:auto;color:var(--slate-400);">›</span></div>
                     <div class="menu-divider"></div>
                     <div class="menu-item"><span class="menu-item-icon">⊘</span> Unlink from this agent</div>
                     <div class="menu-item danger"><span class="menu-item-icon">🗑</span> Delete document</div>
@@ -452,12 +410,6 @@
               <td>
                 <div class="doc-name">Acme Corp — ICP and disqualification rules</div>
                 <div class="doc-sub">Pinned to Acme Corp sub-account · last updated 8 days ago</div>
-              </td>
-              <td>
-                <div class="size-cell">
-                  <div class="size-bar-track"><div class="size-bar-fill normal" style="width:12%;"></div></div>
-                  <div class="size-label">Small</div>
-                </div>
               </td>
               <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
               <td><span class="mode-chip mode-auto">A Auto</span></td>
@@ -475,12 +427,6 @@
                 <div class="doc-name">Outreach email templates — May 2026</div>
                 <div class="doc-sub">Linked to Outreach Agent · last updated 12 days ago</div>
               </td>
-              <td>
-                <div class="size-cell">
-                  <div class="size-bar-track"><div class="size-bar-fill normal" style="width:41%;"></div></div>
-                  <div class="size-label">Medium</div>
-                </div>
-              </td>
               <td><span class="tier-chip tier-agent">Agent</span></td>
               <td><span class="mode-chip mode-auto">A Auto</span></td>
               <td class="cell-loaded">
@@ -497,12 +443,6 @@
                 <div class="doc-name">Heartbeat task — sequence step rules</div>
                 <div class="doc-sub">Pinned to "Acme weekly outreach heartbeat" · last updated 20 days ago</div>
               </td>
-              <td>
-                <div class="size-cell">
-                  <div class="size-bar-track"><div class="size-bar-fill normal" style="width:6%;"></div></div>
-                  <div class="size-label">Small</div>
-                </div>
-              </td>
               <td><span class="tier-chip tier-recurring">Recurring task</span></td>
               <td><span class="mode-chip mode-auto">A Auto</span></td>
               <td class="cell-loaded">
@@ -516,14 +456,11 @@
 
             <tr>
               <td>
-                <div class="doc-name">Outreach product manual (full)</div>
-                <div class="doc-sub">Linked to Outreach Agent · agent fetches on demand</div>
-              </td>
-              <td>
-                <div class="size-cell" title="This document is much larger than recommended. Consider splitting it into smaller, focused sections for better retrieval.">
-                  <div class="size-bar-track"><div class="size-bar-fill over" style="width:100%;"></div></div>
-                  <div class="size-label over">⚠ Over recommended</div>
+                <div class="doc-name">
+                  Outreach product manual (full)
+                  <span class="warn-chip" title="This document is much larger than recommended. Consider splitting it into smaller, focused sections.">⚠ Large document</span>
                 </div>
+                <div class="doc-sub">Linked to Outreach Agent · agent fetches on demand</div>
               </td>
               <td><span class="tier-chip tier-agent">Agent</span></td>
               <td><span class="mode-chip mode-reference">R Reference only</span></td>
@@ -540,12 +477,6 @@
               <td>
                 <div class="doc-name">Acme Corp — Q1 pipeline insights</div>
                 <div class="doc-sub">Pinned to Acme Corp sub-account · last updated 5 days ago</div>
-              </td>
-              <td>
-                <div class="size-cell">
-                  <div class="size-bar-track"><div class="size-bar-fill normal" style="width:9%;"></div></div>
-                  <div class="size-label">Small</div>
-                </div>
               </td>
               <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
               <td><span class="mode-chip mode-auto">A Auto</span></td>
