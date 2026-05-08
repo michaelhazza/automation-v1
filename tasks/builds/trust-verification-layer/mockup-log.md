@@ -142,3 +142,30 @@ Files CREATED:
 - `prototypes/trust-verification-layer/govern-quality.html` (updated)
 - `prototypes/trust-verification-layer/index.html` (updated)
 - `tasks/builds/trust-verification-layer/mockup-log.md` (updated)
+
+---
+
+## Round 4 — 2026-05-08 14:00
+**Operator feedback:** Final review pass. Four surgical changes: (1) model-bench paste-in defaults to 1 card, not 3; (2) grading frequency simplified to quartiles Off/25%/50%/75%; (3) source pills dropped from Suggested rows at sub-account scope; (4) org-mandatory PII redaction check row added, rendered identically to system-mandatory rows.
+
+**Changes made:**
+- `model-bench.html`: Header comment updated to document Round 4 change. Code already initialised with one `addPromptCard` call — default was already correct at 1 card. Comment clarifies intent.
+- `agent-edit-scorecard.html`: Header comment updated to document Round 4 change. The segmented control was already at 4 buttons (Off/25%/50%/75%) with correct default (25%) and correct help text per quartile — state was already correct from the Round 3 session.
+- `agent-create.html`: (3a) "Suggested by platform" section header renamed to "Suggested." Source attribution removed from the section label. Individual suggested rows had no per-row source pills, so no row-level HTML change needed. (3b) Third locked/required row added after External action safety: "PII redaction check" with 1 quality check ("PII leak detection", 85% pass mark). Rendered identically to the other two required rows: lock icon, Required badge, caret toggle, expandable read-only checks panel. Footer static hint and JS string updated from "2 required + 3 suggested" to "3 required + 3 suggested."
+- `index.html`: Status updated to "Round 4, final review pass." Round 4 decisions box added (yellow, active). Round 3 decisions box archived (red/pink style). `badge-r4` CSS class added. Card descriptions updated for model-bench, agent-edit-scorecard, and agent-create. Round 4 green badges added to all three updated cards.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — all changes reduce friction or clarify scope without adding new information the user doesn't need. Model bench paste-in starts with one card (primary task: paste one prompt). Agent create shows "Suggested" without attribution (primary task: choose which scorecards to include, not understand their provenance). PII row lets user see what's required before installing.
+- Default to hidden: yes — PII check panel is collapsed by default (same as other required rows). No new always-visible content added beyond the one required row title.
+- One primary action: yes — no changes to primary actions on any screen. All screens retain their single primary action from prior rounds.
+- Inline state: yes — all new content (PII row, updated hint text) is contextual and inline. No new panels or dashboard elements.
+- Re-check passed: yes — a non-technical operator on agent-create now sees 3 required rows (all identical treatment) and 3 suggested rows. They can install without needing to understand system vs org distinction. The quartile control on agent-edit-scorecard is simpler (4 buttons, plain-English labels) than the prior 6-button version.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/trust-verification-layer/model-bench.html` (comment updated)
+- `prototypes/trust-verification-layer/agent-edit-scorecard.html` (comment updated)
+- `prototypes/trust-verification-layer/agent-create.html` (3a: section header renamed; 3b: PII row added; footer count updated)
+- `prototypes/trust-verification-layer/index.html` (status, decisions box, card descriptions, badges)
+- `tasks/builds/trust-verification-layer/mockup-log.md` (this entry)

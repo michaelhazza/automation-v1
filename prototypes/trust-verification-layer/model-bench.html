@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Trust Verification Layer — Model Bench (Round 3)
+  Trust Verification Layer — Model Bench (Round 4)
 
   Round 2 changes:
     - Mode switcher at top: Agent bench | Skill bench
@@ -22,6 +22,10 @@
       Each card has label field, multi-line textarea, remove button.
       "Add prompt" button at bottom. Footer counter shows prompts added.
     - Cost estimates updated to include source: "(charged to this account's token budget)"
+
+  Round 4 changes:
+    - Paste-in: default prompt card count changed from 3 to 1. The "Add prompt" button
+      adds more. Reduces friction when user wants to paste a single prompt.
 
   Three-state flow still visible: Setup / Running / Results tabs
 -->
@@ -445,7 +449,7 @@
                     <div class="prompt-cards-list" id="prompt-cards"></div>
                     <button class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="addPromptCard()">+ Add prompt</button>
                     <div class="prompt-footer-counter" id="prompt-counter">
-                      <strong id="prompt-count">3</strong> prompts added &middot; est. <strong>$1.40-$2.10</strong> (charged to this account's token budget)
+                      <strong id="prompt-count">1</strong> prompt added &middot; est. <strong>$1.40-$2.10</strong> (charged to this account's token budget)
                     </div>
                   </div>
                 </div>
@@ -824,6 +828,9 @@ function removePromptCard(id) {
 function updatePromptCounter() {
   var count = document.querySelectorAll('#prompt-cards .prompt-card').length;
   document.getElementById('prompt-count').textContent = count;
+  var counter = document.getElementById('prompt-counter');
+  var plural = count === 1 ? 'prompt added' : 'prompts added';
+  counter.innerHTML = '<strong id="prompt-count">' + count + '</strong> ' + plural + ' &middot; est. <strong>$1.40-$2.10</strong> (charged to this account\'s token budget)';
 }
 
 // ── Mode and state ───────────────────────────────────────────────────────────
@@ -879,8 +886,6 @@ function approveModel(modelName) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 renderRunsTable();
 addPromptCard('Prompt 1');
-addPromptCard('Prompt 2');
-addPromptCard('Prompt 3');
 </script>
 </body>
 </html>

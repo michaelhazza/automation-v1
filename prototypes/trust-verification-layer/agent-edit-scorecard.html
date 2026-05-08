@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Trust Verification Layer — Agent Edit: Scorecard tab (Round 2)
+  Trust Verification Layer — Agent Edit: Scorecard tab (Round 4)
 
   Round 2 changes:
     - Multi-attach scorecard list replaces single dimension list
@@ -16,13 +16,20 @@
       quality check (colour-coded vs pass mark), sparkline, drift indicator
     - All terminology updated: Quality check / Pass mark / percentages / sentence case
 
+  Round 3 changes:
+    - "How often to grade" range slider replaced with a six-button segmented control.
+    - Default 20% selected. Live help text updates on selection.
+
+  Round 4 changes:
+    - "How often to grade": replaced 6-button control (Off/20/40/60/80/100%) with
+      4-button quartile control: Off / 25% / 50% / 75%. Default 25%.
+      100% removed (if every run needs grading, tighten the scorecard instead).
+      Help text updated per quartile: Off, 25%, 50%, 75% with plain-English descriptions.
+
   Design decision — "Override pass marks for this agent":
-    Deferred to Round 3. Adding inline editable fields inside a collapsed
+    Still deferred. Adding inline editable fields inside a collapsed
     section, inside a collapsible card, creates 3 levels of nesting that
-    violates the complexity budget. It also requires careful state management
-    (which scorecard's checks are overridden, what happens if the scorecard is
-    updated at org scope). Round 3 can handle this as an "Advanced" disclosure
-    per attached scorecard once the base multi-attach flow is validated.
+    violates the complexity budget.
 -->
 <html lang="en">
 <head>
@@ -374,13 +381,11 @@
                   <div class="form-label" style="margin-bottom:8px;">How often to grade</div>
                   <div class="seg-control">
                     <button class="seg-btn" id="seg-off" onclick="setGradeFreq('off',this)">Off</button>
-                    <button class="seg-btn active" id="seg-20" onclick="setGradeFreq('20',this)">20%</button>
-                    <button class="seg-btn" id="seg-40" onclick="setGradeFreq('40',this)">40%</button>
-                    <button class="seg-btn" id="seg-60" onclick="setGradeFreq('60',this)">60%</button>
-                    <button class="seg-btn" id="seg-80" onclick="setGradeFreq('80',this)">80%</button>
-                    <button class="seg-btn" id="seg-100" onclick="setGradeFreq('100',this)">100%</button>
+                    <button class="seg-btn active" id="seg-25" onclick="setGradeFreq('25',this)">25%</button>
+                    <button class="seg-btn" id="seg-50" onclick="setGradeFreq('50',this)">50%</button>
+                    <button class="seg-btn" id="seg-75" onclick="setGradeFreq('75',this)">75%</button>
                   </div>
-                  <div class="form-hint" style="margin-top:7px;" id="grade-freq-hint">Of every 100 runs, 20 will be graded. Estimated extra cost: ~$1.20 / week.</div>
+                  <div class="form-hint" style="margin-top:7px;" id="grade-freq-hint">Roughly one in four runs is graded. Lowest token cost.</div>
                 </div>
                 <!-- Judge model -->
                 <div>
@@ -699,14 +704,13 @@ function setGradeFreq(val, btn) {
   document.querySelectorAll('.seg-btn').forEach(function(b) { b.classList.remove('active'); });
   btn.classList.add('active');
   var hint = document.getElementById('grade-freq-hint');
-  var costMap = { '20': '$1.20', '40': '$2.40', '60': '$3.60', '80': '$4.80', '100': '$6.00' };
-  if (val === 'off') {
-    hint.textContent = 'No grading. Drift detection disabled for this agent.';
-  } else if (val === '100') {
-    hint.textContent = 'Every run graded. Highest cost, fastest drift detection.';
-  } else {
-    hint.textContent = 'Of every 100 runs, ' + val + ' will be graded. Estimated extra cost: ~' + (costMap[val] || '$?') + ' / week.';
-  }
+  var hintMap = {
+    'off': 'No automated grading. Quality checks only run when manually triggered.',
+    '25': 'Roughly one in four runs is graded. Lowest token cost.',
+    '50': 'Every other run is graded. Balanced cost and coverage.',
+    '75': 'Three out of four runs are graded. Highest coverage, highest cost.'
+  };
+  hint.textContent = hintMap[val] || '';
 }
 
 function toggleScorecard(id) {
