@@ -5,6 +5,7 @@
 import { logger } from '../lib/logger.js';
 import { scorecardService } from './scorecardService.js';
 import { buildFanoutJobs } from './scorecardJudgeRunnerPure.js';
+import { selectForcedGradeTargets } from '../jobs/scorecardJudgeForcedJob.js';
 import type { QualityCheck } from '../db/schema/scorecards.js';
 
 const JUDGE_MAX_JOBS_PER_RUN = Number(process.env['JUDGE_MAX_JOBS_PER_RUN'] ?? '20');
@@ -85,6 +86,11 @@ export async function scheduleForRun(
  * Enqueues forced judge jobs (e.g. triggered by runtime check fail or correction).
  * No-op when agent has zero attached scorecards.
  *
+ * blastRadius / runtimeCheckState: when provided, selectForcedGradeTargets filters
+ * out 'self' blast-radius and non-fail states before enqueueing. Omit (or pass
+ * defaults 'external'/'fail') for the forced_correction path where all checks fire
+ * unconditionally.
+ *
  * Precondition: caller MUST be inside an active withOrgTx block — see scheduleForRun.
  */
 export async function scheduleForcedGrade(args: {
@@ -92,8 +98,15 @@ export async function scheduleForcedGrade(args: {
   agentId: string;
   organisationId: string;
   triggerSource: 'forced_runtime_check_fail' | 'forced_correction';
+  blastRadius?: 'self' | 'tenant' | 'external';
+  runtimeCheckState?: string;
 }): Promise<void> {
-  const { runId, agentId, organisationId, triggerSource } = args;
+  const {
+    runId, agentId, organisationId, triggerSource,
+    blastRadius = 'external',
+    runtimeCheckState = 'fail',
+  } = args;
+
   let attachments: Awaited<ReturnType<typeof scorecardService.listForAgent>>;
   try {
     attachments = await scorecardService.listForAgent(agentId);
@@ -110,27 +123,36 @@ export async function scheduleForcedGrade(args: {
     return;
   }
 
+  const summaries = attachments.map(a => ({
+    scorecardId: a.scorecardId,
+    qualityChecks: (a.scorecard.qualityChecks as QualityCheck[]) ?? [],
+  }));
+
+  const targets = selectForcedGradeTargets(blastRadius, runtimeCheckState, summaries);
+  if (targets.length === 0) {
+    logger.info('scorecard_judge_runner.forced_grade_noop', { runId, agentId, triggerSource, blastRadius, runtimeCheckState });
+    return;
+  }
+
   const { queueService } = await import('./queueService.js');
   const queue = 'scorecard:judge:forced';
 
-  for (const attachment of attachments) {
-    for (const qc of (attachment.scorecard.qualityChecks as QualityCheck[])) {
-      await queueService.sendJob(queue, {
-        runId,
-        scorecardId: attachment.scorecardId,
-        qualityCheckSlug: qc.slug,
-        triggerSource,
-        organisationId,
-      }).catch((err: unknown) => {
-        logger.warn('scorecard_judge_runner.forced_enqueue_failed', {
-          runId, scorecardId: attachment.scorecardId, qualityCheckSlug: qc.slug,
-          error: err instanceof Error ? err.message : String(err),
-        });
+  for (const target of targets) {
+    await queueService.sendJob(queue, {
+      runId,
+      scorecardId: target.scorecardId,
+      qualityCheckSlug: target.qualityCheckSlug,
+      triggerSource,
+      organisationId,
+    }).catch((err: unknown) => {
+      logger.warn('scorecard_judge_runner.forced_enqueue_failed', {
+        runId, scorecardId: target.scorecardId, qualityCheckSlug: target.qualityCheckSlug,
+        error: err instanceof Error ? err.message : String(err),
       });
-    }
+    });
   }
 
   logger.info('scorecard_judge_runner.forced_grade_enqueued', {
-    runId, agentId, triggerSource, attachmentCount: attachments.length,
+    runId, agentId, triggerSource, jobCount: targets.length,
   });
 }
