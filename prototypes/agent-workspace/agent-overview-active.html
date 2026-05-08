@@ -136,10 +136,26 @@
   .obs-item {
     padding: 10px 16px; border-bottom: 1px solid var(--slate-100);
     font-size: 12.5px; color: var(--slate-700); line-height: 1.55;
+    display: grid; grid-template-columns: 80px 1fr; gap: 10px; align-items: start;
   }
   .obs-item:last-child { border-bottom: none; }
-  .obs-time { font-size: 11px; color: var(--slate-400); margin-bottom: 2px; }
+  .obs-meta { display: flex; flex-direction: column; gap: 2px; }
+  .obs-time { font-size: 11px; color: var(--slate-400); }
+  .obs-type {
+    display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 1px 7px; border-radius: 8px;
+    align-self: flex-start;
+  }
+  .obs-type.learned { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+  .obs-type.detected { background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a; }
+  .obs-type.decided { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .obs-type.flagged { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+  .obs-type.produced { background: #fdf4ff; color: #7c3aed; border: 1px solid #ddd6fe; }
   .obs-text strong { color: var(--slate-900); font-weight: 600; }
+  .obs-trace {
+    font-size: 10.5px; color: var(--slate-400); margin-top: 4px; cursor: pointer;
+  }
+  .obs-trace:hover { color: var(--indigo-600); text-decoration: underline; }
 
   /* Activity feed */
   .activity-list { display: flex; flex-direction: column; }
@@ -297,7 +313,10 @@
       <!-- Working-time / activity chart with timeframe pills -->
       <div class="chart-card">
         <div class="chart-head">
-          <span class="chart-title">Working time</span>
+          <div>
+            <div class="chart-title">Working time</div>
+            <div style="font-size:11.5px;color:var(--slate-500);margin-top:2px;">Time spent actively executing runs</div>
+          </div>
           <div class="tf-pills">
             <button class="tf-pill active">Today</button>
             <button class="tf-pill">This week</button>
@@ -365,20 +384,54 @@
             </div>
             <div class="obs-list">
               <div class="obs-item">
-                <div class="obs-time">3 minutes ago</div>
-                <div class="obs-text">Found <strong>23 high-priority contacts</strong> at Acme Corp. Two flagged with no recent engagement (re-engagement candidates).</div>
+                <div class="obs-meta">
+                  <span class="obs-type detected">Detected</span>
+                  <span class="obs-time">3m ago</span>
+                </div>
+                <div>
+                  <div class="obs-text">Found <strong>23 high-priority contacts</strong> at Acme Corp. Two with no recent engagement, flagged for re-engagement.</div>
+                  <div class="obs-trace">Step 4 of run #1284 ↗</div>
+                </div>
               </div>
               <div class="obs-item">
-                <div class="obs-time">12 minutes ago</div>
-                <div class="obs-text">Detected that <strong>Acme Corp's VP of Ops changed roles 3 weeks ago</strong>. Previous draft references stale title; flagging for revision.</div>
+                <div class="obs-meta">
+                  <span class="obs-type detected">Detected</span>
+                  <span class="obs-time">12m ago</span>
+                </div>
+                <div>
+                  <div class="obs-text"><strong>Acme Corp's VP of Ops changed roles 3 weeks ago</strong>. Previous draft references stale title; flagging for revision.</div>
+                  <div class="obs-trace">Step 6 of run #1284 ↗</div>
+                </div>
               </div>
               <div class="obs-item">
-                <div class="obs-time">35 minutes ago</div>
-                <div class="obs-text">Discovered <strong>Acme Corp recently announced SOC 2 Type II compliance</strong>. Worth referencing in outreach for the IT director persona.</div>
+                <div class="obs-meta">
+                  <span class="obs-type learned">Learned</span>
+                  <span class="obs-time">35m ago</span>
+                </div>
+                <div>
+                  <div class="obs-text"><strong>Acme Corp announced SOC 2 Type II compliance.</strong> Worth referencing in outreach to the IT director persona.</div>
+                  <div class="obs-trace">Memory entry ↗</div>
+                </div>
               </div>
               <div class="obs-item">
-                <div class="obs-time">2 hours ago</div>
-                <div class="obs-text">Pattern: outreach from this agent gets <strong>2.4x reply rate when ICP filter is applied vs. generic</strong>. Reinforced ICP-first approach.</div>
+                <div class="obs-meta">
+                  <span class="obs-type decided">Decided</span>
+                  <span class="obs-time">38m ago</span>
+                </div>
+                <div>
+                  <div class="obs-text">Disqualified <strong>365 of 412 contacts</strong> as out-of-ICP. Continuing with the remaining 47.</div>
+                  <div class="obs-trace">Step 3 of run #1284 ↗</div>
+                </div>
+              </div>
+              <div class="obs-item">
+                <div class="obs-meta">
+                  <span class="obs-type produced">Produced</span>
+                  <span class="obs-time">2h ago</span>
+                </div>
+                <div>
+                  <div class="obs-text">Drafted <strong>47 outreach emails</strong>. 12 high-stakes drafts queued for HITL approval.</div>
+                  <div class="obs-trace">Step 5 of run #1283 ↗</div>
+                </div>
               </div>
             </div>
           </div>
@@ -477,7 +530,7 @@
             </div>
           </div>
 
-          <!-- Tools / Skills snapshot -->
+          <!-- Tools / Skills snapshot, qualitative bands -->
           <div class="card" style="margin-top:14px;">
             <div class="card-head">
               <div class="card-title">Tools the agent uses</div>
@@ -485,23 +538,23 @@
             </div>
             <div class="memory-list">
               <div class="memory-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                <span><strong style="color:var(--slate-900);font-weight:600;">search_crm</strong></span>
-                <span style="font-size:11px;color:var(--slate-500);">used in 28 of 30 runs</span>
-              </div>
-              <div class="memory-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                 <span><strong style="color:var(--slate-900);font-weight:600;">compose_email</strong></span>
-                <span style="font-size:11px;color:var(--slate-500);">used in 30 of 30 runs</span>
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--emerald-600);background:var(--emerald-50);border:1px solid #a7f3d0;padding:1px 7px;border-radius:8px;" title="Used in 30 of last 30 runs">Frequently</span>
               </div>
               <div class="memory-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                 <span><strong style="color:var(--slate-900);font-weight:600;">send_email</strong> <span style="font-size:10px;color:var(--amber-700);">(HITL)</span></span>
-                <span style="font-size:11px;color:var(--slate-500);">used in 30 of 30 runs</span>
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--emerald-600);background:var(--emerald-50);border:1px solid #a7f3d0;padding:1px 7px;border-radius:8px;" title="Used in 30 of last 30 runs">Frequently</span>
+              </div>
+              <div class="memory-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <span><strong style="color:var(--slate-900);font-weight:600;">search_crm</strong></span>
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--emerald-600);background:var(--emerald-50);border:1px solid #a7f3d0;padding:1px 7px;border-radius:8px;" title="Used in 28 of last 30 runs">Frequently</span>
               </div>
               <div class="memory-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                 <span><strong style="color:var(--slate-900);font-weight:600;">look_up_company</strong></span>
-                <span style="font-size:11px;color:var(--slate-500);">used in 22 of 30 runs</span>
+                <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--indigo-700);background:var(--indigo-50);border:1px solid var(--indigo-200);padding:1px 7px;border-radius:8px;" title="Used in 22 of last 30 runs">Occasionally</span>
               </div>
               <div class="memory-item" style="font-size:11px;color:var(--slate-400);text-align:center;padding:7px;">
-                + 3 more skills granted
+                + 3 more granted, rarely used
               </div>
             </div>
           </div>

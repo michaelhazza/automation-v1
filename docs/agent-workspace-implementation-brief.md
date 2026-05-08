@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 3. Pre-spec, mockups attached. Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, and Trust & Verification Layer spec.
+> **Status:** Rev 4. Pre-spec, mockups attached. Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, and reviewer pass on §5/§6/§8.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -144,21 +144,46 @@ Two surfaces composed onto one page:
 
 **State surface** (what the agent has):
 - **Identity card** (first-run only or always-visible compact form): name, role, reports-to, sub-account. Establishes the agent as an entity from the moment it is created, before any history exists. See Mockup 4.
-- **Memory snapshot**, top entries the agent uses most, with a link to the workspace Knowledge page filtered by this agent. The "Knowledge in use" card on Mockup 2.
+- **Knowledge in use**, top entries the agent uses most. Surfaces as the "Knowledge in use" card. Renamed from earlier draft "Memory snapshot" because *Knowledge in use* is clearer, less anthropomorphic, and is the term we standardised on in mockups. Linked out to the workspace Knowledge page filtered by this agent.
 - **Files snapshot**, recent files this agent produced or used, with a link to Knowledge → Files filtered by this agent.
-- **Tools / Skills snapshot**, what the agent can do: skills installed or granted, last-used signal, link out to the Skills tab for management. Surfaces *capability* alongside *state* so the operator sees what the agent IS as well as what the agent HAS.
+- **Tools the agent uses**, qualitative usage bands rather than precise counts. Three bands: *Frequently used*, *Occasionally used*, *Rarely used*, classified from rolling 30-day usage. Precise numbers stay available on hover and in the Skills tab for the rare cases an operator wants exact data. Rationale: rolling usage windows shift fast, and exact counts ("28 of 30 runs") cause unstable mental models week-to-week. Qualitative bands are stable enough to anchor a mental model and still informative enough to spot drift.
 - **Schedule peek**, when the agent runs next, what triggers it.
 - **Connections health**, at-a-glance status of the credentials this agent depends on.
-- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter), matching the visual pattern of the Home page Runs widget. Shows when the agent has been working, with success/failure colouring on bars. Compact stat row underneath: runs in period, total working time, success rate, average run duration. Gives the operator a single visual answer to "how busy is this agent and how is it trending?"
+- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter). **Caption mandatory**: *"Time spent actively executing runs"*, surfaced under the chart title so semantic ambiguity (runs vs minutes vs CPU vs success-weighted work) is closed before the operator infers wrong. Bar colour: indigo for successful execution, red overlay for failed. Compact stat row underneath: runs in period, total working time, success rate, average run duration.
 - **Performance**, small stat block as a compact summary alongside the chart.
 
 **Presence surface** (what the agent is doing or about to do):
 - **Status pill**: *Working*, *Idle*, *Scheduled*, *Failing*. Single source of truth for liveness.
-- **Current focus**, one-line plain-language summary of what the agent is thinking about *right now*. Backed by the latest step in the active run (if any) or the next scheduled action.
+- **Current focus**, one-line plain-language summary of what the agent is thinking about *right now*. Backed by the latest step in the active run (if any) or the next scheduled action. **First-class invariants pinned in §5.1.**
 - **Live elapsed time**, for active runs.
-- **Recent observations**, last 3-5 things the agent learned, decided, or noticed. Plain language, not raw tool calls. Backed by the run trace summary.
+- **Recent observations**, last 3-5 typed entries the agent has surfaced. **Type-discriminated** (closed enum, no freeform):
+  - *Learned* — a fact the agent extracted and stored in memory ("Acme Corp has 12 directors")
+  - *Detected* — a state change or anomaly ("VP Ops changed roles 3 weeks ago")
+  - *Decided* — an autonomous choice the agent made ("Disqualified 365 contacts as out-of-ICP")
+  - *Flagged* — something the agent paused on for review ("3 contacts have stale phone numbers")
+  - *Produced* — an artifact the agent generated ("Drafted 47 outreach emails")
+  - **Provenance invariant**: every observation MUST trace to a concrete source: a `agent_execution_events` row id (a step in the run trace), a `retrieval.summary` event id, a structured tool result, or a memory_block insert. Freeform LLM summarisation is NOT the source of truth. The category guides the LLM-side summarisation but the underlying event id is the canonical anchor.
+  - **Why typed**: vague summaries damage the alive-and-trustworthy feeling; categories force the agent to actually have something to say; the trace-back lets the operator drill in and confirm.
 - **Active goals**, open task or schedule the agent is currently advancing toward. Visible even when the agent is idle, so the workspace never feels empty.
 - **Recent activity feed**, short timeline: *3 minutes ago started run X*, *2 hours ago completed task Y*, *yesterday updated memory entry Z*.
+
+### 5.1 Current focus invariants (first-class)
+
+Current focus is the emotional centre of the product. If it drifts, lags, or becomes generic, the illusion breaks immediately. The spec author MUST treat these as hard contracts, not best-effort:
+
+- **Update latency.** When status is *Working*, the focus line MUST update within 5 seconds of the latest `agent_execution_events` row landing for the active run. SSE or websocket; spec picks. Polling is acceptable as a fallback but with a tighter cadence (2-3s) so the perceived latency stays under the 5s budget.
+- **Allowed sources** (closed list, in priority order):
+  1. The latest non-idle step in the active run trace (LLM call, tool call, tool result), summarised in plain language.
+  2. The agent's own emitted "current focus" string if the agent self-narrates (future capability, not v1).
+  3. The next scheduled action when status is *Scheduled* (e.g. "Next: weekly Acme outreach in 18 hours").
+  4. A static fallback when none of the above is available (see below).
+- **Stale-state handling.** If no event has arrived in the last 30 seconds while status is *Working*, the focus line falls back to one of:
+  - *"Waiting on approval"* if the run is paused at a HITL gate.
+  - *"Idle between steps"* if the run is in-flight but in a known wait state.
+  - *"No recent activity"* with the actual last-event timestamp, if the run appears stalled.
+- **Hard rule**: never display focus copy older than 60 seconds while status is *Working*. After 60s without an event, the status pill flips to *Failing* (or *Idle* if the run actually completed and the UI just hadn't caught up).
+- **Verbosity ceiling.** Focus copy is a single sentence. No multi-line summaries. Truncate at ~140 characters.
+- **No marketing-language drift.** Copy is operator-readable plain English ("Drafting email body using retrieved contact data") not anthropomorphic ("The agent is thinking carefully about Sarah Chen's preferences"). Mockup 2 is the tone reference.
 
 ### Three states the tab must handle
 
@@ -177,6 +202,18 @@ Implementation consequences:
 - The Overview tab's first-run state is a real surface, not a placeholder. Identity card is populated. Quick actions guide the next steps. Empty states explain what each section will hold.
 - The customer should never see a "workspace not ready" condition.
 
+**Copy discipline for first-run state.** The first-run mockup (Mockup 4) MUST use identity-instantiation language, not configuration-software language. Concretely:
+
+| Avoid (config language) | Prefer (identity language) |
+|---|---|
+| "Pick a role" | "Role: Account Health Manager" *(presented as already assigned, not asked)* |
+| "Choose a model" | (omit from operator-facing checklist; the agent is already cognitively capable) |
+| "Link knowledge documents" | "Teach the agent" |
+| "Configure schedule or trigger" | "Decide when it should work" |
+| "Run a test" | "Watch it work" |
+
+The shift is from *"this software needs configuring"* to *"this entity exists and is ready; here is how to give it context, decide its working hours, and see it in action."* The setup checklist still exists as a guide, but the verbs are about teaching, deciding, and watching, not picking and configuring. Mockup 4 is the canonical reference.
+
 ### What the tab is NOT
 
 - Not a configuration page. Configure / Behaviour / Personality / Skills / Schedule / Budget tabs already cover authoring; Overview is read-mostly.
@@ -194,6 +231,14 @@ This brief ships that richer widget.
 - Row per running agent: status dot (pulsing), agent name, current step in plain language, elapsed time.
 - Below the running agents: scheduled-next agents, with next-run time.
 - Footer link: *All agents* → Agents list.
+
+**Visible-row cap and overflow rule.** Agencies routinely run 20+ agents simultaneously, especially during scheduled bursts. Without a cap the widget grows unbounded.
+
+- **Working-now section**: top 5 visible. Sort: longest-running first (so the operator sees what's been busy). Overflow collapses into *"+N more working"* link that opens the Agents list filtered to running.
+- **Scheduled-next section**: top 5 visible. Sort: nearest-next-run first. Overflow collapses into *"+N more scheduled today"*.
+- **Idle section**: NOT shown by default in this widget. Idle agents are accessed via the All-agents link or via the Agents page. The widget is for *what's in motion or about to be*.
+
+This keeps the widget at most 12 rows tall (5 + section header + 5 + section header + footer) regardless of agency size. Spec author should mock the 20-running case before declaring layout shippable.
 
 **Why this widget delivers the "always-on" promise without idle compute.** Per Rev 5 §10.4, "always-on" is delivered via schedulers + persistent state, not via continuously running compute. This widget makes that visible: the operator sees what's running NOW (3 of 18) plus what's scheduled to run next (5 today). The workspace feels staffed even though no compute is idle. The cost story (you only pay when work is happening) ships alongside the perceptual story.
 
@@ -231,6 +276,15 @@ Small. The existing Run trace surface (`prototypes/consolidation-2026-05-06/run-
 
 **This is complementary, not a replacement.** The existing run trace structure (run chain, event types, event detail panel, live/historical mode toggle, Trace/Delegation graph tabs) is unchanged. The file lineage is one additional row inside the `event-row`. See Mockup 5 for the visual.
 
+**Chip wrapping and row-height constraints (hard).** Without explicit caps, worst-case event rows (8+ files, long filenames, sub-agent outputs, Trust badges, Correct hover) get visually noisy fast. Spec must pin:
+
+- **Maximum visible chips per event**: 4. Beyond 4, render the first 4 chips followed by *"+N more"* that expands inline on click. Sort: most recent first.
+- **Filename truncation**: 36 characters. Truncate from the middle (preserving extension): `acme-contacts-enriched-2026-...csv`. Tooltip on hover shows full filename.
+- **Maximum event-row height before overflow**: 3 lines of content. Beyond that, content is truncated with a *"Show more"* affordance that expands inline.
+- **Detail panel is the spillover.** Selecting an event in the trace opens the right-hand detail panel where the full set of produced files, full filenames, full content, and Trust runtime-check details all live un-truncated. The inline event row is a scan-friendly summary, not a complete record.
+
+These constraints prevent layout entropy as runs accumulate complexity, and keep the trace scannable on dense screens.
+
 **Coordination with verification work:** the verification team is also touching Run trace (adding Pass/Fail/Pending markers per event, runtime check summary, "Correct this output" action). Both changes are additive composition: file chips appear in the event content area; verification markers appear next to the event type label or in the detail panel. No blocking conflict.
 
 ## 9. Decisions made
@@ -263,6 +317,7 @@ This brief follows the patterns codified in `docs/frontend-design-principles.md`
 - **Explainer banners dismissable.** First-run state has a helpful banner that closes per-user.
 - **No em-dashes in any UI copy or sample data.** Use commas, colons, or rewrite.
 - **Sub-text trimmed.** Activity feed rows are one line. Detail in modal.
+- **NEW badges are review-only.** The "NEW" badges and yellow annotation banners visible on mockups (e.g. the highlighted Active Agents widget on Mockup 1) are review affordances for stakeholder feedback. They MUST NOT ship in production. New surfaces should land without "NEW" decoration; if a feature tour is genuinely needed, it lives in the existing onboarding system, not as a permanent badge.
 
 ## 11. Coordination with concurrent work streams
 
