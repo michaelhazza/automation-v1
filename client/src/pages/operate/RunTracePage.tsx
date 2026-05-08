@@ -53,7 +53,7 @@ const POLL_MAX_DURATION_MS = 15 * 60 * 1_000; // 15 minutes
 
 // ── RunTracePage ──────────────────────────────────────────────────────────────
 
-export default function RunTracePage({ user: _user }: { user: User }) {
+export default function RunTracePage({ user }: { user: User }) {
   const { id: runId } = useParams<{ id: string }>();
   const location = useLocation();
 
@@ -65,6 +65,7 @@ export default function RunTracePage({ user: _user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runtimeChecks, setRuntimeChecks] = useState<RuntimeCheckResult[]>([]);
+  const [rcFetchState, setRcFetchState] = useState<'loading' | 'ok' | 'error'>('loading');
 
   const [chainRuns, setChainRuns] = useState<Array<{
     id: string; agentName: string; isSubAgent: boolean; runSource: string;
@@ -101,7 +102,10 @@ export default function RunTracePage({ user: _user }: { user: User }) {
 
   useEffect(() => {
     if (!runId) return;
-    fetchRunRuntimeChecks(runId).then(setRuntimeChecks).catch(() => setRuntimeChecks([]));
+    setRcFetchState('loading');
+    fetchRunRuntimeChecks(runId)
+      .then((results) => { setRuntimeChecks(results); setRcFetchState('ok'); })
+      .catch(() => { setRcFetchState('error'); });
   }, [runId]);
 
   // ── WebSocket room subscription (ported from RunTraceViewerPage) ─────────────
@@ -321,6 +325,28 @@ export default function RunTracePage({ user: _user }: { user: User }) {
     else rcPendingCount++;
   }
 
+  // org_admin and system_admin always hold org.review.view / subaccount.review.view.
+  const canViewInbox = user.role === 'org_admin' || user.role === 'system_admin';
+
+  // Empty-state footer: fetch completed, zero results, but run has tool-call steps
+  // (i.e. skills exist but verify is null). Distinguish from still-loading or errored.
+  const rcEmptyFooter =
+    rcFetchState === 'ok' &&
+    runtimeChecks.length === 0 ? (
+      <p className="text-[11px] text-slate-400 text-center mt-2 mb-3">
+        Runtime checks not configured for these skills.
+      </p>
+    ) : null;
+
+  // Error footer: fetch failed — the badges have already rendered as ghost shapes
+  // via RunTraceEventRenderer receiving an empty array.
+  const rcErrorFooter =
+    rcFetchState === 'error' ? (
+      <p className="text-[11px] text-amber-600 text-center mt-2 mb-3">
+        Could not load runtime check results.
+      </p>
+    ) : null;
+
   // ── Embedded mode: full-viewport container without PageShell chrome ─────────
 
   if (embedded) {
@@ -332,6 +358,8 @@ export default function RunTracePage({ user: _user }: { user: User }) {
         {ieePanel}
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
         <RunTraceEventRenderer runId={run.id} embedded={true} runtimeChecks={runtimeChecks} />
+        {rcEmptyFooter}
+        {rcErrorFooter}
       </div>
     );
   }
@@ -348,7 +376,10 @@ export default function RunTracePage({ user: _user }: { user: User }) {
           failCount={rcFailCount}
           pendingCount={rcPendingCount}
           runId={run.id}
+          canViewInbox={canViewInbox}
         />
+        {rcEmptyFooter}
+        {rcErrorFooter}
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
         <RunTraceEventRenderer runId={run.id} embedded={false} runtimeChecks={runtimeChecks} />
       </div>

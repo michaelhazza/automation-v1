@@ -11,11 +11,12 @@
  * Stage 2 (Runtime check): fetches suggestion from
  *   POST /api/skills/:id/suggest-runtime-check, shows three radio options:
  *     - Use suggested: PATCH skill with the suggestedCheck as verify
+ *     - Edit (Advanced disclosure): tweak kind+parameters JSON before saving
  *     - No deterministic check possible: PATCH with verifyNullJustification
- *     - Skip for now: navigate away without patching
  */
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { suggestRuntimeCheck } from '../../lib/api/runtimeChecks';
 
@@ -36,7 +37,7 @@ interface SuggestionResult {
   cacheHit: boolean;
 }
 
-type RadioChoice = 'use_suggested' | 'no_check' | 'skip';
+type RadioChoice = 'use_suggested' | 'edit' | 'no_check';
 
 // ── Slug derivation ───────────────────────────────────────────────────────────
 
@@ -46,6 +47,16 @@ function deriveSlug(name: string): string {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 64);
+}
+
+function extractApiErrorMessage(
+  err: unknown,
+  fallback: string,
+): string {
+  return (
+    (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+    fallback
+  );
 }
 
 // ── Stage 1: Describe ─────────────────────────────────────────────────────────
@@ -86,10 +97,7 @@ function DescribeStage({ onCreated }: { onCreated: (skill: CreatedSkill, descrip
       });
       onCreated(data, description.trim());
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'Failed to create skill. Please try again.';
-      setError(msg);
+      setError(extractApiErrorMessage(err, 'Failed to create skill. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -164,6 +172,8 @@ function DescribeStage({ onCreated }: { onCreated: (skill: CreatedSkill, descrip
 
 // ── Stage 2: Suggest ──────────────────────────────────────────────────────────
 
+const VALID_CHECK_KINDS = ['api_status_2xx', 'row_exists', 'field_match', 'external_returns', 'custom_handler'] as const;
+
 function SuggestStage({
   skill,
   description,
@@ -179,6 +189,9 @@ function SuggestStage({
 
   const [choice, setChoice] = useState<RadioChoice>('use_suggested');
   const [nullJustification, setNullJustification] = useState('');
+  // Advanced disclosure: editable JSON for the verify payload (kind + parameters).
+  const [editedVerifyJson, setEditedVerifyJson] = useState('');
+  const [editJsonError, setEditJsonError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -188,6 +201,7 @@ function SuggestStage({
       .then((result) => {
         if (!cancelled) {
           setSuggestion(result);
+          setEditedVerifyJson(JSON.stringify(result.suggestedCheck, null, 2));
           setLoadingSuggestion(false);
         }
       })
@@ -195,7 +209,7 @@ function SuggestStage({
         if (!cancelled) {
           setSuggestionError('Could not load a suggested runtime check. You can still save the skill.');
           setLoadingSuggestion(false);
-          setChoice('skip');
+          setChoice('no_check');
         }
       });
     return () => { cancelled = true; };
@@ -203,17 +217,38 @@ function SuggestStage({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skill.id]);
 
+  function handleChoiceChange(next: RadioChoice) {
+    setChoice(next);
+    // Seed the editor with the current suggestion when switching to edit mode.
+    if (next === 'edit' && suggestion && editedVerifyJson === '') {
+      setEditedVerifyJson(JSON.stringify(suggestion.suggestedCheck, null, 2));
+    }
+    setEditJsonError(null);
+    setSaveError(null);
+  }
+
   async function handleSave() {
     setSaveError(null);
+    setEditJsonError(null);
 
     if (choice === 'no_check' && nullJustification.trim().length < 20) {
       setSaveError('Justification must be at least 20 characters.');
       return;
     }
 
-    if (choice === 'skip') {
-      onDone();
-      return;
+    if (choice === 'edit') {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(editedVerifyJson);
+      } catch {
+        setEditJsonError('Invalid JSON. Fix the syntax before saving.');
+        return;
+      }
+      const p = parsed as { kind?: unknown; parameters?: unknown };
+      if (typeof p?.kind !== 'string' || !VALID_CHECK_KINDS.includes(p.kind as typeof VALID_CHECK_KINDS[number])) {
+        setEditJsonError(`"kind" must be one of: ${VALID_CHECK_KINDS.join(', ')}.`);
+        return;
+      }
     }
 
     setSaving(true);
@@ -221,6 +256,10 @@ function SuggestStage({
       if (choice === 'use_suggested' && suggestion) {
         await api.patch(`/api/skills/${skill.id}`, {
           verify: suggestion.suggestedCheck,
+        });
+      } else if (choice === 'edit') {
+        await api.patch(`/api/skills/${skill.id}`, {
+          verify: JSON.parse(editedVerifyJson),
         });
       } else if (choice === 'no_check') {
         await api.patch(`/api/skills/${skill.id}`, {
@@ -230,10 +269,7 @@ function SuggestStage({
       }
       onDone();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'Failed to save skill. Please try again.';
-      setSaveError(msg);
+      setSaveError(extractApiErrorMessage(err, 'Failed to save skill. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -257,6 +293,7 @@ function SuggestStage({
       )}
 
       <div className="flex flex-col gap-3">
+        {/* Option 1: Use suggested */}
         {suggestion && !loadingSuggestion && (
           <label className="flex items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
             <input
@@ -264,7 +301,7 @@ function SuggestStage({
               name="check_choice"
               value="use_suggested"
               checked={choice === 'use_suggested'}
-              onChange={() => setChoice('use_suggested')}
+              onChange={() => handleChoiceChange('use_suggested')}
               className="mt-0.5"
             />
             <div className="flex flex-col gap-1">
@@ -277,13 +314,54 @@ function SuggestStage({
           </label>
         )}
 
+        {/* Option 2: Edit (Advanced disclosure) */}
+        {suggestion && !loadingSuggestion && (
+          <label className="flex items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+            <input
+              type="radio"
+              name="check_choice"
+              value="edit"
+              checked={choice === 'edit'}
+              onChange={() => handleChoiceChange('edit')}
+              className="mt-0.5"
+            />
+            <div className="flex flex-col gap-1 flex-1">
+              <span className="text-[13px] font-medium text-slate-800">Edit (Advanced)</span>
+              <span className="text-[12px] text-slate-500">
+                Tweak the suggested check kind and parameters before saving.
+              </span>
+              {choice === 'edit' && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <label className="text-[11px] font-medium text-slate-600 uppercase tracking-wide">
+                    Verify payload (JSON)
+                  </label>
+                  <textarea
+                    value={editedVerifyJson}
+                    onChange={(e) => { setEditedVerifyJson(e.target.value); setEditJsonError(null); }}
+                    rows={6}
+                    spellCheck={false}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-[12px] text-slate-800 font-mono resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Valid kinds: {VALID_CHECK_KINDS.join(', ')}
+                  </p>
+                  {editJsonError && (
+                    <p className="text-[11px] text-red-500">{editJsonError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </label>
+        )}
+
+        {/* Option 3: No deterministic check possible */}
         <label className="flex items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
           <input
             type="radio"
             name="check_choice"
             value="no_check"
             checked={choice === 'no_check'}
-            onChange={() => setChoice('no_check')}
+            onChange={() => handleChoiceChange('no_check')}
             className="mt-0.5"
           />
           <div className="flex flex-col gap-1 flex-1">
@@ -311,23 +389,6 @@ function SuggestStage({
             )}
           </div>
         </label>
-
-        <label className="flex items-start gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
-          <input
-            type="radio"
-            name="check_choice"
-            value="skip"
-            checked={choice === 'skip'}
-            onChange={() => setChoice('skip')}
-            className="mt-0.5"
-          />
-          <div className="flex flex-col gap-1">
-            <span className="text-[13px] font-medium text-slate-800">Skip for now</span>
-            <span className="text-[12px] text-slate-500">
-              Save without a runtime check. You can add one later from the skill settings.
-            </span>
-          </div>
-        </label>
       </div>
 
       {saveError && (
@@ -353,28 +414,15 @@ function SuggestStage({
 // ── SkillCreatePage ───────────────────────────────────────────────────────────
 
 export default function SkillCreatePage() {
+  const navigate = useNavigate();
   const [stage, setStage] = useState<'describe' | 'suggest'>('describe');
   const [createdSkill, setCreatedSkill] = useState<CreatedSkill | null>(null);
   const [descriptionForSuggestion, setDescriptionForSuggestion] = useState('');
-  const [done, setDone] = useState(false);
 
   function handleSkillCreated(skill: CreatedSkill, description: string) {
     setCreatedSkill(skill);
     setDescriptionForSuggestion(description);
     setStage('suggest');
-  }
-
-  if (done) {
-    return (
-      <div className="max-w-lg mx-auto py-12 px-4">
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
-          <p className="text-[14px] font-medium text-emerald-700">Skill saved successfully.</p>
-          <a href="/skills" className="mt-3 inline-block text-[13px] text-indigo-600 hover:underline">
-            Back to skills
-          </a>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -412,7 +460,7 @@ export default function SkillCreatePage() {
           <SuggestStage
             skill={createdSkill}
             description={descriptionForSuggestion}
-            onDone={() => setDone(true)}
+            onDone={() => navigate('/skills')}
           />
         )}
       </div>

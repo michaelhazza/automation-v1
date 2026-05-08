@@ -5,7 +5,8 @@
  * Spec: tasks/builds/trust-verification-layer/spec.md §14.
  *
  * Only renders when at least one count is > 0.
- * "Fail" count links to Inbox when failCount > 0.
+ * "Fail" count links to Inbox (scoped by runId) only when the viewer holds
+ * subaccount.review.view / org.review.view (passed as canViewInbox).
  */
 
 interface RuntimeCheckSummaryStripProps {
@@ -13,12 +14,15 @@ interface RuntimeCheckSummaryStripProps {
   failCount: number;
   pendingCount: number;
   runId: string;
+  canViewInbox: boolean;
 }
 
 export function RuntimeCheckSummaryStrip({
   passCount,
   failCount,
   pendingCount,
+  runId,
+  canViewInbox,
 }: RuntimeCheckSummaryStripProps) {
   const total = passCount + failCount + pendingCount;
   if (total === 0) return null;
@@ -34,9 +38,9 @@ export function RuntimeCheckSummaryStrip({
 
       <span className="text-slate-300">|</span>
 
-      {failCount > 0 ? (
+      {failCount > 0 && canViewInbox ? (
         <a
-          href="/inbox"
+          href={`/inbox?runId=${encodeURIComponent(runId)}`}
           className="inline-flex items-center gap-1 text-red-600 hover:underline"
         >
           <span className="size-1.5 rounded-full bg-red-500 shrink-0" />
