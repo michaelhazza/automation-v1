@@ -272,7 +272,7 @@ export const benchRunService = {
         COUNT(CASE WHEN sj.verdict IS NULL THEN 1 END) AS pending_count
       FROM agents a
       LEFT JOIN scorecard_judgements sj
-        ON sj.agent_run_id IN (
+        ON sj.run_id IN (
           SELECT id FROM agent_runs WHERE agent_id = a.id ORDER BY created_at DESC LIMIT 50
         )
       WHERE a.deleted_at IS NULL

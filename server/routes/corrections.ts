@@ -5,8 +5,8 @@
 import { Router } from 'express';
 import {
   authenticate,
-  requireSubaccountPermission,
   hasOrgPermission,
+  hasSubaccountPermission,
 } from '../middleware/auth.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -51,24 +51,17 @@ router.post(
     }
 
     // Step 2: permission gate — subaccount-scoped vs org-scope.
+    // Use the run's subaccountId rather than req.params (the route only carries
+    // runId / eventId in its params; requireSubaccountPermission middleware
+    // would 400 on the missing param). hasSubaccountPermission is the
+    // programmatic equivalent that accepts the subaccount id directly.
     if (run.subaccountId) {
-      // Subaccount-scoped run — require corrections.create in the subaccount context.
-      const hasCorrectPerm = await (async () => {
-        try {
-          // Reuse requireSubaccountPermission logic via the middleware helper.
-          // The guard throws a 403 response; we wrap it with a try/catch so we can
-          // surface a structured error rather than letting it bubble up.
-          await new Promise<void>((resolve, reject) => {
-            requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CORRECTIONS_CREATE)(
-              req, res, (err?: unknown) => (err ? reject(err) : resolve()),
-            );
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      })();
-      if (!hasCorrectPerm) {
+      const canCorrect = await hasSubaccountPermission(
+        req,
+        run.subaccountId,
+        SUBACCOUNT_PERMISSIONS.CORRECTIONS_CREATE,
+      );
+      if (!canCorrect) {
         res.status(403).json({ error: 'Insufficient permissions' });
         return;
       }

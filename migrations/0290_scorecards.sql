@@ -21,15 +21,19 @@ CREATE TABLE IF NOT EXISTS scorecards (
   judge_model_id        text,
   created_at            timestamptz NOT NULL DEFAULT now(),
   updated_at            timestamptz NOT NULL DEFAULT now(),
-  deleted_at            timestamptz,
-
-  CONSTRAINT scorecards_scope_name_uniq
-    UNIQUE NULLS NOT DISTINCT (scope_type, scope_id, name)
-    WHERE deleted_at IS NULL
+  deleted_at            timestamptz
 );
 
 CREATE INDEX scorecards_org_idx   ON scorecards (organisation_id);
 CREATE INDEX scorecards_scope_idx ON scorecards (scope_type, scope_id);
+
+-- Partial unique index — one active scorecard name per scope.
+-- Cannot live inside CREATE TABLE as a table-level UNIQUE constraint because
+-- PostgreSQL does not support a WHERE clause on table-level UNIQUE constraints.
+CREATE UNIQUE INDEX scorecards_scope_name_uniq
+  ON scorecards (scope_type, scope_id, name)
+  NULLS NOT DISTINCT
+  WHERE deleted_at IS NULL;
 
 -- RLS — FORCE; split policies to prevent org-context mutation of system rows.
 ALTER TABLE scorecards ENABLE ROW LEVEL SECURITY;

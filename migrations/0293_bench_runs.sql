@@ -22,18 +22,20 @@ CREATE TABLE IF NOT EXISTS bench_runs (
   completed_at            timestamptz,
   failure_reason          text,
   created_at              timestamptz NOT NULL DEFAULT now(),
-  updated_at              timestamptz NOT NULL DEFAULT now(),
-
-  -- Idempotency: prevent duplicate bench runs triggered by the same user
-  -- for the same target within the same minute.
-  CONSTRAINT bench_runs_user_target_minute_uniq
-    UNIQUE (
-      triggered_by_user_id,
-      target_agent_id,
-      target_skill_slug,
-      date_trunc('minute', created_at)
-    )
+  updated_at              timestamptz NOT NULL DEFAULT now()
 );
+
+-- Idempotency: prevent duplicate bench runs triggered by the same user for the
+-- same target within the same minute. Cannot live inside CREATE TABLE as a
+-- table-level UNIQUE constraint because PostgreSQL does not allow expressions
+-- (date_trunc) in table-level UNIQUE constraints.
+CREATE UNIQUE INDEX bench_runs_user_target_minute_uniq
+  ON bench_runs (
+    triggered_by_user_id,
+    target_agent_id,
+    target_skill_slug,
+    date_trunc('minute', created_at)
+  );
 
 CREATE TABLE IF NOT EXISTS bench_results (
   id                  uuid        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
