@@ -3173,6 +3173,20 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           ) {
             runtimeCheckPauseNeeded = true;
           }
+          // Forced scorecard grading on non-self failure — fire-and-forget,
+          // never throws into the agent loop (spec §12.3).
+          if (rcResult.state === 'fail' && checkBlastRadius !== 'self') {
+            void import('./scorecardJudgeRunner.js')
+              .then(({ scheduleForcedGrade }) =>
+                scheduleForcedGrade({
+                  runId,
+                  agentId: request.agentId,
+                  organisationId: request.organisationId,
+                  triggerSource: 'forced_runtime_check_fail',
+                })
+              )
+              .catch(() => { /* best-effort */ });
+          }
         }
       } catch {
         // Never throw into the agent loop.
