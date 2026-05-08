@@ -208,12 +208,74 @@ None. Round 2 produced no code changes — strategic / framing observations only
 
 `APPROVED — operator drives further-round cadence`. No specific bugs, no regressions, no security holes flagged. 2 new strategic deferrals routed; 1 duplicate auto-applied; 4 framing observations recorded with no action. Operator decides whether to run another round (paste another ChatGPT response) or close out the chatgpt-pr-review loop.
 
+## Round 3 — 2026-05-09T09:30:00Z
+
+Status: CLOSED — disposition `APPROVED — operator drives further-round cadence`.
+
+Round 3 fired on operator paste-back of ChatGPT's response to the Round 3 code-only diff (`.chatgpt-diffs/pr275-round3-code-diff.diff` — 930K, 136 files; reflects 3 commits since Round 1: `82986096` migration 0300 IMMUTABLE fix, `2de2b513` corrections route service helper, `8397d4dc` iterative-loop lock-in).
+
+### ChatGPT Feedback (raw, operator-pasted)
+
+> Anything else? This closes one of the subtle process flaws that would have eventually created review drift. The important part is not the individual wording changes. It's the behavioural guarantee you just locked in: the review loop itself is now deterministic and continuation-safe. That matters more than it sounds.
+>
+> A few important implications from these latest updates:
+>
+> 1. **You removed the "human confirmation dependency" from the approval path** — prevents stalled review chains, avoids ambiguous terminal states, keeps orchestration linear and machine-operable.
+> 2. **The unconditional round-N+1 diff regeneration is a very good catch** — without that, "no-code-change" rounds could silently skip state refresh, creating review desynchronisation risk, especially dangerous in multi-reviewer pipelines.
+> 3. **Locking the discipline into BOTH agents was the correct move** — otherwise one side eventually drifts. Orchestration standards only work when symmetric.
+> 4. **The "never" rules are more important than positive instructions** — negative constraints are what stabilise autonomous loops, especially in agentic coordination systems.
+>
+> **The deeper architectural signal here:** you are gradually evolving from *prompt workflows* into *operational protocols*. That's a major maturity shift. The moment loop behaviour / continuation semantics / escalation rules / terminal-state handling / regeneration guarantees / reviewer synchronisation become explicit system contracts, you stop relying on "good prompting" and start building actual execution infrastructure. That is exactly the right direction for AutomationOS / Synthetos.
+>
+> **One additional recommendation now that you've formalised iterative discipline:** consider introducing explicit loop-state taxonomy later. Right now you likely have implicit states (approved / changes-requested / blocked / deferred / no-findings / waiting / regenerated). Eventually you may benefit from a formal review-loop state machine with invariants like terminal states, resumable states, regeneration-required states, user-decision-required states, machine-continuable states. Why this matters: once multiple agents coordinate reviews asynchronously, implicit loop semantics become a hidden failure surface. You are approaching the scale where orchestration ambiguity becomes more dangerous than implementation bugs.
+>
+> Also worth noting: the KNOWLEDGE.md correction entry is probably more valuable than it appears. Capturing *"approval must continue"*, *"regen occurs even without code changes"*, *"empty findings are still a loop state"* prevents future agent regressions when prompts evolve. That is institutional memory formation, not just documentation.
+>
+> At this point the review system is becoming sophisticated enough that you could eventually benchmark reviewers against each other, detect reviewer inconsistency, score review quality, identify false-positive reviewers, identify under-reporting reviewers, build reviewer trust weighting. Which becomes extremely interesting once autonomous implementation agents start scaling.
+>
+> This was a worthwhile tightening round.
+
+**Triage stance.** Round 3 is acknowledgment + strategic framing — zero specific bugs, zero contract violations, zero security findings. ChatGPT explicitly approves the iterative-loop tightening from `8397d4dc`. Two new forward-looking observations worth capturing as deferrals:
+
+1. **Loop-state taxonomy** — explicit review-loop state machine. Strategic, deferred.
+2. **Reviewer benchmarking / trust weighting** — multi-reviewer quality framework. Speculative future capability, deferred.
+
+The rest are observations / framing with no actionable change.
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+None. Round 3 produced no code changes — strategic / framing observations only.
+
+### Triage table
+
+| Item | Type | Decision | Cross-reference |
+|---|---|---|---|
+| 1. Removed human confirmation dependency from approval path | Observation (praise) | No action | n/a |
+| 2. Unconditional diff regeneration is correct | Observation (praise) | No action | locked in `8397d4dc` (chatgpt-pr-review.md step 9 [MANUAL]) |
+| 3. Symmetric discipline lock across both agents | Observation (praise) | No action | locked in `8397d4dc` |
+| 4. Negative constraints stabilise loops | Observation (praise) | No action | n/a |
+| 5. Prompt workflows → operational protocols framing | Observation | No action | n/a |
+| 6. Explicit loop-state taxonomy (formal state machine) | Risk (new, strategic) | Defer to Stage-2-GA / future-protocol backlog | `CHATGPT-R3-RISK-1` |
+| 7. KNOWLEDGE.md as institutional memory formation | Observation (praise) | No action | n/a |
+| 8. Reviewer benchmarking / trust weighting framework | Risk (new, speculative future capability) | Defer to long-horizon backlog | `CHATGPT-R3-RISK-2` |
+
+### Deferrals routed (2 new entries)
+
+| Risk | Tag | Routing |
+|---|---|---|
+| Formal review-loop state machine — terminal / resumable / regeneration-required / user-decision-required / machine-continuable states | `CHATGPT-R3-RISK-1` | New entry; activation trigger: a third reviewer agent enters the pipeline OR the manual ChatGPT loop becomes asynchronous (multiple parallel rounds). Until then, the locked iterative-loop discipline is sufficient. |
+| Reviewer benchmarking / trust weighting framework — score review quality, detect false-positive vs under-reporting reviewers across spec-conformance / pr-reviewer / dual-reviewer / adversarial-reviewer / chatgpt-pr-review | `CHATGPT-R3-RISK-2` | New entry; long-horizon. Activation trigger: 6+ months of accumulated review-log data with deferred-vs-implemented decision tracking. |
+
+### Verdict
+
+`APPROVED — operator drives further-round cadence`. No specific bugs, no regressions, no security holes flagged. 2 new strategic deferrals routed; 6 observation-only items recorded with no action. Operator decides next-round vs finalise.
+
 ## Final Summary
 
-- **Round count:** 2 (Round 1 closed `APPROVED — round-2 not requested` (incorrectly auto-decided; corrected); Round 2 closed `APPROVED — operator drives further-round cadence`)
-- **Code changes applied across all rounds:** none (Round 1 verifications passed clean; Round 2 framing-only)
+- **Round count:** 3 (Round 1 closed `APPROVED — round-2 not requested` (incorrectly auto-decided; corrected); Rounds 2 and 3 both closed `APPROVED — operator drives further-round cadence`)
+- **Code changes applied across all rounds:** none in the chatgpt-pr-review loop itself (Round 1 verifications passed clean; Rounds 2 and 3 framing-only). Two CI fix commits landed between rounds via the main session: `82986096` (migration 0300 IMMUTABLE), `2de2b513` (corrections route service helper). One iterative-loop discipline lock-in commit `8397d4dc`.
 - **Verifications:** 5 / 5 PASS (Round 1)
-- **Deferrals routed:** 4 from Round 1 (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`) + 1 consolidated (`Risk-4` → existing M1 / TVL-DG-2 / TVL-DG-7) + 2 new from Round 2 (`CHATGPT-R2-RISK-1`, `-2`)
+- **Deferrals routed:** 4 from Round 1 (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`) + 1 consolidated (`Risk-4` → existing M1 / TVL-DG-2 / TVL-DG-7) + 2 new from Round 2 (`CHATGPT-R2-RISK-1`, `-2`) + 2 new from Round 3 (`CHATGPT-R3-RISK-1`, `-2`)
 - **G3 after fixes:** n/a (no code changes)
 
 ### Doc-sync sweep verdicts (per `docs/doc-sync.md` registered docs)
@@ -237,3 +299,4 @@ Investigation procedure ran for each doc per `docs/doc-sync.md`. Branch-diff can
 ### Decision log
 - 2026-05-09T00:00:00Z — Round 1 closed `APPROVED — round-2 not requested` (incorrectly auto-decided; corrected by operator). All 5 "approve after" verifications PASS with file-read + grep evidence. 4 new deferrals routed (`CHATGPT-R1-RISK-1`, `-2`, `-3`, `-5`); Risk-4 consolidated into existing M1 retention deferral.
 - 2026-05-09T08:55:00Z — Round 2 reopened by operator paste-back per the iterative-loop contract. Round 2 entirely strategic / framing — 7 items: 4 observation-only (1, 2, 6, 7), 1 duplicate auto-applied (3 → CHATGPT-R1-RISK-1), 2 new deferrals (CHATGPT-R2-RISK-1 operator-correction taxonomy enrichment; CHATGPT-R2-RISK-2 future Trust Kernel). Verdict `APPROVED — operator drives further-round cadence`. No code changes. Operator decides next-round vs finalise.
+- 2026-05-09T09:30:00Z — Round 3 fired on operator paste of ChatGPT response to the Round 3 diff. Acknowledgment-and-strategic-framing round confirming the iterative-loop tightening from `8397d4dc` was correct. 8 items: 6 observation-only (praise + framing), 2 new strategic deferrals (CHATGPT-R3-RISK-1 formal review-loop state-machine taxonomy; CHATGPT-R3-RISK-2 reviewer benchmarking / trust weighting framework). Verdict `APPROVED — operator drives further-round cadence`. No code changes.
