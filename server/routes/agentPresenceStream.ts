@@ -68,7 +68,7 @@ function attachStream(
     writeSSEEvent(res, event);
   });
 
-  // Heartbeat every 30 s
+  // Heartbeat every 15 s (spec §13.3)
   const heartbeatInterval = setInterval(() => {
     const heartbeat: PresenceStreamEvent = {
       agentId: scope.kind === 'agent' ? scope.agentId : '',
@@ -79,7 +79,7 @@ function attachStream(
       eventType: 'server_heartbeat',
     };
     writeSSEEvent(res, heartbeat);
-  }, 30_000);
+  }, 15_000);
 
   // Cleanup
   req.on('close', () => {

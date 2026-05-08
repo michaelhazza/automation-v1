@@ -3490,3 +3490,41 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
 - `client/src/pages/operate/components/FileLineageChip.tsx`
 - `client/src/pages/operate/components/RunTraceEventRenderer.tsx` (M)
 - `client/src/pages/operate/RunTracePage.tsx` (M)
+
+---
+
+## Deferred from spec-conformance review — agent-workspace (2026-05-08)
+
+**Captured:** 2026-05-08T22-10-41Z
+**Source log:** `tasks/review-logs/spec-conformance-log-agent-workspace-2026-05-08T22-10-41Z.md`
+**Spec:** `tasks/builds/agent-workspace/spec.md`
+
+- [ ] **AGW-DEF-1 — §11.1 watermark predicate uses cross-run tuple only.** `server/services/agentPresenceService.ts:206-225` upsert `WHERE` clause uses `(EXCLUDED.last_event_timestamp, EXCLUDED.last_event_id) > (current.last_event_timestamp, current.last_event_id)` only. Spec §11.1 names a per-run path (`last_event_run_id` match AND `last_event_run_seq` greater) PLUS the cross-run tuple as a fallback. Both produce deterministic ordering, but the implementation drops the per-run path the spec literally pins. Could be intentional simplification (cross-run tuple subsumes per-run when timestamps are honest); could be silent drift.
+  - Spec section: §11.1 Idempotency posture row 3.
+  - Gap: implementation predicate ≠ literal spec predicate.
+  - Suggested approach: confirm with spec author whether the cross-run-only form is acceptable; if yes, amend §11.1 to match; if no, restore the per-run path with `excluded.last_event_run_id = projections.last_event_run_id AND excluded.last_event_run_seq > projections.last_event_run_seq` as the first OR-branch.
+
+- [ ] **AGW-DEF-2 — `agentPresenceStreamPublisher.fanOut()` not invoked from any production code path.** `server/services/agentPresenceStreamPublisher.ts:115` exports the function and `agentPresenceStream.ts` route subscribes to it, but no projection-writer / observation-writer / working-time-writer ever calls `fanOut(event)`. Spec §13.1.1 wires "the same `agentExecutionEventService` event tail that writes the projection — projection-write hook → publisher.fanOut(event) → registered subscribers on this node". Today the SSE channel delivers only heartbeats + reconnect-replay; live agent updates do not propagate.
+  - Spec section: §13.1.1 publisher topology, §9 cross-cutting "surfaces driven by SSE share one connection".
+  - Gap: live data path missing.
+  - Suggested approach: add `fanOut` call from `agentPresenceService.applyEventToPresence` (after upsert) and from `agentObservationService.append` (after insert), and from `agentWorkingTimeService.applyEvent` (after rollup write). Workspace fan-out (`fanOutToWorkspace`) needs `subaccountId` resolution at each call site.
+
+- [ ] **AGW-DEF-3 — `users.default_agent_tab` column added to schema/migration but never read.** `client/src/pages/build/AgentEditPage.tsx:80` hardcodes `'overview'` as the default `activeTab`. Spec §17 Open Q 2 (resolved): "v1 ships READ-ONLY: the column exists and the AgentEditPage reads it on mount." The column is dead code today.
+  - Spec section: §4 Phase 2, §17 Open Question 2 (resolved).
+  - Gap: write path deferred (correct), read path missing (wrong).
+  - Suggested approach: extend `/api/users/me` (or equivalent profile endpoint) to surface `defaultAgentTab`; client reads it via the existing user-context hook; fall back to `'overview'` when the field is null/missing. Single-line change in `AgentEditPage` `useState` initialiser once the data is in scope.
+
+- [ ] **AGW-DEF-4 — `accumulateWorkingTime` missing wait-state subtraction.** `server/services/agentWorkingTimeServicePure.ts:68-108` counts `step_started → step_completed` envelopes only. Spec §7.5 inclusion table requires SUBTRACTION of `external_call_started → external_call_completed`, `hitl_pause_started → hitl_pause_resolved`, `retry_backoff_started → retry_backoff_completed`, and `sub_agent_delegated → sub_agent_returned` as nested wait windows that close inside the parent step interval. JSDoc admits "simplified implementation". The reconciliation invariant in §11.6 (chart total = invoice total) holds for runs with no waits, but breaks the moment any real run waits on anything — invoice over-bills.
+  - Spec section: §7.5 working-time accounting, §11.6 reconciliation invariant.
+  - Gap: spec contract not delivered; reconciliation invariant fails on realistic runs.
+  - Suggested approach: extend the pure function to track an open-wait stack per run; `external_call_started` / `hitl_pause_started` / `retry_backoff_started` / `sub_agent_delegated` push a wait window; the matching `*_completed` event pops, and the popped window's duration is subtracted from the most recently closed step's contribution. Add fixture-based tests covering each pair plus a nested case (HITL inside a step that also has an external call).
+
+- [ ] **AGW-DEF-5 — `server_heartbeat` event payload shape mismatch (missing `lastEventId`).** Spec §13.3 specifies heartbeat `data: { eventTimestamp, serverNow, lastEventId }`. `server/routes/agentPresenceStream.ts:78` sets `data: null`. `eventTimestamp` and `serverNow` live at the envelope top level, but `lastEventId` is not surfaced anywhere in the heartbeat. Browser-side `EventSource` autotracks the `id:` line so client behaviour likely works, but the spec literal is broken — strict consumers may fail.
+  - Spec section: §13.3 event types over the channel, last entry.
+  - Gap: heartbeat payload field missing.
+  - Suggested approach: emit `data: { eventTimestamp, serverNow, lastEventId }` in the heartbeat (where `lastEventId` is the most-recently-emitted real event for the scope); confirm whether the canonical `lastEventId` should be drawn from the ring buffer's last entry per scope or from a separate per-connection tracker.
+
+- [ ] **AGW-DEF-6 — `workingTimeRollupCompactJob` uses `RETURNING id` against composite-PK table.** `server/jobs/workingTimeRollupCompactJob.ts:99` does `DELETE FROM agent_working_time_rollups ... RETURNING id`, but `agent_working_time_rollups` has no `id` column (composite PK on `organisation_id, agent_id, bucket_date`). The job will fail at runtime on the first execution against any non-empty data set. This is a code-quality bug rather than a spec deviation (spec doesn't pin SQL details), but it nullifies the §6.7 retention/compaction policy in production.
+  - Spec section: §6.7 retention policy row "Working Time aggregates".
+  - Gap: SQL bug, runtime failure.
+  - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
