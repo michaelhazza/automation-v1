@@ -1,12 +1,33 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc, isNotNull, isNull, lt } from 'drizzle-orm';
 import * as fs from 'node:fs';
 import { db } from '../db/index.js';
-import { executionFiles, executions } from '../db/schema/index.js';
+import { documentPromotionAudit, executionFiles, executions } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import { getS3Client, getBucketName } from '../lib/storage.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+
+export interface ListFilesOptions {
+  subaccountId?: string;
+  linkedToKnowledge?: 'true' | 'false';
+  cursor?: Date;
+  limit: number;
+}
+
+export interface ListedFile {
+  id: string;
+  fileName: string;
+  fileType: 'input' | 'output';
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  expiresAt: string;
+  createdAt: string;
+  executionId: string;
+  subaccountId: string | null;
+  promotedDocumentId: string | null;
+}
 
 export class FileService {
   async uploadFile(
@@ -111,6 +132,74 @@ export class FileService {
       expiresAt: new Date(Date.now() + 900 * 1000),
       fileName: fileRecord.fileName,
     };
+  }
+
+  // List execution files for an org, optionally filtered by subaccount and
+  // promoted-to-knowledge status. Uses getOrgScopedDb() so the query runs
+  // inside the ALS-tracked tx with app.organisation_id bound — closes
+  // AKR-ADV-2 (route was importing db directly, running outside the tx).
+  async listFiles(
+    organisationId: string,
+    options: ListFilesOptions,
+  ): Promise<{ files: ListedFile[]; hasMore: boolean }> {
+    const orgDb = getOrgScopedDb('fileService.listFiles');
+
+    const conditions = [eq(executions.organisationId, organisationId)];
+    if (options.subaccountId) {
+      conditions.push(eq(executions.subaccountId, options.subaccountId));
+    }
+    if (options.cursor) {
+      conditions.push(lt(executionFiles.createdAt, options.cursor));
+    }
+
+    const promotionConditions = [
+      eq(documentPromotionAudit.fileId, executionFiles.id),
+      eq(documentPromotionAudit.organisationId, organisationId),
+      isNull(documentPromotionAudit.deletedAt),
+    ];
+
+    const where =
+      options.linkedToKnowledge === 'true'
+        ? and(...conditions, isNotNull(documentPromotionAudit.id))
+        : options.linkedToKnowledge === 'false'
+          ? and(...conditions, isNull(documentPromotionAudit.id))
+          : and(...conditions);
+
+    const rows = await orgDb
+      .select({
+        id: executionFiles.id,
+        fileName: executionFiles.fileName,
+        fileType: executionFiles.fileType,
+        mimeType: executionFiles.mimeType,
+        fileSizeBytes: executionFiles.fileSizeBytes,
+        expiresAt: executionFiles.expiresAt,
+        createdAt: executionFiles.createdAt,
+        executionId: executionFiles.executionId,
+        subaccountId: executions.subaccountId,
+        promotedDocumentId: documentPromotionAudit.documentId,
+      })
+      .from(executionFiles)
+      .innerJoin(executions, eq(executionFiles.executionId, executions.id))
+      .leftJoin(documentPromotionAudit, and(...promotionConditions))
+      .where(where)
+      .orderBy(desc(executionFiles.createdAt), desc(executionFiles.id))
+      .limit(options.limit + 1);
+
+    const hasMore = rows.length > options.limit;
+    const files: ListedFile[] = rows.slice(0, options.limit).map((r) => ({
+      id: r.id,
+      fileName: r.fileName,
+      fileType: r.fileType,
+      mimeType: r.mimeType,
+      fileSizeBytes: r.fileSizeBytes,
+      expiresAt: r.expiresAt.toISOString(),
+      createdAt: r.createdAt.toISOString(),
+      executionId: r.executionId,
+      subaccountId: r.subaccountId,
+      promotedDocumentId: r.promotedDocumentId ?? null,
+    }));
+
+    return { files, hasMore };
   }
 }
 

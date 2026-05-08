@@ -2,6 +2,9 @@
 // Spec: docs/universal-brief-dev-spec.md §5.3, §6.3.6
 // No I/O — deterministic output for given input.
 
+import type { RetrievalCandidate } from '../../shared/types/retrieval.js';
+import { rankCandidates } from './retrievalServicePure.js';
+
 export type RuleDerivedStatus = 'active' | 'paused' | 'deprecated';
 
 export interface MemoryBlockRow {
@@ -30,10 +33,10 @@ export function deriveRuleStatus(row: Pick<MemoryBlockRow, 'pausedAt' | 'depreca
   return 'active';
 }
 
-const PRIORITY_RANK: Record<string, number> = {
-  high: 3,
-  medium: 2,
-  low: 1,
+const PRIORITY_SCORE_BONUS: Record<string, number> = {
+  high: 0.3,
+  medium: 0.2,
+  low: 0.1,
 };
 
 function scopeSpecificity(
@@ -66,22 +69,40 @@ export function rankByPrecedencePure(input: MemoryBlockRetrievalInput): MemoryBl
     (r) => r.organisationId === input.organisationId && !r.pausedAt && !r.deprecatedAt,
   );
 
-  return active.sort((a, b) => {
-    // 1. Authoritative wins
-    if (a.isAuthoritative !== b.isAuthoritative) {
-      return a.isAuthoritative ? -1 : 1;
-    }
-    // 2. Scope specificity (higher = first)
-    const specA = scopeSpecificity(a, context);
-    const specB = scopeSpecificity(b, context);
-    if (specA !== specB) return specB - specA;
+  const rowMap = new Map<string, MemoryBlockRow>(active.map(r => [r.id, r]));
 
-    // 3. Priority
-    const prioA = PRIORITY_RANK[a.priority ?? 'medium'] ?? 2;
-    const prioB = PRIORITY_RANK[b.priority ?? 'medium'] ?? 2;
-    if (prioA !== prioB) return prioB - prioA;
-
-    // 4. Recency (newest first)
-    return b.createdAt.getTime() - a.createdAt.getTime();
+  const candidates: RetrievalCandidate[] = active.map(r => {
+    const baseScore = r.isAuthoritative ? 1.0 : 0.5;
+    const priorityBonus = PRIORITY_SCORE_BONUS[r.priority ?? ''] ?? 0;
+    return {
+      id: r.id,
+      organisationId: r.organisationId,
+      kind: 'memory_block',
+      mode: 'auto',
+      scopeTier: scopeSpecificity(r, context),
+      finalScore: baseScore + priorityBonus,
+      updatedAt: r.createdAt,
+      tokenCount: 0,
+      content: r.content,
+    };
   });
+
+  const result = rankCandidates({
+    candidates,
+    threshold: 0,
+    budgetTokens: Infinity,
+    nowMs: Date.now(),
+    orgId: input.organisationId,
+    runContext: {
+      runId: '',
+      agentId: input.agentId ?? '',
+      subaccountId: input.subaccountId ?? null,
+      scheduledTaskId: null,
+      taskInstanceId: null,
+    },
+  });
+
+  return result.loaded
+    .map(c => rowMap.get(c.id))
+    .filter((r): r is MemoryBlockRow => r !== undefined);
 }

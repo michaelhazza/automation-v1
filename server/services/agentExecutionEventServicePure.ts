@@ -368,6 +368,25 @@ export function validateEventPayload(
       if (!isNonNegInt(p.errorMessageLength)) return { ok: false, reason: 'run.terminal.extracted_with_errorMessage_missing_fields' };
       return { ok: true };
 
+    case 'retrieval.summary':
+      if (!isRecord(p.result) || !isRecord(p.chunkConfig)) {
+        return { ok: false, reason: 'retrieval.summary_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'retrieval.always_available.mode_changed':
+      if (
+        !isStr(p.organisationId) ||
+        !isStr(p.documentId) ||
+        !isStr(p.oldMode) ||
+        !isStr(p.newMode) ||
+        !isStr(p.actorUserId) ||
+        !isStr(p.occurredAt)
+      ) {
+        return { ok: false, reason: 'retrieval.always_available.mode_changed_missing_fields' };
+      }
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

@@ -1,5 +1,7 @@
+import type PgBoss from 'pg-boss';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { referenceDocuments, referenceDocumentVersions } from '../db/schema/index.js';
+import { db } from '../db/index.js';
+import { referenceDocuments, referenceDocumentVersions, referenceDocumentChunks } from '../db/schema/index.js';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import type { ReferenceDocument, NewReferenceDocument } from '../db/schema/referenceDocuments.js';
 import type { ReferenceDocumentVersion } from '../db/schema/referenceDocumentVersions.js';
@@ -356,6 +358,67 @@ export async function getVersion(
     ))
     .limit(1);
   return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// persistChunks — bulk-insert embedding chunks (idempotent, used by jobs 3C/3D)
+// Called from within the job handler's withOrgTx context.
+// ON CONFLICT DO NOTHING makes replays safe per spec §10.1 / §10.6.
+// ---------------------------------------------------------------------------
+
+export async function persistChunks(input: {
+  chunks: Array<{
+    organisationId: string;
+    documentId: string;
+    versionId: string;
+    chunkIndex: number;
+    embeddingModel: string;
+    embedding: number[];
+    content: string;
+    tokenCount: number;
+  }>;
+}): Promise<void> {
+  if (input.chunks.length === 0) return;
+  const db = getOrgScopedDb('referenceDocumentService.persistChunks');
+  await db
+    .insert(referenceDocumentChunks)
+    .values(input.chunks)
+    .onConflictDoNothing();
+}
+
+// ---------------------------------------------------------------------------
+// writeVersionAndEnqueueJobs — mark summary stale on version write, then
+// enqueue document:summarise and document:chunk-embed jobs.
+//
+// Uses its own db.transaction() so that boss.send() fires strictly AFTER
+// the transaction commits (spec invariant §1.5 #11). Never enqueue inside
+// the transaction callback.
+// ---------------------------------------------------------------------------
+
+export async function writeVersionAndEnqueueJobs(input: {
+  documentId: string;
+  organisationId: string;
+  versionId: string;
+  boss: PgBoss;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(referenceDocuments)
+      .set({ summaryStale: true, updatedAt: new Date() })
+      .where(and(
+        eq(referenceDocuments.id, input.documentId),
+        eq(referenceDocuments.organisationId, input.organisationId),
+      ));
+  });
+
+  // Enqueue AFTER the transaction commits — spec invariant §1.5 #11.
+  const payload = {
+    organisationId: input.organisationId,
+    documentId: input.documentId,
+    versionId: input.versionId,
+  };
+  await input.boss.send('document:summarise', payload);
+  await input.boss.send('document:chunk-embed', payload);
 }
 
 // ---------------------------------------------------------------------------

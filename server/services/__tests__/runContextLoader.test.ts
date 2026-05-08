@@ -31,7 +31,6 @@ interface LoadedDataSource {
   contentType: string;
   tokenCount: number;
   sizeBytes: number;
-  loadingMode: 'eager' | 'lazy';
   priority: number;
   fetchOk: boolean;
   maxTokenBudget: number;
@@ -59,7 +58,6 @@ function makeSource(overrides: Partial<LoadedDataSource>): LoadedDataSource {
     contentType: overrides.contentType ?? 'text',
     tokenCount: overrides.tokenCount ?? 0,
     sizeBytes: overrides.sizeBytes ?? 0,
-    loadingMode: overrides.loadingMode ?? 'eager',
     priority: overrides.priority ?? 0,
     fetchOk: overrides.fetchOk ?? true,
     maxTokenBudget: overrides.maxTokenBudget ?? 8000,
@@ -181,15 +179,15 @@ test('three scopes share a name: scheduled_task wins over subaccount and agent',
   expect(result.suppressed.every(s => s.suppressedBy === 'st'), 'both losers point at scheduled_task winner').toBeTruthy();
 });
 
-test('lazy + lazy override: winner is still lazy, loser is suppressed', () => {
+test('override: winner is eager, loser is suppressed (loadingMode column removed)', () => {
   const pool = [
-    makeSource({ id: 'a', scope: 'agent', name: 'big.md', loadingMode: 'lazy' }),
-    makeSource({ id: 'st', scope: 'scheduled_task', name: 'big.md', loadingMode: 'lazy' }),
+    makeSource({ id: 'a', scope: 'agent', name: 'big.md' }),
+    makeSource({ id: 'st', scope: 'scheduled_task', name: 'big.md' }),
   ];
   const result = processContextPool(pool);
-  expect(result.eager.length === 0, 'no eager entries').toBeTruthy();
-  expect(result.manifest.length === 1, `expected 1 manifest entry, got ${result.manifest.length}`).toBeTruthy();
-  expect(result.manifest[0].id === 'st', 'scheduled_task scope wins').toBeTruthy();
+  expect(result.eager.length === 1, `expected 1 eager entry, got ${result.eager.length}`).toBeTruthy();
+  expect(result.eager[0].id === 'st', 'scheduled_task scope wins').toBeTruthy();
+  expect(result.manifest.length === 0, 'manifest is always empty').toBeTruthy();
   expect(result.suppressed.length === 1, 'agent scope is suppressed').toBeTruthy();
 });
 
@@ -241,36 +239,17 @@ test('budget walk: precedence preserved under pressure (most-specific wins)', ()
   expect(agentSource.includedInPrompt === false, 'agent excluded by budget').toBeTruthy();
 });
 
-test('lazy sources do not consume eager budget', () => {
+// ─── Manifest cap (always empty after loading_mode removal) ─────────────────
+
+test('manifest is always empty — manifest and manifestForPrompt are empty arrays', () => {
   const pool = [
-    makeSource({ id: 'eager', scope: 'agent', name: 'a', tokenCount: 50000, loadingMode: 'eager' }),
-    makeSource({ id: 'lazy', scope: 'scheduled_task', name: 'b', tokenCount: 50000, loadingMode: 'lazy' }),
+    makeSource({ id: 'a', scope: 'agent', name: 'a', tokenCount: 1000 }),
+    makeSource({ id: 'b', scope: 'agent', name: 'b', tokenCount: 2000, priority: 1 }),
   ];
-  const result = processContextPool(pool, { maxEagerBudget: 60000 });
-  const eagerSource = result.eager[0];
-  expect(eagerSource.includedInPrompt === true, '50k eager source still fits in 60k budget').toBeTruthy();
-  // Lazy source should not consume any of the 60k budget
-});
-
-// ─── Manifest cap ───────────────────────────────────────────────────────────
-
-test('lazy manifest cap: 10 lazy sources with cap=5 → manifestForPrompt.length=5, elided=5', () => {
-  const pool = Array.from({ length: 10 }, (_, i) =>
-    makeSource({ id: `lazy-${i}`, scope: 'agent', name: `lazy-${i}`, loadingMode: 'lazy', priority: i })
-  );
-  const result = processContextPool(pool, { maxLazyManifestItems: 5 });
-  expect(result.manifest.length === 10, 'full manifest has all 10').toBeTruthy();
-  expect(result.manifestForPrompt.length === 5, 'capped subset has 5').toBeTruthy();
-  expect(result.manifestElidedCount === 5, 'elided count is 5').toBeTruthy();
-});
-
-test('manifest cap: 3 lazy sources with cap=10 → manifestForPrompt has all 3, elided=0', () => {
-  const pool = Array.from({ length: 3 }, (_, i) =>
-    makeSource({ id: `lazy-${i}`, scope: 'agent', name: `lazy-${i}`, loadingMode: 'lazy', priority: i })
-  );
-  const result = processContextPool(pool, { maxLazyManifestItems: 10 });
-  expect(result.manifestForPrompt.length === 3, 'full manifest fits').toBeTruthy();
-  expect(result.manifestElidedCount === 0, 'no elision').toBeTruthy();
+  const result = processContextPool(pool);
+  expect(result.manifest.length === 0, 'manifest is always empty').toBeTruthy();
+  expect(result.manifestForPrompt.length === 0, 'manifestForPrompt is always empty').toBeTruthy();
+  expect(result.manifestElidedCount === 0, 'elided count is always 0').toBeTruthy();
 });
 
 // ─── Snapshot completeness ──────────────────────────────────────────────────
@@ -279,11 +258,10 @@ test('snapshot completeness: mixed scenario has every entry tagged', () => {
   const pool = [
     makeSource({ id: 'eager-in', scope: 'agent', name: 'a', tokenCount: 1000 }),
     makeSource({ id: 'eager-out', scope: 'agent', name: 'b', tokenCount: 999999, priority: 1 }),
-    makeSource({ id: 'lazy', scope: 'agent', name: 'c', loadingMode: 'lazy', priority: 2 }),
     makeSource({ id: 'override-loser', scope: 'agent', name: 'a', priority: 3 }),
   ];
   const result = processContextPool(pool, { maxEagerBudget: 50000 });
-  // All four should have orderIndex set
+  // All three should have orderIndex set
   for (const s of [...result.eager, ...result.manifest, ...result.suppressed]) {
     expect(typeof s.orderIndex === 'number', `${s.id} should have orderIndex`).toBeTruthy();
     expect(s.orderIndex! >= 0, `${s.id} orderIndex should be >= 0`).toBeTruthy();

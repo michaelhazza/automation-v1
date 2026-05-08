@@ -408,7 +408,6 @@ export async function executeConfigAttachDataSource(
     contentType: input.contentType ? String(input.contentType) as 'json' | 'csv' | 'markdown' | 'text' | 'auto' : undefined,
     priority: input.priority ? Number(input.priority) : undefined,
     maxTokenBudget: input.maxTokenBudget ? Number(input.maxTokenBudget) : undefined,
-    loadingMode: input.loadingMode ? String(input.loadingMode) as 'eager' | 'lazy' : undefined,
     cacheMinutes: input.cacheMinutes ? Number(input.cacheMinutes) : undefined,
   };
 
@@ -441,7 +440,7 @@ export async function executeConfigUpdateDataSource(
   if (!dataSourceId) return { success: false, error: 'dataSourceId is required' };
 
   const patch: Record<string, unknown> = {};
-  for (const key of ['name', 'priority', 'maxTokenBudget', 'loadingMode', 'cacheMinutes', 'contentType']) {
+  for (const key of ['name', 'priority', 'maxTokenBudget', 'cacheMinutes', 'contentType']) {
     if (input[key] !== undefined) patch[key] = input[key];
   }
 
@@ -660,7 +659,7 @@ export async function executeConfigListDataSources(
         .select({
           id: agentDataSources.id, name: agentDataSources.name,
           sourceType: agentDataSources.sourceType, sourcePath: agentDataSources.sourcePath,
-          loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
+          priority: agentDataSources.priority,
         })
         .from(agentDataSources)
         .innerJoin(agents, and(eq(agentDataSources.agentId, agents.id), isActive(agents)))
@@ -672,7 +671,7 @@ export async function executeConfigListDataSources(
         .select({
           id: agentDataSources.id, name: agentDataSources.name,
           sourceType: agentDataSources.sourceType, sourcePath: agentDataSources.sourcePath,
-          loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
+          priority: agentDataSources.priority,
         })
         .from(agentDataSources)
         .innerJoin(subaccountAgents, and(eq(agentDataSources.subaccountAgentId, subaccountAgents.id), eq(subaccountAgents.isActive, true)))
@@ -689,7 +688,6 @@ export async function executeConfigListDataSources(
         name: ds.name,
         sourceType: ds.sourceType,
         sourcePath: ds.sourcePath,
-        loadingMode: ds.loadingMode,
         priority: ds.priority,
       })),
     };
