@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 8. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, a simplification pass that removed redundant cards and scaffolding, a differentiator-coverage pass (Rev 7), and a final architectural-invariants pass (Rev 8) that locked the unified `AgentPresenceState` enum, the source-of-truth hierarchy, the Working Time accounting rule, the Knowledge-in-use mechanical constraints, the anti-fake-progress rule for Current focus, the home widget deterministic ordering, and the immutable-reference invariant for run-trace file chips.
+> **Status:** Rev 9. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, a simplification pass, a differentiator-coverage pass (Rev 7), an architectural-invariants pass (Rev 8), and a final operational-contracts pass (Rev 9) that pinned the Overview freshness matrix (§5.5), the anti-optimistic-UI synthesis invariant (§5.6), the retention policy for presence projections (§5.7), the degraded-state recovery semantics (§5.2), the session multiplicity invariant (§7), and operator-cognitive-load + accessibility + section-collapse rules (§10).
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -253,6 +253,16 @@ These states are visible to the operator. They are NOT silent fallbacks. Trust d
 
 The seven `AgentPresenceState` values from §5 (`idle / running / waiting_on_human / waiting_on_dependency / scheduled / degraded / failed`) are the closed primary taxonomy. The conditions in the table above are the *causes* that drive a transition into `degraded`; the table's "UI behaviour" column is how that single state surfaces (subtitle for sub-conditions, distinct pill for the primary state).
 
+**Recovery semantics (hard, prevents flicker and oscillation):**
+
+Entry into `degraded` is fast and decisive. Exit is debounced.
+
+- **Recovery threshold.** `degraded` clears only after **two consecutive healthy heartbeat intervals** (or one successful event-stream resync where the client acknowledges receipt of all events since the last seen `event_id`). One stray heartbeat is not enough; one re-connect followed by silence is not enough.
+- **Hysteresis window.** Minimum 10 seconds in `degraded` before the state can transition back to its primary value. This prevents a one-packet network blip from flapping the pill between *Working* and *Status uncertain*.
+- **Anti-oscillation rule.** If `degraded → healthy → degraded` happens twice within a 30-second window, the agent stays in `degraded` for the full 60-second hysteresis period regardless of subsequent healthy heartbeats. The operator sees a stable degraded pill, not a strobe.
+- **Replay semantics on reconnect.** When the event stream resyncs, the client requests events since the last seen `event_id`. Missed events replay in chronological order. The UI applies them in one render pass and snaps back to live state in a single transition; no per-event flicker, no incremental scroll-up, no false activity bursts.
+- **State on resolution.** When `degraded` clears, the agent transitions to whatever its underlying primary state actually is, derived fresh from the §5.3 resolution order — not to whatever it was before the degradation began. If the agent finished its run while telemetry was degraded, the resolved state is `idle`, not the prior `running`.
+
 ### 5.3 Source-of-truth hierarchy (cross-cutting invariant)
 
 The Overview tab (and every other presence-aware surface) composes data from multiple subsystems: run trace events, retrieval observability events, scheduler state, materialised observation rows, append-only activity rows. Without a strict precedence model, builders will inevitably synthesise UI state from mixed sources and visible drift will appear. This subsection pins the rules.
@@ -317,6 +327,71 @@ Inclusion / exclusion rules (closed list):
 **Reconciliation invariant.** The Working Time chart total for any timeframe MUST exactly equal the billable time the operator sees on the invoice for that same timeframe. If the two ever drift, the chart is wrong, not the invoice.
 
 **Hover affordance.** Each bar in the chart, when hovered, shows the run id(s) contributing to that bucket. This is the operator's escape hatch when reconciling against the invoice.
+
+### 5.5 Overview freshness matrix
+
+§5.1 pins latency for Current focus. The other Overview surfaces are semantically *live* but operationally undefined. Without per-surface freshness contracts, builders will independently choose live subscription, polling, stale cache, eventual projection, or materialised snapshot — and cross-card temporal drift will appear (one surface feels alive, an adjacent one lags by a minute).
+
+The spec author MUST pick one delivery model per surface and meet the freshness target. The matrix is the contract.
+
+| Surface | Freshness target | Delivery model |
+|---|---|---|
+| Status pill (`AgentPresenceState`) | <5s end-to-end | Server-pushed (SSE or WebSocket). Polling acceptable as fallback at 2-3s cadence. |
+| Current focus | <5s end-to-end | Server-pushed alongside the pill. See §5.1. |
+| Activity feed | <10s | Append stream. New rows arrive without polling. |
+| Recent observations | <10s while a run is active; immediate on run-end | Append stream, same channel as activity feed. |
+| Working Time chart | <30s | Incremental aggregation off `agent_execution_events`. Bucket containing "now" updates live; older buckets are immutable. |
+| Knowledge in use | Active-run live (<5s); otherwise last-run snapshot | Event projection from the retrieval observability layer. Snapshot persists between runs. |
+| Files snapshot | <60s | Cached per-agent slice of the Phase 1 Files projection; refresh on run-end. |
+| Tools usage bands | Hourly rollup acceptable | Materialised aggregation. Cache for 1h is fine; bands shift slowly. |
+| Connections health | Cached ≤60s | Health projection from the Connections layer. The Connections page is live; the Overview snapshot is the cached read. |
+| Schedule peek | <60s | Cached read of the scheduler state. |
+| Identity card | Static (read on tab mount) | No live updates needed; identity rarely changes. |
+
+**Cross-cutting rules:**
+- Surfaces driven by SSE/WebSocket share one connection per Overview tab. The spec author should not let three independent live channels open in parallel.
+- A surface that misses its freshness target degrades gracefully: timestamp the data ("as of 47s ago") rather than showing stale data as live. This composes with the §5.1 stale-state copy and the §5.2 `degraded` state.
+- The matrix is the contract; PR review checks it. New Overview surfaces added later MUST add a row before merging.
+
+### 5.6 Anti-optimistic UI synthesis (frontend invariant)
+
+§5.3 forbids re-deriving presence state from raw signals. This subsection covers the adjacent failure mode: a frontend engineer pre-committing UI state before the server confirms it. Both modes destroy the embodiment-layer trust signal; this one is more subtle because optimistic updates often look like good UX in other domains.
+
+**Allowed local synthesis (presentation only):**
+- Animating an elapsed-time counter between server updates (the *0:42 elapsed* readout ticking once per second locally is fine; the underlying timestamp comes from the server).
+- Smoothing the chart bar that contains "now" between aggregation pushes.
+- Local hover/focus/expand state for UI affordances.
+
+**Forbidden synthesis (state simulation):**
+- Inventing activity-feed rows before the server confirms the underlying event.
+- Pre-committing a `AgentPresenceState` transition (e.g. flipping the pill to *Failing* because a single client-side request errored, or to *Idle* because the SSE connection paused for 3s).
+- Speculating on `waiting_on_human`, `failed`, `degraded`, or `completed` transitions ahead of the canonical event.
+- Appending observations or updating Knowledge-in-use entries without the corresponding server event.
+- "Run started" / "Run completed" surfacing before the server-side run lifecycle event lands.
+
+**Why hard.** Optimistic UI works in domains where the user is the actor (typing into a doc, sending a message). Here the agent is the actor, and the user is the *observer of an autonomous worker*. Optimistic synthesis turns the observer into a co-author of fictional state; one wrong guess and the trust signal is dead. Local animation is presentation; state transitions are truth. The two never mix.
+
+**Spec author note.** This invariant lives at the `useAgentPresence` hook (or equivalent) in the client. The hook MUST expose a single, server-confirmed snapshot per render; intermediate predictions never leak into the UI.
+
+### 5.7 Retention policy for presence projections
+
+The brief depends on observations, retrieval summaries, focus snapshots, activity projections, and session summaries staying available long enough to power the Overview tab and the Run trace, but not so long that storage becomes the dominant cost. Without an explicit retention policy, builders aggressively prune (silently breaking Overview history) or never prune (unbounded growth). Pin the policy now.
+
+| Class | Source | Retention | Notes |
+|---|---|---|---|
+| Run lifecycle events (canonical) | `agent_execution_events` | Immutable, retained indefinitely | The audit log is source of truth for everything else. |
+| Typed observations | `agent_observations` (or equivalent) | 90 days default; pinned observations indefinite | "Pinned" is operator-driven; surfaces a small star/pin affordance per observation in v1.1. |
+| Retrieval summaries | `retrieval.summary` events on `agent_execution_events` | 30 days at full fidelity; older entries collapse into per-agent rolling aggregates | Aggregates power the Tools usage bands and the longer-window Knowledge-in-use stale signal. |
+| Current focus snapshots | In-memory / cache only | Ephemeral, session-bound | Never persisted; rebuilt on tab mount from the latest event. |
+| Activity feed projection | Materialised view | 60 days visible; older entries paged via *"Show all"* into the archived view | Archived view reads from the canonical `agent_execution_events` table directly. |
+| Session summaries | `iee_sessions` row + summary blob | 90 days | Older sessions: row retained, summary blob compacted. |
+| Working Time aggregates | Per-day rollup | 1 year visible; older buckets collapse to monthly resolution | Chart timeframe pills (Today / Week / Month / Quarter) all served from the rollup table. |
+
+**Invariants that hold across the policy:**
+- Canonical events are immutable. All projections may be compacted, rebuilt, or replaced; the canonical source is the recovery path.
+- Pruning a projection MUST NOT invalidate any user-visible surface. If the Overview tab references data older than the projection retention, the surface fails closed (shows "older than X days, view in Run trace") rather than rendering stale or wrong data.
+- Retention windows are configurable per workspace within tight bounds (operator can extend, never shorten below the defaults above).
+- Spec author should call out any surface that depends on a longer window than the table allows; the retention rule extends to meet the surface, not the other way around.
 
 ### Three states the tab must handle
 
@@ -423,6 +498,19 @@ A *session* primitive in IEE: a logical envelope that holds the same container a
 
 Session-scoped persistence is what makes the *current focus* line on the Agent Overview tab real. Without it, the agent has no "current step in a multi-step task" because every step is a fresh container. With it, the live focus line is meaningful and the felt-aliveness of the surface lands.
 
+### Session multiplicity invariant (hard)
+
+Resolves the ambiguity around concurrent runs, sub-agent delegation, and session-teardown races up front.
+
+- An agent MAY own **multiple concurrent runs** (parallel scheduled triggers, manual operator runs alongside a scheduled one, sub-agent invocations from another agent).
+- Each run maps to **exactly one** active session for its lifetime.
+- Sessions are NEVER shared across independent runs. Two runs of the same agent at the same time mean two distinct sessions, two distinct containers, two distinct cost lines.
+- Sessions are NEVER reused after teardown. A second run starts a fresh session.
+- Sub-agent delegation creates a **new session for the sub-agent**, parented to the parent run. Cost attributes to the sub-agent's own line; rolls up to the parent run for invoice purposes (matches §5.4 Working Time accounting).
+- Session teardown is the responsibility of the run that owns it. A run cannot end while its session is alive; a session cannot outlive its run.
+
+This rule disambiguates Working Time attribution (§5.4), the home widget *Working* footer count, the focus resolution order (§5.3 — focus follows the run, not the agent), and the cleanup contract for the engineering risk surface below.
+
 ### Engineering risk
 
 This is the highest-risk piece in the brief. Container lifecycle is hairy: heartbeats, idle timeouts, leaked containers, cleanup races, orphaned resources. The spec author should treat this as a Significant task with explicit incident-handling tests.
@@ -493,6 +581,35 @@ This brief follows the patterns codified in `docs/frontend-design-principles.md`
 - **No em-dashes in any UI copy or sample data.** Use commas, colons, or rewrite.
 - **Sub-text trimmed.** Activity feed rows are one line. Detail in modal.
 - **NEW badges are review-only.** The "NEW" badges and yellow annotation banners visible on mockups (e.g. the highlighted Active Agents widget on Mockup 1) are review affordances for stakeholder feedback. They MUST NOT ship in production. New surfaces should land without "NEW" decoration; if a feature tour is genuinely needed, it lives in the existing onboarding system, not as a permanent badge.
+
+### Operator cognitive load is a non-functional constraint
+
+Overview surfaces prioritise **operator comprehension** over telemetry completeness. Dense diagnostic data belongs on Run trace or in the Govern surface, not on Overview. Reviewers reject Overview additions that fail this test:
+
+> *Would a non-technical operator understand this surface in 5 seconds, without scrolling, without hovering, and without learning a new vocabulary?*
+
+If the answer is no, the addition belongs elsewhere. This gives reviewers a principled reason to reject future dashboard creep without re-litigating the strategic spine each time.
+
+### Accessibility constraints for live surfaces (hard)
+
+The Overview tab is heavily live and animated: pulsing status dots, elapsed-time tickers, live focus updates, streaming activity feed, status pill transitions, retrieval-score badges. Without explicit accessibility discipline this becomes inaccessible by accident, especially for users with reduced-motion preferences or screen-reader workflows.
+
+- **Reduced-motion compatibility.** Every animation (pulse, fade, slide, marquee) honours `prefers-reduced-motion: reduce`. Reduced-motion users see static dots, instant pill transitions, and no slide-in feed rows; the data still updates, but the motion is gone.
+- **ARIA live regions.** Status pill changes, focus updates, and activity-feed appends are announced via ARIA live regions. `aria-live="polite"` for ambient updates; `aria-live="assertive"` for `waiting_on_human` and `failed` transitions because they require operator action.
+- **Screen-reader announcement throttling.** Live updates rate-limited to one announcement per 5 seconds per surface. During a high-activity burst the operator should hear *"Outreach Agent: 12 new activity rows in the last minute"*, not 12 separate announcements.
+- **No layout jumping.** Surfaces that update in place reserve their final-state height. The activity feed appends new rows below; existing rows do not reflow. Status pill width is fixed across all 7 states so the surrounding row never shifts.
+- **Keyboard navigation.** Every link, expand/collapse, hover-only affordance (Trust Correct hover, Knowledge-in-use expandable provenance) has a keyboard equivalent. Hover-only behaviour is forbidden; hover is an enhancement, not the only path.
+- **Colour is not the only signal.** Status pill colours (indigo / amber / red / slate) are paired with copy and dot shape so colourblind operators still parse state correctly.
+
+### Section-collapse persistence (if introduced)
+
+v1 ships Overview with all sections expanded by default; the simplification pass (Rev 5/6) trimmed Overview enough that scrolling is not the primary concern. If a future iteration introduces collapsible sections:
+
+- **Persistence scope: per user, per agent.** Operator A collapsing the Working Time chart on the Outreach Agent does not affect Operator B's view, and does not affect Operator A's view of any other agent.
+- **Storage:** `user_preferences` keyed on `(user_id, agent_id, section_id, collapsed)`.
+- **Defaults:** all sections expanded; collapse is opt-in per section, never silently inherited from another agent.
+- **Reset affordance:** per-agent *"Restore default layout"* link in the page header.
+- **No collapse-by-default in v1.** Defer the affordance entirely until operator feedback specifically asks for it; introducing it speculatively creates UX entropy and a user-preferences-table dependency without a payoff.
 
 ## 11. Coordination with concurrent work streams
 
@@ -611,4 +728,4 @@ The competitive frame, plain English: *"Open your agent and see it working. Or s
 
 ---
 
-> **Brief is final at Rev 8, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here, with the architectural-invariants pass (Rev 8) pinning the unified `AgentPresenceState`, the source-of-truth hierarchy (§5.3), the Working Time accounting rule (§5.4), and the immutable file-lineage tuple (§8). Positioning-rewrite deliverables and non-UI dependencies are itemised in §3. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
+> **Brief is final at Rev 9, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here, with the architectural-invariants pass (Rev 8) pinning the unified `AgentPresenceState`, the source-of-truth hierarchy (§5.3), the Working Time accounting rule (§5.4), and the immutable file-lineage tuple (§8); and the operational-contracts pass (Rev 9) pinning the Overview freshness matrix (§5.5), the anti-optimistic-UI rule (§5.6), retention (§5.7), degraded recovery (§5.2), session multiplicity (§7), and cognitive-load + accessibility + section-collapse rules (§10). Positioning-rewrite deliverables and non-UI dependencies are itemised in §3. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
