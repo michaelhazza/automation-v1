@@ -67,22 +67,44 @@
   .btn-primary { background: var(--indigo-600); color: white; }
   .btn-primary:hover { background: var(--indigo-700); }
 
-  /* Document cards */
-  .doc-list { display: flex; flex-direction: column; gap: 8px; }
-  .doc-card {
-    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
-    padding: 14px 18px; cursor: pointer; transition: all 0.1s;
-    display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 14px; align-items: center;
+  /* Documents table — proper aligned columns */
+  .docs-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px; overflow: hidden;
   }
-  .doc-card:hover { border-color: var(--slate-300); box-shadow: 0 2px 8px rgba(15,23,42,0.04); }
-  .doc-card.org-pinned { border-left: 4px solid #8b5cf6; padding-left: 14px; }
-  .doc-card.from-file { border-left: 4px solid var(--indigo-500); padding-left: 14px; }
+  .docs-table thead tr { background: var(--slate-50); }
+  .docs-table thead th {
+    text-align: left; padding: 11px 16px; font-size: 10.5px; font-weight: 600;
+    color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--slate-200); white-space: nowrap;
+  }
+  .docs-table thead th.col-tier { width: 130px; }
+  .docs-table thead th.col-mode { width: 170px; }
+  .docs-table thead th.col-usedby { width: 200px; }
+  .docs-table thead th.col-action { width: 50px; }
+  .docs-table tbody tr {
+    border-bottom: 1px solid var(--slate-100); transition: background 0.1s; cursor: pointer;
+  }
+  .docs-table tbody tr:hover { background: var(--slate-50); }
+  .docs-table tbody tr:last-child td { border-bottom: none; }
+  .docs-table tbody td {
+    padding: 14px 16px; vertical-align: middle; border-bottom: 1px solid var(--slate-100);
+  }
+  .docs-table tbody tr.org-pinned td:first-child { border-left: 4px solid #8b5cf6; }
+  .docs-table tbody tr.from-file td:first-child { border-left: 4px solid var(--indigo-500); }
 
   .doc-name { font-size: 14px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; }
   .doc-meta {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate-500);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate-500);
   }
   .doc-meta-item { display: flex; align-items: center; gap: 4px; }
+
+  /* Warning chip for large documents */
+  .warn-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px;
+    background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a;
+    font-size: 10.5px; font-weight: 600; margin-left: 8px;
+  }
   .source-badge {
     display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
     font-size: 10.5px; font-weight: 500;
@@ -243,210 +265,136 @@
         </div>
       </div>
 
-      <!-- Document list -->
-      <div class="doc-list">
+      <!-- Documents table -->
+      <table class="docs-table">
+        <thead>
+          <tr>
+            <th>Document</th>
+            <th class="col-tier">Tier</th>
+            <th class="col-mode">Mode</th>
+            <th class="col-usedby">Used by</th>
+            <th class="col-action"></th>
+          </tr>
+        </thead>
+        <tbody>
 
-        <!-- Org-wide pinned -->
-        <div class="doc-card org-pinned">
-          <div>
-            <div class="doc-name">Synthetos Agency — Master Brand Voice Playbook</div>
-            <div class="doc-meta">
-              <span class="source-badge source-manual">Manually authored</span>
-              <span class="doc-meta-item">2,300 tokens</span>
-              <span class="doc-meta-item">Updated 5 days ago by Michael H.</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-org">📌 Org-wide</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-always">! Always available</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>27</strong> agents · 4 clients</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr class="org-pinned">
+            <td>
+              <div class="doc-name">Synthetos Agency — Master Brand Voice Playbook</div>
+              <div class="doc-meta">
+                <span class="source-badge source-manual">Manually authored</span>
+                <span class="doc-meta-item">Updated 5 days ago by Michael H.</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
+            <td><span class="mode-chip mode-always">! Always available</span></td>
+            <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Org-wide manual -->
-        <div class="doc-card org-pinned">
-          <div>
-            <div class="doc-name">Agency-wide compliance and disclosure rules</div>
-            <div class="doc-meta">
-              <span class="source-badge source-manual">Manually authored</span>
-              <span class="doc-meta-item">1,400 tokens</span>
-              <span class="doc-meta-item">Updated 12 days ago by Michael H.</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-org">📌 Org-wide</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-always">! Always available</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>27</strong> agents · 4 clients</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr class="org-pinned">
+            <td>
+              <div class="doc-name">Agency-wide compliance and disclosure rules</div>
+              <div class="doc-meta">
+                <span class="source-badge source-manual">Manually authored</span>
+                <span class="doc-meta-item">Updated 12 days ago by Michael H.</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
+            <td><span class="mode-chip mode-always">! Always available</span></td>
+            <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Sub-account, Auto, manual -->
-        <div class="doc-card">
-          <div>
-            <div class="doc-name">Acme Corp — Account Context</div>
-            <div class="doc-meta">
-              <span class="source-badge source-manual">Manually authored</span>
-              <span class="doc-meta-item">1,800 tokens</span>
-              <span class="doc-meta-item">Updated 2 days ago by Sarah M.</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-subaccount">Sub-account</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-auto">A Auto</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>9</strong> agents in Acme Corp</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr>
+            <td>
+              <div class="doc-name">Acme Corp — Account Context</div>
+              <div class="doc-meta">
+                <span class="source-badge source-manual">Manually authored</span>
+                <span class="doc-meta-item">Updated 2 days ago by Sarah M.</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><span class="agents-count"><strong>9</strong> agents in Acme Corp</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Sub-account, from file -->
-        <div class="doc-card from-file">
-          <div>
-            <div class="doc-name">Acme Corp enriched contacts</div>
-            <div class="doc-meta">
-              <span class="source-badge source-from-file">📎 From file: acme-contacts-enriched-2026-05-06.csv</span>
-              <span class="doc-meta-item">800 tokens</span>
-              <span class="doc-meta-item">Promoted by CRM Hygiene Agent · 2 days ago</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-subaccount">Sub-account</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-auto">A Auto</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>3</strong> agents in Acme Corp</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr class="from-file">
+            <td>
+              <div class="doc-name">Acme Corp enriched contacts</div>
+              <div class="doc-meta">
+                <span class="source-badge source-from-file">📎 From file: acme-contacts-enriched-2026-05-06.csv</span>
+                <span class="doc-meta-item">Promoted by CRM Hygiene Agent · 2 days ago</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><span class="agents-count"><strong>3</strong> agents in Acme Corp</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Sub-account, Auto, from agent run (auto-extracted) -->
-        <div class="doc-card from-file">
-          <div>
-            <div class="doc-name">Acme Corp Q1 pipeline insights</div>
-            <div class="doc-meta">
-              <span class="source-badge source-from-run">Approved from auto-memory</span>
-              <span class="doc-meta-item">900 tokens</span>
-              <span class="doc-meta-item">Suggested by Research Agent · approved 5 days ago</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-subaccount">Sub-account</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-auto">A Auto</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>4</strong> agents in Acme Corp</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr class="from-file">
+            <td>
+              <div class="doc-name">Acme Corp Q1 pipeline insights</div>
+              <div class="doc-meta">
+                <span class="source-badge source-from-run">Approved from auto-memory</span>
+                <span class="doc-meta-item">Suggested by Research Agent · approved 5 days ago</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><span class="agents-count"><strong>4</strong> agents in Acme Corp</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Sub-account, manual -->
-        <div class="doc-card">
-          <div>
-            <div class="doc-name">Acme Corp — ICP and disqualification rules</div>
-            <div class="doc-meta">
-              <span class="source-badge source-manual">Manually authored</span>
-              <span class="doc-meta-item">1,200 tokens</span>
-              <span class="doc-meta-item">Updated 8 days ago by Michael H.</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-subaccount">Sub-account</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-auto">A Auto</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>9</strong> agents in Acme Corp</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr>
+            <td>
+              <div class="doc-name">Acme Corp — ICP and disqualification rules</div>
+              <div class="doc-meta">
+                <span class="source-badge source-manual">Manually authored</span>
+                <span class="doc-meta-item">Updated 8 days ago by Michael H.</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><span class="agents-count"><strong>9</strong> agents in Acme Corp</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Agent-specific, uploaded PDF -->
-        <div class="doc-card">
-          <div>
-            <div class="doc-name">Outreach product manual (full)</div>
-            <div class="doc-meta">
-              <span class="source-badge source-uploaded">Uploaded PDF</span>
-              <span class="doc-meta-item">38,000 tokens</span>
-              <span class="doc-meta-item">Uploaded 3 weeks ago by Sarah M.</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-agent">Agent</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-reference">R Reference only</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>1</strong> agent: Outreach Agent</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr>
+            <td>
+              <div class="doc-name">
+                Outreach product manual (full)
+                <span class="warn-chip" title="This document is much larger than typical. Consider splitting it into smaller, more focused sections.">⚠ Large document</span>
+              </div>
+              <div class="doc-meta">
+                <span class="source-badge source-uploaded">Uploaded PDF</span>
+                <span class="doc-meta-item">Uploaded 3 weeks ago by Sarah M.</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-agent">Agent</span></td>
+            <td><span class="mode-chip mode-reference">R Reference only</span></td>
+            <td><span class="agents-count"><strong>1</strong> agent: Outreach Agent</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-        <!-- Recurring task scope -->
-        <div class="doc-card">
-          <div>
-            <div class="doc-name">Heartbeat task — sequence step rules</div>
-            <div class="doc-meta">
-              <span class="source-badge source-manual">Manually authored</span>
-              <span class="doc-meta-item">600 tokens</span>
-              <span class="doc-meta-item">Updated 20 days ago by Michael H.</span>
-            </div>
-          </div>
-          <div>
-            <div class="col-label">Tier</div>
-            <span class="tier-chip tier-recurring">Recurring task</span>
-          </div>
-          <div>
-            <div class="col-label">Mode</div>
-            <span class="mode-chip mode-auto">A Auto</span>
-          </div>
-          <div>
-            <div class="col-label">Used by</div>
-            <span class="agents-count"><strong>1</strong> recurring task</span>
-          </div>
-          <button class="three-dot-btn">⋮</button>
-        </div>
+          <tr>
+            <td>
+              <div class="doc-name">Heartbeat task — sequence step rules</div>
+              <div class="doc-meta">
+                <span class="source-badge source-manual">Manually authored</span>
+                <span class="doc-meta-item">Updated 20 days ago by Michael H.</span>
+              </div>
+            </td>
+            <td><span class="tier-chip tier-recurring">Recurring task</span></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><span class="agents-count"><strong>1</strong> recurring task</span></td>
+            <td><button class="three-dot-btn">⋮</button></td>
+          </tr>
 
-      </div>
+        </tbody>
+      </table>
 
       <!-- Footer note -->
       <div style="margin-top:24px;padding:14px 18px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">

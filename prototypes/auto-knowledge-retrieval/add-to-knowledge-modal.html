@@ -225,34 +225,37 @@
         <div class="field-help">Defaulted to this sub-account because that's where the file was created. Org-wide makes the document available to every client. (Org-admin only.)</div>
       </div>
 
-      <!-- Apply to -->
+      <!-- Available to -->
       <div class="field-group">
-        <label class="field-label">Apply to</label>
+        <label class="field-label">Available to</label>
+        <div class="field-help" style="margin-top:0;margin-bottom:8px;">
+          By default, every agent in this sub-account can pick this up. Each agent decides whether to actually use it based on the task it's running. Restrict to specific agents only if you want to limit access.
+        </div>
         <div class="radio-group">
           <div class="radio-row selected">
             <div class="radio-circle"></div>
             <div>
               <div class="radio-text">All agents in Acme Corp</div>
-              <div class="radio-help">Document is available to every agent in this sub-account. Recommended.</div>
+              <div class="radio-help">Recommended. Every agent in this sub-account can use this when relevant.</div>
             </div>
           </div>
           <div class="radio-row">
             <div class="radio-circle"></div>
             <div>
               <div class="radio-text">Specific agents only</div>
-              <div class="radio-help">Pick which agents should have access. Use when only a few agents need this.</div>
+              <div class="radio-help">Restrict access. Use only when you want to limit which agents can see this.</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Cost preview -->
+      <!-- How this works -->
       <div class="cost-preview">
-        <div class="cost-icon">!</div>
+        <div class="cost-icon">i</div>
         <div>
-          <div class="cost-title">Roughly 800 tokens of context when relevant</div>
+          <div class="cost-title">How this works</div>
           <div class="cost-body">
-            This document loads automatically into agent context only when relevant to the task being run. Estimated cost when loaded: under 1¢ per run.
+            Documents in Auto mode load into agent context only when relevant to the task being run. The agent decides per task. You don't need to manage what's loaded when.
           </div>
         </div>
       </div>
