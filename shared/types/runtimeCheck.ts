@@ -50,7 +50,7 @@ export interface RuntimeCheckResult {
   organisationId: string;
   subaccountId: string | null;
   runId: string;
-  eventId: string;
+  eventId: string | null;
   sequenceNumber: number;
   skillSlug: string;
   attemptNumber: number;

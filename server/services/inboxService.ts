@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, reviewItems, agentRuns, actions, inboxReadStates, subaccounts } from '../db/schema/index.js';
 import { eq, and, or, isNull, desc, asc, gte, ilike, inArray, sql } from 'drizzle-orm';
 import { auditService } from './auditService.js';
@@ -845,7 +846,7 @@ export async function createRuntimeCheckFailItem(input: {
   subaccountId: string | null;
 }): Promise<void> {
   const stateLabel = input.state === 'fail' ? 'Failed' : 'Inconclusive';
-  await db.insert(tasks).values({
+  await getOrgScopedDb('inboxService.createRuntimeCheckFailItem').insert(tasks).values({
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
     title: `Runtime check ${stateLabel.toLowerCase()}: ${input.skillSlug} (step ${input.sequenceNumber})`,

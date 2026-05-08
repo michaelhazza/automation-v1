@@ -3145,30 +3145,44 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         }
       }
 
-      // Runtime check hook — fire and forget, never fails the run.
-      // Observational only: evaluate the post-action state and persist the
-      // result for trust analytics and Run-trace badge rendering.
-      void (async () => {
-        try {
-          const actionDef = getActionDefinition(toolCall.name);
-          if (actionDef !== undefined) {
-            await evaluateRuntimeCheck({
-              runId,
-              eventId: null,
-              sequenceNumber: totalToolCalls,
-              skillSlug: toolCall.name,
-              organisationId: request.organisationId,
-              subaccountId: request.subaccountId ?? null,
-              checkKind: actionDef.verify ?? null,
-              toolResult: result,
-              blastRadius: actionDef.blastRadius ?? 'self',
-              reversible: actionDef.reversible ?? false,
-            });
+      // Runtime check hook — inline, bounded by 250ms timeout, never throws.
+      // Evaluates post-action state, persists the result, and pauses the run
+      // when blastRadius === 'external' and state is fail or inconclusive
+      // (spec §11.2: "External — Always pause. Existing approval gate handles
+      // the operator confirmation.").
+      let runtimeCheckPauseNeeded = false;
+      try {
+        const actionDef = getActionDefinition(toolCall.name);
+        if (actionDef !== undefined) {
+          const checkBlastRadius = actionDef.blastRadius ?? 'self';
+          const rcResult = await evaluateRuntimeCheck({
+            runId,
+            eventId: null,
+            sequenceNumber: totalToolCalls,
+            skillSlug: toolCall.name,
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            checkKind: actionDef.verify ?? null,
+            toolResult: result,
+            blastRadius: checkBlastRadius,
+            reversible: actionDef.reversible ?? false,
+          });
+          if (
+            checkBlastRadius === 'external' &&
+            (rcResult.state === 'fail' || rcResult.state === 'inconclusive')
+          ) {
+            runtimeCheckPauseNeeded = true;
           }
-        } catch {
-          // Never throw into the agent loop.
         }
-      })();
+      } catch {
+        // Never throw into the agent loop.
+      }
+
+      if (runtimeCheckPauseNeeded) {
+        finalStatus = 'failed';
+        emitLoopTermination('error', { iteration, totalToolCalls, reason: 'runtime_check_gate' });
+        break outerLoop;
+      }
 
       const toolDurationMs = Date.now() - toolStart;
 

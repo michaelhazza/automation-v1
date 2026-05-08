@@ -6,15 +6,15 @@
  *
  * Contract:
  *   - MUST NEVER throw into the caller — errors resolve to inconclusive.
- *   - MUST NEVER fail the agent run — this service is observational only.
  *   - Hard timeout: RUNTIME_CHECK_TIMEOUT_MS env var (default 250ms).
  *   - Timeout resolves to inconclusive, never to fail (spec §11.5).
  *   - Idempotent INSERT via ON CONFLICT DO NOTHING on
  *     (run_id, sequence_number, skill_slug, attempt_number).
+ *   - All DB writes use getOrgScopedDb — runtime_check_results is FORCE-RLS'd.
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { runtimeCheckResults } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -109,7 +109,7 @@ async function dispatchEvaluation(
         return evaluateRowExists(false);
       }
 
-      const rows = await db.execute(
+      const rows = await getOrgScopedDb('runtimeCheckService.row_exists').execute(
         sql`SELECT 1 FROM ${sql.raw(checkKind.table)} WHERE id = ${String(matchValue)} LIMIT 1`,
       );
       const rowCount = Array.isArray(rows)
@@ -146,15 +146,16 @@ async function dispatchEvaluation(
 // Main exported evaluate function
 // ---------------------------------------------------------------------------
 
-export async function evaluate(input: RuntimeCheckEvaluateInput): Promise<void> {
+export async function evaluate(input: RuntimeCheckEvaluateInput): Promise<EvalResult> {
   // No check configured — persist not_applicable and return.
   if (input.checkKind == null) {
-    await persistAndEmit(input, {
+    const notApplicable: EvalResult = {
       state: 'not_applicable',
       reasonCode: 'no_check_configured',
       reasonText: `No runtime check configured for skill '${input.skillSlug}'.`,
-    });
-    return;
+    };
+    await persistAndEmit(input, notApplicable);
+    return notApplicable;
   }
 
   const attemptNumber = input.attemptNumber ?? 1;
@@ -177,6 +178,8 @@ export async function evaluate(input: RuntimeCheckEvaluateInput): Promise<void> 
       input.sequenceNumber,
       input.skillSlug,
     );
+    // Swallow late rejections from checkPromise after the timeout wins the race.
+    checkPromise.catch(() => { /* race lost — result discarded */ });
 
     // Timeout resolves (never rejects) to inconclusive on abort.
     const timeoutPromise: Promise<EvalResult> = new Promise((resolve) => {
@@ -203,6 +206,7 @@ export async function evaluate(input: RuntimeCheckEvaluateInput): Promise<void> 
   }
 
   await persistAndEmit(input, evalResult, attemptNumber);
+  return evalResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,9 +228,9 @@ async function persistAndEmit(
 
   try {
     // Idempotent INSERT — ON CONFLICT DO NOTHING prevents duplicate rows on
-    // retry. Uses db directly (not withOrgTx) since we're called within the
-    // agent execution loop which manages its own org context via ALS.
-    await db
+    // retry. getOrgScopedDb ensures the org GUC is set on the connection,
+    // required by FORCE RLS on runtime_check_results.
+    await getOrgScopedDb('runtimeCheckService.persistAndEmit')
       .insert(runtimeCheckResults)
       .values({
         organisationId,
