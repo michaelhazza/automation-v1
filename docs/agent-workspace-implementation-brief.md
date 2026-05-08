@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 5. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, and two reviewer passes on §5/§6/§8.
+> **Status:** Rev 6. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, and a final simplification pass that removed redundant cards and scaffolding without losing capability.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -150,8 +150,7 @@ Two surfaces composed onto one page:
 - **Tools the agent uses**, qualitative usage bands rather than precise counts. Three bands: *Frequently used*, *Occasionally used*, *Rarely used*, classified from rolling 30-day usage. Precise numbers stay available on hover and in the Skills tab for the rare cases an operator wants exact data. Rationale: rolling usage windows shift fast, and exact counts ("28 of 30 runs") cause unstable mental models week-to-week. Qualitative bands are stable enough to anchor a mental model and still informative enough to spot drift.
 - **Schedule peek**, when the agent runs next, what triggers it.
 - **Connections health**, at-a-glance status of the credentials this agent depends on.
-- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter). **Caption mandatory**: *"Time spent actively executing runs"*, surfaced under the chart title so semantic ambiguity (runs vs minutes vs CPU vs success-weighted work) is closed before the operator infers wrong. Bar colour: indigo for successful execution, red overlay for failed. Compact stat row underneath: runs in period, total working time, success rate, average run duration.
-- **Performance**, small stat block as a compact summary alongside the chart.
+- **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter). **Caption mandatory**: *"Time spent actively executing runs"*, surfaced under the chart title so semantic ambiguity (runs vs minutes vs CPU vs success-weighted work) is closed before the operator infers wrong. Bar colour: indigo for successful execution, red overlay for failed. Compact stat row underneath: runs in period, total working time, success rate, average run duration. **The chart's stat row is the single source of performance metrics on Overview**, no separate Performance card. Earlier draft had both; the chart already covers the same ground at every timeframe, so a parallel Performance card was redundant.
 
 **Presence surface** (what the agent is doing or about to do):
 - **Status pill** (5 states, closed taxonomy):
@@ -163,7 +162,7 @@ Two surfaces composed onto one page:
   - **Why split Working from Waiting**: Most competitor surfaces conflate them, which inflates apparent utilisation and obscures HITL bottlenecks. Splitting them is a structural decision that pays off as soon as agencies run >5 agents concurrently.
 - **Current focus**, one-line plain-language summary of what the agent is thinking about *right now*. Backed by the latest step in the active run (if any) or the next scheduled action. **First-class invariants pinned in §5.1.**
 - **Live elapsed time**, for active runs.
-- **Recent observations**, last 3-5 typed entries the agent has surfaced. **Type-discriminated** (closed enum, no freeform):
+- **Recent observations**, default 3 typed entries with a *"Show more"* expand to reach the full set (up to 5). **Type-discriminated** (closed enum, no freeform):
   - *Learned* — a fact the agent extracted and stored in memory ("Acme Corp has 12 directors")
   - *Detected* — a state change or anomaly ("VP Ops changed roles 3 weeks ago")
   - *Decided* — an autonomous choice the agent made ("Disqualified 365 contacts as out-of-ICP")
@@ -172,7 +171,7 @@ Two surfaces composed onto one page:
   - **Provenance invariant**: every observation MUST trace to a concrete source: a `agent_execution_events` row id (a step in the run trace), a `retrieval.summary` event id, a structured tool result, or a memory_block insert. Freeform LLM summarisation is NOT the source of truth. The category guides the LLM-side summarisation but the underlying event id is the canonical anchor.
   - **Why typed**: vague summaries damage the alive-and-trustworthy feeling; categories force the agent to actually have something to say; the trace-back lets the operator drill in and confirm.
 - **Active goals**, open task or schedule the agent is currently advancing toward. Visible even when the agent is idle, so the workspace never feels empty.
-- **Recent activity feed**, short timeline: *3 minutes ago started run X*, *2 hours ago completed task Y*, *yesterday updated memory entry Z*.
+- **Recent activity feed**, short timeline: *3 minutes ago started run X*, *2 hours ago completed task Y*, *yesterday updated memory entry Z*. Capped at 5 rows in any state (active / idle / first-run); *"View all"* in the card head links to full activity.
 
 ### 5.1 Current focus invariants (first-class)
 
@@ -241,6 +240,19 @@ Implementation consequences:
 The shift is from *"this software needs configuring"* to *"this entity exists and is ready; here is how to give it context, decide its working hours, and see it in action."* The setup checklist still exists as a guide, but the verbs are about teaching, deciding, and watching, not picking and configuring. Mockup 4 is the canonical reference.
 
 **Critical: do not couple model branding to the identity layer.** Earlier draft had "Cognitively ready (Sonnet 4.6)" on the first-run state. That was emotionally effective but introduces a fragile coupling: when the underlying model changes (Sonnet 4.6 → 4.7 → GPT → local model → multi-model routing), the identity-layer copy needs updating too, and the user's mental model of *"my agent's personhood is tied to which model is under the hood"* gets disrupted on every migration. **Identity-layer copy stays model-neutral.** Operator-facing language references *reasoning system*, *inference engine*, or *core cognition*, never the specific model brand. The exact model lives in the Configure or Behaviour tab where it belongs.
+
+**First-run page shape (lean, not scaffolded).** Earlier draft of the first-run state included a setup checklist (5 rows: 2 done, 3 todo) and several empty-state cards (Recent activity / Schedule / Knowledge each showing "no X yet"). Both were removed in the simplification pass. **Reasons:**
+- The setup checklist duplicated the three quick-action cards. Two surfaces telling the operator the same thing felt like a progress bar of how-configured-the-software-is, which works against the *"this entity already exists"* principle.
+- Empty placeholder cards (Schedule / Files / Knowledge each saying "nothing here yet") added visual scaffolding without information. The agent felt half-built rather than "newly arrived and ready."
+
+**First-run shape (canonical):**
+- Welcome banner (dismissable).
+- Three quick action cards: *Teach the agent / Decide when it should work / Watch it work*.
+- Identity card (full-width or prominent): name, role, reports-to, sub-account.
+- Tools card (compact): one-line summary of inherited default skills + link to Skills tab.
+- Connections card (compact): inherited connections summary.
+
+That's it. No checklist. No empty cards for sections that will populate naturally as the agent runs. The page is confident about what already exists and clear about what comes next; it doesn't surface placeholders for things that haven't happened yet.
 
 ### What the tab is NOT
 
@@ -327,7 +339,7 @@ These constraints prevent layout entropy as runs accumulate complexity, and keep
 | 5 | Connections section in Overview | Read-only health snapshot. Editing happens on Connections page, not here. |
 | 6 | Status pill values | *Working / Idle / Scheduled / Failing*. First-run state shows *Idle* with empty-state copy. |
 | 7 | Current focus copy | One sentence, plain language, sourced from the latest step in the active run. Not raw tool-call output. |
-| 8 | Recent observations | Last 3-5 in v1. Updated continuously while a run is active, not only at run end. Backed by Phase 1 retrieval observability + run trace summary. |
+| 8 | Recent observations | Default 3 visible with *"Show more"* expand to 5. Updated continuously while a run is active, not only at run end. Backed by Phase 1 retrieval observability + run trace summary. |
 | 9 | Empty / first-run hero copy | *"Just created. No activity yet."* + suggested first actions (run a test, configure schedule, link documents). The page is still a real surface, not a placeholder. |
 | 10 | Home widget shape | Per-agent live-status rows (per the consolidation prototype). Not a chart, not aggregated metrics. |
 | 11 | Session container lifetime | Bounded by one logical task. Idle timeout in minutes, not hours. Heartbeat extends. No cross-task container reuse in v1. |

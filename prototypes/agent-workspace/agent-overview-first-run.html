@@ -246,140 +246,50 @@
         </div>
       </div>
 
-      <!-- 2-column grid -->
-      <div class="overview-grid">
+      <!-- Identity card, full-width and prominent -->
+      <div class="identity-card" style="margin-bottom:14px;">
+        <div class="card-title" style="margin-bottom:8px;">Identity</div>
+        <div class="identity-row">
+          <span class="identity-label">Name</span>
+          <span class="identity-value">Account Health Agent <span class="identity-edit">edit</span></span>
+        </div>
+        <div class="identity-row">
+          <span class="identity-label">Role</span>
+          <span class="identity-value">Account Health Manager</span>
+        </div>
+        <div class="identity-row">
+          <span class="identity-label">Reports to</span>
+          <span class="identity-value">CEO Agent</span>
+        </div>
+        <div class="identity-row">
+          <span class="identity-label">Sub-account</span>
+          <span class="identity-value">Acme Corp</span>
+        </div>
+      </div>
 
-        <!-- LEFT COLUMN -->
-        <div>
-          <!-- Setup checklist -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title">Setup checklist</div>
-              <div class="card-link">Skip all →</div>
-            </div>
-            <div class="checklist">
-              <div class="check-row">
-                <div class="check-icon done">✓</div>
-                <div class="check-text done">Identity established as Account Health Manager</div>
-                <div></div>
-              </div>
-              <div class="check-row">
-                <div class="check-icon done">✓</div>
-                <div class="check-text done">Reasoning system ready</div>
-                <div></div>
-              </div>
-              <div class="check-row">
-                <div class="check-icon todo">3</div>
-                <div class="check-text">Teach it what it needs to know</div>
-                <div class="check-action">Add knowledge →</div>
-              </div>
-              <div class="check-row">
-                <div class="check-icon todo">4</div>
-                <div class="check-text">Decide when it should work</div>
-                <div class="check-action">Set schedule →</div>
-              </div>
-              <div class="check-row">
-                <div class="check-icon todo">5</div>
-                <div class="check-text">Watch it work the first time</div>
-                <div class="check-action">Try a task →</div>
-              </div>
-            </div>
+      <!-- Tools + Connections, side by side, both compact -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">Tools</div>
+            <div class="card-link">Skills →</div>
           </div>
-
-          <!-- Activity feed, empty state -->
-          <div class="card" style="margin-top:14px;">
-            <div class="card-head">
-              <div class="card-title">Recent activity</div>
-            </div>
-            <div class="empty">
-              <div class="empty-icon">📭</div>
-              <div class="empty-title">No activity yet</div>
-              <div class="empty-text">Once the agent runs for the first time, you'll see what it's done here. Schedule a run or trigger one manually to get started.</div>
-              <div class="empty-action">Run a test now →</div>
-            </div>
+          <div style="padding:12px 16px;font-size:12.5px;color:var(--slate-700);line-height:1.5;">
+            <strong>5 default skills</strong> inherited from the Account Health Manager role.
           </div>
         </div>
 
-        <!-- RIGHT COLUMN -->
-        <div>
-          <!-- Identity card, the agent feels real -->
-          <div class="identity-card">
-            <div class="card-title" style="margin-bottom:8px;">Identity</div>
-            <div class="identity-row">
-              <span class="identity-label">Name</span>
-              <span class="identity-value">Account Health Agent <span class="identity-edit">edit</span></span>
-            </div>
-            <div class="identity-row">
-              <span class="identity-label">Role</span>
-              <span class="identity-value">Account Health Manager</span>
-            </div>
-            <div class="identity-row">
-              <span class="identity-label">Reports to</span>
-              <span class="identity-value">CEO Agent</span>
-            </div>
-            <div class="identity-row">
-              <span class="identity-label">Sub-account</span>
-              <span class="identity-value">Acme Corp</span>
-            </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">Connections</div>
+            <div class="card-link">Manage →</div>
           </div>
-
-          <!-- Schedule, empty -->
-          <div class="card">
-            <div class="card-head">
-              <div class="card-title">Schedule</div>
-              <div class="card-link">Set up →</div>
-            </div>
-            <div class="empty">
-              <div class="empty-text">No schedule yet. The agent will only run when you trigger it manually.</div>
-            </div>
+          <div style="padding:12px 16px;font-size:12.5px;color:var(--slate-700);line-height:1.5;">
+            <strong>3 connections</strong> inherited from Acme Corp. All healthy.
           </div>
-
-          <!-- Files, empty -->
-          <div class="card" style="margin-top:14px;">
-            <div class="card-head">
-              <div class="card-title">Files</div>
-            </div>
-            <div class="empty">
-              <div class="empty-text">No files yet. Files the agent produces during runs will appear here.</div>
-            </div>
-          </div>
-
-          <!-- Tools, defaulted from role -->
-          <div class="card" style="margin-top:14px;">
-            <div class="card-head">
-              <div class="card-title">Tools</div>
-              <div class="card-link">Skills →</div>
-            </div>
-            <div style="padding:12px 16px;font-size:12px;color:var(--slate-700);line-height:1.55;">
-              Inheriting <strong>5 default skills</strong> for the Account Health Manager role:
-              <span style="color:var(--slate-600);">score_account_health, detect_churn_signal, draft_ops_summary, score_nps_csat, query_crm</span>.
-              Add or remove on the Skills tab.
-            </div>
-          </div>
-
-          <!-- Knowledge, empty but actionable -->
-          <div class="card" style="margin-top:14px;">
-            <div class="card-head">
-              <div class="card-title">Knowledge</div>
-              <div class="card-link">Link documents →</div>
-            </div>
-            <div class="empty">
-              <div class="empty-text">No documents linked yet. Even one or two account playbooks will significantly improve agent decisions.</div>
-            </div>
-          </div>
-
-          <!-- Connections, inherited from sub-account -->
-          <div class="card" style="margin-top:14px;">
-            <div class="card-head">
-              <div class="card-title">Connections</div>
-              <div class="card-link">Manage →</div>
-            </div>
-            <div style="padding:12px 16px;font-size:12px;color:var(--slate-700);line-height:1.5;">
-              Inheriting <strong>3 connections</strong> from Acme Corp sub-account: HubSpot CRM, Gmail, LinkedIn Sales Navigator. All healthy.
-            </div>
-          </div>
-
         </div>
+
       </div>
     </div>
   </main>
