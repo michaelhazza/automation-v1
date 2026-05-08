@@ -1408,6 +1408,31 @@ export const queueService = {
         }
       });
 
+      // Trust & Verification Layer — scorecard judge workers (spec §12.3)
+      await (boss as any).work('scorecard:judge', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { scorecardJudgeJobHandler } = await import('../jobs/scorecardJudgeJob.js');
+          await withTimeout(scorecardJudgeJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'scorecard:judge', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      await (boss as any).work('scorecard:judge:forced', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { scorecardJudgeJobHandler } = await import('../jobs/scorecardJudgeJob.js');
+          await withTimeout(scorecardJudgeJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'scorecard:judge:forced', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs
