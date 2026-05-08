@@ -123,13 +123,13 @@ These six items from the spec's §18 "Open questions for operator" carry forward
 
 **Open issues for finalisation (operator decisions before merge):**
 
-These survived the fix-loop and need operator-level direction. Filed in `tasks/todo.md`:
+Filed in `tasks/todo.md`. **Update 2026-05-08 (post Phase 2 fix-loop): four originally-deferred items are now CLOSED. See `progress.md § Phase 2 fix-loop` for verdicts.**
 
-- **B-4 (Tier-A blocker; deferred):** cross-entity guard bypass on `POST /api/runs/:runId/steps/:eventId/correct` when `eventId === runId`. Caller can pass any runId as both runId AND eventId to skip per-step verification. **Suggested approach:** expose canonical `agent_execution_events.id` from trace-events endpoint so the UI passes a real eventId; OR persist `sourceEventId: null` in the placeholder path. Operator decides; spec/UI question.
-- **S-3 (Tier-B; deferred):** cross-subaccount IDOR on `DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:scorecardId`. The `agentId` is not verified to belong to `subaccountId` (RLS protects writes by org but not by subaccount within the org). Suggested approach: verify `agent.subaccount_id` matches caller's resolved subaccount before proceeding.
+- ~~**B-4 (Tier-A blocker; deferred):**~~ **CLOSED in fix-loop commit `2655acbf`.** Cross-entity guard now mandatory; corrections route requires a real `agent_execution_events.id`; trace-events route enriches each tool-call with its canonical event id via the new `linkToolCallsToEventIds` pure helper (rewritten in commit `9f99874c` per Codex P2 to match by `(skillSlug, ordinal-within-slug)` instead of global position).
+- ~~**S-3 (Tier-B; deferred):**~~ **CLOSED in fix-loop commit `effce969`.** `scorecardService.assertAgentInSubaccount` checks for an active `subaccount_agents` link before the detach proceeds; cross-subaccount targeting fails-403 with `AGENT_NOT_IN_SUBACCOUNT`.
 
-- **TVL-DG-1 + TVL-DG-10:** Stage 1 backfill incomplete (ACTION_REGISTRY interface extended; the 20 most-used skills' `verify` values are NOT actually backfilled in production code) AND `verify-runtime-check-coverage` CI gate has a Windows path bug (`pathToFileURL` missing) plus exits 2 advisory rather than 1 blocking. Spec §3 Stage 1 exit criterion not strictly met.
-- **TVL-DG-3:** `QualityCheck.passMark` (spec §6.3) implemented as `weight` with no `enabled` field. Affects every scorecard judgement. Recommend fix before Stage 2 GA. Suggested: rename across schema/Zod/frontend; add `enabled: boolean` field.
+- ~~**TVL-DG-1 + TVL-DG-10:**~~ **CLOSED in fix-loop commit `3c213e16`** (refined in `9f99874c`). Every `ACTION_REGISTRY` entry has runtime-check coverage. The Windows path bug + advisory→blocking flip are both shipped. **Caveat:** initial concrete `verify` shapes on review-gated and wrapped skills were reverted in `9f99874c` per Codex P1 — they would have always evaluated inconclusive (actionService wrapper hides the inner field from the runtime-check dispatcher). Those skills now declare `verify: null` with HITL-approval or backfill-candidate justifications. A future follow-on can teach the runtime-check dispatcher to unwrap the actionService envelope, at which point concrete shapes can be re-introduced for direct-handler skills.
+- ~~**TVL-DG-3:**~~ **CLOSED in fix-loop commit `05255c11`.** `weight` → `passMark` (optional, fallback to DEFAULT_PASS_MARK 0.7). New `enabled?: boolean` (default true). Disabled checks skipped at fanout, forced-grade, and dispatch layers. Judge job now passes `qc.passMark` to `computeVerdict`. UI shows "Pass mark %" + "Enabled" controls per spec §15 terminology lock.
 - **TVL-DG-4:** `scorecard_judgements.trigger_source` enum collapsed `forced_runtime_check_fail` + `forced_correction` into `forced`, plus added `bench` (not in spec). Forced-source attribution lost.
 - **TVL-DG-5:** `scorecard_judgements.verdict` adds `'inconclusive'` not in spec §6.5. Either drop, or amend spec to formalise three verdict states.
 - **TVL-DG-6:** `bench_runs` schema misses spec §6.6 fields (`mode`, `triggerScopeType`, `triggerScopeId`, `testInputSource`, `testInputs`).
@@ -143,6 +143,6 @@ These survived the fix-loop and need operator-level direction. Filed in `tasks/t
   - **AR-TVL-4 (LIKELY-HOLE, MEDIUM):** judge prompt injection — partially mitigated by S-2 fix (`<untrusted_input>` tags); would still benefit from a structured tool-use schema as a stronger defence.
   - **AR-TVL-5, AR-TVL-6:** worth-confirming items kept in log only.
 
-**Branch HEAD at handoff:** `c1ed1535` (post fix-loop + dual-reviewer commits). Branch is 41 commits ahead of `origin/main`.
+**Branch HEAD at handoff:** `9f99874c` (post fix-loop + Codex dual-reviewer P1/P2 commits). Branch is 47 commits ahead of `origin/main`.
 
-**Recommended next action:** open a new Claude Code session and type `launch finalisation` to begin Phase 3.
+**Recommended next action:** open a new Claude Code session and type `launch finalisation` to begin Phase 3. The four originally-flagged items are now closed; the remaining 11 directional gaps + 2 ambiguous items are operator-deferred and can ship to merge with a documented decision in the Phase 3 handoff (or be deferred further to a Stage 2 GA polish PR).

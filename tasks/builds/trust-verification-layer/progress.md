@@ -44,6 +44,48 @@ All 16 plan chunks built and committed inline before this post-build pipeline ra
 3. `server/routes/corrections.ts` — `requireSubaccountPermission` middleware reads `req.params.subaccountId` but the route only carries `runId` / `eventId`; the wrap-as-Promise pattern always hit the missing-param 400 short-circuit (every subaccount correction request was broken). Replaced with `hasSubaccountPermission` programmatic helper.
 4. `server/services/benchRunService.ts:275` — query used `sj.agent_run_id` but schema has `run_id`; Govern / Quality drift list would crash on first hit.
 
+## Phase 2 fix-loop (2026-05-08, post Phase 2 close) — Complete
+
+**Status:** Operator-elected pre-merge fix loop on top of `c1ed1535`. All four flagged items (B-4 / S-3 / TVL-DG-1 / TVL-DG-3) closed before Phase 3 begins.
+
+| Step | Status | Notes |
+|---|---|---|
+| Pre-flight: lint + typecheck baseline | PASS | 0 errors / 874 pre-existing warnings; typecheck clean |
+| Fix 1 — B-4 cross-entity guard | **CLOSED** | Commit `2655acbf`. New `linkToolCallsToEventIds` enriches trace-events with canonical `agent_execution_events.id`; new `validateEventIdShape` rejects null/empty/runId-equality eventIds at the corrections route. UI Correct affordance hides when `eventId === null`. Pure tests +12. |
+| Fix 2 — S-3 cross-subaccount IDOR | **CLOSED** | Commit `effce969`. `scorecardService.assertAgentInSubaccount` verifies `subaccount_agents` link before the detach route proceeds. `assertAgentSubaccountMembership` pure helper for testability. Fail-403 (not 404 — would leak agent existence cross-subaccount). Pure tests +3. |
+| Fix 3 — TVL-DG-1 ACTION_REGISTRY backfill | **CLOSED** | Commit `3c213e16`. Every `ACTION_REGISTRY` entry has runtime-check coverage: 20 most-used skills carry concrete `verify` shapes (revised in Codex pass — see below); other entries get bucket-mapped `verify: null` + justification via deterministic sweep at module init. Windows path bug fixed (`pathToFileURL`); advisory exit 2 → blocking exit 1. Tests assert every entry covered (1106 tests). |
+| Fix 4 — TVL-DG-3 weight→passMark + enabled | **CLOSED** | Commit `05255c11`. `weight: number` → `passMark: number` (optional, fallback to DEFAULT_PASS_MARK); `enabled: boolean` (default true) added. Disabled checks skipped at three layers (fanout, forced-grade, dispatch). Judge job now passes `qc.passMark` to `computeVerdict` (was using DEFAULT only). UI shows "Pass mark %" + "Enabled" controls. No migration needed (JSONB column has no shape constraint). Pure tests +14. |
+| G2 integrated-state gate | **PASS** | lint 0 errors; typecheck clean; 1230 vitest tests pass across 7 files |
+| spec-conformance delta re-check | **CONFORMANT** | TVL-DG-1 + TVL-DG-3 closed against spec §3, §6.3, §6.5, §11.4. 11 other directional gaps remain operator-deferred (TVL-DG-2, 4, 5, 6, 7, 8, 9, 10, AM-1, AM-2). |
+| adversarial-reviewer delta re-check | **HOLES_CLOSED** | B-4 and S-3 are no longer exploitable. Org-internal trust-data integrity hole closed; cross-subaccount IDOR closed. AR-TVL-2 / AR-TVL-4 (advisory only) unchanged. |
+| pr-reviewer on delta | **APPROVED** | Surgical edits, vitest tests, no security regressions, backward compat preserved via optional types. |
+| Codex dual-reviewer | **2 P-findings, both fixed** | Round 1 surfaced two functional regressions in the prior fix-loop commits: P1 — concrete `verify` shapes on actionService-wrapped skills always evaluate inconclusive (was going to break every successful review-gated send via spec §11.2 external pause path). P2 — `linkToolCallsToEventIds` positional matching mis-attaches across slugs because the agent loop only emits skill events on special paths. Both fixed in commit `9f99874c`: P1 — review-gated and wrapped skills moved to `verify: null` with HITL-justification or backfill-candidate justification; only direct-handler skills stay on concrete shapes. P2 — rewrote linkage to match by `(skillSlug, ordinal-within-slug)` against `payload.skillSlug`. Codex log embedded above; +5 new tests asserting cross-slug mis-attach is blocked. |
+| Re-review pr-reviewer post-Codex | **APPROVED** | Verified the Codex-acceptance edits don't introduce new findings. |
+| Doc-sync delta | **PASS** | Verdicts: architecture.md=no (no triggered changes); capabilities.md=no (terminology unchanged); KNOWLEDGE.md=yes (3 patterns appended — wrapper-shape verify, slug-match toolCalls↔events, cross-subaccount IDOR); CLAUDE.md/dev-guidelines/frontend-principles=no; integration-reference=n/a. |
+
+### Commits (5 in fix loop)
+- `2655acbf` — Fix 1 B-4 cross-entity guard
+- `effce969` — Fix 2 S-3 cross-subaccount IDOR
+- `3c213e16` — Fix 3 TVL-DG-1 backfill + gate hardening
+- `05255c11` — Fix 4 TVL-DG-3 passMark + enabled
+- `9f99874c` — Codex P1 + P2 fixes (wrapper shape + slug-match)
+
+### Operator-deferred items still open after fix loop
+- TVL-DG-2 (migration inventory 0288–0297 vs spec 0288–0295 — operator confirms in §5)
+- TVL-DG-4 (scorecard_judgements.trigger_source enum collapse)
+- TVL-DG-5 (scorecard_judgements.verdict adds 'inconclusive' not in spec)
+- TVL-DG-6 (bench_runs schema misses spec §6.6 fields)
+- TVL-DG-7 (bench_results row shape diverges from BenchResult contract)
+- TVL-DG-8 (pattern detector clusters by (agent, skill) not (skill, agent, dimension))
+- TVL-DG-9 (`shared/types/scorecard.ts` not created; types duplicated)
+- TVL-DG-10 was tied to TVL-DG-1 — gate-script aspect now CLOSED; the original CI exit code was the second part, also fixed.
+- TVL-AM-1 (scorecard-tightening feature flag presence)
+- TVL-AM-2 (cosine-similarity matching heuristic in pattern detector)
+- AR-TVL-2 (validateBody warn vs enforce — advisory)
+- AR-TVL-4 (judge prompt injection — partially mitigated by `<untrusted_input>` tags)
+
+### Branch HEAD at end of fix loop: `9f99874c`
+
 ## Phase 3 (FINALISATION) — Not started
 
-Run `finalisation-coordinator` in a new Claude Code session after this post-build pipeline merges. Spec deviations and operator decisions are listed in `tasks/builds/trust-verification-layer/handoff.md § Phase 3 (FINALISATION)` open issues.
+Run `finalisation-coordinator` in a new Claude Code session. Open items: see deferred list above (operator decisions before merge), plus any further pre-launch backlog tracked in `tasks/todo.md`.

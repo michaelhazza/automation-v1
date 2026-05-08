@@ -2923,3 +2923,30 @@ Correction capture uses `onConflictDoUpdate` with a partial unique index target:
 **Source:** Trust & Verification Layer spec §6.2, Chunk 5.
 
 Internally, runtime check results carry five states: `pending`, `running`, `pass`, `fail`, `inconclusive`. The UI collapses these to three visual groups: loading (pending + running), pass, not-pass (fail + inconclusive). `inconclusive` is surfaced distinctly from `fail` in the drawer detail — `fail` means the check fired and found a problem; `inconclusive` means the check could not determine a verdict (e.g. model output was ambiguous or the check function threw). Never merge `fail` and `inconclusive` at the data layer — they carry different operator actions. Merge only at the UI summary level, and always expose both labels in the detail view.
+
+### [2026-05-08] Pattern — `verify` shape on actionService-wrapped skills always evaluates inconclusive
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer fix-loop, Codex P1 finding.
+
+`runtimeCheckService.dispatchEvaluation` reads the tool result's top-level `statusCode` / `status` field. Skills that go through `proposeAction` / `executeWithActionAudit` (review-gated AND most auto-gated skills) return the action service envelope `{ status: 'pending_approval' | 'approved' | 'completed', actionId, ... }` — `status` is a STRING, not a numeric HTTP status. So `verify: { kind: 'api_status_2xx' }` declared on these skills will resolve to `inconclusive` every time. With `blastRadius: 'external'` that maps to the same pause/inbox path as `fail` per spec §11.2 — every successful action would pause for inbox review.
+
+**Rule:** before declaring a concrete `verify` shape on an `ACTION_REGISTRY` entry, trace the actual handler path. If the handler routes through `executeWithActionAudit` or any other action service wrapper, declare `verify: null` with a justification ("Review-gated: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape" or "External read — backfill candidate; current actionService wrapper hides the inner field from the runtime-check dispatcher"). A future follow-on can teach the runtime-check dispatcher to unwrap the actionService envelope before evaluation.
+
+### [2026-05-08] Pattern — Position-match against agent_execution_events.sequence_number is wrong for toolCallsLog
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer fix-loop, Codex P2 finding.
+
+`runAgenticLoop` pushes one entry to `toolCallsLog` per tool dispatch, but does NOT emit `skill.invoked` / `skill.completed` events for every tool call. Those event types are emitted only by special paths (`crmQueryPlanner.plannerEvents`, `chargeRouterService`). A naive position-match — Nth toolCall ↔ Nth skill.completed event ordered by `sequence_number` — produces two failure modes: (a) ordinary tool calls resolve to `null` (they have no matching event), and (b) when special-path events DO exist, an event from one slug may be attached to a tool call from a different slug.
+
+**Rule:** when reconciling toolCallsLog entries to event-log rows, match by `(skillSlug, ordinal-within-slug)`, not by global position. Group events by `payload.skillSlug` and pair the Nth toolCall whose `tool === foo` with the Nth `skill.completed` event whose `payload.skillSlug === foo`. Tool calls without matching events resolve to `null` cleanly. See `linkToolCallsToEventIds` in `server/services/agentRunMessageServicePure.ts`.
+
+### [2026-05-08] Pattern — Cross-subaccount IDOR slips past RLS in agent-scoped routes
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer adversarial-review S-3.
+
+Subaccount-scoped routes that carry both `:subaccountId` and `:agentId` in the URL (e.g. `DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:id`) are protected by RLS at the org level but NOT at the subaccount level — RLS on the writes-target table (`scorecards`, `agents`, etc.) filters rows to the caller's org via `app.organisation_id`, but does not enforce that the named agent belongs to the named subaccount. A power user with `subaccount.X.manage` on subaccount A could target an agent in subaccount B (same org) and the route would proceed.
+
+**Rule:** for any subaccount-scoped route that carries both `:subaccountId` AND a target-resource id (`:agentId`, `:templateId`, etc.), add an explicit application-layer assertion that the resource has an active link to the named subaccount via `subaccount_agents` (or the relevant join table). Fail-403 not 404 — 404 leaks the resource's existence in another subaccount; 403 is the standard cross-tenant rejection envelope. Pure verdict-shaping helper (`assertAgentSubaccountMembership`) keeps the route → HTTP mapping testable.
