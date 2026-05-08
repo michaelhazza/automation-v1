@@ -70,6 +70,16 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
           logger.warn('scorecard_judge.quality_check_not_found', { runId, scorecardId, qualityCheckSlug });
           return;
         }
+        // Spec §6.3 — disabled checks must not be graded. Defence-in-depth:
+        // buildFanoutJobs / selectForcedGradeTargets already filter disabled,
+        // but the job-level guard catches racing edits where the scorecard
+        // was edited between fanout and dispatch.
+        if (qc.enabled === false) {
+          logger.info('scorecard_judge.skipped_disabled_check', {
+            runId, scorecardId, qualityCheckSlug,
+          });
+          return;
+        }
 
         const judgeModelId = sc.judgeModelId ?? DEFAULT_JUDGE_MODEL_ID;
         const runSummary = (runRow.run as { summary?: string }).summary ?? '[No summary available]';
@@ -117,7 +127,10 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
             if (typeof parsed.observedScore === 'number' && typeof parsed.judgeReasoning === 'string') {
               observedScore = parsed.observedScore;
               judgeReasoning = parsed.judgeReasoning;
-              verdict = computeVerdict(observedScore);
+              // Spec §6.5 — verdict = observedScore >= passMark. Use the
+              // quality check's per-check passMark when set; computeVerdict
+              // falls back to DEFAULT_PASS_MARK when undefined.
+              verdict = computeVerdict(observedScore, qc.passMark);
               break;
             }
             logger.warn('scorecard_judge.malformed_json', { runId, scorecardId, qualityCheckSlug, attempt, raw });

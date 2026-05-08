@@ -35,6 +35,9 @@ export function selectForcedGradeTargets(
   const targets: ForcedGradeTarget[] = [];
   for (const sc of attachedScorecards) {
     for (const qc of sc.qualityChecks) {
+      // Spec §6.3 — skip disabled quality checks. Treat undefined as
+      // enabled (default) so legacy rows pre-rename still force-grade.
+      if (qc.enabled === false) continue;
       targets.push({ scorecardId: sc.scorecardId, qualityCheckSlug: qc.slug });
     }
   }

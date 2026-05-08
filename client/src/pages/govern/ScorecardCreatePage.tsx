@@ -7,14 +7,28 @@ import { useNavigate } from 'react-router-dom';
 import { PageShell } from '../../components/PageShell';
 import { createScorecard, type QualityCheck } from '../../lib/api/scorecards';
 
+// Default pass mark applied when the operator does not override it.
+// Mirrors DEFAULT_PASS_MARK in scorecardJudgeRunnerPure (spec §6.3).
+const DEFAULT_PASS_MARK_PERCENT = 70;
+
 interface QCDraft {
   slug: string;
   name: string;
   description: string;
+  /** 0..100 percent in the form; converted to 0..1 on submit. */
+  passMarkPercent: number;
+  enabled: boolean;
 }
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function clamp01(v: number): number {
+  if (Number.isNaN(v) || !Number.isFinite(v)) return DEFAULT_PASS_MARK_PERCENT / 100;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
 }
 
 export default function ScorecardCreatePage() {
@@ -22,19 +36,24 @@ export default function ScorecardCreatePage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [shareWithSubaccounts, setShareWithSubaccounts] = useState(false);
-  const [checks, setChecks] = useState<QCDraft[]>([{ slug: '', name: '', description: '' }]);
+  const [checks, setChecks] = useState<QCDraft[]>([
+    { slug: '', name: '', description: '', passMarkPercent: DEFAULT_PASS_MARK_PERCENT, enabled: true },
+  ]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   function addCheck() {
-    setChecks((prev) => [...prev, { slug: '', name: '', description: '' }]);
+    setChecks((prev) => [
+      ...prev,
+      { slug: '', name: '', description: '', passMarkPercent: DEFAULT_PASS_MARK_PERCENT, enabled: true },
+    ]);
   }
 
-  function updateCheck(index: number, field: keyof QCDraft, value: string) {
+  function updateCheck<K extends keyof QCDraft>(index: number, field: K, value: QCDraft[K]) {
     setChecks((prev) => {
       const next = [...prev];
       next[index] = { ...next[index]!, [field]: value };
-      if (field === 'name' && !next[index]!.slug) {
+      if (field === 'name' && typeof value === 'string' && !next[index]!.slug) {
         next[index]!.slug = slugify(value);
       }
       return next;
@@ -60,6 +79,9 @@ export default function ScorecardCreatePage() {
           slug: c.slug || slugify(c.name),
           name: c.name.trim(),
           description: c.description.trim() || undefined,
+          // Convert 0..100 form input to the 0..1 spec scale.
+          passMark: clamp01(c.passMarkPercent / 100),
+          enabled: c.enabled,
         }));
       await createScorecard({ name: name.trim(), description: description.trim() || undefined, qualityChecks, shareWithSubaccounts });
       navigate('/quality?tab=scorecards');
@@ -154,6 +176,38 @@ export default function ScorecardCreatePage() {
                     className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                     placeholder="Description (optional)"
                   />
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <span>Pass mark</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={check.passMarkPercent}
+                        onChange={(e) =>
+                          updateCheck(
+                            i,
+                            'passMarkPercent',
+                            Number.isFinite(Number(e.target.value))
+                              ? Math.max(0, Math.min(100, Number(e.target.value)))
+                              : DEFAULT_PASS_MARK_PERCENT,
+                          )
+                        }
+                        className="w-16 border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      />
+                      <span>%</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={check.enabled}
+                        onChange={(e) => updateCheck(i, 'enabled', e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      Enabled
+                    </label>
+                  </div>
                   {checks.length > 1 && (
                     <button
                       type="button"

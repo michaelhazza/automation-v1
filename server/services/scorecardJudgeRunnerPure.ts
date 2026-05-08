@@ -147,6 +147,9 @@ export function buildFanoutJobs(
   const all: JudgeJobSpec[] = [];
   for (const attachment of sortedSampled) {
     for (const qc of attachment.qualityChecks) {
+      // Spec §6.3 — skip disabled quality checks. `enabled === undefined`
+      // is treated as true (default) so legacy rows pre-rename still grade.
+      if (qc.enabled === false) continue;
       all.push({ scorecardId: attachment.scorecardId, qualityCheckSlug: qc.slug });
     }
   }

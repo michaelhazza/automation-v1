@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 // POST /api/scorecards + POST /api/subaccounts/:subaccountId/scorecards
+//
+// QualityCheck shape (spec §6.3): passMark drives verdict via
+// observedScore >= passMark; enabled gates whether the judge runs at all.
 export const createScorecardBody = z.object({
   name: z.string().min(1).max(255),
   description: z.string().max(2000).optional(),
@@ -8,7 +11,8 @@ export const createScorecardBody = z.object({
     slug: z.string().min(1).max(100),
     name: z.string().min(1).max(255),
     description: z.string().max(2000).optional(),
-    weight: z.number().min(0).max(1).optional(),
+    passMark: z.number().min(0).max(1).optional(),
+    enabled: z.boolean().optional(),
   })).optional(),
   shareWithSubaccounts: z.boolean().optional(),
   judgeModelId: z.string().max(255).optional(),

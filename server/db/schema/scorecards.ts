@@ -15,7 +15,22 @@ export interface QualityCheck {
   slug: string;
   name: string;
   description?: string;
-  weight?: number;
+  /**
+   * Pass mark on the 0..1 scale. The judge runner maps observedScore to
+   * verdict via `observedScore >= passMark` (Trust & Verification Layer
+   * spec §6.3, §6.5). UI displays as a percentage. Optional at the type
+   * level so legacy rows pre-rename still load; service layer falls back
+   * to DEFAULT_PASS_MARK when undefined.
+   */
+  passMark?: number;
+  /**
+   * When false, the check is skipped — the judge runner does NOT enqueue a
+   * job for it, no row is written to scorecard_judgements, and the check
+   * does not count toward the scorecard's pass/fail rollup. Defaults to
+   * true (treated as enabled when the field is missing on legacy rows).
+   * Spec §6.3.
+   */
+  enabled?: boolean;
 }
 
 export const scorecards = pgTable(

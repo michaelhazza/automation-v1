@@ -8,7 +8,19 @@ export interface QualityCheck {
   slug: string;
   name: string;
   description?: string;
-  weight?: number;
+  /**
+   * Pass mark on the 0..1 scale. Verdict = observedScore >= passMark
+   * (Trust & Verification Layer spec §6.3, §6.5). UI displays as a
+   * percentage. Optional — service falls back to DEFAULT_PASS_MARK (0.7)
+   * when undefined.
+   */
+  passMark?: number;
+  /**
+   * When false, the check is skipped — judge does not run, no judgement
+   * row is written, no contribution to the scorecard rollup. Defaults to
+   * true. Spec §6.3.
+   */
+  enabled?: boolean;
 }
 
 export interface Scorecard {
@@ -43,7 +55,13 @@ export interface AgentScorecardAttachment {
 export interface CreateScorecardBody {
   name: string;
   description?: string;
-  qualityChecks?: Array<{ slug: string; name: string; description?: string; weight?: number }>;
+  qualityChecks?: Array<{
+    slug: string;
+    name: string;
+    description?: string;
+    passMark?: number;
+    enabled?: boolean;
+  }>;
   shareWithSubaccounts?: boolean;
   judgeModelId?: string;
 }

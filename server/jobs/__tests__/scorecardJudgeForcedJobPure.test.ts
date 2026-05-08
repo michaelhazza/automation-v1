@@ -73,4 +73,20 @@ describe('selectForcedGradeTargets', () => {
       expect(typeof t.qualityCheckSlug).toBe('string');
     }
   });
+
+  it('skips quality checks where enabled === false', () => {
+    // Spec §6.3 — disabled checks must not enqueue forced-grade work.
+    const scorecards = [
+      {
+        scorecardId: 'sc-1',
+        qualityChecks: [
+          { slug: 'on-1', name: 'On 1', enabled: true },
+          { slug: 'off-1', name: 'Off 1', enabled: false },
+          { slug: 'on-2', name: 'On 2' }, // enabled undefined → treated as enabled
+        ],
+      },
+    ];
+    const targets = selectForcedGradeTargets('tenant', 'fail', scorecards);
+    expect(targets.map((t) => t.qualityCheckSlug)).toEqual(['on-1', 'on-2']);
+  });
 });
