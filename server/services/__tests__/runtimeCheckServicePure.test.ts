@@ -24,6 +24,7 @@ import {
   classifyTimeoutAsInconclusive,
   registerCustomHandler,
   isCustomHandlerRegistered,
+  assertCustomHandlerRegistered,
 } from '../runtimeCheckServicePure.js';
 import type { RuntimeCheckState } from '../../../shared/types/runtimeCheck.js';
 
@@ -261,4 +262,36 @@ test('isCustomHandlerRegistered: different handler names are independent', () =>
   registerCustomHandler('handler_a_unique');
   expect(isCustomHandlerRegistered('handler_a_unique')).toBe(true);
   expect(isCustomHandlerRegistered('handler_b_unique')).toBe(false);
+});
+
+test('assertCustomHandlerRegistered: throws and thrown value is instanceof Error', () => {
+  expect(() => assertCustomHandlerRegistered('unregistered_handler_xyz')).toThrow(Error);
+});
+
+test('assertCustomHandlerRegistered: thrown error has state: inconclusive', () => {
+  let thrown: unknown;
+  try {
+    assertCustomHandlerRegistered('unregistered_handler_xyz');
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(Error);
+  expect((thrown as { state: string }).state).toBe('inconclusive');
+});
+
+// ── evaluateFieldMatch: non-ISO date string rejected ──────────────────────────
+
+test('evaluateFieldMatch: non-ISO date string "January 1, 2024" → fail', () => {
+  const result = evaluateFieldMatch('January 1, 2024', 'output.createdAt', 'date');
+  expect(result.state).toBe('fail');
+  expect(result.reasonCode).toBe('field_shape_mismatch');
+});
+
+// ── evaluateExternalReturns: array result → inconclusive ──────────────────────
+
+test('evaluateExternalReturns: array result → inconclusive (malformed response)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = evaluateExternalReturns(['item1', 'item2'] as any, 'twilio', 'messageId');
+  expect(result.state).toBe('inconclusive');
+  expect(result.reasonCode).toBe('invalid_check_definition');
 });

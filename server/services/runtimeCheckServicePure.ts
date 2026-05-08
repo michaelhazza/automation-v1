@@ -51,17 +51,21 @@ export function isCustomHandlerRegistered(name: string): boolean {
  */
 export function assertCustomHandlerRegistered(name: string): void {
   if (!_customHandlerRegistry.has(name)) {
-    throw {
-      state: 'inconclusive' as RuntimeCheckState,
-      reasonCode: 'custom_handler_unregistered',
-      reasonText: `Custom handler '${name}' has not been registered. Call registerCustomHandler('${name}') at startup.`,
-    };
+    const err = Object.assign(
+      new Error(`Custom handler '${name}' is not registered`),
+      {
+        state: 'inconclusive' as const,
+        reasonCode: 'custom_handler_unregistered',
+        reasonText: `Custom handler '${name}' is not registered`,
+      },
+    );
+    throw err;
   }
 }
 
 // ── Evaluation result type (subset of RuntimeCheckResult) ─────────────────────
 
-type EvalResult = {
+export type EvalResult = {
   state: RuntimeCheckState;
   reasonCode: string;
   reasonText: string;
@@ -127,7 +131,16 @@ export function evaluateFieldMatch(
   let matches: boolean;
 
   if (expectedShape === 'date') {
-    matches = typeof value === 'string' && !Number.isNaN(Date.parse(value));
+    // ISO 8601: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ
+    const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/;
+    if (typeof value !== 'string' || !ISO_DATE_REGEX.test(value)) {
+      return {
+        state: 'fail',
+        reasonCode: 'field_shape_mismatch',
+        reasonText: `Expected ISO 8601 date string at '${outputPath}'`,
+      };
+    }
+    matches = !Number.isNaN(Date.parse(value));
   } else {
     matches = typeof value === expectedShape;
   }
@@ -182,7 +195,7 @@ export function evaluateExternalReturns(
   provider: string,
   expectedField: string,
 ): EvalResult {
-  if (result == null || typeof result !== 'object') {
+  if (result == null || typeof result !== 'object' || Array.isArray(result)) {
     return {
       state: 'inconclusive',
       reasonCode: 'invalid_check_definition',
