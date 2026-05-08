@@ -10,6 +10,7 @@ import { memoryBlocks } from '../db/schema/memoryBlocks.js';
 import { agentExecutionEvents } from '../db/schema/agentExecutionEvents.js';
 import { logger } from '../lib/logger.js';
 import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
+import { scheduleForcedGrade } from './scorecardJudgeRunner.js';
 import type { CorrectionDialogPayload, CorrectionResult } from '../../shared/types/correction.js';
 
 // ── create ────────────────────────────────────────────────────────────────────
@@ -79,27 +80,10 @@ export async function create(
     );
   });
 
-  // Phase 2: emit correction.captured (fire-and-forget, outside tx).
-  tryEmitAgentEvent({
-    runId,
-    organisationId,
-    subaccountId,
-    sourceService: 'correctionCaptureService',
-    payload: {
-      eventType: 'correction.captured',
-      critical: false,
-      sourceRunId: runId,
-      sourceEventId: eventId,
-      skillSlug,
-      memoryBlockId: memoryBlockId!,
-      forcedGradeEnqueued: false, // updated below if enqueued
-    },
-  });
-
-  // Phase 3: schedule forced grade (no-op when agent has no scorecards attached).
+  // Phase 2: schedule forced grade (no-op when agent has no scorecards attached).
+  // Run BEFORE event emit so the event reflects final forcedGradeEnqueued state (B-2 fix).
   let forcedGradeEnqueued = false;
   try {
-    const { scheduleForcedGrade } = await import('./scorecardJudgeRunner.js');
     await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
       await withOrgTx(
@@ -120,6 +104,23 @@ export async function create(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // Phase 3: emit correction.captured with the final forcedGradeEnqueued value.
+  tryEmitAgentEvent({
+    runId,
+    organisationId,
+    subaccountId,
+    sourceService: 'correctionCaptureService',
+    payload: {
+      eventType: 'correction.captured',
+      critical: false,
+      sourceRunId: runId,
+      sourceEventId: eventId,
+      skillSlug,
+      memoryBlockId: memoryBlockId!,
+      forcedGradeEnqueued,
+    },
+  });
 
   logger.info('correctionCaptureService.created', {
     runId, agentId, skillSlug, memoryBlockId: memoryBlockId!, forcedGradeEnqueued,

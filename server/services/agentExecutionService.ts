@@ -3196,8 +3196,15 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
               });
           }
         }
-      } catch {
-        // Never throw into the agent loop.
+      } catch (rcHookErr) {
+        // Never throw into the agent loop. Log so unexpected failures
+        // (programming error, persistence error, action-definition lookup
+        // failure) are observable instead of silently dropped.
+        logger.warn('runtime_check_hook_error', {
+          runId,
+          skillSlug: toolCall.name,
+          error: rcHookErr instanceof Error ? rcHookErr.message : String(rcHookErr),
+        });
       }
 
       if (runtimeCheckPauseNeeded) {

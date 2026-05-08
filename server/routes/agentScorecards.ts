@@ -32,7 +32,7 @@ router.post(
   '/api/agents/:agentId/scorecards/attach',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
-  validateBody(attachScorecardBody, 'warn'),
+  validateBody(attachScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
     const { scorecardId, gradingFrequency } = req.body;

@@ -14,6 +14,8 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { runtimeCheckResults } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
@@ -284,21 +286,34 @@ async function persistAndEmit(
 
   // Approval gate — external blast radius + fail or inconclusive only.
   // Per spec §11.2: never fires for 'self', 'tenant', or pass/pending/not_applicable.
+  // Wraps in its own withOrgTx so the org GUC is set for the FORCE-RLS-checked
+  // INSERT into `tasks` (B-1 fix: previously called getOrgScopedDb outside any
+  // transaction, which always threw and silently dropped notifications).
   if (
     blastRadius === 'external' &&
     (evalResult.state === 'fail' || evalResult.state === 'inconclusive')
   ) {
     void (async () => {
       try {
-        await createRuntimeCheckFailItem({
-          runId,
-          skillSlug,
-          sequenceNumber,
-          state: evalResult.state as 'fail' | 'inconclusive',
-          reasonText: evalResult.reasonText,
-          reasonCode: evalResult.reasonCode,
-          organisationId,
-          subaccountId,
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,
+          );
+          await withOrgTx(
+            { tx, organisationId, subaccountId, source: 'runtimeCheckService.inboxNotify' },
+            async () => {
+              await createRuntimeCheckFailItem({
+                runId,
+                skillSlug,
+                sequenceNumber,
+                state: evalResult.state as 'fail' | 'inconclusive',
+                reasonText: evalResult.reasonText,
+                reasonCode: evalResult.reasonCode,
+                organisationId,
+                subaccountId,
+              });
+            },
+          );
         });
       } catch (inboxErr) {
         logger.warn('runtimeCheckService.inbox_item_failed', {

@@ -66,7 +66,7 @@ router.post(
   '/api/scorecards',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
-  validateBody(createScorecardBody, 'warn'),
+  validateBody(createScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const card = await scorecardService.create(req.body, 'org', req.orgId!, req.orgId!);
     res.status(201).json(card);
@@ -95,7 +95,7 @@ router.patch(
   '/api/scorecards/:id',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
-  validateBody(updateScorecardBody, 'warn'),
+  validateBody(updateScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const card = await scorecardService.update(req.params.id, req.body);
     res.json(card);
@@ -120,7 +120,7 @@ router.post(
   '/api/scorecards/:id/duplicate',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
-  validateBody(duplicateScorecardBody, 'warn'),
+  validateBody(duplicateScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const card = await scorecardService.duplicate(req.params.id, req.body, req.orgId!);
     res.status(201).json(card);
@@ -133,7 +133,7 @@ router.post(
   '/api/scorecards/:id/share-toggle',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
-  validateBody(shareToggleBody, 'warn'),
+  validateBody(shareToggleBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const card = await scorecardService.toggleShareWithSubaccounts(req.params.id, req.body.shareWithSubaccounts);
     res.json(card);
@@ -164,7 +164,7 @@ router.post(
   '/api/subaccounts/:subaccountId/scorecards',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SCORECARDS_MANAGE),
-  validateBody(createScorecardBody, 'warn'),
+  validateBody(createScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);

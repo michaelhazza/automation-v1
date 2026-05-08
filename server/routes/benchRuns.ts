@@ -34,7 +34,7 @@ router.post(
   '/api/bench-runs/estimate',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_BENCH_RUN),
-  validateBody(estimateBody, 'warn'),
+  validateBody(estimateBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof estimateBody>;
     const result = await benchRunService.estimate({
@@ -102,7 +102,7 @@ router.post(
   '/api/bench-runs/:id/approve',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_BENCH_RUN),
-  validateBody(approveBody, 'warn'),
+  validateBody(approveBody, 'enforce'),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof approveBody>;
     const result = await benchRunService.approve(req.params.id!, body.candidateModelId);
