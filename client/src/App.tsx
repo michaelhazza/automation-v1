@@ -116,6 +116,10 @@ const SystemModulesPage = lazy(() => import('./pages/SystemModulesPage'));
 const KnowledgePage = lazy(() => import('./pages/govern/KnowledgePage'));
 const SpendingPage = lazy(() => import('./pages/govern/SpendingPage'));
 const ConnectionsPage = lazy(() => import('./pages/govern/ConnectionsPage'));
+// Trust & Verification Layer — Stage 2 UI (Chunk 12)
+const QualityPage = lazy(() => import('./pages/govern/QualityPage'));
+const ScorecardCreatePage = lazy(() => import('./pages/govern/ScorecardCreatePage'));
+const ModelBenchPage = lazy(() => import('./pages/govern/ModelBenchPage'));
 const SubaccountApprovalChannelsPage = lazy(() => import('./pages/SubaccountApprovalChannelsPage'));
 const OrgApprovalChannelsPage = lazy(() => import('./pages/OrgApprovalChannelsPage'));
 
@@ -507,6 +511,10 @@ export default function App() {
             <Route path="/knowledge"    element={<KnowledgePage />} />
             <Route path="/spending"     element={<SpendingPage />} />
             <Route path="/connections"  element={<ConnectionsPage />} />
+            {/* Trust & Verification Layer — Stage 2 Quality surface (Chunk 12) */}
+            <Route path="/quality"                     element={<QualityPage />} />
+            <Route path="/quality/scorecards/create"   element={<ScorecardCreatePage />} />
+            <Route path="/quality/bench"               element={<ModelBenchPage />} />
             {/* Redirect legacy spend paths so bookmarks survive */}
             <Route path="/admin/spending-budgets"                        element={<Navigate to="/spending" replace />} />
             <Route path="/admin/spending-budgets/:budgetId"             element={<Navigate to="/spending" replace />} />
