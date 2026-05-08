@@ -111,6 +111,16 @@ export interface RunTraceToolCallProjection {
   outputTruncated?: true;
   durationMs: number;
   iteration: number;
+  /**
+   * Canonical `agent_execution_events.id` for this tool call, or null when no
+   * matching event row exists (e.g. legacy runs that pre-date the event log,
+   * or tool-call entries written by the failure-path `fail_run` branch that
+   * does not always emit a `skill.completed` event). The Run-trace UI's
+   * Correct affordance MUST pass this id (when non-null) to the corrections
+   * route — the corrections route rejects runs that lack a real eventId
+   * (Trust & Verification Layer spec §9 cross-entity guard).
+   */
+  eventId: string | null;
 }
 
 /** Maximum characters for truncated tool result output (workspace_user tier). */
@@ -177,6 +187,7 @@ export function projectMessageForRole(
       ...(outputTruncated ? { outputTruncated: true as const } : {}),
       durationMs,
       iteration,
+      eventId: null,
     };
   }
 
@@ -187,12 +198,19 @@ export function projectMessageForRole(
     output: rawOutput,
     durationMs,
     iteration,
+    eventId: null,
   };
 }
 
 /**
  * Project an ordered array of tool-call log entries for a given user role.
  * Returns a new array; does not mutate the input.
+ *
+ * `eventIdsByPosition` (optional): the canonical `agent_execution_events.id`
+ * to attach to each tool-call entry by position. Pass the array of event IDs
+ * obtained from {@link linkToolCallsToEventIds}. When omitted or undefined,
+ * every projected entry's `eventId` is `null` (legacy callers that have not
+ * been wired up to the cross-entity guard yet).
  */
 export function projectForRole(
   entries: ReadonlyArray<{
@@ -204,8 +222,59 @@ export function projectForRole(
     iteration?: number;
   }>,
   role: string,
+  eventIdsByPosition?: ReadonlyArray<string | null>,
 ): RunTraceToolCallProjection[] {
-  return entries.map((entry) => projectMessageForRole(entry, role));
+  return entries.map((entry, idx) => {
+    const projected = projectMessageForRole(entry, role);
+    const eventId = eventIdsByPosition?.[idx] ?? null;
+    return { ...projected, eventId };
+  });
+}
+
+/**
+ * Position-match each tool-call log entry to its canonical
+ * `agent_execution_events.id` (Trust & Verification Layer spec §9 cross-entity
+ * guard). The toolCallsLog blob in `agent_run_snapshots` does not carry event
+ * UUIDs, so the run-trace endpoint must look them up at read time and pass
+ * them through.
+ *
+ * Matching strategy: the Nth tool-call entry corresponds to the Nth
+ * `skill.completed` event (or `skill.invoked` when the run died before
+ * completion), since `runAgenticLoop` writes one `skill.invoked` + one
+ * `skill.completed` event per `toolCallsLog.push(...)` call. The caller is
+ * responsible for passing events filtered to those two types and ordered by
+ * `sequence_number` ASC.
+ *
+ * Returns an array the same length as `toolCalls`. Entries past the available
+ * event list resolve to `null` (legacy runs, fail_run-truncated logs, etc.).
+ *
+ * Pure: no DB, no I/O. Tested at server/services/__tests__/agentRunMessageServicePure.test.ts.
+ */
+export function linkToolCallsToEventIds(
+  toolCalls: ReadonlyArray<{ tool?: string; name?: string }>,
+  events: ReadonlyArray<{ id: string; eventType: string }>,
+): Array<string | null> {
+  // Filter to one event per tool-call: prefer `skill.completed` since it is
+  // emitted at the end of dispatch (1:1 with toolCallsLog.push). Fall back to
+  // `skill.invoked` if the run terminated before completion was emitted.
+  const completed = events.filter((e) => e.eventType === 'skill.completed');
+  if (completed.length >= toolCalls.length) {
+    return toolCalls.map((_, idx) => completed[idx]?.id ?? null);
+  }
+  // Fewer completed events than tool calls — supplement with `skill.invoked`
+  // for the trailing tool calls (run died mid-dispatch, fail_run path, etc.).
+  const invoked = events.filter((e) => e.eventType === 'skill.invoked');
+  const result: Array<string | null> = [];
+  for (let i = 0; i < toolCalls.length; i++) {
+    if (i < completed.length) {
+      result.push(completed[i]?.id ?? null);
+    } else if (i < invoked.length) {
+      result.push(invoked[i]?.id ?? null);
+    } else {
+      result.push(null);
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

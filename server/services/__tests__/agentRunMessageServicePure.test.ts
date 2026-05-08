@@ -14,6 +14,7 @@ import {
   REDACTION_TOKEN,
   TOOL_RESULT_TRUNCATE_CHARS,
   normaliseRunTraceRole,
+  linkToolCallsToEventIds,
 } from '../agentRunMessageServicePure.js';
 
 function assertThrows(fn: () => unknown, label: string): void {
@@ -312,6 +313,81 @@ test('missing durationMs defaults to 0', () => {
 test('missing iteration defaults to 0', () => {
   const result = projectMessageForRole({ tool: 'noop' }, 'system_admin');
   expect(result.iteration).toBe(0);
+});
+
+// ── linkToolCallsToEventIds (Trust & Verification Layer §9 cross-entity guard) ──
+
+test('linkToolCallsToEventIds: empty inputs return empty array', () => {
+  expect(linkToolCallsToEventIds([], [])).toEqual([]);
+});
+
+test('linkToolCallsToEventIds: prefers skill.completed events when available 1:1', () => {
+  const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
+  const events = [
+    { id: 'e1-inv', eventType: 'skill.invoked' },
+    { id: 'e1-cmp', eventType: 'skill.completed' },
+    { id: 'e2-inv', eventType: 'skill.invoked' },
+    { id: 'e2-cmp', eventType: 'skill.completed' },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-cmp', 'e2-cmp']);
+});
+
+test('linkToolCallsToEventIds: falls back to skill.invoked when no completed event', () => {
+  // run died after invoke but before completed
+  const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
+  const events = [
+    { id: 'e1-inv', eventType: 'skill.invoked' },
+    { id: 'e2-inv', eventType: 'skill.invoked' },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-inv', 'e2-inv']);
+});
+
+test('linkToolCallsToEventIds: trailing tool calls without events resolve to null', () => {
+  // legacy run / fail_run path that pushed a tool call without emitting an event
+  const toolCalls = [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }];
+  const events = [
+    { id: 'e1-cmp', eventType: 'skill.completed' },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-cmp', null, null]);
+});
+
+test('linkToolCallsToEventIds: mix of completed + invoked when partial coverage', () => {
+  // first tool got a skill.completed; second only got skill.invoked
+  const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
+  const events = [
+    { id: 'e1-inv', eventType: 'skill.invoked' },
+    { id: 'e1-cmp', eventType: 'skill.completed' },
+    { id: 'e2-inv', eventType: 'skill.invoked' },
+  ];
+  // 1 completed total < 2 toolCalls → enter fallback branch:
+  // toolCalls[0] uses completed[0]; toolCalls[1] uses invoked[1]
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-cmp', 'e2-inv']);
+});
+
+test('linkToolCallsToEventIds: ignores unrelated event types', () => {
+  const toolCalls = [{ tool: 'a' }];
+  const events = [
+    { id: 'r1', eventType: 'run.started' },
+    { id: 'p1', eventType: 'prompt.assembled' },
+    { id: 'sc-cmp', eventType: 'skill.completed' },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['sc-cmp']);
+});
+
+test('projectForRole: passes eventId through by position', () => {
+  const entries = [
+    { tool: 'a', input: { x: 1 }, output: 'ok', durationMs: 5, iteration: 0 },
+    { tool: 'b', input: { x: 2 }, output: 'ok', durationMs: 5, iteration: 0 },
+  ];
+  const result = projectForRole(entries, 'system_admin', ['evt-a', null]);
+  expect(result[0]!.eventId).toBe('evt-a');
+  expect(result[1]!.eventId).toBeNull();
+});
+
+test('projectForRole: omitting eventIdsByPosition leaves eventId null', () => {
+  const entries = [{ tool: 'a', output: 'ok' }];
+  const result = projectForRole(entries, 'system_admin');
+  expect(result[0]!.eventId).toBeNull();
 });
 
 console.log('');

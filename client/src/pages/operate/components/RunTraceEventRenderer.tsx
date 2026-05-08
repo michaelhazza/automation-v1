@@ -26,6 +26,14 @@ export interface RunTraceToolCallEvent {
   outputTruncated?: true;
   durationMs: number;
   iteration: number;
+  /**
+   * Canonical `agent_execution_events.id` for this tool-call. Null when no
+   * matching event row exists (legacy run, fail_run-truncated log).
+   * The Correct affordance is hidden when null — the corrections route
+   * rejects requests without a real eventId (Trust & Verification Layer
+   * spec §9 cross-entity guard).
+   */
+  eventId: string | null;
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -170,8 +178,12 @@ function ToolCallEventCard({
           </svg>
         </button>
 
-        {/* Correct affordance — hover-only, visible only when canCorrect */}
-        {canCorrect && event.output !== '<redacted>' && (
+        {/* Correct affordance — hover-only, visible only when canCorrect AND
+            this tool call has a canonical eventId. Tool calls without an
+            eventId (legacy runs / fail_run-truncated logs) are not
+            correctable because the corrections route requires a real
+            agent_execution_events.id (spec §9 cross-entity guard). */}
+        {canCorrect && event.output !== '<redacted>' && event.eventId !== null && (
           <button
             type="button"
             onClick={() => onCorrect?.(event)}

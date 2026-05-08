@@ -12,6 +12,7 @@ import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { create, verifyEventBelongsToRun } from '../services/correctionCaptureService.js';
 import { correctionPayloadValidator } from '../../shared/types/correction.js';
+import { validateEventIdShape } from './correctionsRoutePure.js';
 import type { CorrectionDialogPayload } from '../../shared/types/correction.js';
 import { agentRuns } from '../db/schema/index.js';
 import { db } from '../db/index.js';
@@ -74,17 +75,24 @@ router.post(
       }
     }
 
-    // Step 3: cross-entity guard — when eventId is a real agent_execution_event UUID,
-    // verify it belongs to runId (spec §9). The trace-events endpoint returns snapshot
-    // data without DB event IDs; in that path the UI passes eventId === runId as a
-    // placeholder — we skip the DB check and proceed (run ownership already verified).
-    // TODO: once trace-events exposes event IDs, restore strict verification here.
-    if (eventId !== runId) {
-      const eventBelongs = await verifyEventBelongsToRun(eventId, runId, orgId);
-      if (!eventBelongs) {
-        res.status(404).json({ error: 'Step not found' });
-        return;
-      }
+    // Step 3: cross-entity guard — eventId MUST be a real
+    // agent_execution_events.id that belongs to runId AND organisationId
+    // (spec §9). The trace-events route enriches each tool-call with its
+    // canonical event id, so the UI always has a real id to send. Reject
+    // any request that lacks one (placeholder or stale-client) so we never
+    // persist a memory_block carrying a non-existent sourceEventId.
+    const eventIdVerdict = validateEventIdShape(eventId, runId);
+    if (eventIdVerdict !== 'ok') {
+      res.status(400).json({
+        error: 'eventId is required and must reference a real run step',
+        code: 'EVENT_ID_REQUIRED',
+      });
+      return;
+    }
+    const eventBelongs = await verifyEventBelongsToRun(eventId, runId, orgId);
+    if (!eventBelongs) {
+      res.status(404).json({ error: 'Step not found' });
+      return;
     }
 
     // Step 4: parse and validate body.

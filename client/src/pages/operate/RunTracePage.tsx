@@ -400,11 +400,15 @@ export default function RunTracePage({ user }: { user: User }) {
         />
       </div>
 
-      {/* Correct dialog — mounts when the user clicks Correct on a step */}
-      {correctingEvent && (
+      {/* Correct dialog — mounts when the user clicks Correct on a step.
+          eventId is the canonical agent_execution_events.id from the
+          trace-events response (spec §9 cross-entity guard). The Correct
+          affordance is hidden when eventId is null, so the dialog only
+          mounts with a real eventId — non-null is guaranteed here. */}
+      {correctingEvent && correctingEvent.eventId && (
         <CorrectDialog
           runId={run.id}
-          eventId={run.id}
+          eventId={correctingEvent.eventId}
           skillSlug={correctingEvent.toolName}
           originalOutput={
             typeof correctingEvent.output === 'string'
