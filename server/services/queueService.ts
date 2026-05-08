@@ -1459,6 +1459,20 @@ export const queueService = {
         }
       });
 
+      // Trust & Verification Layer — correction pattern detector (daily sweep, spec §13.3)
+      await (boss as any).work('correction:pattern-detect', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runCorrectionPatternDetector } = await import('../jobs/correctionPatternDetectorJob.js');
+          await withTimeout(runCorrectionPatternDetector().then(() => undefined), 300_000); // 5 min max
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'correction:pattern-detect', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('correction:pattern-detect', '0 5 * * *', {}); // 5am daily
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs
