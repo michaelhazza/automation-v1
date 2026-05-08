@@ -337,4 +337,6 @@ The brief is intentionally not the final word on every detail. The following ite
 
 5. **Policy primitive deferral confirmed.** A first-class Policy object is out of scope for this layer (see §8). If during spec authoring it becomes clear that policy-shaped requirements *cannot* be expressed via `blast_radius` + runtime checks, escalate as a scoping question rather than expanding scope inside this spec.
 
+6. **Pending and Inconclusive are distinct internal states.** The operator-facing Run-trace badge collapses to three values (Pass / Fail / Pending). At the schema and event level, **Pending** (not yet evaluated — async still running) and **Inconclusive** (evaluated but the check could not determine an outcome) must remain distinct, alongside **Not-applicable** (`verify: null` skills). The distinction matters for retries, analytics, trust reporting, benchmark validity, and operator interpretation downstream. The spec must preserve all four internal states even though the operator UI collapses them today.
+
 This list is the canonical handoff from the brief to the spec phase. The spec author should treat each item as a required resolution, not optional.
