@@ -36,15 +36,23 @@ export function registerDocumentPromotionFinaliseWorker(boss: PgBoss): void {
     // administrative updates that do not need RLS scoping.
     resolveOrgContext: () => null,
     handler: async (job) => {
-      const { documentId, promotionAuditId } = job.data;
+      const { organisationId, documentId, promotionAuditId } = job.data;
 
       // Step 1: Verify retrieval_version_id is non-null. If the chunk-embed
       // job has not yet flipped the pointer, throw so pg-boss retries with
       // exponential backoff (retryLimit: 5, retryBackoff: true in jobConfig).
+      // Org filter: this worker opts out of auto-org-context (resolveOrgContext
+      // returns null) so app.organisation_id is unset; require an explicit
+      // organisationId predicate as the tenant guard. (AKR-ADV-6)
       const docRows = await db
         .select({ retrievalVersionId: referenceDocuments.retrievalVersionId })
         .from(referenceDocuments)
-        .where(eq(referenceDocuments.id, documentId))
+        .where(
+          and(
+            eq(referenceDocuments.id, documentId),
+            eq(referenceDocuments.organisationId, organisationId),
+          ),
+        )
         .limit(1);
 
       const doc = docRows[0];
@@ -55,11 +63,17 @@ export function registerDocumentPromotionFinaliseWorker(boss: PgBoss): void {
         );
       }
 
-      // Step 2: Resolve fileId from document_promotion_audit.
+      // Step 2: Resolve fileId from document_promotion_audit (org-filtered).
+      // (AKR-ADV-6)
       const auditRows = await db
         .select({ fileId: documentPromotionAudit.fileId })
         .from(documentPromotionAudit)
-        .where(eq(documentPromotionAudit.id, promotionAuditId))
+        .where(
+          and(
+            eq(documentPromotionAudit.id, promotionAuditId),
+            eq(documentPromotionAudit.organisationId, organisationId),
+          ),
+        )
         .limit(1);
 
       const audit = auditRows[0];

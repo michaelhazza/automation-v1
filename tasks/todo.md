@@ -3413,3 +3413,19 @@ Three findings — two in pre-existing code, one in new code — surfaced during
 - [ ] **AKR-CONF-13 — `KnowledgeDocumentsTab` three-dots menu (Edit / Change mode / Add to bundle / Duplicate / Delete) not implemented.** Spec §14.3. Current table is read-only. Likely waits on Chunk 5E (modal) and Chunk 6B (DocumentDetailModal) for the Edit / Change-mode targets, but the menu surface itself can land in 5D's component.
 
 - [ ] **AKR-CONF-14 — Always-available capacity warning banner not in Documents tab.** Spec §11.5 + §1.5 #8 both surface the banner in Phase 5 (Chunk 5D); plan defers to Chunk 7A (capacity endpoint). The plan-level deferral conflicts with the spec-level invariant. Resolve when 7A lands OR add a stub query in 5D as the plan's note suggests ("can stub initially"). No-op until 7A is in scope.
+
+---
+
+### Deferred from adversarial-reviewer — auto-knowledge-retrieval (2026-05-08)
+
+3 confirmed-holes (AKR-ADV-1, AKR-ADV-4, AKR-ADV-6) FIXED inline in main session. The 5 items below are likely-holes / worth-confirming, routed for triage post-merge. Source log: `tasks/review-logs/adversarial-reviewer-auto-knowledge-retrieval-2026-05-08T11-30-00Z.md`.
+
+- [ ] **AKR-ADV-2 — `server/routes/files.ts` imports `db` directly; `/api/files` GET runs outside the ALS org-scoped transaction.** Tenant boundary relies solely on the explicit `eq(*, req.orgId!)` predicates and (if applicable) RLS. If the `DATABASE_URL` Postgres role has BYPASSRLS or is a superuser, RLS is transparent and the explicit `req.orgId!` filter is the sole tenant guard. Fix: extract the GET into a service function that uses `getOrgScopedDb()`. Verify DB role BYPASSRLS status as part of triage.
+
+- [ ] **AKR-ADV-3 — Promote endpoint accepts `agentId`, `subaccountId`, `scheduledTaskId`, `taskInstanceId` from request body without org-membership verification.** `POST /api/reference-documents/promote` and `POST /api/reference-documents/:id/links` both pass scope IDs through to `referenceDocumentDataSources` insertion without verifying each ID belongs to `req.orgId!`. Direct cross-tenant data exposure is low (FK-walked retrieval queries scope by `organisationId` AND `agentId`), but writes corrupt the scope-link table with FK-valid references to other orgs' entities. Fix: verify each non-null scope ID against `WHERE id = :id AND organisationId = :orgId` before insert.
+
+- [ ] **AKR-ADV-5 — No per-org chunk-count cap or embedding cost quota in `documentChunkEmbedJob`.** A user with `REFERENCE_DOCUMENTS_WRITE` can promote large documents rapidly, each producing hundreds of OpenAI embedding API batches. The job's `expireInSeconds: 300` timeout fires after API calls are already billed. Fix: add `MAX_CHUNKS_PER_DOCUMENT = 500` constant in `documentChunkingServicePure.ts` (truncate + warn-log if exceeded); add per-org `document:chunk-embed` queue rate-limit or daily embedding-token counter.
+
+- [ ] **AKR-ADV-W1 — `document_promotion_audit` RLS policy uses two-condition form (migration 0294) rather than canonical three-condition form.** Functionally safe under PostgreSQL null semantics, but diverges from the canonical pattern enforced by `scripts/verify-rls-coverage.sh` and may produce a gate warning. Fix: align with migrations 0245, 0284, 0289 (add `IS NOT NULL` and `<> ''` guards).
+
+- [ ] **AKR-ADV-W2 — Memory blocks from out-of-scope subaccounts (same org, different subaccount) are not pre-filtered before the ranker.** `retrievalService.ts:222–254` loads ALL active memory blocks for the org without filtering by `subaccountId` or `ownerAgentId`; `rankByPrecedencePure` assigns `scopeTier = 0` and `rankCandidates` then includes these tier-0 candidates in output. Subaccount-B's agent-scoped memory block can surface in subaccount-A's agent run if the budget permits. Comment at `memoryBlockRetrievalServicePure.ts:51` confirms the caller was supposed to pre-filter. Verify intent vs. spec; fix at the DB query layer if leakage.
