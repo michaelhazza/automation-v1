@@ -5,11 +5,11 @@
 
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { scorecards, agentScorecardAttachments, agents, organisations, systemAgents } from '../db/schema/index.js';
+import { scorecards, agentScorecardAttachments, agents, organisations, systemAgents, subaccountAgents } from '../db/schema/index.js';
 import type { Scorecard, NewScorecard } from '../db/schema/scorecards.js';
 import type { AgentScorecardAttachment } from '../db/schema/agentScorecardAttachments.js';
 import type { CreateScorecardInput, UpdateScorecardInput, DuplicateScorecardInput } from '../schemas/scorecards.js';
-import { applyVisibilityRules, resolveAttachAuthority } from './scorecardServicePure.js';
+import { applyVisibilityRules, resolveAttachAuthority, assertAgentSubaccountMembership } from './scorecardServicePure.js';
 
 // ── Viewer context passed in from routes ──────────────────────────────────────
 
@@ -304,6 +304,41 @@ export const scorecardService = {
     await db
       .delete(agentScorecardAttachments)
       .where(eq(agentScorecardAttachments.id, attachment.id));
+  },
+
+  // ─── Cross-subaccount IDOR guard ──────────────────────────────────────────
+  //
+  // Trust & Verification Layer spec §12.2 + adversarial-review S-3.
+  //
+  // The subaccount-scoped attach/detach routes carry both :subaccountId and
+  // :agentId in the URL. RLS protects writes from crossing org boundaries
+  // but does NOT block within-org cross-subaccount targeting (e.g. a power
+  // user in subaccount A calling DELETE with :agentId pointing at an agent
+  // owned by subaccount B in the same org). This service-layer guard
+  // verifies an active subaccount_agents link exists before the route
+  // proceeds.
+  //
+  // Pure verdict shaping lives in `assertAgentSubaccountMembership` so the
+  // route → HTTP status mapping (403 AGENT_NOT_IN_SUBACCOUNT) is testable.
+
+  async assertAgentInSubaccount(agentId: string, subaccountId: string): Promise<void> {
+    const db = getOrgScopedDb('scorecardService.assertAgentInSubaccount');
+    const rows = await db
+      .select({ id: subaccountAgents.id })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.agentId, agentId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    const verdict = assertAgentSubaccountMembership({ hasActiveLink: rows.length > 0 });
+    if (verdict !== 'ok') {
+      throwForbidden('AGENT_NOT_IN_SUBACCOUNT', 'Agent does not belong to this subaccount.');
+    }
   },
 
   // ─── List for agent ───────────────────────────────────────────────────────

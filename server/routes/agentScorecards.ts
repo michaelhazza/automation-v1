@@ -60,6 +60,11 @@ router.delete(
 
 // ── DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:scorecardId ──
 // Subaccount-scoped detach — only removes `suggested` attachments (authority guard in service).
+//
+// Cross-subaccount IDOR guard (S-3): the agent is verified to belong to the
+// caller's subaccount before the detach proceeds. RLS protects writes from
+// crossing org boundaries but does NOT block within-org cross-subaccount
+// targeting; this is the application-layer counterpart.
 
 router.delete(
   '/api/subaccounts/:subaccountId/agents/:agentId/scorecards/:scorecardId',
@@ -68,6 +73,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId, scorecardId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
+    await scorecardService.assertAgentInSubaccount(agentId, subaccountId);
     await scorecardService.detachFromAgent(agentId, scorecardId, 'subaccount');
     res.status(204).end();
   }),

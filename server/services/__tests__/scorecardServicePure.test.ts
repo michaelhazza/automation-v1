@@ -5,6 +5,7 @@ import {
   computeRegressionRisk,
   computeBenchComposite,
   applyVisibilityRules,
+  assertAgentSubaccountMembership,
 } from '../scorecardServicePure.js';
 import type { Scorecard } from '../../db/schema/scorecards.js';
 
@@ -259,5 +260,27 @@ describe('applyVisibilityRules', () => {
       viewerSubaccountId: null,
     });
     expect(result).toHaveLength(0);
+  });
+});
+
+// ── assertAgentSubaccountMembership (S-3 cross-subaccount IDOR guard) ─────────
+
+describe('assertAgentSubaccountMembership', () => {
+  it('returns ok when an active link exists', () => {
+    expect(assertAgentSubaccountMembership({ hasActiveLink: true })).toBe('ok');
+  });
+
+  it('returns agent_not_in_subaccount when no link exists', () => {
+    expect(assertAgentSubaccountMembership({ hasActiveLink: false })).toBe(
+      'agent_not_in_subaccount',
+    );
+  });
+
+  it('does not leak whether the agent exists elsewhere in the org', () => {
+    // The verdict shape is binary — there is no "not found" verdict that could
+    // leak the agent's existence in another subaccount. Both the "agent does
+    // not exist" and "agent exists in subaccount B" paths funnel into the same
+    // 403 AGENT_NOT_IN_SUBACCOUNT response.
+    expect(assertAgentSubaccountMembership({ hasActiveLink: false })).not.toBe('not_found');
   });
 });

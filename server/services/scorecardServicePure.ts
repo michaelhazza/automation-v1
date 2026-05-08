@@ -174,3 +174,32 @@ export function applyVisibilityRules(args: {
     return false;
   });
 }
+
+// ── assertAgentSubaccountMembership ───────────────────────────────────────────
+
+/**
+ * Verdict for the cross-subaccount IDOR guard on subaccount-scoped agent
+ * scorecard routes (Trust & Verification Layer spec §12.2). The route looks
+ * up the (agentId, subaccountId) link in `subaccount_agents`; this helper
+ * shapes the verdict from the lookup result so the route mapping to HTTP
+ * status is testable.
+ *
+ *   - 'ok'                       → caller's subaccount owns this agent — proceed.
+ *   - 'agent_not_in_subaccount'  → no active link in `subaccount_agents` —
+ *                                  403 with code `AGENT_NOT_IN_SUBACCOUNT`.
+ *
+ * Why fail-403 not 404: the agent may exist in another subaccount within the
+ * same org. Returning 404 would leak the agent's existence to a caller that
+ * has no permission to manage it; 403 is the standard cross-tenant rejection
+ * envelope for IDOR-class issues.
+ */
+export type AgentSubaccountMembershipVerdict =
+  | 'ok'
+  | 'agent_not_in_subaccount';
+
+export function assertAgentSubaccountMembership(args: {
+  /** True iff the (agentId, subaccountId) lookup found a row with isActive = true. */
+  hasActiveLink: boolean;
+}): AgentSubaccountMembershipVerdict {
+  return args.hasActiveLink ? 'ok' : 'agent_not_in_subaccount';
+}
