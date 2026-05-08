@@ -201,6 +201,8 @@ import clientErrorsRouter from './routes/clientErrors.js';
 import baselinesRouter from './routes/baselines.js';
 // Consolidation Build C3 — recurring tasks aggregator
 import recurringTasksRouter from './routes/recurringTasks.js';
+// Agent Workspace — presence SSE stream (Chunk 9)
+import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -448,6 +450,8 @@ app.use(clientErrorsRouter);
 app.use(baselinesRouter);
 // Consolidation Build C3 — recurring tasks aggregator
 app.use(recurringTasksRouter);
+// Agent Workspace — presence SSE stream (Chunk 9)
+app.use(agentPresenceStreamRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

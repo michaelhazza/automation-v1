@@ -52,6 +52,7 @@ export const ORG_PERMISSIONS = {
   AGENTS_EDIT: 'org.agents.edit',
   AGENTS_DELETE: 'org.agents.delete',
   AGENTS_CHAT: 'org.agents.chat',
+  AGENTS_OBSERVATIONS_PIN: 'org.agents.observations.pin',
   // Scheduled task data sources (migration 0078 / spec §10)
   SCHEDULED_TASKS_DATA_SOURCES_MANAGE: 'org.scheduled_tasks.data_sources.manage',
   // Workspace
@@ -103,6 +104,8 @@ export const ORG_PERMISSIONS = {
   DOCUMENT_BUNDLES_READ:          'document_bundles.read',
   DOCUMENT_BUNDLES_WRITE:         'document_bundles.write',
   DOCUMENT_BUNDLES_ATTACH:        'document_bundles.attach',
+  // ── Agent Workspace — presence stream (Chunk 9) ──────────────────────────
+  AGENTS_PRESENCE_STREAM_SUBSCRIBE: 'org.agents.presence.stream.subscribe',
 } as const;
 
 // ─── System-level permissions (sysadmin-only surfaces) ───────────────────────
@@ -227,7 +230,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.AGENTS_CREATE, description: 'Create AI agents',           groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_EDIT,   description: 'Edit AI agents',             groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_DELETE, description: 'Delete AI agents',           groupName: 'org.agents' },
-  { key: ORG_PERMISSIONS.AGENTS_CHAT,   description: 'Chat with AI agents',        groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.AGENTS_CHAT,              description: 'Chat with AI agents',                                  groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.AGENTS_OBSERVATIONS_PIN, description: 'Pin agent observations to the Recent observations card', groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE,
     description: 'Manage data sources (reference files, URLs) attached to scheduled tasks',
     groupName: 'org.agents' },
