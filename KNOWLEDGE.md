@@ -2873,3 +2873,53 @@ When a parallel branch lands a UI consolidation that deletes pages, the feature 
 - the new page component, registered under the new canonical route — for the canonical destination itself
 
 Always cross-check against the consolidating branch's App.tsx (`git show origin/main:client/src/App.tsx`) for the canonical mapping; do not invent route names. After the rewrite, also remove any duplicate redirect elsewhere in the file (e.g. an old `<Route path="/agents" element={<Navigate to="/" />} />` that conflicts with the new canonical `<Route path="/agents" element={<AgentsListPage />} />`).
+
+### [2026-05-08] Pattern — Coordinators run INLINE in the main session, never dispatched as sub-agents
+
+**Date:** 2026-05-08
+**Source:** Phase 2 launch attempt for `trust-verification-layer` build. Operator typed `launch feature coordinator`; main session called `Agent({subagent_type: "feature-coordinator", ...})`; the dispatched coordinator immediately hit `No such tool available: Task. Task is not available inside subagents.` when it tried to invoke `architect` at Step 3. Same constraint applies to `spec-coordinator` (mockup-designer + spec-reviewer + chatgpt-spec-review dispatches) and `finalisation-coordinator` (chatgpt-pr-review + builder dispatches).
+
+**Pattern:** the three coordinators (`spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`) and `audit-runner` run INLINE in the main Claude Code session. The operator's entry phrase (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `audit-runner: <mode>`) signals the main session to ADOPT the playbook — read the agent file at `.claude/agents/<name>.md` and execute its steps directly. It does NOT mean call `Agent({subagent_type: "<coordinator>"})`.
+
+**Why this matters:** the Claude Code runtime returns a hard error when a dispatched sub-agent attempts to dispatch a further sub-agent. The coordinator playbooks are built around sub-agent dispatch (architect, builder, the four reviewers, mockup-designer, chatgpt-pr-review, chatgpt-spec-review). Nesting a coordinator inside an `Agent` call breaks the pipeline at its first dispatch step. The main session has top-level `Agent` access — that's where the dispatches must issue from.
+
+**Two valid entry paths:**
+1. Fresh session: open a new Claude Code session, type the entry phrase as the first message, the main session adopts the playbook.
+2. In-flight adoption: operator types the entry phrase mid-session, the current main session reads the agent file and follows it directly. Same outcome.
+
+The agent definitions at `.claude/agents/feature-coordinator.md`, `.claude/agents/spec-coordinator.md`, and `.claude/agents/finalisation-coordinator.md` each carry an `## Invocation` section with this rule. CLAUDE.md's "Common invocations" section codifies the constraint for all four (three coordinators + audit-runner).
+
+### [2026-05-08] Pattern — Cross-tenant source-pill compression rule
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.8, Chunk 7.
+
+Scorecard source pills compress based on the viewer's scope, not the scorecard's scope. `compressSourcePill(scope, viewerScope)` returns five canonical values: `system`, `organisation`, `this_subaccount`, `platform`, `custom`. The rule: `subaccount`-scoped scorecards always show `this_subaccount`; `system`-scoped show `system` to org_admins and `platform` to workspace viewers; `org`-scoped show `organisation` to org_admins and `custom` to workspace viewers. This compression prevents org-name leakage to subaccount-scope viewers. Pure function in `scorecardServicePure.ts`; mirrored in `ScorecardSourcePill.tsx` for client-side rendering without a round-trip. Permutation test in `server/services/__tests__/scorecardServicePure.test.ts` covers all four `(scope, viewerScope)` combinations.
+
+### [2026-05-08] Pattern — Three-tier authority lock model for scorecards
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.4, Chunk 7.
+
+Scorecard authority resolves in three tiers: system > org > subaccount. When an agent has two attachments for the same scorecard slug — one from a higher tier and one from a lower tier — `resolveAuthority(attachments)` always picks the higher-tier source. Attachments at the same tier conflict only if the same org/subaccount owns two rows for the same slug; that is a data invariant violation, not a normal state. The resolver is a pure function in `scorecardServicePure.ts`, never hits the DB. Any route that surfaces "which scorecard is active" must pass the full attachment list through the resolver before responding.
+
+### [2026-05-08] Pattern — Single-share-toggle visibility primitive
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.3, Chunk 7.
+
+Scorecard visibility is controlled by a single `isShared` boolean. `isShared: true` makes the scorecard visible to all subaccounts under the owning org. `isShared: false` (default) makes it visible only to the owning org admins and the subaccount that created it. There is no per-subaccount sharing list, no ACL, no role-based filter — just one toggle. This keeps the permission surface minimal. Route-level visibility is enforced by `getVisibleScorecards(organisationId, subaccountId?)` in `scorecardService.ts`, which applies the `isShared` predicate in SQL rather than in application code.
+
+### [2026-05-08] Pattern — Idempotent UPSERT on operator correction capture
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §10.1, Chunk 13.
+
+Correction capture uses `onConflictDoUpdate` with a partial unique index target: `(organisation_id, source_run_id) WHERE captured_via = 'operator_correction' AND deleted_at IS NULL`. This means the operator can correct the same run multiple times and each subsequent correction silently updates the existing block (last-write-wins) rather than inserting a duplicate. The `targetWhere` clause in the Drizzle `onConflictDoUpdate` maps to the partial index predicate. Without `targetWhere`, Drizzle cannot locate the partial index and the UPSERT falls through to an error. Always specify both `target` columns and `targetWhere` when the conflict target is a partial index.
+
+### [2026-05-08] Pattern — Runtime check three-state UI collapsed from five internal states
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.2, Chunk 5.
+
+Internally, runtime check results carry five states: `pending`, `running`, `pass`, `fail`, `inconclusive`. The UI collapses these to three visual groups: loading (pending + running), pass, not-pass (fail + inconclusive). `inconclusive` is surfaced distinctly from `fail` in the drawer detail — `fail` means the check fired and found a problem; `inconclusive` means the check could not determine a verdict (e.g. model output was ambiguous or the check function threw). Never merge `fail` and `inconclusive` at the data layer — they carry different operator actions. Merge only at the UI summary level, and always expose both labels in the detail view.

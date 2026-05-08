@@ -3455,6 +3455,14 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Show a zero-results state | `client/src/components/EmptyState.tsx` — standardised zero-results panel. |
 | Show a fetch-error state | `client/src/components/ErrorState.tsx` — standardised fetch-error panel. |
 | Add a new permission key | `server/lib/permissions.ts` |
+| Add or modify a runtime check definition | `server/db/schema/runtimeCheckDefinitions.ts` (table shape) + `server/services/runtimeCheckService.ts` (CRUD) + `server/services/runtimeCheckServicePure.ts` (pure validators) + `server/routes/runtimeChecks.ts` (routes) |
+| Add or modify a scorecard or scorecard attachment | `server/db/schema/scorecards.ts` + `server/db/schema/agentScorecardAttachments.ts` + `server/services/scorecardService.ts` + `server/services/scorecardServicePure.ts` (authority resolution, source-pill compression) + `server/routes/scorecards.ts` + `server/routes/agentScorecards.ts` |
+| Modify the scorecard judge runner | `server/services/scorecardJudgeRunner.ts` (orchestration) + `server/services/scorecardJudgeRunnerPure.ts` (sampling, verdict) + `server/jobs/scorecardJudgeJob.ts` (pg-boss worker) + `server/jobs/scorecardJudgeForcedJob.ts` (forced path) |
+| Trigger or modify a bench run | `server/services/benchService.ts` + `server/services/benchServicePure.ts` + `server/routes/benchRuns.ts` + `server/jobs/benchExecuteJob.ts` |
+| Modify operator correction capture | `server/services/correctionCaptureService.ts` + `server/routes/corrections.ts` (POST /api/runs/:runId/steps/:eventId/correct) + `shared/types/correction.ts` |
+| Modify correction pattern detection | `server/services/correctionPatternDetectorPure.ts` (cosine clustering, pure) + `server/jobs/correctionPatternDetectorJob.ts` (daily sweep, cluster → pending_review promotion) |
+| Modify the Govern Quality page | `client/src/pages/govern/GovernQualityPage.tsx` + `client/src/pages/govern/components/ScorecardCard.tsx` + `server/routes/governQuality.ts` + `client/src/lib/api/scorecards.ts` |
+| Add a source filter or provenance field to the Knowledge page | `server/services/knowledgeService.ts` (`listEntries` source param) + `server/routes/knowledge.ts` (schema) + `shared/types/govern.ts` (`KnowledgeSourceFilter`) + `client/src/pages/govern/KnowledgePage.tsx` + `client/src/components/knowledge/SourcePillKnowledge.tsx` |
 | Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
 | Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
@@ -3507,6 +3515,46 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Connections list / usage / test / disconnect | `server/routes/integrationConnections.ts` (`GET /api/connections`, `GET /:id/usage`, `POST /:id/test`, `POST /:id/disconnect`), `server/services/connectionsService.ts` (incl. `disconnectConnection`), `server/services/connectionsListPure.ts`, `server/services/connectionTokenService.ts` (testConnection dispatcher with closed-enum error.code mapping), `client/src/pages/govern/ConnectionsPage.tsx`, `client/src/pages/govern/components/ConnectionTestButton.tsx`, `client/src/pages/govern/components/DisconnectConfirmDialog.tsx` |
 | Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
 | Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
+
+#### Trust & Verification Layer (trust-verification-layer, 2026-05)
+
+Three-stage quality layer: runtime skill checks (Stage 1), scoring + bench evaluation (Stage 2), operator correction memory (Stage 3). Spec: `tasks/builds/trust-verification-layer/spec.md`.
+
+| Concern | Files |
+|---|---|
+| Stage 1 — runtime check definitions | `server/db/schema/runtimeCheckDefinitions.ts`, `server/db/schema/runtimeCheckResults.ts`, `server/services/runtimeCheckService.ts`, `server/services/runtimeCheckServicePure.ts`, `server/routes/runtimeChecks.ts`, `client/src/lib/api/runtimeChecks.ts` |
+| Stage 2 — scorecards | `server/db/schema/scorecards.ts`, `server/db/schema/agentScorecardAttachments.ts`, `server/db/schema/scorecardJudgements.ts`, `server/services/scorecardService.ts`, `server/services/scorecardServicePure.ts`, `server/routes/scorecards.ts`, `server/routes/agentScorecards.ts` |
+| Stage 2 — bench | `server/db/schema/benchRuns.ts`, `server/db/schema/benchResults.ts`, `server/services/benchService.ts`, `server/services/benchServicePure.ts`, `server/routes/benchRuns.ts`, `server/jobs/benchExecuteJob.ts`, `client/src/lib/api/benchRuns.ts` |
+| Stage 2 — scorecard judge runner | `server/services/scorecardJudgeRunner.ts`, `server/services/scorecardJudgeRunnerPure.ts`, `server/jobs/scorecardJudgeJob.ts`, `server/jobs/scorecardJudgeForcedJob.ts` |
+| Stage 2 — Govern Quality page | `client/src/pages/govern/GovernQualityPage.tsx`, `client/src/pages/govern/components/ScorecardCard.tsx`, `server/routes/governQuality.ts` |
+| Stage 3 — correction capture | `shared/types/correction.ts`, `server/services/correctionCaptureService.ts`, `server/routes/corrections.ts`, `client/src/lib/api/corrections.ts` |
+| Stage 3 — correction pattern detector | `server/services/correctionPatternDetectorPure.ts`, `server/jobs/correctionPatternDetectorJob.ts` |
+| Stage 3 — Knowledge page integration | `client/src/pages/govern/KnowledgePage.tsx`, `client/src/components/knowledge/SourcePillKnowledge.tsx`, `client/src/lib/api/memoryBlocks.ts` (source filter) |
+| Stage 3 — Run-trace correction UI | `client/src/pages/operate/RunTracePage.tsx`, `client/src/pages/operate/components/RunTraceEventRenderer.tsx`, `client/src/components/correction/CorrectDialog.tsx` |
+| Schema migrations | `migrations/0290_trust_verification_layer.sql` — five new tables: `runtime_check_definitions`, `runtime_check_results`, `scorecards`, `agent_scorecard_attachments`, `scorecard_judgements`, `bench_runs`, `bench_results`; extends `memory_blocks` with `source_run_id`, `confidence`, `quality_score`, `captured_via` |
+| Shared contracts | `shared/types/agentExecutionLog.ts` (`correction.captured` event), `shared/types/correction.ts`, `shared/types/govern.ts` (`KnowledgeSourceFilter`, `capturedVia`) |
+
+##### Permissions
+
+Six new permission keys (migration 0290):
+
+| Key | Scope | Granted action | Default roles |
+|-----|-------|---------------|---------------|
+| `org.scorecards.view` | Org | List org, system, and subaccount-visible scorecards | org_admin (bypass), org_user (explicit grant) |
+| `org.scorecards.manage` | Org | Create, edit, and delete org-scope scorecards; set mandatory slugs | org_admin (bypass) |
+| `org.scorecards.bench_run` | Org | Trigger a model bench run for agent or skill evaluation | org_admin (bypass) |
+| `subaccount.scorecards.view` | Subaccount | List subaccount-visible scorecards | subaccount_admin (bypass) |
+| `subaccount.scorecards.manage` | Subaccount | Create, edit, and delete subaccount-scope scorecards; attach/detach suggested scorecards | subaccount_admin (bypass) |
+| `subaccount.corrections.create` | Subaccount | Use the Correct action on Run-trace to submit an operator correction | subaccount_admin (bypass) |
+
+##### pg-boss queues
+
+| Queue name | Schedule | Worker config | Purpose |
+|------------|----------|---------------|---------|
+| `scorecard:judge` | Event-driven (enqueued per run) | teamSize 4, teamConcurrency 1 | Sampled scorecard judgement |
+| `scorecard:judge:forced` | Event-driven (enqueued on correction) | teamSize 4, teamConcurrency 1 | Forced judgement triggered by operator correction |
+| `bench:execute` | Event-driven (enqueued by POST /bench-runs/:id/run) | teamSize 2, teamConcurrency 1 | Execute a bench run against all bench items |
+| `correction:pattern-detect` | Daily 05:00 UTC | teamSize 1, teamConcurrency 1 | Cluster operator corrections; promote patterns to pending_review memory blocks |
 
 ---
 
