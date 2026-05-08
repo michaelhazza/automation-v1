@@ -10,13 +10,14 @@ import {
 } from '../middleware/auth.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { create, verifyEventBelongsToRun } from '../services/correctionCaptureService.js';
+import {
+  create,
+  getRunOwnership,
+  verifyEventBelongsToRun,
+} from '../services/correctionCaptureService.js';
 import { correctionPayloadValidator } from '../../shared/types/correction.js';
 import { validateEventIdShape } from './correctionsRoutePure.js';
 import type { CorrectionDialogPayload } from '../../shared/types/correction.js';
-import { agentRuns } from '../db/schema/index.js';
-import { db } from '../db/index.js';
-import { eq, and } from 'drizzle-orm';
 
 const router = Router();
 
@@ -36,15 +37,7 @@ router.post(
     const orgId = req.orgId!;
 
     // Step 1: resolve the run and verify org ownership.
-    const [run] = await db
-      .select({
-        id: agentRuns.id,
-        subaccountId: agentRuns.subaccountId,
-        agentId: agentRuns.agentId,
-      })
-      .from(agentRuns)
-      .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)))
-      .limit(1);
+    const run = await getRunOwnership(runId, orgId);
 
     if (!run) {
       res.status(404).json({ error: 'Run not found' });

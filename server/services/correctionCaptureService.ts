@@ -8,6 +8,7 @@ import { withOrgTx } from '../instrumentation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
 import { agentExecutionEvents } from '../db/schema/agentExecutionEvents.js';
+import { agentRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
 import { scheduleForcedGrade } from './scorecardJudgeRunner.js';
@@ -146,6 +147,29 @@ function buildBlockContent(args: {
     lines.push(`Reason: ${args.reason}`);
   }
   return lines.join('\n');
+}
+
+// ── run-ownership lookup ─────────────────────────────────────────────────────
+
+/**
+ * Returns the run's owning subaccount + agent if the run exists AND belongs
+ * to organisationId. Routes use this instead of a direct `db` import (gated
+ * by `verify-rls-contract-compliance.sh`); the explicit `organisationId`
+ * filter on every read keeps the contract closed regardless of RLS state.
+ */
+export async function getRunOwnership(
+  runId: string,
+  organisationId: string,
+): Promise<{ subaccountId: string | null; agentId: string } | null> {
+  const [row] = await db
+    .select({
+      subaccountId: agentRuns.subaccountId,
+      agentId: agentRuns.agentId,
+    })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, organisationId)))
+    .limit(1);
+  return row ?? null;
 }
 
 // ── cross-entity verification helper ─────────────────────────────────────────
