@@ -39,13 +39,21 @@ export function registerDocumentChunkEmbedWorker(boss: PgBoss): void {
 
       // ── Step 1: Pre-transaction reads and embedding (NO DB transaction held) ──
 
-      // 1a. Read version content via plain db (no org-scoped tx required here —
-      //     this is a direct read before we open the short-lived write tx).
-      const [versionRow] = await db
-        .select({ content: referenceDocumentVersions.content })
-        .from(referenceDocumentVersions)
-        .where(eq(referenceDocumentVersions.id, versionId))
-        .limit(1);
+      // 1a. Read version content. `reference_document_versions` is FORCE RLS
+      //     (migration 0229) — its policy fail-closes when `app.organisation_id`
+      //     is unset. Open a short read tx that sets the GUC for the duration
+      //     of this read only, then exit so the embedding API call below runs
+      //     OUTSIDE any DB transaction (spec invariant §1.5 #9).
+      const [versionRow] = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,
+        );
+        return tx
+          .select({ content: referenceDocumentVersions.content })
+          .from(referenceDocumentVersions)
+          .where(eq(referenceDocumentVersions.id, versionId))
+          .limit(1);
+      });
 
       if (!versionRow) {
         logger.warn('documentChunkEmbedJob.version_not_found', { organisationId, documentId, versionId });

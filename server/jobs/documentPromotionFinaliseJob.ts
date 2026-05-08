@@ -8,7 +8,7 @@
 // Invariants: §1.5 #11 (enqueued only after chunk-embed tx commits)
 
 import type PgBoss from 'pg-boss';
-import { eq, and, lt } from 'drizzle-orm';
+import { eq, and, lt, sql } from 'drizzle-orm';
 import { createWorker } from '../lib/createWorker.js';
 import { db } from '../db/index.js';
 import { documentPromotionAudit, executionFiles, referenceDocuments } from '../db/schema/index.js';
@@ -32,30 +32,52 @@ export function registerDocumentPromotionFinaliseWorker(boss: PgBoss): void {
   createWorker<DocumentPromotionFinaliseJobPayload>({
     queue: 'document:promotion-finalise',
     boss,
-    // Opt out of auto-org-context: this worker uses plain db directly for
-    // administrative updates that do not need RLS scoping.
+    // Opt out of createWorker's auto-tx: this handler runs separate read and
+    // write transactions and explicitly sets `app.organisation_id` inside each
+    // tx that touches FORCE-RLS tables. The `executionFiles` write tx does
+    // not need the GUC because that table is not RLS-protected.
     resolveOrgContext: () => null,
     handler: async (job) => {
       const { organisationId, documentId, promotionAuditId } = job.data;
 
-      // Step 1: Verify retrieval_version_id is non-null. If the chunk-embed
-      // job has not yet flipped the pointer, throw so pg-boss retries with
-      // exponential backoff (retryLimit: 5, retryBackoff: true in jobConfig).
-      // Org filter: this worker opts out of auto-org-context (resolveOrgContext
-      // returns null) so app.organisation_id is unset; require an explicit
-      // organisationId predicate as the tenant guard. (AKR-ADV-6)
-      const docRows = await db
-        .select({ retrievalVersionId: referenceDocuments.retrievalVersionId })
-        .from(referenceDocuments)
-        .where(
-          and(
-            eq(referenceDocuments.id, documentId),
-            eq(referenceDocuments.organisationId, organisationId),
-          ),
-        )
-        .limit(1);
+      // Steps 1+2: Read retrieval_version_id and audit fileId in a single
+      // short org-scoped read tx. `reference_documents` and
+      // `document_promotion_audit` are both FORCE RLS — without setting
+      // `app.organisation_id`, the policies fail-closed and return zero rows.
+      // Explicit organisationId predicates remain as belt-and-braces (AKR-ADV-6).
+      const { doc, audit } = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,
+        );
 
-      const doc = docRows[0];
+        const docRows = await tx
+          .select({ retrievalVersionId: referenceDocuments.retrievalVersionId })
+          .from(referenceDocuments)
+          .where(
+            and(
+              eq(referenceDocuments.id, documentId),
+              eq(referenceDocuments.organisationId, organisationId),
+            ),
+          )
+          .limit(1);
+
+        const auditRows = await tx
+          .select({ fileId: documentPromotionAudit.fileId })
+          .from(documentPromotionAudit)
+          .where(
+            and(
+              eq(documentPromotionAudit.id, promotionAuditId),
+              eq(documentPromotionAudit.organisationId, organisationId),
+            ),
+          )
+          .limit(1);
+
+        return { doc: docRows[0], audit: auditRows[0] };
+      });
+
+      // Step 1 guard: if chunk-embed has not yet flipped the pointer, throw so
+      // pg-boss retries with exponential backoff (retryLimit: 5, retryBackoff:
+      // true in jobConfig).
       if (!doc || !doc.retrievalVersionId) {
         throw Object.assign(
           new Error('RETRIEVAL_VERSION_NOT_READY: chunk-embed has not flipped the pointer yet'),
@@ -63,20 +85,6 @@ export function registerDocumentPromotionFinaliseWorker(boss: PgBoss): void {
         );
       }
 
-      // Step 2: Resolve fileId from document_promotion_audit (org-filtered).
-      // (AKR-ADV-6)
-      const auditRows = await db
-        .select({ fileId: documentPromotionAudit.fileId })
-        .from(documentPromotionAudit)
-        .where(
-          and(
-            eq(documentPromotionAudit.id, promotionAuditId),
-            eq(documentPromotionAudit.organisationId, organisationId),
-          ),
-        )
-        .limit(1);
-
-      const audit = auditRows[0];
       if (!audit) {
         // Audit row missing — this should be impossible given 5A is a
         // prerequisite, but guard against stale jobs from a failed 5A.

@@ -37,24 +37,31 @@ export function registerDocumentReembedWorker(boss: PgBoss): void {
 
       // ── Find documents eligible for upgrade ───────────────────────────────
       // Eligible: retrieval_version_id IS NOT NULL and active_embedding_model != target.
-      const eligibleDocs = await db
-        .select({
-          id: referenceDocuments.id,
-          retrievalVersionId: referenceDocuments.retrievalVersionId,
-          activeEmbeddingModel: referenceDocuments.activeEmbeddingModel,
-        })
-        .from(referenceDocuments)
-        .where(
-          and(
-            eq(referenceDocuments.organisationId, organisationId),
-            isNull(referenceDocuments.deletedAt),
-            // retrieval_version_id IS NOT NULL — document has been chunked at least once
-            sql`${referenceDocuments.retrievalVersionId} IS NOT NULL`,
-            // active_embedding_model is either NULL or different from target
-            sql`(${referenceDocuments.activeEmbeddingModel} IS NULL OR ${referenceDocuments.activeEmbeddingModel} != ${targetEmbeddingModel})`,
-          ),
-        )
-        .limit(MAX_DOCUMENTS_PER_RUN);
+      // `reference_documents` is FORCE RLS (migration 0229) — wrap the read in
+      // a short tx that sets `app.organisation_id` so the policy lets rows through.
+      const eligibleDocs = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,
+        );
+        return tx
+          .select({
+            id: referenceDocuments.id,
+            retrievalVersionId: referenceDocuments.retrievalVersionId,
+            activeEmbeddingModel: referenceDocuments.activeEmbeddingModel,
+          })
+          .from(referenceDocuments)
+          .where(
+            and(
+              eq(referenceDocuments.organisationId, organisationId),
+              isNull(referenceDocuments.deletedAt),
+              // retrieval_version_id IS NOT NULL — document has been chunked at least once
+              sql`${referenceDocuments.retrievalVersionId} IS NOT NULL`,
+              // active_embedding_model is either NULL or different from target
+              sql`(${referenceDocuments.activeEmbeddingModel} IS NULL OR ${referenceDocuments.activeEmbeddingModel} != ${targetEmbeddingModel})`,
+            ),
+          )
+          .limit(MAX_DOCUMENTS_PER_RUN);
+      });
 
       if (eligibleDocs.length === 0) {
         logger.info('documentReembedJob.no_eligible_docs', { organisationId, targetEmbeddingModel });
@@ -100,26 +107,54 @@ async function processDocument(opts: {
 }): Promise<void> {
   const { job, organisationId, documentId, retrievalVersionId, targetEmbeddingModel } = opts;
 
-  // ── Step 1: Pre-transaction reads (NO DB transaction held) ────────────────
+  // ── Step 1: Pre-transaction reads (short-lived org-scoped read tx) ────────
+  //
+  // `reference_document_chunks` is FORCE RLS — open a single read tx that sets
+  // `app.organisation_id`, do both reads, then exit so the embedding API call
+  // below runs OUTSIDE any DB transaction (spec invariant §1.5 #9).
 
-  // 1a. Find chunks under the old (active) model — these are the source of
-  //     truth for content. We need (chunkIndex, content, tokenCount).
-  const oldModelChunks = await db
-    .select({
-      chunkIndex: referenceDocumentChunks.chunkIndex,
-      content: referenceDocumentChunks.content,
-      tokenCount: referenceDocumentChunks.tokenCount,
-    })
-    .from(referenceDocumentChunks)
-    .where(
-      and(
-        eq(referenceDocumentChunks.documentId, documentId),
-        eq(referenceDocumentChunks.versionId, retrievalVersionId),
-        isNull(referenceDocumentChunks.deletedAt),
-        // Any model that is NOT the target (covers the current active model)
-        ne(referenceDocumentChunks.embeddingModel, targetEmbeddingModel),
-      ),
+  const { oldModelChunks, existingIndices } = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,
     );
+
+    // 1a. Find chunks under the old (active) model — these are the source of
+    //     truth for content. We need (chunkIndex, content, tokenCount).
+    const oldModelRows = await tx
+      .select({
+        chunkIndex: referenceDocumentChunks.chunkIndex,
+        content: referenceDocumentChunks.content,
+        tokenCount: referenceDocumentChunks.tokenCount,
+      })
+      .from(referenceDocumentChunks)
+      .where(
+        and(
+          eq(referenceDocumentChunks.documentId, documentId),
+          eq(referenceDocumentChunks.versionId, retrievalVersionId),
+          isNull(referenceDocumentChunks.deletedAt),
+          // Any model that is NOT the target (covers the current active model)
+          ne(referenceDocumentChunks.embeddingModel, targetEmbeddingModel),
+        ),
+      );
+
+    // 1b. Find chunk indices already present under targetEmbeddingModel.
+    const existingTargetRows = await tx
+      .select({ chunkIndex: referenceDocumentChunks.chunkIndex })
+      .from(referenceDocumentChunks)
+      .where(
+        and(
+          eq(referenceDocumentChunks.documentId, documentId),
+          eq(referenceDocumentChunks.versionId, retrievalVersionId),
+          eq(referenceDocumentChunks.embeddingModel, targetEmbeddingModel),
+          isNull(referenceDocumentChunks.deletedAt),
+        ),
+      );
+
+    return {
+      oldModelChunks: oldModelRows,
+      existingIndices: new Set(existingTargetRows.map((c) => c.chunkIndex)),
+    };
+  });
 
   if (oldModelChunks.length === 0) {
     logger.warn('documentReembedJob.no_source_chunks', {
@@ -132,21 +167,6 @@ async function processDocument(opts: {
   }
 
   const expectedTotal = oldModelChunks.length;
-
-  // 1b. Find chunk indices already present under targetEmbeddingModel.
-  const existingTargetChunks = await db
-    .select({ chunkIndex: referenceDocumentChunks.chunkIndex })
-    .from(referenceDocumentChunks)
-    .where(
-      and(
-        eq(referenceDocumentChunks.documentId, documentId),
-        eq(referenceDocumentChunks.versionId, retrievalVersionId),
-        eq(referenceDocumentChunks.embeddingModel, targetEmbeddingModel),
-        isNull(referenceDocumentChunks.deletedAt),
-      ),
-    );
-
-  const existingIndices = new Set(existingTargetChunks.map((c) => c.chunkIndex));
 
   // 1c. Identify missing chunks (present under old model, absent under new model).
   const missingChunks = oldModelChunks.filter((c) => !existingIndices.has(c.chunkIndex));
