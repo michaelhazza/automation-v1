@@ -24,12 +24,13 @@ import ScheduleTab from './components/AgentEditTabs/ScheduleTab';
 import BudgetTab from './components/AgentEditTabs/BudgetTab';
 import RunsTab from './components/AgentEditTabs/RunsTab';
 import AgentVersionChip from './components/AgentVersionChip';
+import AgentOverviewTab from '../../components/agent-workspace/AgentOverviewTab';
 import DeleteAgentDialog from './components/DeleteAgentDialog';
 import { TestRunnerCard } from './components/TestRunnerCard';
 
-type TabKey = 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
+type TabKey = 'overview' | 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
 
-const TAB_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
+const TAB_ORDER: TabKey[] = ['overview', 'configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
 // Note: 'budget' excluded from WRITE_ORDER - Phase 1 budget schema gap (see migration-gaps.md)
 // Note: 'schedule' excluded - org-level trigger editing not in Phase 1 scope (see spec §4.2 Q5)
 
@@ -51,6 +52,7 @@ const TAB_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 
 const WRITE_ORDER: TabKey[] = ['configure', 'behaviour', 'personality', 'skills', 'data-sources'];
 
 const TAB_LABELS: Record<TabKey, string> = {
+  overview: 'Overview',
   configure: 'Configure',
   behaviour: 'Behaviour',
   personality: 'Personality',
@@ -75,7 +77,7 @@ export default function AgentEditPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const activeTab = (searchParams.get('tab') ?? 'configure') as TabKey;
+  const activeTab = (searchParams.get('tab') ?? 'overview') as TabKey;
 
   const [data, setData] = useState<AgentFull | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -280,6 +282,9 @@ export default function AgentEditPage() {
 
       {/* Tab content */}
       <div className="px-6 py-4">
+        {activeTab === 'overview' && id && (
+          <AgentOverviewTab agentId={id} />
+        )}
         {activeTab === 'configure' && (
           <ConfigureTab
             data={data.configure}
