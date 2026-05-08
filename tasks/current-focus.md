@@ -1,9 +1,9 @@
 <!-- mission-control
 active_spec: none
 active_plan: none
-build_slug: none
-branch: none
-status: NONE
+build_slug: auto-knowledge-retrieval
+branch: auto-knowledge-retrieval
+status: PLANNING
 last_updated: 2026-05-08
 last_merged_pr: #273
 last_merged_slug: consolidation-govern
@@ -24,11 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE** — PR #273 (`ui-consolidation-govern`) merged to `main` 2026-05-07T23:18:59Z (squash-commit `dfa53e58`); branch deleted. No active build.
+**Active spec:** tasks/builds/auto-knowledge-retrieval/spec.md (in flight)
+**Active plan:** tasks/builds/auto-knowledge-retrieval/plan.md (Phase 2)
+**Active build slug:** auto-knowledge-retrieval
+**Branch:** auto-knowledge-retrieval
+**Status:** **PLANNING** — `spec-coordinator` running Phase 1 against `docs/auto-knowledge-retrieval-dev-brief.md` (Rev 4). Mockups already iterated and approved across 5 prior rounds (`prototypes/auto-knowledge-retrieval/`). Spec authoring + `spec-reviewer` + `chatgpt-spec-review` next, then handoff to `feature-coordinator`.
 
 **Just merged:** PR #273 — `consolidation-govern` (squash-commit `dfa53e58`, 2026-05-07T23:18:59Z). Govern surface — Knowledge / Spending / Connections consolidated UI shipped across 13 build chunks. Spec: `tasks/builds/consolidation-govern/spec.md`. Phase 3 handoff: `tasks/builds/consolidation-govern/handoff.md`. Pipeline: spec-conformance NON_CONFORMANT (18 directional gaps deferred) → pr-reviewer CHANGES_REQUESTED (5 blockers + 7 strong recommendations all fixed in `3d4f1cfe`) → adversarial-reviewer 3 findings deferred (CONSOL-GOV-DEF-17/18/19) → dual-reviewer commit `5566880c` → S2 sync (auto-resolved via finalisation-coordinator) → G4 regression-guard fixes in `997e940a` (App.tsx route handlers consolidated post-S2 with main's PR #271/#272 page-deletion pattern; migration 0286 → 0287 collision rename; architecture.md migration filename updated) → Phase 3 commit `9188981f` (KNOWLEDGE.md +4 patterns, handoff.md created, current-focus.md → MERGE_READY, CONSOL-GOV-DEF-9 closed) → ready-to-merge label applied → CI ALL GREEN → auto-merged. **chatgpt-pr-review SKIPPED** in Phase 3 (operator instructed autonomous mode, incompatible with manual ChatGPT-web loop). 4 KNOWLEDGE.md patterns appended: closed-enum service-boundary mapping, targeted onConflictDoNothing, migration-number collision after S2, App.tsx route regression after upstream page deletions. Doc-sync sweep complete (13 verdicts recorded). 1 todo item closed (CONSOL-GOV-DEF-9 testConnection error.code mapping shipped via Phase 2 pr-reviewer Blocker B-1). 18 spec-conformance directional gaps + 3 adversarial-reviewer findings deferred to post-merge backlog in `tasks/todo.md`.
 
