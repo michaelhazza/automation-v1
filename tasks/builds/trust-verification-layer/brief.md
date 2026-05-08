@@ -97,15 +97,49 @@ Three new fields on every skill in the capabilities registry:
 
 Skills that genuinely cannot define a verify check declare `verify: null` with a written justification. This is a flag, not a blocker, but the count of `verify: null` skills is a quality metric we will track.
 
+**Who authors verify checks:**
+
+- **System skills.** Platform team authors the verify check when shipping the skill. Ships baked in.
+- **Custom skills (org or subaccount).** When an admin adds a custom skill, the platform proposes a verify check based on the skill's API spec or tool description (LLM-suggested). The admin reviews and chooses: accept, edit, or mark "no deterministic check possible" with one-line justification.
+- **Plain English first.** The proposed check is shown in operator-readable form ("Did the API return a 2xx response?"). The actual implementation lives in an "Advanced" disclosure for technical users.
+- **Mandatory at creation.** A custom skill cannot be saved without either a confirmed verify check or an explicit "no deterministic check possible" with justification. This is the only way coverage holds at scale.
+
 ### Layer 2: Agent scorecards
 
-A new resource attached to agents, with a built-in bench workflow:
+Scorecards are first-class library objects, not properties of an agent. An agent attaches one or more scorecards by reference. Each scorecard contains a small set (typically 3-5) of named **quality checks**, each with a description the judge model uses to score and a **pass mark** (shown to operators as a percentage, stored as 0-1 internally).
 
-- **Scorecard definition.** A small set (3-5) of named quality dimensions, each with a description the judge model uses to score (0-1) and a floor threshold. Example for a content agent: `tone_match` (>=0.8), `factual_grounding` (>=0.9), `hook_strength` (>=0.7).
-- **Sampling rate.** Operator-configured. Default: evaluate 20% of runs. Anything flagged by Layer 1 or by user correction is auto-evaluated regardless.
-- **Trend view.** Per scorecard, per dimension, a time series the operator can scan in seconds. The headline question this answers: "Is my agent getting better or worse?"
-- **Model bench.** A separate operator-triggered workflow: pick an agent or a skill, pick a candidate model set, pick a sample size (10-20), run the same task across all candidates, score each via the scorecard, output a table with mean score, variance, latency, cost, and a composite (cheapest model that clears the floor wins). Result writes to `bench-log.md`. Operator approves the suggested default before it takes effect.
-- **Regression detection.** When a model is updated by the provider, the bench can be re-run automatically against previously approved configurations. If a skill's score drops past a threshold, the operator gets a single notification.
+**Library and scoping.** Scorecards live in a unified library, surfaced as a tab on Govern / Quality. The library spans three scopes:
+
+- **System** — platform-shipped, available everywhere. Read-only to org and subaccount admins.
+- **Organisation** — created by the org admin. Visible to org-level agents and (by default) to subaccounts in the org.
+- **Subaccount** — created by a subaccount admin. Visible only inside that subaccount.
+
+Each library row carries a **Source** pill (System / Organisation / This subaccount) so operators see at a glance what they own versus what they inherit.
+
+**Visibility, controlled by one toggle.** Every scorecard row has a single **"Share with sub-accounts"** toggle.
+
+- For System scorecards viewed at org scope, default on. Org admin can turn off to hide that scorecard from their subaccounts.
+- For Organisation scorecards, default on. Org admin can turn off to keep it org-internal.
+- Subaccount scorecards do not show the toggle (subaccount-only by definition).
+
+This is the only visibility primitive we ship. No fork tracking, no diff, no version pinning UI. If an admin wants to customise a scorecard, they **Duplicate** it (independent copy at their scope) and edit the copy.
+
+**Multi-attach.** An agent has a list of attached scorecards. Each is scored independently and tracked independently. Trend views and drift detection split by scorecard, so an operator can tell that "tone match" is fine but "factual grounding" is drifting.
+
+**System agent + agent template integration.** Both existing platform primitives extend with scorecard fields, mirroring how skills already inherit:
+
+- `system_agents` gets `default_system_scorecard_slugs` (always attached, hidden from org UI) and `default_org_scorecard_slugs` (suggested at install, org admin can keep / swap / remove).
+- `agent_templates` gets `default_scorecard_slugs` (suggested when creating a new agent from a template).
+
+When an admin installs a System Agent or creates from an Agent Template, the recommended scorecard set is pre-attached. They can keep, add more, or remove.
+
+**How often to grade.** Operator-configured per agent. Default: grade 20% of runs sampled at random. Anything flagged by Layer 1 verify or by an operator correction is graded regardless.
+
+**Trend view.** Per scorecard, per quality check, a time series the operator can scan in seconds. The headline question: "Is anything getting worse?"
+
+**Model bench.** A separate operator-triggered workflow on Govern / Quality. Pick an agent (agent bench) or a specific skill (skill bench), pick candidate models, pick a sample count, optionally point at recent real runs as test inputs (default) or a paste-in set. Each candidate is scored against the agent's attached scorecards. Output: a comparison table with mean score, variance, latency, cost, and a composite (cheapest model that clears every pass mark wins). Operator approves the recommended default before it takes effect.
+
+**Regression detection.** When a provider ships a new model version, the bench can be re-run automatically against previously approved configurations. A score drop past a threshold pings the operator once.
 
 ### Layer 3: Correction-sourced auto-memory
 
@@ -133,21 +167,27 @@ We do not build all three layers at once. Each stage delivers value on its own a
 ### Stage 1: Skill verification (foundational)
 
 - Add the three new fields (`verify`, `reversible`, `blast_radius`) to the capabilities registry schema.
-- Write verify hooks for the top 20 most-used skills. Document the pattern.
+- Write verify hooks for the top 20 most-used system skills. Document the pattern.
+- Build the **suggested verify** flow for custom skill creation (org and subaccount). Plain-English first, code in advanced disclosure, mandatory at save (or "no deterministic check possible" with one-line justification).
 - Add a registry-level lint rule: skills shipping without a verify hook must declare `verify: null` with justification.
-- Surface verify results in the agent run log so the operator can see pass / fail at a glance.
+- Surface verify results on Run-trace step rows (pass / fail / inconclusive / not-applicable). Verify failures feed Inbox.
 
-**Exit criteria:** every new skill PR carries a verify hook (or a justified null), and the operator can see verify results in the run UI.
+**Exit criteria:** every new skill PR (system, org, or subaccount) carries a verify hook or a justified null, and the operator can see verify results inline on Run-trace.
 
-### Stage 2: Agent scorecards + model bench
+### Stage 2: Agent scorecards + library + model bench
 
-- Add the scorecard resource. Operators can author them in the UI or via a config file.
-- Build the sampled judge runner. Default sample rate 20%, configurable.
-- Build the trend view. One chart per scorecard dimension over time.
-- Build the model bench as a separate operator-triggered workflow. Output a comparison table and a recommended default. Operator approves before it ships.
-- Wire regression detection to run the bench automatically on model updates.
+- Add the **scorecard** resource with three-scope ownership (system / org / subaccount). Every scorecard carries `share_with_subaccounts` (boolean, default on for system and org scopes).
+- Add the **scorecard library** as a tab on Govern / Quality, showing System / Org / Subaccount scorecards with Source pills, attach counts, and the Share-with-subaccounts toggle on system and org rows.
+- Add **multi-attach** on agents: an agent has an ordered list of attached scorecard ids.
+- Extend `system_agents` with `default_system_scorecard_slugs` (hidden, always attached on install) and `default_org_scorecard_slugs` (suggested at install).
+- Extend `agent_templates` with `default_scorecard_slugs` (suggested at agent creation).
+- Build the **scorecard creation form** (blank or pre-filled from Duplicate). Quality checks expressed as name + description + pass mark (operator-facing as percentage).
+- Build the sampled judge runner. Default sample rate 20%, configurable per agent.
+- Build the **Agents** tab on Govern / Quality (drift list with sparklines and per-scorecard trend drawer).
+- Build the **model bench** workflow on Govern / Quality. Modes: Agent bench (uses recent real runs as test inputs by default), Skill bench (uses recent invocations of one skill). Test-input picker supports paste-in for cold starts.
+- Wire regression detection: re-run the bench against approved configurations on provider model updates.
 
-**Exit criteria:** operator can attach a scorecard to an agent, see scoring trends, and run a bench to pick a model with confidence.
+**Exit criteria:** an admin at any scope can browse the library, attach one or more scorecards to an agent, see scoring trends per scorecard on Govern / Quality, and run a bench to pick a model with confidence. Org admins can hide system scorecards from their subaccounts using the single Share-with-subaccounts toggle.
 
 ### Stage 3: Correction-sourced auto-memory
 
@@ -175,10 +215,12 @@ To keep scope honest:
 1. **Where does the verify hook actually run?** In-process with the skill (fast, tight coupling) or as a separate post-action job (slower, cleaner)? Probably in-process for synchronous skills and post-action for long-running ones, but worth deciding before the schema lands.
 2. **How do we keep judge cost bounded?** A 20% sample rate is a starting point. Do we adapt the rate based on observed score variance (sample less when the agent is clearly stable, more when it's drifting)? Probably yes, but not in Stage 2.
 3. **How does the bench handle prompt portability?** A prompt tuned for Opus may unfairly disadvantage Sonnet. Stage 2 ships with same-prompt benching (most honest as a real-world test). Auto-prompt-adaptation is a possible Stage 4 if scores look unfair in practice.
-4. **Should scorecards be tenant-scoped or template-able across tenants?** Probably both, with platform-default scorecards per agent type that tenants can fork. To be confirmed in Stage 2 design.
+4. **Scorecard scoping, resolved.** Three scopes (System / Organisation / Subaccount), one library, one **Share with sub-accounts** toggle on system and org rows. No fork tracking, no diff. Customisation is done via Duplicate. Subaccounts can create their own scorecards (full autonomy).
 5. **Correction privacy.** Corrections may contain sensitive operator commentary. They live in the existing memory tenant-isolation tier, with existing retention rules. Confirm with the security review when Stage 3 lands.
-6. **Naming, resolved.** *Scorecards* replaces HyperAgent's *rubrics*. The Layer 3 capability is intentionally not given a top-level marketing name — it rides the existing `auto-memory` umbrella and the existing `Edit and override` lifecycle on the consolidated Knowledge page. The only new operator-facing word is the verb **Correct** on Run-trace step outputs.
-7. **Govern / Quality as a fourth Govern primitive.** This brief assumes scorecards land as a new sibling of Knowledge / Spending / Connections in the Govern IA. To be confirmed in the spec — alternative is to surface the trend view on the Build / Agent edit page only.
+6. **Naming, resolved.** *Scorecards* replaces HyperAgent's *rubrics*. *Quality checks* replaces "dimensions" in operator-facing copy. The Layer 3 capability is intentionally not given a top-level marketing name — it rides the existing `auto-memory` umbrella and the existing `Edit and override` lifecycle on the consolidated Knowledge page. The only new operator-facing word is the verb **Correct** on Run-trace step outputs.
+7. **Govern / Quality as a fourth Govern primitive, resolved.** Scorecards land as a new sibling of Knowledge / Spending / Connections in the Govern IA. The page has tabs: Agents (drift list), Scorecards (library), Bench history.
+8. **Test inputs for the model bench.** Default: replay recent real runs (most honest signal). For cold starts, allow paste-in. Skill bench replays recent invocations of one skill. To be confirmed in Stage 2 design.
+9. **Bench cost ceiling.** Benching N candidates × M samples × judge cost is real money. Operator chooses the candidate set and sample size; platform shows estimated cost before "Run bench" fires. No autonomous benching without explicit operator action in v1.
 
 ## 10. Success metrics
 
