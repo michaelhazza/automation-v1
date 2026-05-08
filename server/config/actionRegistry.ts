@@ -1,5 +1,6 @@
 ﻿// @principal-context-import-only — reason: registry references canonicalDataService only in handler-classification documentation; future handlers that invoke it must pass fromOrgId(organisationId, subaccountId).
 import { z } from 'zod';
+import type { RuntimeCheckKind, RuntimeCheckBlastRadius } from '../../shared/types/runtimeCheck.js';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
 // Phase 1: TypeScript config object. Phase 2: promotes to DB table.
@@ -197,6 +198,15 @@ export interface ActionDefinition {
    * Spec: tasks/builds/agentic-commerce/spec.md §7.1, §6.1.
    */
   executionPath?: 'main_app_stripe' | 'worker_hosted_form';
+
+  // Trust & Verification Layer (spec §6.1)
+  // Declares the runtime check to run after this action executes.
+  // null means no deterministic check is possible; verifyNullJustification
+  // must then be set (enforced by verify-runtime-check-coverage.sh CI gate).
+  verify?: RuntimeCheckKind | null;
+  verifyNullJustification?: string;
+  reversible?: boolean;
+  blastRadius?: RuntimeCheckBlastRadius;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
