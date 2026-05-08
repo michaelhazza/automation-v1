@@ -1,0 +1,99 @@
+import { describe, it, expect } from 'vitest';
+import { splitIntervalAcrossBuckets, accumulateWorkingTime } from './agentWorkingTimeServicePure';
+
+describe('splitIntervalAcrossBuckets', () => {
+  it('throws RangeError when endMs <= startMs', () => {
+    expect(() => splitIntervalAcrossBuckets(1000, 1000)).toThrow(RangeError);
+    expect(() => splitIntervalAcrossBuckets(2000, 1000)).toThrow(RangeError);
+  });
+
+  it('single-bucket interval (entirely within one day)', () => {
+    // 2026-05-08T10:00:00Z to 2026-05-08T11:00:00Z = 3600000 ms
+    const startMs = Date.UTC(2026, 4, 8, 10, 0, 0);
+    const endMs = Date.UTC(2026, 4, 8, 11, 0, 0);
+    const result = splitIntervalAcrossBuckets(startMs, endMs);
+    expect(result).toHaveLength(1);
+    expect(result[0].bucketDate).toBe('2026-05-08');
+    expect(result[0].contributionMs).toBe(3_600_000);
+    // Postcondition: sum equals duration
+    const sum = result.reduce((acc, r) => acc + r.contributionMs, 0);
+    expect(sum).toBe(endMs - startMs);
+  });
+
+  it('two-bucket interval crossing midnight', () => {
+    // 2026-05-08T23:50:00Z to 2026-05-09T00:30:00Z
+    const startMs = Date.UTC(2026, 4, 8, 23, 50, 0);
+    const endMs = Date.UTC(2026, 4, 9, 0, 30, 0);
+    const result = splitIntervalAcrossBuckets(startMs, endMs);
+    expect(result).toHaveLength(2);
+    expect(result[0].bucketDate).toBe('2026-05-08');
+    expect(result[0].contributionMs).toBe(10 * 60 * 1000); // 10 min
+    expect(result[1].bucketDate).toBe('2026-05-09');
+    expect(result[1].contributionMs).toBe(30 * 60 * 1000); // 30 min
+    const sum = result.reduce((acc, r) => acc + r.contributionMs, 0);
+    expect(sum).toBe(endMs - startMs);
+  });
+
+  it('exact midnight boundary: T = boundary belongs to new bucket', () => {
+    // Interval starting exactly at midnight
+    const startMs = Date.UTC(2026, 4, 9, 0, 0, 0); // midnight exactly
+    const endMs = startMs + 1000; // 1 second after
+    const result = splitIntervalAcrossBuckets(startMs, endMs);
+    expect(result).toHaveLength(1);
+    expect(result[0].bucketDate).toBe('2026-05-09'); // belongs to NEW bucket
+    expect(result[0].contributionMs).toBe(1000);
+  });
+
+  it('multi-bucket: year-long span — drift bound ≤ 365ms (sum equals duration exactly since we use ms integers)', () => {
+    // 365 days span
+    const startMs = Date.UTC(2025, 0, 1, 0, 0, 0);
+    const endMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+    const result = splitIntervalAcrossBuckets(startMs, endMs);
+    expect(result.length).toBe(365);
+    const sum = result.reduce((acc, r) => acc + r.contributionMs, 0);
+    expect(sum).toBe(endMs - startMs); // exactly equal (no rounding during split)
+  });
+
+  it('concurrent-run summing: two step pairs sum independently', () => {
+    // This is tested at the accumulateWorkingTime level
+    const startMs = Date.UTC(2026, 4, 8, 10, 0, 0);
+    const endMs1 = startMs + 30_000; // 30s
+    const endMs2 = startMs + 60_000; // 60s
+    const r1 = splitIntervalAcrossBuckets(startMs, endMs1);
+    const r2 = splitIntervalAcrossBuckets(startMs, endMs2);
+    expect(r1[0].contributionMs + r2[0].contributionMs).toBe(90_000);
+  });
+});
+
+describe('accumulateWorkingTime', () => {
+  it('returns zero for empty events', () => {
+    const result = accumulateWorkingTime([]);
+    expect(result.workingTimeSeconds).toBe(0);
+    expect(result.runCount).toBe(0);
+  });
+
+  it('counts a matched step pair', () => {
+    const events = [
+      { runId: 'run1', eventType: 'step_started', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_completed', eventTimestamp: '2026-05-08T10:00:30.000Z' },
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(30);
+    expect(result.runCount).toBe(1);
+  });
+
+  it('counts concurrent runs separately', () => {
+    const events = [
+      { runId: 'run1', eventType: 'step_started', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run2', eventType: 'step_started', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_completed', eventTimestamp: '2026-05-08T10:00:30.000Z' },
+      { runId: 'run2', eventType: 'step_completed', eventTimestamp: '2026-05-08T10:01:00.000Z' },
+      { runId: 'run1', eventType: 'run_completed', eventTimestamp: '2026-05-08T10:00:31.000Z' },
+      { runId: 'run2', eventType: 'run_completed', eventTimestamp: '2026-05-08T10:01:01.000Z' },
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(90); // 30 + 60
+    expect(result.runCount).toBe(2);
+    expect(result.successfulRuns).toBe(2);
+  });
+});

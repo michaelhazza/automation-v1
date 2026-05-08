@@ -88,7 +88,8 @@ export type AgentExecutionEventType =
   | 'run.terminal.summary_missing'
   | 'run.terminal.extracted_with_errorMessage'
   | 'retrieval.summary'
-  | 'retrieval.always_available.mode_changed';
+  | 'retrieval.always_available.mode_changed'
+  | 'observation_emitted';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -276,6 +277,15 @@ export type AgentExecutionEventPayload =
       newMode: string;
       actorUserId: string;
       occurredAt: string;
+    }
+  | {
+      /** Agent Workspace — emitted after an observation row is successfully written (spec §7.3). */
+      eventType: 'observation_emitted';
+      critical: false;
+      observationId: string;
+      observationType: 'learned' | 'detected' | 'decided' | 'flagged' | 'produced';
+      agentId: string;
+      sourceKind: 'run_step' | 'retrieval_summary' | 'tool_result' | 'memory_block_insert';
     };
 
 // ---------------------------------------------------------------------------
@@ -308,6 +318,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'run.terminal.extracted_with_errorMessage': false,
   'retrieval.summary': false,
   'retrieval.always_available.mode_changed': false,
+  'observation_emitted': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

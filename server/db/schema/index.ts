@@ -280,3 +280,10 @@ export * from './securityAuditEvents.js';
 // F3 Baseline Capture — baseline rows + per-metric rows (migrations 0280/0283)
 export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
+
+// Agent Workspace — presence projections, observations, sessions, working time (migration 0295)
+export * from './agentObservations';
+export * from './ieeSessions';
+export * from './agentPresenceProjections';
+export * from './agentWorkingTimeRollups';
+export * from './agentWorkingTimeEventLedger';

@@ -14,6 +14,7 @@ import {
   tasks,
   taskActivities,
   taskDeliverables,
+  agentExecutionEvents,
 } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
 import { devContextService } from './devContextService.js';
@@ -106,6 +107,7 @@ import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServiceP
 import { spendingBudgets } from '../db/schema/spendingBudgets.js';
 import { spendingPolicies } from '../db/schema/spendingPolicies.js';
 import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
+import type { ServicePrincipal } from './principal/types.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -1678,13 +1680,74 @@ export const agentExecutionService = {
       {
         const { emitRetrievalSummary } = await import('./retrievalObservabilityService.js');
         const { DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS } = await import('./documentChunkingServicePure.js');
-        emitRetrievalSummary({
+        const retrievalSummaryPromise = emitRetrievalSummary({
           runId: run.id,
           organisationId: request.organisationId,
           result: retrievalResult,
           chunkConfig: { targetTokens: DEFAULT_CHUNK_TARGET_TOKENS, overlapTokens: DEFAULT_CHUNK_OVERLAP_TOKENS },
         }).catch((err: unknown) => {
           logger.warn('agentExecutionService.retrieval_summary_emit_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        // Observation emit for retrieval-summary — spec §7.3 Rev 2 composition.
+        // Chains off retrievalSummaryPromise so the event row exists before the
+        // FK-referencing observation row is inserted. Fire-and-forget: observation
+        // failure does NOT roll back the retrieval-summary event.
+        retrievalSummaryPromise.then(async () => {
+          const { append } = await import('./agentObservationService.js');
+          const orgDb = getOrgScopedDb('agentExecutionService.observation_retrieval_summary');
+          const [eventRow] = await orgDb
+            .select({ id: agentExecutionEvents.id })
+            .from(agentExecutionEvents)
+            .where(
+              and(
+                eq(agentExecutionEvents.runId, run.id),
+                eq(agentExecutionEvents.eventType, 'retrieval.summary'),
+              ),
+            )
+            .limit(1);
+          if (!eventRow) return; // event was deduplicated away before we could observe it
+          const ik = createHash('sha256').update(`${run.id}:retrieval_summary`).digest('hex');
+          const ctx: ServicePrincipal = {
+            type: 'service',
+            id: 'agentExecutionService',
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            serviceId: 'agentExecutionService',
+            teamIds: [],
+          };
+          return append(
+            {
+              agentId: run.agentId,
+              eventId: eventRow.id,
+              observationType: 'learned',
+              body: 'Retrieval summary produced',
+              metadata: { source_kind: 'retrieval_summary' },
+              idempotencyKey: ik,
+            },
+            ctx,
+          );
+        }).then((observation) => {
+          if (!observation) return;
+          tryEmitAgentEvent({
+            runId: run.id,
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            sourceService: 'agentExecutionService',
+            payload: {
+              eventType: 'observation_emitted',
+              critical: false,
+              observationId: observation.id,
+              observationType: 'learned',
+              agentId: run.agentId,
+              sourceKind: 'retrieval_summary',
+            },
+          });
+        }).catch((err: unknown) => {
+          logger.warn('agentExecutionService.observation_retrieval_summary_emit_failed', {
             runId: run.id,
             error: err instanceof Error ? err.message : String(err),
           });
