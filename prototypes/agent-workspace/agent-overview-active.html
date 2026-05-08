@@ -278,8 +278,8 @@
     <div class="page-content">
       <h1 class="page-h1">Outreach Agent</h1>
       <div class="page-sub">
-        <span class="agent-status-pill pill-waiting"><span class="dot"></span> Waiting</span>
-        <span>0:42 paused on operator approval</span>
+        <span class="agent-status-pill pill-waiting"><span class="dot"></span> Waiting on you</span>
+        <span>0:42 paused on your approval</span>
         <span>·</span>
         <span>142 runs in last 30 days</span>
       </div>
@@ -545,27 +545,61 @@
             </div>
           </div>
 
-          <!-- Knowledge in use, with why-surfaced metadata -->
+          <!-- Knowledge in use, retrieval-payload-only with mechanical metadata -->
           <div class="card" style="margin-top:14px;">
             <div class="card-head">
-              <div class="card-title">Knowledge in use</div>
+              <div>
+                <div class="card-title">Knowledge in use</div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:1px;">Loaded into this run's context, ranked by retrieval weight.</div>
+              </div>
               <div class="card-link">Data sources →</div>
             </div>
             <div class="memory-list">
               <div class="memory-item">
-                <div><span class="memory-cat memcat-rule">rule</span> Avoid SMB deals under 50 seats</div>
-                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;">Pinned behavioural rule · used in last 3 runs</div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                  <div><span class="memory-cat memcat-rule">rule</span> Avoid SMB deals under 50 seats</div>
+                  <span style="font-size:10px;font-weight:600;color:var(--emerald-600);background:var(--emerald-50);border:1px solid #a7f3d0;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="Retrieval score (rerank-weighted)">0.94</span>
+                </div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;display:flex;gap:8px;flex-wrap:wrap;">
+                  <span>Pinned behavioural rule</span>
+                  <span>·</span>
+                  <span>Last used 2 min ago</span>
+                  <span>·</span>
+                  <span title="Share of prompt context this entry consumed">3.2% of context</span>
+                </div>
               </div>
               <div class="memory-item">
-                <div><span class="memory-cat memcat-fact">fact</span> Primary buyer persona is VP Ops or Head of RevOps</div>
-                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;">Referenced during outreach drafting</div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                  <div><span class="memory-cat memcat-fact">fact</span> Primary buyer persona is VP Ops or Head of RevOps</div>
+                  <span style="font-size:10px;font-weight:600;color:var(--emerald-600);background:var(--emerald-50);border:1px solid #a7f3d0;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="Retrieval score (rerank-weighted)">0.87</span>
+                </div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;display:flex;gap:8px;flex-wrap:wrap;">
+                  <span>Account brief</span>
+                  <span>·</span>
+                  <span>Last used 2 min ago</span>
+                  <span>·</span>
+                  <span title="Share of prompt context this entry consumed">2.4% of context</span>
+                </div>
               </div>
               <div class="memory-item">
-                <div><span class="memory-cat memcat-pref">preference</span> Never reference competitor by name</div>
-                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;">Pinned behavioural rule</div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                  <div>
+                    <span class="memory-cat memcat-pref">preference</span>
+                    Never reference competitor by name
+                    <span style="font-size:9.5px;font-weight:600;color:var(--amber-700);background:#fef3c7;border:1px solid #fde68a;padding:1px 5px;border-radius:6px;margin-left:4px;letter-spacing:0.04em;" title="Not retrieved in 47 days">STALE</span>
+                  </div>
+                  <span style="font-size:10px;font-weight:600;color:var(--slate-500);background:var(--slate-100);border:1px solid var(--slate-200);padding:1px 6px;border-radius:8px;white-space:nowrap;" title="Retrieval score (rerank-weighted)">0.71</span>
+                </div>
+                <div style="font-size:10.5px;color:var(--slate-400);margin-top:3px;padding-left:2px;display:flex;gap:8px;flex-wrap:wrap;">
+                  <span>Pinned behavioural rule</span>
+                  <span>·</span>
+                  <span>Last used 47 days ago</span>
+                  <span>·</span>
+                  <span title="Share of prompt context this entry consumed">1.1% of context</span>
+                </div>
               </div>
               <div class="memory-item" style="font-size:11px;color:var(--slate-400);text-align:center;padding:7px;">
-                + 6 more loaded for this task
+                + 6 more entries loaded into this run
               </div>
             </div>
           </div>

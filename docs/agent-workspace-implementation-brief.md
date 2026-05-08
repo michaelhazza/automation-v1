@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 7. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, a simplification pass that removed redundant cards and scaffolding, and a final differentiator-coverage pass that itemised the §10.4 positioning rewrite, surfaced the cost-attribution narrative inline on the Working Time chart, and named the non-UI deliverables explicitly so the brief is self-contained for spec.
+> **Status:** Rev 8. Pre-spec, mockups attached. **Considered ready for spec.** Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, Trust & Verification Layer spec, two reviewer passes on §5/§6/§8, a simplification pass that removed redundant cards and scaffolding, a differentiator-coverage pass (Rev 7), and a final architectural-invariants pass (Rev 8) that locked the unified `AgentPresenceState` enum, the source-of-truth hierarchy, the Working Time accounting rule, the Knowledge-in-use mechanical constraints, the anti-fake-progress rule for Current focus, the home widget deterministic ordering, and the immutable-reference invariant for run-trace file chips.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -168,6 +168,12 @@ Two surfaces composed onto one page:
 - **Identity card** (first-run only or always-visible compact form): name, role, reports-to, sub-account. Establishes the agent as an entity from the moment it is created, before any history exists. See Mockup 4.
 - **Knowledge in use**, top entries the agent uses most. Surfaces as the "Knowledge in use" card. Renamed from earlier draft "Memory snapshot" because *Knowledge in use* is clearer, less anthropomorphic, and is the term we standardised on in mockups. Linked out to the workspace Knowledge page filtered by this agent.
   - **Each entry shows contextual metadata: why this entry is surfaced.** Without metadata, the card looks archival; with it, the card looks active. Examples: *"Used in last 3 runs"*, *"Referenced during outreach drafting"*, *"Pinned behavioural rule"*, *"Recently updated"*. The metadata comes from the retrieval observability layer (Phase 1's `retrieval.summary` events, §11 of the auto-knowledge-retrieval spec). Keep the metadata short (under 30 chars per entry).
+  - **Mechanical constraints (hard).** Without these the card silently degrades into "configured knowledge sources", which destroys the why-did-the-agent-do-that trust signal it exists to provide:
+    1. **Only items actually injected into the active or most recent run's context appear.** Configured-but-unused sources do NOT surface here. They live on the Data sources tab (Phase 1).
+    2. **Order is retrieval/rerank weight, not alphabetic and not last-modified.** The most-influential entry sits at the top. Tie-break by most recent use.
+    3. **Stale entries are visibly marked.** If an entry hasn't been retrieved in the last 30 days, badge it *"Stale"* with a tooltip showing last-used date. Stale items still appear if they were injected, but the badge is the trust signal.
+    4. **Expandable provenance per entry**: source document name, last-used timestamp, retrieval/rerank score, and token contribution % (share of the prompt context this entry consumed). Click or hover surfaces the full panel. The panel reads directly from the retrieval observability event; UI MUST NOT synthesise these numbers.
+  - **Source-of-truth rule**: this card reads ONLY from the actual retrieval payload of the active or most recent run, never from `agent.configured_knowledge_sources`. See §5.3.
 - **Files snapshot**, recent files this agent produced or used, with a link to Knowledge → Files filtered by this agent.
 - **Tools the agent uses**, qualitative usage bands rather than precise counts. Three bands: *Frequently used*, *Occasionally used*, *Rarely used*, classified from rolling 30-day usage. Precise numbers stay available on hover and in the Skills tab for the rare cases an operator wants exact data. Rationale: rolling usage windows shift fast, and exact counts ("28 of 30 runs") cause unstable mental models week-to-week. Qualitative bands are stable enough to anchor a mental model and still informative enough to spot drift.
 - **Schedule peek**, when the agent runs next, what triggers it.
@@ -179,13 +185,17 @@ Two surfaces composed onto one page:
   - Compact stat row underneath: runs in period, total working time, success rate, average run duration. **The chart's stat row is the single source of performance metrics on Overview**, no separate Performance card. Earlier draft had both; the chart already covers the same ground at every timeframe, so a parallel Performance card was redundant.
 
 **Presence surface** (what the agent is doing or about to do):
-- **Status pill** (5 states, closed taxonomy):
-  - *Working* — actively executing a step. The agent is consuming compute and producing output right now.
-  - *Waiting* — run is in flight but paused. HITL approval pending, external API call in progress, dependency lock waiting. **Distinct from Working** because the agent is NOT consuming budget; this matters for cost-visibility at scale ("3 agents Working" vs "2 Working + 1 Waiting on humans" tells very different stories about consumption).
-  - *Idle* — no run in flight, has recent history. Last seen X minutes ago.
-  - *Scheduled* — no run in flight, next run is upcoming and known.
-  - *Failing* — terminal error state requiring operator attention. Distinct from a one-off failed run within an otherwise healthy agent (that's surfaced in the activity feed, not the pill).
-  - **Why split Working from Waiting**: Most competitor surfaces conflate them, which inflates apparent utilisation and obscures HITL bottlenecks. Splitting them is a structural decision that pays off as soon as agencies run >5 agents concurrently.
+- **Status pill** — driven by the unified `AgentPresenceState` enum (see §5.3 Source-of-truth hierarchy). 7 closed states, internal name on the left, display copy on the right:
+  - `idle` → *Idle* — no run in flight, has recent history. Last seen X minutes ago.
+  - `running` → *Working* — actively executing a step. The agent is consuming compute and producing output right now.
+  - `waiting_on_human` → *Waiting on you* — run is in flight but paused on a HITL approval, a clarification request, or an operator decision. Operator action is required to unblock.
+  - `waiting_on_dependency` → *Waiting on system* — run is in flight but paused on something the operator can't act on: external API call in progress, dependency lock, retry backoff, sub-agent delegation.
+  - `scheduled` → *Scheduled* — no run in flight, next run is upcoming and known.
+  - `degraded` → *Status uncertain* — presence telemetry has degraded (event stream delayed, worker heartbeat stale, orchestration disconnected). The agent may still be working; the system can't currently confirm. See §5.2.
+  - `failed` → *Failing* — terminal error state requiring operator attention. Distinct from a one-off failed run within an otherwise healthy agent (that's surfaced in the activity feed, not the pill).
+  - **Why split `waiting_on_human` from `waiting_on_dependency`**: the operator's required action is fundamentally different. Conflating them ("Waiting") makes HITL bottlenecks invisible at scale. *Waiting on you* says *I need you*. *Waiting on system* says *I'm fine, just blocked elsewhere*. The home widget orders by this distinction (§6).
+  - **Why split `running` from `waiting_*`**: most competitor surfaces conflate them, which inflates apparent utilisation and obscures cost. *Running* consumes compute; *Waiting* does not. At >5 agents this matters for COGS visibility (Rev 5 §11.6).
+  - **Single source of truth**: every presence-aware surface (Overview hero pill, Home Active Agents widget, sidebar agent list, run trace header, activity badges, Inbox notifications) MUST read from the same `AgentPresenceState` value. UI MUST NOT re-derive state from raw signals. See §5.3.
 - **Current focus**, one-line plain-language summary of what the agent is thinking about *right now*. Backed by the latest step in the active run (if any) or the next scheduled action. **First-class invariants pinned in §5.1.**
 - **Live elapsed time**, for active runs.
 - **Recent observations**, default 3 typed entries with a *"Show more"* expand to reach the full set (up to 5). **Type-discriminated** (closed enum, no freeform):
@@ -217,6 +227,14 @@ Current focus is the emotional centre of the product. If it drifts, lags, or bec
 - **Verbosity ceiling.** Focus copy is a single sentence. No multi-line summaries.
 - **Truncation discipline (hard).** The focus line is **1-line ellipsis** by default. Full text on hover (tooltip). Click expands inline OR navigates to the run trace step that produced the focus. Truncation length: **140 characters before ellipsis** for desktop; tighter on narrower viewports per the existing responsive pattern. This prevents layout blowout on long company names, localised copy, and dense agent rows.
 - **No marketing-language drift.** Copy is operator-readable plain English ("Drafting email body using retrieved contact data") not anthropomorphic ("The agent is thinking carefully about Sarah Chen's preferences"). Mockup 2 is the tone reference.
+- **Anti-fake-progress rule (hard).** Generic cognition-language is forbidden. Every focus line MUST reference at least one of:
+  - a concrete step (*"Step 7 of 14: drafting outreach email"*),
+  - a concrete entity or object (*"Acme Corp VP Operations"*, *"contact 4719"*, *"invoice INV-2026-0142"*),
+  - or a concrete blocking condition (*"Awaiting your approval on draft email to Acme Corp VP Operations"*, *"HubSpot rate limit, retrying in 12s"*).
+
+  **Forbidden** (generic, unfalsifiable, decorative): *"Thinking…"*, *"Analysing data…"*, *"Working on task…"*, *"Reasoning about contact selection"*, *"Preparing outreach strategy"*, *"Processing"*, any *-ing* verb without an object.
+
+  **Why hard:** generic copy is the signature failure mode of agent platforms; it lets a stuck or shallow agent look busy. The focus line is the most-watched surface in the product, so it carries the highest trust load. The rule is enforced at the summarisation step that produces the focus copy: if the latest event has no concrete subject, the focus line falls back to the explicit stale-state copy (§5.1 Stale-state handling) rather than synthesising filler.
 
 ### 5.2 Presence degradation states (infrastructure-aware)
 
@@ -233,7 +251,72 @@ The Overview tab and the Home Active Agents widget MUST surface degradation expl
 
 These states are visible to the operator. They are NOT silent fallbacks. Trust depends on the system being honest about uncertainty. Spec author should mock each degraded state explicitly.
 
-The status pill values from §5 (Working / Waiting / Idle / Scheduled / Failing) remain closed; degradation states attach as **subtitles or auxiliary indicators**, not as new pill values. This keeps the primary taxonomy clean.
+The seven `AgentPresenceState` values from §5 (`idle / running / waiting_on_human / waiting_on_dependency / scheduled / degraded / failed`) are the closed primary taxonomy. The conditions in the table above are the *causes* that drive a transition into `degraded`; the table's "UI behaviour" column is how that single state surfaces (subtitle for sub-conditions, distinct pill for the primary state).
+
+### 5.3 Source-of-truth hierarchy (cross-cutting invariant)
+
+The Overview tab (and every other presence-aware surface) composes data from multiple subsystems: run trace events, retrieval observability events, scheduler state, materialised observation rows, append-only activity rows. Without a strict precedence model, builders will inevitably synthesise UI state from mixed sources and visible drift will appear. This subsection pins the rules.
+
+**`AgentPresenceState`** — derived once, server-side, from the priority list below. Every UI surface reads the resolved state; UI MUST NOT re-derive presence from raw signals.
+
+```
+AgentPresenceState resolution order (first match wins):
+  1. degraded            — any §5.2 degradation condition is currently true
+  2. failed              — agent is in terminal error state
+  3. waiting_on_human    — active run is paused at a HITL gate
+  4. running             — active run has at least one step in flight
+  5. waiting_on_dependency — active run is paused on external system / lock / retry / sub-agent
+  6. scheduled           — no active run, next run time is known
+  7. idle                — none of the above
+```
+
+**`Current focus`** — single value, resolved from this fallback chain (first match wins):
+1. `run_execution_state.current_step` of the active run (the latest non-idle step).
+2. `pending_hitl_gate` description, when status is `waiting_on_human`.
+3. `scheduled_next_run` description, when status is `scheduled`.
+4. `last_completed_run` summary, when status is `idle`.
+5. Static fallback per §5.1 stale-state handling.
+
+The focus line MUST NEVER be synthesised from raw event content the summariser can't anchor; if no source resolves, fall back to stale-state copy, never to filler.
+
+**`Recent observations`** — materialised observation rows only. Each observation is a typed row written at the moment the underlying event landed (run trace step, retrieval summary, structured tool result, memory_block insert). Observations MUST NEVER be inferred from activity-feed text or summarised post-hoc. The provenance invariant in §5 applies: every row traces to a concrete event id.
+
+**`Knowledge in use`** — actual retrieval payload from the active or most recent run only. Reads from the retrieval observability layer. MUST NOT read from `agent.configured_knowledge_sources` or any "what knowledge could the agent use" view. *Configured* is on the Data sources tab; *In use* is here, and the distinction is the point.
+
+**`Activity feed`** — append-only audit/event stream only. Rows are written by the systems that own each event class (run lifecycle, scheduler, memory, connections). The feed is a projection of the audit log filtered to this agent. UI MUST NOT compose the feed from inferred or summarised state.
+
+**`Working time` chart** — `agent_execution_events` rows of type `step_started` / `step_completed` for this agent, summed per timeframe bucket. See §5.4 for the accounting invariant.
+
+**Why this matters.** Three concrete drift modes this hierarchy prevents:
+- Synthesising *Current focus* from activity-feed text (drifts from real run state, lags, lies).
+- Treating *configured knowledge* as *Knowledge in use* (looks active, isn't, destroys the why-did-the-agent-do-that signal).
+- Inferring *Recent observations* from LLM summaries of the run trace (no provenance, no trace-back, breaks operator trust the moment they try to drill in).
+
+Spec author should treat this section as load-bearing. If a future surface needs a piece of presence-shaped data and the source isn't named here, the answer is to extend §5.3, not to invent a side channel.
+
+### 5.4 Working Time accounting (formal definition)
+
+The Working Time chart caption commits the product to *"you're billed for this time only, not while the agent is idle."* Without a hard backend definition, support tickets become inevitable as soon as an operator reconciles the chart against an invoice. The spec author MUST pin the accounting rule before the chart ships.
+
+**Working Time is the sum of intervals during which an `agent_execution_events.step_started` event has fired and the matching `step_completed` event has not yet fired, for runs owned by this agent.**
+
+Inclusion / exclusion rules (closed list):
+
+| Condition | Included in Working Time? | Billed? | Rationale |
+|---|---|---|---|
+| Active LLM call or tool call (state = `running`) | **Yes** | Yes | This is the work. |
+| Queue wait before a step starts | No | No | Pre-work; not the agent's labour. |
+| HITL pause (state = `waiting_on_human`) | No | No | Operator-blocked; the agent is not consuming compute. |
+| External API in flight (state = `waiting_on_dependency`) | No | No | The agent is suspended; matches Rev 5's no-idle-compute pitch. |
+| Retry backoff between attempts | No | No | The agent is not consuming compute during the backoff. |
+| Sub-agent delegation (this agent invoked another) | **Yes for the parent**, also Yes for the sub-agent | Yes for both, attributed separately | Both agents are working. Cost is attributed to each line item; reconciliation rolls up to the parent run for invoice purposes. |
+| Failed step | **Yes**, up to the moment the failure is recorded | Yes | Failed work still consumed compute. |
+| Concurrent runs of the same agent | Time intervals are **summed, not deduplicated** | Yes | Two parallel runs do twice the work. |
+| Time spent in `degraded` state | **Best-effort included** based on last known step timestamps | Yes (matches Working Time) | Honest about uncertainty; if the spec author finds a case where this over-charges, document it as an exception. |
+
+**Reconciliation invariant.** The Working Time chart total for any timeframe MUST exactly equal the billable time the operator sees on the invoice for that same timeframe. If the two ever drift, the chart is wrong, not the invoice.
+
+**Hover affordance.** Each bar in the chart, when hovered, shows the run id(s) contributing to that bucket. This is the operator's escape hatch when reconciling against the invoice.
 
 ### Three states the tab must handle
 
@@ -300,11 +383,21 @@ This brief ships that richer widget.
 
 **Visible-row cap and overflow rule.** Agencies routinely run 20+ agents simultaneously, especially during scheduled bursts. Without a cap the widget grows unbounded.
 
-- **Working-now section**: top 5 visible. Sort: longest-running first (so the operator sees what's been busy). Overflow collapses into *"+N more working"* link that opens the Agents list filtered to running.
-- **Scheduled-next section**: top 5 visible. Sort: nearest-next-run first. Overflow collapses into *"+N more scheduled today"*.
-- **Idle section**: NOT shown by default in this widget. Idle agents are accessed via the All-agents link or via the Agents page. The widget is for *what's in motion or about to be*.
+**Section order (top to bottom, deterministic):**
 
-This keeps the widget at most 12 rows tall (5 + section header + 5 + section header + footer) regardless of agency size. Spec author should mock the 20-running case before declaring layout shippable.
+1. **Waiting on you** (`waiting_on_human`) — operator action required to unblock. Listed first because *the operator is the bottleneck*; surfacing this anywhere else hides the queue. Top 5 visible; overflow collapses into *"+N more waiting on you"*.
+2. **Working now** (`running`) — actively executing. Top 5 visible; overflow collapses into *"+N more working"*.
+3. **Failing** (`failed`) — terminal error state requiring attention. Top 5 visible; overflow collapses into *"+N more failing"*. Hidden when empty.
+4. **Scheduled next** (`scheduled`) — soonest first. Top 5 visible; overflow collapses into *"+N more scheduled today"*.
+5. **Idle** (`idle`) — NOT shown by default in this widget. Accessed via the All-agents link. The widget is for *what's in motion, blocked, or about to be*.
+
+Within each section, sort by `updated_at DESC` (most-recently-changed first). For `Scheduled next` only, override with `next_run_at ASC` (soonest first), since scheduled-time ordering is more useful than recency.
+
+`waiting_on_dependency` agents are intentionally NOT a visible section. They consume no operator attention and no budget; surfacing them as a peer to *Waiting on you* dilutes the urgency signal. Count is rolled into the *Working now* footer (e.g. *"3 working, 2 paused on system"*).
+
+`degraded` agents float up into whichever section their primary state would have been (a degraded-but-running agent appears in *Working now* with the *Status uncertain* badge). The badge is the trust signal; the section placement preserves the operator's mental model of where the agent normally lives.
+
+This keeps the widget at most ~17 rows tall (5 + section header, four times, plus footer) regardless of agency size. Spec author should mock the 20-running case before declaring layout shippable.
 
 **Why this widget delivers the "always-on" promise without idle compute.** Per Rev 5 §10.4, "always-on" is delivered via schedulers + persistent state, not via continuously running compute. This widget makes that visible: the operator sees what's running NOW (3 of 18) plus what's scheduled to run next (5 today). The workspace feels staffed even though no compute is idle. The cost story (you only pay when work is happening) ships alongside the perceptual story.
 
@@ -341,6 +434,21 @@ Small. The existing Run trace surface (`prototypes/consolidation-2026-05-06/run-
 **Change:** when an event produced a file, show a "📎 Output" chip row inline below the event content. Each chip is a clickable file (icon + filename) that deep-links to the file in Knowledge → Files (Phase 1 surface). Sub-agent events that produced files surface them too (labeled "📎 From sub-agent"). The Event detail panel on the right also surfaces produced files in a dedicated section so they are visible whether you scan or drill in.
 
 **This is complementary, not a replacement.** The existing run trace structure (run chain, event types, event detail panel, live/historical mode toggle, Trace/Delegation graph tabs) is unchanged. The file lineage is one additional row inside the `event-row`. See Mockup 5 for the visual.
+
+**Immutable-reference invariant (hard).** Every file chip resolves to the **exact artifact produced at that event**, not to "the current version of the file with this name". Without this, reruns, regenerated files, corrected outputs, and promoted-to-knowledge artifacts create temporal ambiguity inside the trace ("which version of `acme-contacts.csv` did this step actually use?"), and the trace stops being a faithful record of what happened.
+
+Each chip is keyed on the tuple:
+
+```
+(run_id, event_id, produced_file_id, produced_version_id)
+```
+
+Click resolution behaviour:
+- Default click: opens the artifact at `produced_version_id` in Knowledge → Files. The file chrome shows *"As produced by Outreach Agent run 1283, step 7 — 2 days ago"* and a *"View latest"* affordance for the operator who genuinely wants the current version.
+- The chip itself never silently re-binds to a newer version. If the source file is later corrected, regenerated, or superseded, the chip still resolves to the version produced at this event. A small *"Newer version available"* badge MAY appear on the chip when the version is no longer current, but the link target stays bound.
+- "Promote to knowledge" promotes the *exact version* the chip points at. The promoted knowledge entry stores the same tuple as its origin reference.
+
+Spec implication: the artifact store schema MUST surface a stable `produced_version_id` per write. The Phase 1 Files tab MUST accept the four-part tuple in its deep-link URL shape. Lock this query-parameter contract with the Phase 1 spec author before mockup-to-spec conversion.
 
 **Chip wrapping and row-height constraints (hard).** Without explicit caps, worst-case event rows (8+ files, long filenames, sub-agent outputs, Trust badges, Correct hover) get visually noisy fast. Spec must pin:
 
@@ -503,4 +611,4 @@ The competitive frame, plain English: *"Open your agent and see it working. Or s
 
 ---
 
-> **Brief is final at Rev 7, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here. Positioning-rewrite deliverables and non-UI dependencies are itemised in §3. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
+> **Brief is final at Rev 8, ready for spec.** Strategic argument is in the locked Rev 5 of `docs/agent-cloud-compute-dev-brief.md`. Implementation invariants are in §5-§8 here, with the architectural-invariants pass (Rev 8) pinning the unified `AgentPresenceState`, the source-of-truth hierarchy (§5.3), the Working Time accounting rule (§5.4), and the immutable file-lineage tuple (§8). Positioning-rewrite deliverables and non-UI dependencies are itemised in §3. Risk surface is in §12. The mockups linked in the header capture the UX. The next move is invoking the architect agent against this brief, producing an implementation spec, and shipping in chunks against that spec.
