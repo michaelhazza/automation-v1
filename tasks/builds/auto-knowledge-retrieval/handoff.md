@@ -129,3 +129,86 @@ None blocking. All Phase 1 ambiguity was resolved during the spec-reviewer + cha
 - Lock five-tier scope CHECK invariant: exactly one tier active per row, organisation = all FK columns NULL (item 5).
 - Lock ranking determinism: comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC`; document relevance = `MAX(chunk.finalScore)` (items C + D).
 - Round 2 ChatGPT review declined; spec frozen at `8a44844c`.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**phase_status:** PHASE_3_COMPLETE
+**Completed at:** 2026-05-08T12:06:00Z
+**HEAD at finalisation:** `9a4a4557`
+**PR number:** #274 — https://github.com/michaelhazza/automation-v1/pull/274
+**ready-to-merge label applied at:** 2026-05-08T12:06:00Z
+
+### State-machine note
+
+Phase 3 entry was permitted with `tasks/current-focus.md` `status: BUILDING` (not the `REVIEWING` value the entry guard normally enforces). Phase 2 review pipeline was complete per the operator's explicit kickoff context and verified against branch commits — `33f30ae4` (spec-conformance), `9535d59c` (adversarial fixes), `384bd7cd` (pr-reviewer fixes), `9662b8b7` (dual-reviewer fixes), `9a4a4557` (external ChatGPT review follow-ups). The state field was never advanced from `BUILDING → REVIEWING` during Phase 2; not a correctness issue, just a missing pointer update. Phase 3 advances the field directly to `MERGE_READY` per its standard contract.
+
+### Phase 2 review pipeline summary (per operator kickoff)
+
+| Reviewer | Verdict | Disposition |
+|---|---|---|
+| spec-conformance | NON_CONFORMANT | 14 directional gaps deferred as `AKR-CONF-1..14` |
+| adversarial-reviewer | HOLES_FOUND | 3 confirmed-holes FIXED (`9535d59c`); 5 likely-holes deferred (`AKR-ADV-2/3/5/W1/W2`) |
+| pr-reviewer | CHANGES_REQUESTED → APPROVED | 4 mechanical fixes applied (`384bd7cd`); 9 design/UX deferred (`PR-REV-B2/B3/S2/S3/S4/S6/N1-N3`) |
+| dual-reviewer | APPROVED (2 Codex iters) | 2 P1 RLS-context bugs FIXED (`9662b8b7`) — 3 worker files |
+| chatgpt-pr-review | **SKIPPED** | Operator instructed autonomous mode; manual ChatGPT-web loop incompatible. REVIEW_GAP flagged (matches consolidation-govern PR #273 precedent) |
+| External PR review (ad-hoc ChatGPT) | APPROVE-with-follow-up | 4 net-new items appended as `AKR-EXT-1..4` (`9a4a4557`); 95% overlap with existing deferred items |
+
+### REVIEW_GAP
+
+`chatgpt-pr-review: SKIPPED` — operator chose autonomous mode (no manual ChatGPT-web round trips). The build did receive: spec-conformance, pr-reviewer (re-checked APPROVED after mechanical fixes), adversarial-reviewer, dual-reviewer (Codex APPROVED after 2 iterations), and an external ChatGPT review. Consider running `chatgpt-pr-review` retrospectively against the merged commit if the build's risk profile warrants further review.
+
+### Phase 3 actions
+
+| Step | Result |
+|---|---|
+| S2 branch sync | No-op — branch already contained `origin/main` HEAD `ac20aa2f`. 0 commits behind main, no migration collision (branch carries 0288–0294, main capped at 0287). |
+| G4 regression-guard | GREEN. `npm run lint` 0 errors / 849 warnings (baseline level, not new). `npm run typecheck` clean (both root + server tsconfig). |
+| PR existence | Confirmed open: PR #274. |
+| chatgpt-pr-review | Skipped per operator (autonomous mode). REVIEW_GAP recorded above. |
+| Doc-sync sweep | Verdicts table below. |
+| KNOWLEDGE.md | 8 patterns appended (worker-opt-out FORCE-RLS reads, embedding silent-truncation observability, pure-helper-return-discarded bug shape, retrieval-version completeness read-path enforcement, document-promotion atomicity audit-anchor, retrieval-ranker generic-core extraction, bounded observability payload pattern, always-available preventive UI surface). |
+| tasks/todo.md cleanup | No items closed — operator explicitly directed deferred items to remain in place. 33 items in `AKR-CONF-*`, `AKR-ADV-*`, `PR-REV-*`, `AKR-EXT-*` namespaces left intentionally. |
+| current-focus.md | Status `BUILDING → MERGE_READY`. Active fields cleared. `last_merge_ready_*` keys recorded. |
+| ready-to-merge label | Applied 2026-05-08T12:06:00Z. CI runs G5 (full lint + typecheck + test gates). |
+
+### Doc-sync sweep verdicts
+
+Investigation procedure ran per `docs/doc-sync.md` for every registered doc.
+
+| Doc | Verdict |
+|---|---|
+| `architecture.md` | **yes** — added new § *Document Retrieval Pipeline* covering five-tier scope model, modes (auto / always-available / reference-only), source provenance, the seven new/extended tables (0288–0294), retrieval version completeness invariant, ranking determinism, generic ranker shared with memory blocks, bounded observability payload contract, always-available telemetry, files-vs-documents split, key files list, routes table. Added 4 rows to § *Key files per domain*: modify retrieval pipeline; modify Knowledge Documents/Files tabs; add new scope tier; promote a file to Knowledge document. |
+| `docs/capabilities.md` | **yes** — extended § *Memory & Knowledge System* with 4 new bullets covering semantic document retrieval, three retrieval modes, Add to Knowledge promotion, and always-available budget guidance. Vendor-neutral, editorial-rules compliant. Added Changelog entry (2026-05-08). |
+| `docs/integration-reference.md` | **n/a** — checked grep terms `retrieval`, `reference_document`, `document_chunk`, `loading_mode`, `always_available`; zero hits. No integration behaviour change in this build. |
+| `CLAUDE.md` | **n/a** — checked grep terms above; zero hits. No build-discipline / agent-fleet / locked-rule changes in this build. |
+| `DEVELOPMENT_GUIDELINES.md` | **n/a** — checked grep terms above; zero hits. No new schema invariant, gate, or §8 rule introduced — the FORCE-RLS-worker-opt-out finding is captured in KNOWLEDGE.md instead (per CLAUDE.md §13: rules belong in DEVELOPMENT_GUIDELINES.md, observations in KNOWLEDGE.md; this is closer to an observation than a hard rule). |
+| `CONTRIBUTING.md` | **n/a** — no lint-suppression / `// reason:` policy change. |
+| `docs/frontend-design-principles.md` | **yes** — already updated in branch (commit during Phase 2 mockup pass): added § *Recurring UI patterns* with 9 sub-sections (three-dot menus, source badges, token/cost/size info, stat tiles, explainer banners, admin-only controls, default-case controls, modal advanced expanders, em-dashes, sub-text on rows) plus 10 new pre-design checklist items. Already merged to branch HEAD. |
+| `KNOWLEDGE.md` | **yes** — 8 patterns appended (listed above in Phase 3 actions row). |
+| `docs/spec-context.md` | **n/a** — spec-review session only; not applicable to PR finalisation. |
+| `docs/decisions/` (ADRs) | **no — rationale captured in spec.md instead.** Spec § *Decisions made in Phase 1* (in this handoff doc) captures the durable architectural choices (per-document embedding model, retrieval version completeness, ranking comparator chain, five-tier scope CHECK shape, always-available telemetry shape). Spec.md is the authoritative artefact for build-specific decisions; promoting to standalone ADRs would duplicate. If any of these decisions get cited 3+ times in future specs, promote then. |
+| `docs/context-packs/` | **n/a** — no architecture.md anchor changes. New § *Document Retrieval Pipeline* anchor added but no existing pack referenced the prior section structure. |
+| `references/test-gate-policy.md` | **n/a** — no test-gate posture change. |
+| `references/spec-review-directional-signals.md` | **n/a** — no new spec-review classifier signal repeated >2 times. |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | **n/a** — repo-specific application changes; framework version 2.1.0 unchanged. |
+
+### Spec deviations reviewed
+
+The 14 `AKR-CONF-*` directional gaps from spec-conformance are intentional design-decision deferrals (e.g. AKR-CONF-1/2 simplified-ranker design vs spec contract; AKR-CONF-5 5-tier candidate-pool reduced to 3-tier in `retrievalService` pending design resolution). These are NOT regressions — each is a spec-vs-impl divergence the build team chose to ship with, routed to backlog for explicit design resolution rather than rushed in-build. Operator-acknowledged: "do not implement them as part of finalisation".
+
+### Outstanding deferred items (intentional, in `tasks/todo.md`)
+
+| Namespace | Count | Notes |
+|---|---|---|
+| `AKR-CONF-*` | 14 | spec-conformance directional gaps (e.g. CONF-1/2 simplified ranker, CONF-5 3-tier candidate pool) |
+| `AKR-ADV-*` | 5 | adversarial-reviewer likely-holes (W1/W2/2/3/5) |
+| `PR-REV-*` | 9 | pr-reviewer design/UX strong-recommendations (B2, B3, S2, S3, S4, S6, N1, N2, N3) |
+| `AKR-EXT-*` | 4 | external ChatGPT review follow-ups; 95% overlap with above |
+
+Total: 33 items deferred, all named in `tasks/todo.md` for post-merge backlog grooming.
+
+### Final verdict
+
+**MERGE_READY.** PR #274 labelled `ready-to-merge` at 2026-05-08T12:06:00Z. CI runs the full G5 gate suite. Operator drives merge sequence per Phase 3 end-of-phase prompt.

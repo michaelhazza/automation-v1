@@ -963,6 +963,128 @@ Both are process-local (single-instance assumption — see tasks/todo.md D-GPT-1
 
 ---
 
+<a id="document-retrieval-pipeline"></a>
+## Document Retrieval Pipeline
+
+Auto-knowledge-retrieval ranks document chunks by semantic relevance at run start instead of dumping every attached document into the prompt. Spec: [`tasks/builds/auto-knowledge-retrieval/spec.md`](./tasks/builds/auto-knowledge-retrieval/spec.md). Migrations 0288–0294.
+
+### Five-tier scope model
+
+A document attaches at exactly one tier per `reference_document_data_sources` link row. Higher precedence wins on same-name override.
+
+| Tier | Tier ID | Scope key columns |
+|---|---|---|
+| 1. Task instance | `task_instance` | `task_instance_id` non-NULL |
+| 2. Recurring task | `recurring_task` | `scheduled_task_id` non-NULL |
+| 3. Agent | `agent` | `agent_id` non-NULL |
+| 4. Sub-account | `subaccount` | `subaccount_id` non-NULL |
+| 5. Organisation | `organisation` | all four scope FK columns NULL |
+
+CHECK constraint on `reference_document_data_sources` (migration 0290) enforces "exactly one tier active per row" by naming the four FK columns explicitly. A polymorphic `scope_type` + `scope_id` was rejected so RLS policies stay straightforward and tier-specific partial indexes remain possible.
+
+### Modes
+
+`reference_documents.mode` is a closed enum:
+
+- `auto` (default) — eligible for retrieval, participates in threshold + ranking + budget
+- `always_available` — bypasses threshold and ranking, but **still participates in the overall context budget**. If always-available alone exceeds context, the system surfaces operator guidance via the always-available starvation telemetry (§Always-available telemetry below).
+- `reference_only` — never auto-loaded. Only title + 1–2 sentence summary appears in the prompt manifest; the agent fetches full content via `read_data_source`.
+
+Adding a new mode is a spec amendment, not an emergent shape.
+
+### Source provenance
+
+`reference_documents.source` (closed enum): `manual` (default), `from_file`, `auto_memory_approved`, `synthesised_by_agent` (reserved), `external` (legacy Drive). Only non-default values render a UI badge — the absence of a badge is the visual carrier of "this is normal".
+
+### Data model
+
+| Table | Migration | Purpose |
+|---|---|---|
+| `reference_documents` (extended) | 0288 | New columns: `mode`, `summary`, `summary_stale`, `summary_generated_at`, `last_chunked_at`, `active_embedding_model`, `retrieval_version_id`. The two pointers (`active_embedding_model`, `retrieval_version_id`) are the read-side switches; chunking flips them atomically only when the new chunk set is complete. |
+| `reference_document_chunks` | 0289 | New. Keyed `(version_id, chunk_index, embedding_model)` with `vector(1536)` embedding column + HNSW index. Each chunk references its parent `document_version_id` so version pinning survives. Retrieval reads at chunk granularity; whole-document embeddings are NOT stored on `reference_documents`. |
+| `reference_document_data_sources` | 0290 | New join table. One row per (document, scope) attachment. Carries the five-tier scope key columns + tier CHECK constraint. Mode is on the document, not the link, so all attachments of the same document share the same mode (§Modes above). |
+| `memory_blocks` (extended) | 0291 | Adds nullable `scheduled_task_id` for the new "recurring task" memory-block tier. Memory blocks do NOT gain `task_instance_id` (persistent memory at an ephemeral scope is a category error). |
+| `agent_execution_events` (extended) | 0292 | Partial unique index enforcing exactly one `retrieval.summary` event per run. |
+| `agent_data_sources` (extended) | 0293 | Drops `loading_mode` column after Phase 4 cutover. All sources are eager — see § Eager loading after migration 0293. |
+| `document_promotion_audit` | 0294 | New append-only ledger of `(file_id, document_id, organisation_id, principal_id, created_at)` with `UNIQUE (file_id) WHERE deleted_at IS NULL`. Idempotency anchor for Add-to-Knowledge promotion. |
+
+### Retrieval version completeness invariant
+
+`reference_documents.retrieval_version_id` MUST always reference a version whose full chunk set exists for `active_embedding_model`. The chunking job MUST NOT flip the pointer until every chunk for the new version has been written + embedded. Mid-flip reads would surface partial documents — pinned by the test fixture in `documentRetrievalServicePure.test.ts`.
+
+### Ranking determinism
+
+The pure ranker (`retrievalServicePure.ts`) consumes `RetrievalCandidate[]` (chunks + memory blocks via the same shape) and returns deterministic load order. Comparator chain — DO NOT REORDER:
+
+```
+finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC
+```
+
+`id ASC` is the determinism anchor. Document-level relevance is `MAX(chunk.finalScore)` — never average / sum / weighted. Pinned in `retrievalServicePure.test.ts`.
+
+### Generic ranker shared with memory blocks
+
+`memoryBlockRetrievalServicePure` retains its block-specific filters (priority enum, divergence flags, owner-agent) but delegates ranking to the same `retrievalServicePure` core. Future cross-encoder re-ranking, learned thresholds, and new knowledge primitives all benefit from concentrating the algorithm in one place.
+
+### Bounded observability payload contract
+
+`retrievalObservabilityService` emits a single `retrieval.summary` event per run into `agent_execution_events` (canonical storage). Truncation values are constants; tests assert byte-bounded payloads, and replays must be byte-identical (ranking determinism invariant). When production traces look thin, the documented escalation path is to migrate to the deferred dedicated `retrieval_events` table — NOT to raise the truncation caps in place.
+
+### Always-available telemetry
+
+Preventive surface, not a runtime safety net. Constants in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred.
+
+- Soft warning surfaces in the Documents tab when `doc_count >= 30` OR `token_cost >= 30000` for always-available documents in scope.
+- Operator-facing copy when always-available documents exceed budget mid-run: `"Context limits prevented some always-available documents from loading."`
+- Telemetry events: `retrieval.always_available.doc_count`, `retrieval.always_available.token_cost`. Threshold tuning is a post-launch amendment once production data lands.
+
+### Files vs Documents
+
+`execution_files` is NOT modified by this build. The Files tab is a read view of existing rows filtered by sub-account / agent / scope. The "Add to Knowledge" action transforms an `execution_files` row into a new `reference_documents` row plus link rows; the file row itself is untouched in the inline transaction. The source file becomes durable — `execution_files.expiresAt` is flipped to NULL or far-future by the `document:promotion-finalise` job after the chunking job commits. Until finalise runs, the file is still expirable; the `document_promotion_audit` row prevents the promotion path from re-running if expiry races finalise. Operator-facing: the file row is marked "durable" in the UI as soon as the inline transaction completes (audit-row backed); the `expiresAt` flip is invisible to the operator.
+
+### Key files
+
+| File | Purpose |
+|---|---|
+| `server/services/retrievalServicePure.ts` | Generic ranker over `RetrievalCandidate[]`. Pure. |
+| `server/services/retrievalService.ts` | DB-backed surface: builds candidate pool RLS-scoped, hands to the pure ranker, returns load order + observability snapshot. |
+| `server/services/documentRetrievalServicePure.ts` | Document-specific filters before ranking (mode, version pinning, chunk grouping). |
+| `server/services/memoryBlockRetrievalServicePure.ts` | Block-specific filters; delegates ranking to `retrievalServicePure`. |
+| `server/services/documentChunkingServicePure.ts` | Chunk-boundary heuristics. Pure. |
+| `server/services/documentEmbeddingService.ts` | OpenAI embedding for chunks. Wraps `withBackoff`. |
+| `server/services/documentSummariseService.ts` | Cheap-LLM summarisation, async. |
+| `server/services/documentDataSourceService.ts` | CRUD + scope validation for `reference_document_data_sources`. The only path that mutates link rows. |
+| `server/services/documentPromotionService.ts` | Add-to-Knowledge transaction: file → document + link rows + `document_promotion_audit` row. |
+| `server/services/retrievalObservabilityService.ts` | Emits the `retrieval.summary` event into `agent_execution_events`. |
+| `server/services/retrievalObservabilityServicePure.ts` | Pure truncation + payload-shaping helpers. |
+| `server/services/referenceDocumentService.ts` | Chunk-aware version write; mode-update API; triggers summarise + chunk-embed jobs. |
+| `server/jobs/documentSummariseJob.ts` | `document:summarise` queue handler. |
+| `server/jobs/documentChunkEmbedJob.ts` | `document:chunk-embed` queue handler. Atomic-swap source of truth for `retrieval_version_id`. |
+| `server/jobs/documentReembedJob.ts` | `document:reembed` queue handler. Background sweep on embedding-model upgrade. |
+| `server/jobs/documentPromotionFinaliseJob.ts` | `document:promotion-finalise` queue handler. Marks file durable + emits telemetry. |
+| `server/db/schema/referenceDocumentChunks.ts` | Drizzle schema. |
+| `server/db/schema/referenceDocumentDataSources.ts` | Drizzle schema. |
+| `server/db/schema/documentPromotionAudit.ts` | Drizzle schema. |
+| `shared/types/retrieval.ts` | `RetrievalCandidate`, `RetrievalResult`, `RetrievalRejectionReason`, `RetrievalMode`. |
+| `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` | Documents tab — list / add / edit / promote. |
+| `client/src/pages/govern/components/KnowledgeFilesTab.tsx` | Files tab — read view of `execution_files` with Add-to-Knowledge action. |
+| `client/src/api/filesApi.ts` | Client API hooks for the Files tab. |
+| `prototypes/auto-knowledge-retrieval/` | Mockup directory; design source of truth. |
+
+### Routes
+
+| Route | File | Purpose |
+|---|---|---|
+| `GET /api/reference-documents/...` | `referenceDocuments.ts` | List documents in scope; mode + scope link CRUD; promotion endpoint |
+| `GET /api/files/...` | `files.ts` | List execution files for a given scope (Files tab surface) |
+| Existing scheduled-task data-source routes | `scheduledTasks.ts` | Unchanged; consumed for the recurring-task tier |
+
+### Eager loading after migration 0293
+
+`agent_data_sources.loading_mode` was dropped. All sources are now eager and walk through `runContextLoader.ts` step 6. Historical `agent_runs.context_sources_snapshot` rows may carry a legacy `loadingMode` field — the type marks it optional for backward compat. The lazy-manifest cap (`MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT`) is gone.
+
+---
+
 <a id="scraping-engine"></a>
 ## Scraping Engine
 
@@ -3418,6 +3540,10 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Attach a Google Drive file as a live external reference | `server/services/externalDocumentResolverService.ts` (resolve pipeline) + `server/services/resolvers/googleDriveResolver.ts` (Drive fetch + normalisation) + `server/routes/externalDocumentReferences.ts` (CRUD) + `server/routes/integrations/googleDrive.ts` (OAuth + picker). Cache: `document_cache`. Audit log: `document_fetch_events`. Pure helpers: `server/services/runContextLoaderPure.ts`. See §External Document References above. |
 | Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Entry point: `server/services/cachedContextOrchestrator.ts::cachedContextOrchestrator.execute()`. Pipeline: budget resolution (`executionBudgetResolver.ts`) → bundle snapshotting (`bundleResolutionService.ts`) → assembly + validation (`contextAssemblyEngine.ts` + pure `contextAssemblyEnginePure.ts`) → `llmRouter.routeCall` (gains `prefixHash` + `cacheTtl` params) → terminal `agent_runs` UPDATE. Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. Hash: `computeAssembledPrefixHash` in `contextAssemblyEnginePure.ts` (constant `ASSEMBLY_VERSION`). HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry.ts`. New `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. New `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. |
 | Modify document bundle membership or attachments | `server/services/documentBundleService.ts` (create/promote/attach/dismiss) + pure helpers in `documentBundleServicePure.ts` (computeDocSetHash). Unnamed bundles store `doc_set_hash:<hash>` as description sentinel for O(1) lookup. Attachment routes: `server/routes/documentBundles.ts`. Upload flow: `server/routes/referenceDocuments.ts` (reusable multi-file upload `POST /api/reference-documents/upload`). |
+| Modify the document retrieval pipeline (chunk ranking, mode handling, scope precedence) | `server/services/retrievalServicePure.ts` (pure ranker, comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` — DO NOT REORDER) + `server/services/retrievalService.ts` (DB-backed surface) + `server/services/documentRetrievalServicePure.ts` (mode + version-pinning filters) + `server/services/documentChunkingServicePure.ts` (chunk boundaries) + `server/services/documentEmbeddingService.ts` + `server/services/documentSummariseService.ts` + `server/services/retrievalObservabilityService.ts` + `server/services/retrievalObservabilityServicePure.ts` + `shared/types/retrieval.ts`. Jobs: `documentSummariseJob`, `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`. Tables: `reference_documents` (extended), `reference_document_chunks`, `reference_document_data_sources`, `document_promotion_audit`. Migrations 0288–0294. See § Document Retrieval Pipeline above. |
+| Modify the Knowledge Documents / Files tabs | `client/src/pages/govern/KnowledgePage.tsx` (tab strip) + `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` + `client/src/pages/govern/components/KnowledgeFilesTab.tsx` + `client/src/api/filesApi.ts`. Mockups: `prototypes/auto-knowledge-retrieval/` (design source of truth). Routes: `GET /api/reference-documents/...` + `GET /api/files/...`. |
+| Add a new document-retrieval scope tier | Spec amendment first. Then: extend the CHECK constraint in a corrective migration that names the new FK column explicitly (per § Five-tier scope model in Document Retrieval Pipeline). Update `reference_document_data_sources` schema, RLS policy, indexes, and the scope-precedence comparator in `retrievalServicePure.ts`. The polymorphic `scope_type`/`scope_id` shape is explicitly rejected — keep the named-FK pattern. |
+| Promote a file to a Knowledge document | `server/services/documentPromotionService.ts` (transaction: file → document row + link rows + `document_promotion_audit` row inside one tx) + `server/jobs/documentPromotionFinaliseJob.ts` (post-commit side effects: flip `execution_files.expiresAt` to NULL, emit telemetry). The `document_promotion_audit` row with `UNIQUE (file_id) WHERE deleted_at IS NULL` is the idempotency anchor — it prevents the promotion path from re-running if expiry races finalise. UI: `client/src/pages/govern/components/KnowledgeFilesTab.tsx` "Add to Knowledge" action. |
 | Add a new agent execution log event type | Extend the union in `shared/types/agentExecutionLog.ts` (AgentExecutionEventType + AgentExecutionEventPayload + AGENT_EXECUTION_EVENT_CRITICALITY) and add a validator branch in `server/services/agentExecutionEventServicePure.ts::validateEventPayload`. Emit via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. If the new type links to a new entity kind, extend `LinkedEntityType` + the mask branch in `server/lib/agentRunEditPermissionMaskPure.ts` + the batched label resolver in `server/lib/agentRunEditPermissionMask.ts`. Pure tests under `server/services/__tests__/agentExecutionEventServicePure.test.ts`. Spec: `tasks/live-agent-execution-log-spec.md` §5.3a. |
 | Modify the Live Agent Execution Log read path | `server/routes/agentExecutionLog.ts` (3 GETs) + `server/services/agentExecutionEventService.ts` (`streamEvents` / `getPrompt` / `getLlmPayload`) + `server/lib/agentRunVisibility.ts` (canView / canViewPayload rules) + `server/lib/agentRunPermissionContext.ts` (user-context hydration). Migration 0192 carries the three new tables (`agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads`) + adds `next_event_seq` + `event_limit_reached_emitted` to `agent_runs`. |
 | Modify the Live Agent Execution Log payload writer | `server/services/agentRunPayloadWriter.ts::buildPayloadRow` — redaction → tool-policy → greatest-first truncation pipeline. Patterns in `server/lib/redaction.ts` (bearer / openai / anthropic / github / slack / aws / google). Per-tool opt-in via `payloadPersistencePolicy: 'full' \| 'args-redacted' \| 'args-never-persisted'`. Size cap: `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default 1 MB). `response` input is nullable (`null` = no usable provider output; partial object = usage-only/refusal data). Pure tests in `server/services/__tests__/agentRunPayloadWriterPure.test.ts` + `agentRunPayloadWriterFailurePathPure.test.ts`. Modifications recorded in `agent_run_llm_payloads.modifications` + `redacted_fields` (separate columns — never overloaded). |
