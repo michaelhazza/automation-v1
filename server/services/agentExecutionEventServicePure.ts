@@ -16,6 +16,7 @@ import {
   AGENT_EXECUTION_EVENT_CRITICALITY,
   isCriticalEventType,
 } from '../../shared/types/agentExecutionLog.js';
+import { OBSERVATION_TYPES, OBSERVATION_SOURCE_KINDS } from '../../shared/types/agentObservations.js';
 
 // ---------------------------------------------------------------------------
 // Event-cap predicate
@@ -125,6 +126,7 @@ const SOURCE_SERVICES: ReadonlyArray<AgentExecutionSourceService> = [
   'runContextLoader',
   'orchestratorFromTaskJob',
   'requestClarification',
+  'retrievalService',
 ];
 
 export function isValidSourceService(value: unknown): value is AgentExecutionSourceService {
@@ -384,6 +386,18 @@ export function validateEventPayload(
         !isStr(p.occurredAt)
       ) {
         return { ok: false, reason: 'retrieval.always_available.mode_changed_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'observation_emitted':
+      if (!isStr(p.observationId) || !isStr(p.observationType) || !isStr(p.agentId) || !isStr(p.sourceKind)) {
+        return { ok: false, reason: 'observation_emitted_missing_fields' };
+      }
+      if (!(OBSERVATION_TYPES as ReadonlyArray<string>).includes(p.observationType)) {
+        return { ok: false, reason: 'observation_emitted_invalid_observation_type' };
+      }
+      if (!(OBSERVATION_SOURCE_KINDS as ReadonlyArray<string>).includes(p.sourceKind)) {
+        return { ok: false, reason: 'observation_emitted_invalid_source_kind' };
       }
       return { ok: true };
 
