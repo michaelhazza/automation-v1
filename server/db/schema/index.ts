@@ -275,4 +275,4 @@ export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
 
 // Trust & Verification Layer — runtime check verdicts (migration 0289)
-export * from './runtimeCheckResults';
+export * from './runtimeCheckResults.js';
