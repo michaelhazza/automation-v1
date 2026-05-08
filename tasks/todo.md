@@ -3467,3 +3467,26 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
 - [ ] **AKR-EXT-3 — `KnowledgeFilesTab` row menu keyboard accessibility.** Outside-click backdrop pattern works but lacks Escape-key handling, focus trapping, and keyboard navigation. Migrate row-menu surface onto the shared overlay/modal primitives used elsewhere in the repo (e.g., `client/src/components/Drawer`, `Modal`). Pair with PR-REV-S3 (pagination) and PR-REV-S4 (Agent column) as one Files-tab UX polish chunk.
 
 - [ ] **AKR-EXT-4 — Org-level retrieval cost telemetry.** Architecture introduces chunking + embeddings + summarisation + re-embedding + promotion + retrieval — each a potential silent token-spend amplifier. AKR-ADV-5 covers per-document chunk caps; this entry is the broader observability question: per-org embedding spend metric, per-document embedding stats, retrieval-hit / retrieval-usefulness telemetry, embedding storm / re-embed-loop detection. Wire into existing audit/observability stream rather than building a parallel ledger. Defer until retrieval is in production use and we have real spend data to instrument against.
+
+---
+
+## Blockers
+
+### Chunk 12 — Run Trace Lineage Chips (hard-blocked)
+
+**Blocked on:** Phase 1 deep-link query-parameter resolver for `/govern/knowledge?tab=files` not shipped on main as of `b1c4d14d` (PR #274). The Files tab (`client/src/pages/govern/components/KnowledgeFilesTab.tsx`) accepts only `subaccountId` + `linkedToKnowledge` — not the spec's five-tuple `?agentId=&runId=&eventId=&fileId=&versionId=`.
+
+**What was attempted:** Plan identified the block before build start (plan.md Chunk 12, §7 Risks row "Phase 1 deep-link query-parameter resolver missing on main"). Not built; escalated as required.
+
+**Root-cause hypothesis:** Phase 1 follow-up work for PR #274 was not included in the initial retrieval-observability PR.
+
+**What's needed to unblock:** 
+1. Phase 1 follow-up PR must wire the five-tuple query-param resolver in `KnowledgeFilesTab.tsx` (or equivalent).
+2. Once merged to main and the branch is rebased, build Chunk 12 per plan spec §5 Phase 5, §7.7, §15.1.
+
+**Files Chunk 12 would create (do not pre-create):**
+- `shared/types/runTraceLineage.ts`
+- `client/src/pages/operate/components/EventFileLineageChips.tsx`
+- `client/src/pages/operate/components/FileLineageChip.tsx`
+- `client/src/pages/operate/components/RunTraceEventRenderer.tsx` (M)
+- `client/src/pages/operate/RunTracePage.tsx` (M)

@@ -65,8 +65,68 @@ Audit found **7 mechanical gaps** across 6 of the 8 surfaces. All fixed. Surface
 
 ## Phase 2 (BUILD)
 
-To be filled in by feature-coordinator after Phase 1 hands off.
+| Step | Status | Notes |
+|---|---|---|
+| Context load (CLAUDE.md, architecture.md, DEVELOPMENT_GUIDELINES.md, handoff, spec, lessons.md) | done | feature-coordinator entry guard satisfied; status was BUILDING |
+| Branch-sync S1 | done | branch is 27 commits ahead of main, 0 behind; latest main migration = 0287; spec's 0288/0289 are free |
+| Migration-collision detection | done | no collisions |
+| architect invocation (Rev 1) | done | plan written to tasks/builds/agent-workspace/plan.md; 14 chunks across 6 spec phases plus doc-sync |
+| **Branch-sync S1 (post-PR #274 merge)** | **done** | **2026-05-08: branch synced with origin/main (merge commit `3b52cab8`); PR #274 absorbed 0288–0294; agent-workspace migrations shift to 0295/0296** |
+| **architect revision (Rev 2)** | **done** | **plan revised in place; revision history block added; chunk titles + chunk 1/3/4/5/7/9/12/14 reframed for post-PR #274 baseline; risks expanded with two new programme-level rows (deep-link resolver missing, knowledge.files.* events missing); spec text remains LOCKED — only plan revised** |
+| chatgpt-plan-review (manual) — Round 1 | done | Verdict: **APPROVED with tightenings — no structural redesign**. 8 mechanical tightenings auto-applied as Rev 3 (all chunk-level invariant pinning; zero operator-judgement findings). Verbatim review at `tasks/review-logs/chatgpt-plan-review-agent-workspace-2026-05-08T12-40-27Z.md`. |
+| **architect revision (Rev 3)** | **done** | **plan revised in place; Rev 3 block added to Revision history; 8 tightenings applied to Chunks 3, 5, 6, 9, 10, 11; self-consistency pass updated to enumerate the new pinned invariants; spec text remains LOCKED** |
+| **Plan gate** | **done** | **Operator approved Rev 3 on 2026-05-08. No Round 2 review — verdict "diminishing returns, not missing structural rigor." Proceed to per-chunk builder loop on Sonnet.** |
+| Per-chunk loop | pending | starts after plan gate |
+| G2 integrated-state static-check gate | pending | |
+| Branch-level review pass | pending | |
+| Doc-sync gate | pending | |
+| Handoff write (Phase 2 section) | pending | |
+| current-focus.md → REVIEWING | pending | |
+| End-of-phase prompt | pending | |
+
+## ChatGPT-web plan review — Round 1 (2026-05-08)
+
+Verbatim review at `tasks/review-logs/chatgpt-plan-review-agent-workspace-2026-05-08T12-40-27Z.md`. Verdict: **APPROVED with tightenings — no structural redesign needed**. 8 findings, all classified as mechanical / technical (zero operator-judgement). Auto-applied as plan **Rev 3**.
+
+| # | Chunk | Tightening | Plan change |
+|---|---|---|---|
+| 1 | 3 | Pin §11.1 watermark predicate inline as SQL | Chunk 3 contract restates `ON CONFLICT ... WHERE excluded.event_timestamp > current.event_timestamp OR (... AND excluded.event_id > current.event_id)` literally. |
+| 2 | 5 | Define 150KB budget unit (gzip vs brotli, on-wire vs raw) | Chunk 5 scope: gzip-compressed UTF-8 HTTP response body under prod Express `compression()` middleware. |
+| 3 | 5 | Cache-invalidation log suppression across clustered restarts | 24h suppression keyed `(event_name, host)`; in-process Map; first INFO per UTC day per host; subsequent boots within window → DEBUG. |
+| 4 | 9 | Ring-buffer eviction order under burst pressure | Eviction follows `(event_timestamp ASC, event_id ASC)`; canonical-order indexed structure; replay deterministic regardless of arrival order. |
+| 5 | 9 | Last-Event-ID precedence (open vs reconnect) | Header always supersedes query param; query param consulted only when header absent. Conflicts logged at DEBUG. |
+| 6 | 6+9 | Elapsed-timer drift semantics | Server-authoritative; client ticking allowed for visual smoothness; reset only from server snapshot or SSE; never persisted, never sent back. |
+| 7 | 10 | Container release boundary | Release MUST execute after `withOrgTx` commit; forbidden inside transaction scope. 5-step sequence pinned; `pr-reviewer` enforces. |
+| 8 | 11 | Prune-job batching invariant | 1000-row batches ordered `(created_at ASC, id ASC)`, `FOR UPDATE SKIP LOCKED`, loop-until-empty, per-batch transaction. |
+
+**Plan line count:** 915 → ~1010 (+~95 lines from Rev 3 tightenings + Rev 3 history block + review log entries; all surgical).
+
+**No findings required directional / operator-judgement decisions.** All 8 were chunk-level invariant pinning (existing intent made self-evident at the contract surface). Spec text remains LOCKED. ChatGPT explicitly called out the Chunk 12 hard-block handling as the correct discipline — left untouched.
+
+Operator option: proceed to plan gate on Rev 3, OR run Round 2 verification pass against the Rev 3 changes (similar pattern to spec review).
 
 ## Phase 3 (FINALISE)
 
 To be filled in by finalisation-coordinator after Phase 2 completes.
+
+---
+
+## Chunk 14 doc-sync verdicts
+
+Investigation procedure per `docs/doc-sync.md` ran for all 13 registered docs. Grep terms checked: `agent_workspace`, `agentPresenceStreamPublisher`, `agentOverviewAggregator`, `ieeSessionService`, `agentWorkingTimeService`, `agentPresenceStream`, `agentOverview`, `AgentOverviewTab`, `useAgentPresence`, `agent_presence_states`, `agent_observations`, `agent_working_time_buckets`, `iee_sessions`, `iee_artifacts`, `agentObservationsPruneJob`, `workingTimeRollupCompactJob`, `replaySinceLastEventId`, `allow_observation_mutation`.
+
+| Doc | Update required? | Updated in build? | Verdict |
+|-----|-----------------|-------------------|---------|
+| `architecture.md` | YES — new Agent Workspace section; new Key files per domain rows for 13 agent-workspace files | YES — Chunk 14 | `yes (Agent Workspace, Agent Workspace key files per domain)` |
+| `KNOWLEDGE.md` | YES — 5 new patterns from agent-workspace build: single-node SSE topology, monotonic-clock working time, bounded SSE payload, immutability GUC bypass, withOrgTx side-effect boundary | YES — Chunk 14 | `yes (5 entries appended)` |
+| `docs/capabilities.md` | YES — new Persistent Agent Workspace product capability | YES — Chunk 13 | `yes (Persistent Agent Workspace section added in Chunk 13)` |
+| `docs/integration-reference.md` | NO — no new integration slug, OAuth provider, MCP preset, or capability slug added in this build | N/A | `no — checked agentPresenceStreamPublisher, ieeSessionService, agentWorkingTimeService; zero integration-reference candidates` |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | NO — no build-discipline, convention, agent-fleet, or review-pipeline changes in this build | N/A | `no — no build discipline or convention changes` |
+| `CONTRIBUTING.md` | NO — no lint-suppression policy, comment-format, or contributor-convention changes | N/A | `no — no contributor convention changes` |
+| `docs/frontend-design-principles.md` | NO — no new UI hard rule or worked example introduced; agent-workspace UI follows existing principles (one primary action, minimal information surface) | N/A | `no — no new UI hard rule or worked example` |
+| `docs/spec-context.md` | N/A — spec-review sessions only; this is a build chunk | N/A | `n/a` |
+| `docs/decisions/` | NO — single-node SSE topology was locked in spec (spec §18 + plan Rev 3); no new architectural X-over-Y choice made in implementation that requires an ADR | N/A | `no — topology was spec-locked; no new durable architectural choice made during implementation` |
+| `docs/context-packs/` | NO — no architecture.md section anchors renamed or removed (new `agent-workspace` anchor added, but context packs reference existing anchors; new sections don't break existing packs) | N/A | `no — only additive section added; no existing anchor changed` |
+| `references/test-gate-policy.md` | NO — no test-gate posture change; no new umbrella command became forbidden or allowed | N/A | `no — no test-gate posture change` |
+| `references/spec-review-directional-signals.md` | NO — no spec-reviewer signal pattern repeated >2 times in this build | N/A | `no — no recurring spec-reviewer signal in this build` |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | NO — agent-workspace is a repo-specific feature build; framework layer (agent fleet/conventions) not changed | N/A | `no — repo-specific feature build; framework version not affected` |

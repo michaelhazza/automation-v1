@@ -2977,4 +2977,24 @@ When a feature lets operators flag documents as "always available" (loaded on ev
 
 **Pattern:** the primary surface is preventive, in the configuration tab. Soft warning fires at thresholds well below the runtime cliff (`doc_count >= 30` OR `token_cost >= 30000` for v1) and surfaces in the Documents tab as an inline chip. The runtime degradation path still exists as the last-line-of-defence safety net, but operators see the chip first and reconfigure before any run degrades. Constants live in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred to a post-launch amendment once production telemetry exists to inform tuning.
 
+### [2026-05-09] Pattern — Single-node SSE topology with reconnect-snapshot recovery
+
+`agentPresenceStreamPublisher.ts` uses an in-process singleton `Map` keyed by scope (no Redis, no message broker). Each scope holds a sorted ring buffer (300 events, canonical order `(eventTimestamp ASC, eventId ASC)`). On reconnect the route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer. The `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; query param is consulted only when the header is absent. Multi-node fan-out is explicitly deferred (spec §18 Agent Workspace). File: `server/services/agentPresenceStreamPublisher.ts`; routes: `server/routes/agentPresenceStream.ts`.
+
+### [2026-05-09] Pattern — Monotonic-clock hysteresis for working time
+
+`agentWorkingTimeService.ts` uses `process.hrtime.bigint()` for elapsed measurement to avoid `Date.now()` wall-clock drift and NTP adjustments. Elapsed accumulates into a per-run bucket in `agent_working_time_buckets`. UTC half-open intervals `[start, end)` prevent double-counting at midnight: runs that cross midnight are split into two buckets inside the pure helper `splitIntervalAcrossBuckets`. The monthly compact job (`workingTimeRollupCompactJob.ts`) keeps per-day rows for 1 year then collapses to monthly resolution. File: `server/services/agentWorkingTimeService.ts` + `agentWorkingTimeServicePure.ts`.
+
+### [2026-05-09] Pattern — Bounded-payload pattern reuse applied to SSE (KNOWLEDGE.md 2026-05-08 retrieval pattern applied)
+
+`agentPresenceStreamPublisher.ts` applies the same bounded-observability-payload pattern from `retrievalObservabilityService`: per-event hard cap is 32KB measured via `Buffer.byteLength(JSON.stringify(event.data), 'utf8')`. Over-limit events have their `data` replaced with `{ truncated: true, byteLength }` and `truncated: true` set on the envelope. Truncation is logged at most once per 24h per event-type (in-process Map keyed on event-type name, reset at UTC midnight) to prevent log storms on burst traffic. The 24h suppression key is `(eventType, host)` — same pattern as the cache-invalidation log suppression (plan Rev 3 tightening #3).
+
+### [2026-05-09] Pattern — Immutability GUC bypass for retention prune
+
+`agentObservationsPruneJob.ts` bypasses the `agent_observations` DB immutability trigger via `set_config('app.allow_observation_mutation', 'retention_prune', true)` issued as the first statement inside the DELETE transaction. The GUC is transaction-scoped only. Every prune cycle calls `recordSecurityEvent` with action `agent.observations.retention_prune` — this is the ONLY authorised mutation path for non-pinned rows. GUC + audit-log pairing is the canonical pattern for any table that uses a trigger-based immutability guard but needs a maintenance prune path. Delete batches: 1000 rows ordered `(created_at ASC, id ASC)` with `FOR UPDATE SKIP LOCKED`.
+
+### [2026-05-09] Pattern — withOrgTx external side-effect boundary
+
+`ieeSessionService.tearDown()` uses `withOrgTx` for the DB update. The external container release (IEE infra teardown) MUST be placed AFTER the `await withOrgTx(...)` call returns — never inside the transaction callback. Pattern: commit first, then side-effect. Placing the release inside the callback violates atomicity: if the release throws before the implicit commit, the transaction may roll back leaving the DB row in a stale state while the container is already gone. `markFailed()` and `recordSummary()` use `getOrgScopedDb` because a single UPDATE needs no full transaction wrapper. File: `server/services/ieeSessionService.ts`.
+
 **Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
