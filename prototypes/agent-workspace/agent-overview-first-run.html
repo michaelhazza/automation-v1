@@ -246,50 +246,54 @@
         </div>
       </div>
 
-      <!-- Identity card, full-width and prominent -->
-      <div class="identity-card" style="margin-bottom:14px;">
-        <div class="card-title" style="margin-bottom:8px;">Identity</div>
-        <div class="identity-row">
-          <span class="identity-label">Name</span>
-          <span class="identity-value">Account Health Agent <span class="identity-edit">edit</span></span>
-        </div>
-        <div class="identity-row">
-          <span class="identity-label">Role</span>
-          <span class="identity-value">Account Health Manager</span>
-        </div>
-        <div class="identity-row">
-          <span class="identity-label">Reports to</span>
-          <span class="identity-value">CEO Agent</span>
-        </div>
-        <div class="identity-row">
-          <span class="identity-label">Sub-account</span>
-          <span class="identity-value">Acme Corp</span>
-        </div>
-      </div>
+      <!-- Identity (half) on the left, Tools + Connections stacked (half) on the right -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;">
 
-      <!-- Tools + Connections, side by side, both compact -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-
-        <div class="card">
-          <div class="card-head">
-            <div class="card-title">Tools</div>
-            <div class="card-link">Skills →</div>
+        <!-- Identity card, half-width -->
+        <div class="identity-card" style="margin-bottom:0;">
+          <div class="card-title" style="margin-bottom:8px;">Identity</div>
+          <div class="identity-row">
+            <span class="identity-label">Name</span>
+            <span class="identity-value">Account Health Agent <span class="identity-edit">edit</span></span>
           </div>
-          <div style="padding:12px 16px;font-size:12.5px;color:var(--slate-700);line-height:1.5;">
-            <strong>5 default skills</strong> inherited from the Account Health Manager role.
+          <div class="identity-row">
+            <span class="identity-label">Role</span>
+            <span class="identity-value">Account Health Manager</span>
+          </div>
+          <div class="identity-row">
+            <span class="identity-label">Reports to</span>
+            <span class="identity-value">CEO Agent</span>
+          </div>
+          <div class="identity-row">
+            <span class="identity-label">Sub-account</span>
+            <span class="identity-value">Acme Corp</span>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-head">
-            <div class="card-title">Connections</div>
-            <div class="card-link">Manage →</div>
-          </div>
-          <div style="padding:12px 16px;font-size:12.5px;color:var(--slate-700);line-height:1.5;">
-            <strong>3 connections</strong> inherited from Acme Corp. All healthy.
-          </div>
-        </div>
+        <!-- Tools + Connections stacked in the right half -->
+        <div style="display:flex;flex-direction:column;gap:14px;">
 
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Tools</div>
+              <div class="card-link">Skills →</div>
+            </div>
+            <div style="padding:12px 16px;font-size:12.5px;color:var(--slate-700);line-height:1.5;">
+              <strong>5 default skills</strong> inherited from the Account Health Manager role.
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Connections</div>
+              <div class="card-link">Manage →</div>
+            </div>
+            <div style="padding:12px 16px;font-size:12.5px;color:var(--slate-700);line-height:1.5;">
+              <strong>3 connections</strong> inherited from Acme Corp. All healthy.
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
   </main>
