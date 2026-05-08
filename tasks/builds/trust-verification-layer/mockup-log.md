@@ -195,3 +195,30 @@ Files CREATED:
 - `prototypes/trust-verification-layer/model-bench.html` (Regression risk column added to results table)
 - `prototypes/trust-verification-layer/index.html` (status, decisions box, card descriptions, badges)
 - `tasks/builds/trust-verification-layer/mockup-log.md` (this entry)
+
+---
+
+## Round 6 — 2026-05-08 17:00
+**Operator feedback:** External reviewer flagged two issues: (1) agent-create.html still had free-range sliders for grading frequency (missed when agent-edit-scorecard.html was fixed in Round 3); (2) terminology "verify check" is overloaded and confusing to operators — brief locked "runtime check" as the operator-facing term.
+
+**Changes made:**
+- `agent-create.html`: Slider bug resolved. Investigation found the segmented control HTML (Off / 25% / 50% / 75%) was already present from a prior round's partial fix, but the `setGradeFreq()` JS function was never added to this file. The buttons called an undefined function, making the control non-functional. Added `setGradeFreq(prefix, val, btn)` — scoped to find the closest `.seg-control` parent so the two independent controls (sys path and tmpl path) update separately without interfering. Live hint text per selection matches agent-edit-scorecard.html. No `<input type="range">` remains anywhere in the file. Header comment updated to Round 6.
+- `skill-create.html`: Terminology rename applied. Operator-facing "verify check" instances renamed to "runtime check": stepper label (Step 2), page heading (STEP 2), why-banner body, suggested-check section header, no-check warning, footer button initial text, JS-set footer button text, save toast text. Count: 8 instances renamed. Developer literals retained: CSS comment `/* Verify check radios */`, code-block comment `// Generated verify hook`, HTML comment `<!-- No badge — no verify hook on llm_call -->`.
+- `run-trace.html`: Terminology rename applied. Summary bar label "Verify:" renamed to "Runtime checks:". Detail-panel field label "Verify result" renamed to "Runtime check result". Tooltip `data-reason` text for event 6 (fail) and event 7 (pending) updated. JS EVENTS data `verify.reason` strings for events 6 and 7 updated. Count: 5 instances renamed. CSS class names (`.verify-summary-bar`, `.verify-summary-label`, `.verify-badge`, etc.), HTML comments, and JS object key names (`verify:`) retained unchanged.
+- `index.html`: Status updated to "Round 6 (terminology lock + slider bug fix)". Round 6 decisions box added (blue style). Round 5 decisions box archived (red/pink style, heading updated to "Round 5 design decisions (archived)"; bullet noting terminology rename updated to say "Applied in Round 6"). `badge-r6` CSS class added. Section subtitle updated: "Verify badges on every run step" → "Runtime checks on every run step". Card descriptions updated for run-trace.html, skill-create.html, and agent-create.html. Round 6 badges added to those three cards. Skipped/deferred card updated: "verify failures" → "failed runtime checks". Archived Round 2 and Round 3 decision bullets updated for consistency.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — all changes are copy/terminology or bug fixes. No new UI elements added. Primary tasks (create a skill, trace a run, create an agent) unchanged.
+- Default to hidden: yes — no new panels or information surfaces added. The segmented control fix makes an existing control functional; it does not add visibility to new information.
+- One primary action: yes — no changes to primary actions on any screen.
+- Inline state: yes — the grading frequency control updates hint text inline below the control, same pattern as agent-edit-scorecard. Runtime check state is still shown as inline badges per event row.
+- Re-check passed: yes — "runtime check" is clearer to a non-technical operator than "verify check." The segmented control now works correctly and gives immediate feedback on selection.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/trust-verification-layer/agent-create.html` (setGradeFreq function added, comment updated)
+- `prototypes/trust-verification-layer/skill-create.html` (8 operator-facing verify → runtime check renames)
+- `prototypes/trust-verification-layer/run-trace.html` (5 operator-facing verify → runtime check renames)
+- `prototypes/trust-verification-layer/index.html` (status, decisions boxes, section subtitle, card descriptions, badges)
+- `tasks/builds/trust-verification-layer/mockup-log.md` (this entry)

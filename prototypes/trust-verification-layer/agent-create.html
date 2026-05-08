@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Trust Verification Layer — Agent create (Round 4)
+  Trust Verification Layer — Agent create (Round 6)
 
   Shows how scorecards pre-attach at agent creation. Two paths visible
   via anchor tabs at top:
@@ -25,6 +25,11 @@
       Rendered identically to system-mandatory rows — same lock, same Required
       badge, same expandable caret. Sub-account users see no distinction.
     - Footer count updated to 3 required + 3 suggested.
+
+  Round 6 changes:
+    - setGradeFreq() JS function added (was missing; buttons called undefined function).
+    - No slider remains: both evaluation-settings controls use 4-button segmented
+      control (Off / 25% / 50% / 75%), default 25%, with live hint text per selection.
 
   Primary task: install or create an agent that already has quality coverage.
 -->
@@ -226,6 +231,22 @@
   .sc-checks-label {
     font-size: 10.5px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 6px;
+  }
+
+  /* ── Grade frequency segmented control ── */
+  .seg-control {
+    display: inline-flex; border: 1px solid var(--slate-200); border-radius: 9px;
+    overflow: hidden; background: var(--slate-50);
+  }
+  .seg-btn {
+    padding: 6px 14px; font-size: 12.5px; font-weight: 500; color: var(--slate-500);
+    border: none; background: transparent; cursor: pointer; transition: all 0.12s;
+    border-right: 1px solid var(--slate-200); white-space: nowrap;
+  }
+  .seg-btn:last-child { border-right: none; }
+  .seg-btn.active {
+    background: white; color: var(--indigo-700); font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   }
 </style>
 </head>
@@ -429,12 +450,14 @@
           <div class="section-card-body">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
               <div>
-                <div class="form-label" style="margin-bottom:6px;">How often to grade</div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <input type="range" min="5" max="100" value="20" style="flex:1;accent-color:var(--indigo-600);" oninput="document.getElementById('sys-grade-val').textContent=this.value+'%'">
-                  <span style="font-size:13px;font-weight:600;color:var(--slate-700);width:40px;text-align:right;" id="sys-grade-val">20%</span>
+                <div class="form-label" style="margin-bottom:8px;">How often to grade</div>
+                <div class="seg-control">
+                  <button class="seg-btn" onclick="setGradeFreq('sys','off',this)">Off</button>
+                  <button class="seg-btn active" onclick="setGradeFreq('sys','25',this)">25%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('sys','50',this)">50%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('sys','75',this)">75%</button>
                 </div>
-                <div class="form-hint" style="margin-top:5px;">Of every 100 agent runs, score this many.</div>
+                <div class="form-hint" style="margin-top:7px;" id="sys-grade-hint">Roughly one in four runs is graded. Lowest token cost.</div>
               </div>
               <div>
                 <div class="form-label" style="margin-bottom:6px;">Judge model</div>
@@ -526,12 +549,14 @@
           <div class="section-card-body">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
               <div>
-                <div class="form-label" style="margin-bottom:6px;">How often to grade</div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <input type="range" min="5" max="100" value="20" style="flex:1;accent-color:var(--indigo-600);" oninput="document.getElementById('tmpl-grade-val').textContent=this.value+'%'">
-                  <span style="font-size:13px;font-weight:600;color:var(--slate-700);width:40px;text-align:right;" id="tmpl-grade-val">20%</span>
+                <div class="form-label" style="margin-bottom:8px;">How often to grade</div>
+                <div class="seg-control">
+                  <button class="seg-btn" onclick="setGradeFreq('tmpl','off',this)">Off</button>
+                  <button class="seg-btn active" onclick="setGradeFreq('tmpl','25',this)">25%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('tmpl','50',this)">50%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('tmpl','75',this)">75%</button>
                 </div>
-                <div class="form-hint" style="margin-top:5px;">Of every 100 agent runs, score this many.</div>
+                <div class="form-hint" style="margin-top:7px;" id="tmpl-grade-hint">Roughly one in four runs is graded. Lowest token cost.</div>
               </div>
               <div>
                 <div class="form-label" style="margin-bottom:6px;">Judge model</div>
@@ -649,6 +674,22 @@ function showToast(msg) {
   var t = document.getElementById('toast');
   t.classList.remove('hidden');
   setTimeout(function() { t.classList.add('hidden'); }, 4000);
+}
+
+function setGradeFreq(prefix, val, btn) {
+  // Update active state within the relevant seg-control only
+  var control = btn.closest('.seg-control');
+  control.querySelectorAll('.seg-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  // Update the corresponding hint text
+  var hintEl = document.getElementById(prefix + '-grade-hint');
+  var hintMap = {
+    'off': 'No automated grading. Quality checks only run when manually triggered.',
+    '25': 'Roughly one in four runs is graded. Lowest token cost.',
+    '50': 'Every other run is graded. Balanced cost and coverage.',
+    '75': 'Three out of four runs are graded. Highest coverage, highest cost.'
+  };
+  if (hintEl) hintEl.textContent = hintMap[val] || '';
 }
 
 function toggleRequiredRow(panelId) {

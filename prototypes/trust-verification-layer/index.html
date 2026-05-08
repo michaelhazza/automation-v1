@@ -70,6 +70,7 @@
   .badge-r3 { background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7; }
   .badge-r4 { background: #f0fdf4; color: #14532d; border: 1px solid #86efac; }
   .badge-r5 { background: #ecfdf5; color: #065f46; border: 1px solid #34d399; }
+  .badge-r6 { background: #eff6ff; color: #1e40af; border: 1px solid #93c5fd; }
 
   .decisions-box {
     background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
@@ -96,20 +97,28 @@
   <p>Ten screens extending the post-consolidation IA with three trust layers: skill verification (Layer 1), agent scorecards and model bench (Layer 2), and correction-sourced auto-memory (Layer 3). No new top-level navigation. All surfaces extend existing pages or add focused creation flows.</p>
   <div class="meta-row">
     <div class="meta-item"><strong>Date:</strong> 2026-05-08</div>
-    <div class="meta-item"><strong>Status:</strong> Round 5 (post-review polish)</div>
+    <div class="meta-item"><strong>Status:</strong> Round 6 (terminology lock + slider bug fix)</div>
     <div class="meta-item"><strong>Base prototypes:</strong> <a href="../consolidation-2026-05-06/index.html" style="color:#4f46e5;font-weight:600;">Consolidation 2026-05-06</a></div>
   </div>
   <div class="meta-row" style="margin-top:8px;">
-    <div class="meta-item" style="font-size:11.5px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:5px;padding:4px 10px;color:#065f46;font-weight:600;">Round 5, 2026-05-08: Post-review polish</div>
+    <div class="meta-item" style="font-size:11.5px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:5px;padding:4px 10px;color:#065f46;font-weight:600;">Round 6, 2026-05-08: Terminology lock + slider bug fix</div>
   </div>
 </div>
 
-<div class="decisions-box">
-  <h3>Round 5 design decisions</h3>
+<div class="decisions-box" style="background:#eff6ff;border-color:#93c5fd;">
+  <h3 style="color:#1e40af;">Round 6 design decisions</h3>
+  <ul>
+    <li>Terminology lock: "verify check" renamed to "runtime check" in all operator-facing copy across all screens. Schema field <code style="font-size:11px;background:#dbeafe;padding:1px 5px;border-radius:3px;">verify</code> retained as developer literal. Umbrella name "Trust &amp; Verification Layer" unchanged.</li>
+    <li>Slider bug resolved: agent-create.html System Agent and Template paths now correctly use the same 4-button quartile control (Off / 25% / 50% / 75%) as agent-edit-scorecard. The <code style="font-size:11px;background:#dbeafe;padding:1px 5px;border-radius:3px;">setGradeFreq()</code> JS function that the buttons depended on was missing from agent-create.html; it is now added, with independent hint-text update per control.</li>
+  </ul>
+</div>
+
+<div class="decisions-box" style="background:#fef2f2;border-color:#fca5a5;margin-bottom:16px;">
+  <h3 style="color:#991b1b;">Round 5 design decisions (archived)</h3>
   <ul>
     <li>run-trace.html: Correct dialog now exposes scope, persistence, and confidence so corrections feel auditable, not magic. "About this correction" block shows: Scope (This agent only), Persistence (Active on next run), Confidence (High signal — applied immediately, listed under Knowledge where you can edit, override, or reject).</li>
     <li>model-bench.html: Bench results now include a Regression risk column (Low / Medium / High) derived from score variance. Addresses enterprise concern about hidden output degradation. Low = winner (Sonnet 4.6, +/-4%), Medium = Opus 4.7 (+/-3%), High = Haiku 4.5 (+/-9%, also fails pass mark).</li>
-    <li>Terminology rename ("verify" overloaded) deferred to spec phase per brief directives.</li>
+    <li>Terminology rename ("verify" overloaded) deferred to spec phase per brief directives. Applied in Round 6.</li>
     <li>First-class Policy primitive explicitly out of scope (brief); future Stage 4 candidate.</li>
   </ul>
 </div>
@@ -130,7 +139,7 @@
     <li>model-bench.html: auto-select-15 replaced with an explicit multi-select table of last 50 runs. "Pick newest 15" and "Clear all" convenience buttons. Textarea paste-in replaced with vertical prompt cards. Cost estimates now append "(charged to this account's token budget)".</li>
     <li>skill-create.html: Step 1 restructured into sub-steps 1A and 1B. Blast radius labels simplified. Help text added to all technical fields.</li>
     <li>agent-edit-scorecard.html: "How often to grade" range slider replaced with a segmented control. Live help text updates on selection.</li>
-    <li>run-trace.html: Verify badge states reduced from 4 to 3: Pass, Fail, Pending. Correct modal adds reassurance note.</li>
+    <li>run-trace.html: Runtime check badge states reduced from 4 to 3: Pass, Fail, Pending. Correct modal adds reassurance note.</li>
     <li>scorecard-library.html: Source pill reduced to 2 values: Platform / Custom. Empty state added when Custom filter has no rows.</li>
     <li>agent-create.html: Locked "Always attached" rows made expandable via caret toggle to reveal read-only quality checks.</li>
     <li>scorecard-create.html: Pass mark inputs show reference note with typical range for similar checks.</li>
@@ -146,7 +155,7 @@
     <li>scorecard-library.html renders as a standalone page with the same tab strip as govern-quality.html. The govern-quality.html Scorecards tab shows an iframe for prototype navigation, reflecting how the tab would work in-product.</li>
     <li>Bench history tab in govern-quality.html shows approved/overridden/rejected outcomes. "Overridden" means the operator selected a different model than the recommended one.</li>
     <li>agent-create.html uses two path tabs (System Agent / Template) on one page to make the inheritance story concrete without requiring the operator to navigate between two separate screens.</li>
-    <li>skill-create.html: "Advanced" code block defaults collapsed. The plain-English verify check is the primary surface; code is progressive disclosure for technical users.</li>
+    <li>skill-create.html: "Advanced" code block defaults collapsed. The plain-English runtime check is the primary surface; code is progressive disclosure for technical users.</li>
   </ul>
 </div>
 
@@ -156,7 +165,7 @@
 <div class="section">
   <div class="section-heading">
     <span>Layer 1: Skill verification</span>
-    <span class="section-heading-desc">Verify badges on every run step + custom skill creation flow</span>
+    <span class="section-heading-desc">Runtime checks on every run step + custom skill creation flow</span>
   </div>
   <div class="card-grid">
 
@@ -166,13 +175,14 @@
         <div class="proto-card-file">run-trace.html</div>
       </div>
       <div class="proto-card-desc">
-        Verify badge per step: three states only (Pass / Fail / Pending). Lifecycle events (run start, HITL gate) carry no badge. Summary strip counts all three states. Correct modal includes "About this correction" block (scope, persistence, confidence) so corrections feel auditable before confirming. After save, shows a "captured as auto-memory" toast.
+        Runtime check badge per step: three states only (Pass / Fail / Pending). Lifecycle events (run start, HITL gate) carry no badge. Summary strip counts all three states. Correct modal includes "About this correction" block (scope, persistence, confidence) so corrections feel auditable before confirming. After save, shows a "captured as auto-memory" toast.
       </div>
       <div class="proto-card-footer">
         <span class="badge layer-1">Layer 1</span>
         <span class="badge layer-3">Layer 3</span>
         <span class="badge badge-r3">Round 3 updated</span>
         <span class="badge badge-r5">Round 5 updated</span>
+        <span class="badge badge-r6">Round 6 updated</span>
         <a href="../consolidation-2026-05-06/run-trace.html" class="ref-link" style="position:relative;z-index:2;">Base prototype</a>
       </div>
     </div>
@@ -184,12 +194,13 @@
       </div>
 
       <div class="proto-card-desc">
-        Two-step focused form. Step 1 split into sub-steps 1A (name + description + "Suggest details" button) and 1B (revealed after suggestion: parameters, blast radius, reversible toggle). Blast radius uses plain labels: "Just this skill" / "Your account" / "External services". Step 2: verify check with auto-generated plain-English suggestion, three options, advanced pseudocode disclosure.
+        Two-step focused form. Step 1 split into sub-steps 1A (name + description + "Suggest details" button) and 1B (revealed after suggestion: parameters, blast radius, reversible toggle). Blast radius uses plain labels: "Just this skill" / "Your account" / "External services". Step 2: runtime check with auto-generated plain-English suggestion, three options, advanced pseudocode disclosure.
       </div>
       <div class="proto-card-footer">
         <span class="badge layer-1">Layer 1</span>
         <span class="badge badge-r2">Round 2 new</span>
         <span class="badge badge-r3">Round 3 updated</span>
+        <span class="badge badge-r6">Round 6 updated</span>
       </div>
     </div>
 
@@ -212,13 +223,14 @@
         <div class="proto-card-file">agent-create.html</div>
       </div>
       <div class="proto-card-desc">
-        Shows scorecard pre-attachment at agent creation. Two paths via tabs: Install a System Agent (Content Director) and Create from Template (Content Writer). Round 4: source pills removed from Suggested rows (sub-account users see all suggestions as "Suggested," no attribution). Third required row added: "PII redaction check," rendered identically to existing required rows. Footer updated to 3 required + 3 suggested.
+        Shows scorecard pre-attachment at agent creation. Two paths via tabs: Install a System Agent (Content Director) and Create from Template (Content Writer). Round 4: source pills removed, third required row added ("PII redaction check"), footer updated to 3 required + 3 suggested. Round 6: grading-frequency segmented control now fully wired (Off / 25% / 50% / 75%) with independent hint text per path.
       </div>
       <div class="proto-card-footer">
         <span class="badge layer-2">Layer 2</span>
         <span class="badge badge-r2">Round 2 new</span>
         <span class="badge badge-r3">Round 3 updated</span>
         <span class="badge badge-r4">Round 4 updated</span>
+        <span class="badge badge-r6">Round 6 updated</span>
       </div>
     </div>
 
@@ -360,7 +372,7 @@
         <div class="proto-card-file">home.html</div>
       </div>
       <div class="proto-card-desc" style="color:#64748b;">
-        Skipped per brief guidance. The existing home uses a fixed 2-column, 3-row widget grid. Entry through Inbox (verify failures appear as items) and Govern / Quality is sufficient.
+        Skipped per brief guidance. The existing home uses a fixed 2-column, 3-row widget grid. Entry through Inbox (failed runtime checks appear as items) and Govern / Quality is sufficient.
       </div>
     </div>
     <div class="proto-card" style="border-style:dashed;background:#fafbfc;">

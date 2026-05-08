@@ -446,7 +446,7 @@
 
             <!-- Verify summary bar — 3 states only: Pass / Fail / Pending -->
             <div class="verify-summary-bar">
-              <span class="verify-summary-label">Verify:</span>
+              <span class="verify-summary-label">Runtime checks:</span>
               <span class="vsb-item">
                 <span style="width:7px;height:7px;border-radius:50%;background:var(--emerald-500);display:inline-block;"></span>
                 5 passed
@@ -550,7 +550,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-tool_call">tool_call: send_email</span>
-                      <span class="verify-badge verify-fail" data-reason="send_email verify failed: recipient domain 'acmecorp.com' is on the suppression list. Email was not sent. Run flagged for review.">Fail</span>
+                      <span class="verify-badge verify-fail" data-reason="send_email runtime check failed: recipient domain 'acmecorp.com' is on the suppression list. Email was not sent. Run flagged for review.">Fail</span>
                     </div>
                     <div class="event-content">Preparing email to sarah.chen@acmecorp.com, subject "Following up on our Q2 proposal"</div>
                   </div>
@@ -564,7 +564,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label" style="color:var(--slate-600);">hitl_gate: send_email</span>
-                      <span class="verify-badge verify-pending" data-reason="Awaiting operator decision. Verify result will be recorded after approval or rejection.">
+                      <span class="verify-badge verify-pending" data-reason="Awaiting operator decision. Runtime check result will be recorded after approval or rejection.">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         Pending
                       </span>
@@ -759,13 +759,13 @@ const EVENTS = {
     fields:{ tool_name:'send_email', called_by_step:5, expected_result_type:'email_send_receipt',
       input_args:'{\n  "to": "sarah.chen@acmecorp.com",\n  "subject": "Following up on our Q2 proposal",\n  "body": "Hi Sarah,\\n\\nI hope this note finds you well...",\n  "from_alias": "Alex at Agency",\n  "track_opens": true\n}' },
     raw:'{\n  "event_id": "evt_01HXYZ128",\n  "type": "tool_call",\n  "seq": 6,\n  "tool_name": "send_email",\n  "timestamp": "2026-05-06T09:00:18.451Z"\n}',
-    verify:{ state:'fail', reason:'send_email verify failed: recipient domain on suppression list. Email was not sent. Run flagged for review.' },
+    verify:{ state:'fail', reason:'send_email runtime check failed: recipient domain on suppression list. Email was not sent. Run flagged for review.' },
     hasOutput: false
   },
   7: { type:'HITL_GATE', label:'hitl_gate', seq:7, total:47, timeIntoRun:'+19s', iso:'2026-05-06T09:00:19.210Z',
     fields:{ gate_type:'approval', awaiting:'send_email tool execution', who_can_approve:'Role: operator / admin (this org)', queued_at:'2026-05-06T09:00:19Z', inbox_link:'#' },
     raw:'{\n  "event_id": "evt_01HXYZ129",\n  "type": "hitl_gate",\n  "seq": 7,\n  "timestamp": "2026-05-06T09:00:19.210Z"\n}',
-    verify:{ state:'pending', reason:'Awaiting operator decision. Verify result will be recorded after approval or rejection.' },
+    verify:{ state:'pending', reason:'Awaiting operator decision. Runtime check result will be recorded after approval or rejection.' },
     hasOutput: false
   },
   8: { type:'DELEGATION', label:'delegation', seq:8, total:47, timeIntoRun:'+28s', iso:'2026-05-06T09:00:28.003Z',
@@ -792,7 +792,7 @@ function buildDetailHtml(evt) {
   if (evt.verify.state !== 'none') {
     const vLabels = { pass:'Pass', fail:'Fail', pending:'Pending' };
     html += `<div class="detail-field">
-      <div class="detail-field-label">Verify result</div>
+      <div class="detail-field-label">Runtime check result</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
         <span class="verify-badge verify-${evt.verify.state}" style="cursor:default;">${vLabels[evt.verify.state] || evt.verify.state}</span>
         <span style="font-size:12px;color:var(--slate-600);">${escHtml(evt.verify.reason)}</span>
