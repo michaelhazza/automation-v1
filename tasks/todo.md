@@ -3453,3 +3453,17 @@ Three findings — two in pre-existing code, one in new code — surfaced during
 - [ ] **PR-REV-N2 — `0291_memory_blocks_scheduled_task_scope.sql` partial index lacks `WHERE deleted_at IS NULL`.** Other indexes on `memory_blocks` consistently use the partial form. Soft-deleted rows currently sit in the index. Minor bloat; consistency improvement.
 
 - [ ] **PR-REV-N3 — `ReferenceDocumentSourceType` does not include `auto_memory_approved`.** Spec §4.4 lists five `source` values: `manual | from_file | auto_memory_approved | synthesised_by_agent | external`. Impl declares `manual | external | google_drive | from_file`. `google_drive` is legacy; `auto_memory_approved` and `synthesised_by_agent` are missing. Spec §15 explicitly defers `synthesised_by_agent` ("Schema accommodates the value"). Decision: amend spec to drop `google_drive` (or rename to `external`) and add `auto_memory_approved` to the enum, OR rerun spec-conformance to expand AKR-CONF-* with this entry.
+
+---
+
+### Deferred from external PR review — auto-knowledge-retrieval (2026-05-08)
+
+External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings overlap items already routed above. The 4 below are net-new follow-ups.
+
+- [ ] **AKR-EXT-1 — ADR for retrieval/ranker architecture decision.** Multiple deferred items (AKR-CONF-1, AKR-CONF-2, PR-REV-B2, PR-REV-B3, PR-REV-S2) reduce to one strategic question: do we amend the spec to lock the v1-simplified ranker (no embedding bonuses, three-tier UNION, chunk-level competition, no `referenceOnlyManifest` consumption), or refactor implementation to restore the richer retrieval/ranking semantics the spec originally specified? Write an ADR in `docs/decisions/` recording the choice and rationale; freeze the contract before further retrieval work lands. Highest-leverage item in the backlog — unblocks 5 other deferred entries.
+
+- [ ] **AKR-EXT-2 — `KnowledgePage.tsx` cleanup pass.** External reviewer flagged duplicated structural regions, nested conditional rendering, awkward reflow, and modal orchestration coupling. File compiles cleanly but maintenance cost will rise as Knowledge surface evolves. Refactor: extract per-tab panels, isolate auto-memory view, isolate modal orchestration, reduce nested conditionals. Not blocking; do before next significant Knowledge UI change.
+
+- [ ] **AKR-EXT-3 — `KnowledgeFilesTab` row menu keyboard accessibility.** Outside-click backdrop pattern works but lacks Escape-key handling, focus trapping, and keyboard navigation. Migrate row-menu surface onto the shared overlay/modal primitives used elsewhere in the repo (e.g., `client/src/components/Drawer`, `Modal`). Pair with PR-REV-S3 (pagination) and PR-REV-S4 (Agent column) as one Files-tab UX polish chunk.
+
+- [ ] **AKR-EXT-4 — Org-level retrieval cost telemetry.** Architecture introduces chunking + embeddings + summarisation + re-embedding + promotion + retrieval — each a potential silent token-spend amplifier. AKR-ADV-5 covers per-document chunk caps; this entry is the broader observability question: per-org embedding spend metric, per-document embedding stats, retrieval-hit / retrieval-usefulness telemetry, embedding storm / re-embed-loop detection. Wire into existing audit/observability stream rather than building a parallel ledger. Defer until retrieval is in production use and we have real spend data to instrument against.
