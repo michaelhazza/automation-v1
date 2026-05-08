@@ -148,8 +148,9 @@
   .agents-count {
     display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 8px;
     background: var(--slate-50); border: 1px solid var(--slate-200); font-size: 11.5px; color: var(--slate-700); font-weight: 500;
-    white-space: nowrap;
+    white-space: nowrap; cursor: help;
   }
+  .agents-count:hover { border-color: var(--indigo-300); color: var(--indigo-700); }
   .agents-count strong { color: var(--slate-900); }
 
   .col-label { font-size: 10.5px; color: var(--slate-400); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
@@ -322,7 +323,7 @@
             </td>
             <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
             <td><span class="mode-chip mode-always">! Always available</span></td>
-            <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
+            <td><span class="agents-count" title="Loaded into every run for all 27 agents across 4 client workspaces because mode is set to Always available. Click for usage breakdown."><strong>27</strong> agents · 4 clients</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
@@ -335,7 +336,7 @@
             </td>
             <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
             <td><span class="mode-chip mode-always">! Always available</span></td>
-            <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
+            <td><span class="agents-count" title="Loaded into every run for all 27 agents across 4 client workspaces because mode is set to Always available. Click for usage breakdown."><strong>27</strong> agents · 4 clients</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
@@ -348,7 +349,7 @@
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
             <td><span class="mode-chip mode-auto">A Auto</span></td>
-            <td><span class="agents-count"><strong>9</strong> agents</span></td>
+            <td><span class="agents-count" title="Available to all 9 agents in Acme Corp. Most frequently retrieved by Outreach Agent and Research Agent for account-context tasks. Click for usage breakdown."><strong>9</strong> agents</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
@@ -362,7 +363,7 @@
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
             <td><span class="mode-chip mode-auto">A Auto</span></td>
-            <td><span class="agents-count"><strong>3</strong> agents</span></td>
+            <td><span class="agents-count" title="Available to 3 agents (CRM Hygiene, Outreach, Research). Recently retrieved for contact enrichment and outreach planning. Click for usage breakdown."><strong>3</strong> agents</span></td>
             <td>
               <div class="three-dot-wrap">
                 <button class="three-dot-btn" style="background:var(--slate-100);color:var(--slate-700);">⋮</button>
@@ -391,7 +392,7 @@
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
             <td><span class="mode-chip mode-auto">A Auto</span></td>
-            <td><span class="agents-count"><strong>4</strong> agents</span></td>
+            <td><span class="agents-count" title="Available to 4 agents in Acme Corp. Most relevant for pipeline analysis and account research tasks. Click for usage breakdown."><strong>4</strong> agents</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
@@ -404,7 +405,7 @@
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
             <td><span class="mode-chip mode-auto">A Auto</span></td>
-            <td><span class="agents-count"><strong>9</strong> agents</span></td>
+            <td><span class="agents-count" title="Available to all 9 Acme Corp agents. Frequently retrieved when qualifying or disqualifying prospects. Click for usage breakdown."><strong>9</strong> agents</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
@@ -421,7 +422,7 @@
             </td>
             <td><span class="tier-chip tier-agent">Agent</span></td>
             <td><span class="mode-chip mode-reference">R Reference only</span></td>
-            <td><span class="agents-count"><strong>1</strong> agent: Outreach Agent</span></td>
+            <td><span class="agents-count" title="Reference-only mode: agent fetches on demand when it needs detail. Linked only to Outreach Agent. Click for fetch history."><strong>1</strong> agent: Outreach Agent</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
@@ -434,7 +435,7 @@
             </td>
             <td><span class="tier-chip tier-recurring">Recurring task</span></td>
             <td><span class="mode-chip mode-auto">A Auto</span></td>
-            <td><span class="agents-count"><strong>1</strong> recurring task</span></td>
+            <td><span class="agents-count" title="Available to agents running this recurring task only. Loaded when the heartbeat fires. Click for usage breakdown."><strong>1</strong> recurring task</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 

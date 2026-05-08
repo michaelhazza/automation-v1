@@ -76,11 +76,13 @@
   .mode-picker { display: flex; gap: 6px; margin-top: 4px; }
   .mode-pick {
     flex: 1; padding: 8px 10px; border: 1px solid var(--slate-200); border-radius: 7px;
-    background: white; cursor: pointer; transition: all 0.1s;
+    background: white; cursor: pointer; transition: all 0.1s; position: relative;
     display: flex; flex-direction: column; gap: 3px; text-align: left; min-width: 0;
   }
   .mode-pick:hover { border-color: var(--slate-300); }
   .mode-pick.active { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .mode-pick.cautionary { background: #fffbeb; border-color: #fde68a; }
+  .mode-pick.cautionary:hover { border-color: var(--amber-600); }
   .mode-pick-label {
     font-size: 12px; font-weight: 600; color: var(--slate-800);
     display: flex; align-items: center; gap: 5px;
@@ -93,6 +95,13 @@
   .mode-pick-icon.always { background: var(--amber-600); }
   .mode-pick-icon.reference { background: var(--slate-500); }
   .mode-pick-desc { font-size: 10.5px; color: var(--slate-500); line-height: 1.35; }
+  .mode-pick-desc.warn { color: var(--amber-700); }
+  .recommended-badge {
+    position: absolute; top: -7px; right: 8px;
+    background: var(--emerald-500); color: white;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 8px;
+  }
 
   /* Scope segmented */
   .scope-segmented { display: flex; gap: 0; border: 1px solid var(--slate-300); border-radius: 8px; overflow: hidden; }
@@ -228,16 +237,17 @@ Data quality:
           <label class="field-label">Loading mode</label>
           <div class="mode-picker">
             <button class="mode-pick active">
+              <span class="recommended-badge">Recommended</span>
               <div class="mode-pick-label"><span class="mode-pick-icon auto">A</span> Auto</div>
-              <div class="mode-pick-desc">Loaded only when relevant.</div>
+              <div class="mode-pick-desc">Loaded only when relevant. Default for almost all documents.</div>
             </button>
-            <button class="mode-pick">
+            <button class="mode-pick cautionary">
               <div class="mode-pick-label"><span class="mode-pick-icon always">!</span> Always available</div>
-              <div class="mode-pick-desc">Loaded every run.</div>
+              <div class="mode-pick-desc warn">Loaded into every run. Increases token usage. Use sparingly.</div>
             </button>
             <button class="mode-pick">
               <div class="mode-pick-label"><span class="mode-pick-icon reference">R</span> Reference only</div>
-              <div class="mode-pick-desc">Agent fetches on demand.</div>
+              <div class="mode-pick-desc">Agent fetches on demand. Use for large manuals.</div>
             </button>
           </div>
         </div>

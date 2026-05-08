@@ -1,6 +1,6 @@
 # Auto Knowledge Retrieval, Development Brief
 
-> **Status:** Rev 2. Pre-spec, mockups attached.
+> **Status:** Rev 3. Pre-spec, mockups attached.
 > **Date:** 2026-05-08
 > **Branch:** to be created (`claude/auto-knowledge-retrieval` or similar)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -17,10 +17,7 @@
 > - **Mockup 6:** [Knowledge: Bundles sub-tab](../prototypes/auto-knowledge-retrieval/knowledge-bundles-tab.html)
 > - **Mockup 7:** [Bundle Edit modal](../prototypes/auto-knowledge-retrieval/bundle-edit-modal.html)
 >
-> **What's new in Rev 2:**
-> 1. Mockups produced for all primary surfaces and linked above.
-> 2. UX details added to §3 (modes), §6 (Add to Knowledge flow), and a new §6.1 (UI patterns established) reflecting decisions reached through three rounds of mockup feedback.
-> 3. Frontend design principles updated in `docs/frontend-design-principles.md` with the recurring patterns established here, so future mockup work starts closer to the optimum.
+> **What's new in Rev 3:** Incorporates a thorough reviewer pass. Adds explicit retrieval ordering formula and invariants (§3), chunking model (§8), three new engineering-invariant sections (§9 retrieval observability, §10 tenant isolation, §11 lifecycle and re-embedding), elevates token-budget philosophy to a platform principle, strengthens bundle framing, reserves space for system-generated documents, and adds a §14 spec-risk areas section so the spec author knows where the booby-traps are.
 
 ---
 
@@ -34,11 +31,15 @@
 6. The Add to Knowledge flow
 7. Memory blocks at additional tiers
 8. The shared retrieval engine
-9. What this enables (Phase 2, agent workspace)
-10. Decisions made
-11. Out of scope for v1
-12. Success criteria for v1
-13. UI patterns established through mockups
+9. Retrieval observability
+10. Tenant isolation invariants
+11. Lifecycle, versioning, and re-embedding
+12. What this enables (Phase 2, agent workspace)
+13. Decisions made
+14. Spec-risk areas to watch
+15. Out of scope for v1
+16. Success criteria for v1
+17. UI patterns established through mockups
 
 ---
 
@@ -70,6 +71,30 @@ Three modes. The default is Auto. The other two are escape hatches for the rare 
 The document is in the **candidate pool** for the scope it's linked to. When the agent runs a task, the system embeds the task description and runs vector similarity against all candidate documents. Documents above a minimum **relevance threshold** are loaded in score order until either all relevant documents are loaded or the token budget cap is reached.
 
 Critical: **the budget is a cap, not a target.** The system never loads documents to fill the budget. If only one document is relevant, only one loads. If none are relevant, none load. Most tasks load zero to three documents. The cap is a backstop for the rare case where many documents are genuinely relevant.
+
+### Retrieval ordering and invariants
+
+Retrieval is deterministic, in this order:
+
+1. **Authorization filter.** Build the candidate pool from documents the agent is authorized to see (see §10). Documents outside that pool never enter retrieval, regardless of similarity.
+2. **Threshold filter.** Drop any document whose relevance score is below the minimum threshold.
+3. **Rank.** Compute the final ranking score: `final_score = (relevance_score × relevance_weight) + scope_bonus + recency_bonus + operator_pin_bonus`.
+4. **Truncate to budget.** Load documents in `final_score` order until the token budget is reached.
+
+**Hard invariants** the implementation must preserve:
+
+- **Scope is a tiebreaker, not a multiplier.** Scope bonuses are bounded and small. They MUST NEVER cause an irrelevant document to outrank a materially more relevant one. A highly-relevant agent-scope document beats a marginally-relevant org-pinned document; an org-pinned document only "wins ties" against documents at similar relevance scores.
+- **Always-available documents bypass threshold and ranking.** They load every run. They are the only category that ignores relevance.
+- **Reference-only documents never enter the candidate pool.** Their manifest is added to the prompt; their content is fetched by the agent on demand via tool call.
+- **Operator pins are bounded too.** A user-pinned document gets a bonus, but the same hard rule applies: the bonus must never cause irrelevant content to outrank relevant content.
+
+### Platform principle: retrieval quality over retrieval volume
+
+This system is intentionally not optimised for "how many documents can we fit." It is optimised for "how few documents can we load while still answering well."
+
+> **Retrieval quality is prioritised over retrieval volume.** The system always prefers loading fewer highly-relevant documents over many marginally-relevant documents.
+
+This shapes every threshold-tuning decision, every UI surface that shows the model's behaviour, and every default that ships. Future improvements (better re-ranking, learned thresholds, cross-encoder rescoring) all serve this principle. Reviewers and spec authors should weight any proposed change against it.
 
 ### Always available
 The document is loaded into every run regardless of relevance. Use for compliance rules, brand voice guidelines, or any context the agent must always have. Replaces the old "eager" mode for cases where the operator genuinely needs the guarantee.
@@ -115,7 +140,15 @@ The Knowledge page tab strip becomes:
 - **Documents** — durable knowledge documents with scope and mode (existing, refreshed for new model)
 - **Files** — agent-produced artifacts across all runs (new tab, surfaces what already exists in the database)
 
-A file becomes a document via the **Add to Knowledge** action (§6). This is the only direction we support — promoting an artifact to durable knowledge. The reverse (document → file) is uncommon and unsupported in v1.
+A file becomes a document via the **Add to Knowledge** action (§6). This is the only direction we support; promoting an artifact to durable knowledge. The reverse (document to file) is uncommon and unsupported in v1.
+
+### What bundles are, and what they aren't
+
+The Knowledge → Documents tab has a *Bundles* sub-tab (existing primitive). To prevent ambiguity:
+
+> **Bundles are organisational and operational groupings only. Retrieval still occurs at the document level. Bundles do not alter semantic ranking behaviour.**
+
+A bundle is a curatorial collection of documents you can attach to an agent or task in one action, or clone across sub-accounts. A document inside a bundle is retrieved per its own mode and scope; the bundle does not modify relevance scoring, threshold behaviour, or token budget rules. Mode is set on the document, not on the bundle. This is enforced in the UI (Bundle Edit modal shows mode chips read-only) and called out in the brief here so it does not drift during spec.
 
 ## 6. The Add to Knowledge flow
 
@@ -137,9 +170,22 @@ The user clicks the three-dot menu on a file row → **Add to Knowledge.** A mod
 - The source file gets a **"Linked: [Document name]"** indicator on its row.
 - The source file is automatically marked durable (no TTL expiry) so the link remains valid.
 
-**Auto-suggestion path** (parallel feature): when an agent produces a text-heavy output (markdown summary, transcript, structured report), the agent emits a *"candidate for knowledge"* hint. The file appears in the **Auto-memory tab** alongside agent-extracted memory entries. The user clicks Approve and it's promoted via the same flow with sensible defaults. No new UI surface — this reuses the existing Auto-memory pending-review pattern.
+**Auto-suggestion path** (parallel feature): when an agent produces a text-heavy output (markdown summary, transcript, structured report), the agent emits a *"candidate for knowledge"* hint. The file appears in the **Auto-memory tab** alongside agent-extracted memory entries. The user clicks Approve and it's promoted via the same flow with sensible defaults. No new UI surface; this reuses the existing Auto-memory pending-review pattern.
 
 This means most knowledge accumulation happens via review-and-approve, not manual addition. The operator stays in control without doing the curation work.
+
+### System-generated documents (future-native concept)
+
+The promotion flow above covers *agent-produced files become durable documents*. The architecture should reserve conceptual space for a stronger version: **agents synthesizing reusable knowledge directly**, without going through a file step.
+
+Example future flow:
+- An agent completes a research task across many runs.
+- The agent identifies a recurring pattern worth keeping ("Acme Corp's primary buyer always asks about SOC 2 first").
+- The agent emits a *knowledge candidate* directly (no intermediate file).
+- The candidate appears in the Auto-memory tab for operator approval.
+- On approval, it becomes a durable Reference Document with the standard scope and mode controls.
+
+We are NOT building this in v1. The brief reserves the concept so the schema, the source-provenance taxonomy, and the Auto-memory tab UX can accommodate it without rework when it ships. Concretely: the document source taxonomy includes a future *"synthesised by agent"* badge alongside the current *"From file"*, *"Approved from auto-memory"*, *"Manually authored"*, *"Uploaded"* badges.
 
 ## 7. Memory blocks at additional tiers
 
@@ -163,7 +209,7 @@ Documents support five tiers because they can be one-off attachments to a single
 
 ## 8. The shared retrieval engine
 
-Today, memory blocks have a relevance ranker buried in the memory-block service. Documents have nothing equivalent — they're loaded by linkage alone.
+Today, memory blocks have a relevance ranker buried in the memory-block service. Documents have nothing equivalent; they're loaded by linkage alone.
 
 The build extracts the existing ranker into a small shared **RetrievalService** that:
 
@@ -172,7 +218,7 @@ The build extracts the existing ranker into a small shared **RetrievalService** 
 - Honours the token budget cap as a backstop.
 - Returns the items to load, in priority order.
 
-Memory blocks and documents each have their own data-source layer (different tables, different scoping rules) but plug into the same ranker. The infrastructure that already exists — OpenAI `text-embedding-3-small`, pgvector storage, cosine similarity — stays exactly as it is. Documents adopt it.
+Memory blocks and documents each have their own data-source layer (different tables, different scoping rules) but plug into the same ranker. The infrastructure that already exists; OpenAI `text-embedding-3-small`, pgvector storage, cosine similarity, stays exactly as it is. Documents adopt it.
 
 This abstraction is small but high-leverage:
 
@@ -182,7 +228,89 @@ This abstraction is small but high-leverage:
 
 Cost per task at scale: under one cent of embedding overhead per run. End-to-end retrieval latency: under 100ms added per run. Already proven by memory blocks in production today.
 
-## 9. What this enables (Phase 2, agent workspace)
+### What gets embedded (chunking model)
+
+Critical decision the spec must lock: **retrieval operates on chunked semantic units, not whole-document embeddings.**
+
+- During ingestion, documents are split into semantically coherent chunks. Chunk size and boundaries are tuned for the embedding model in use; the spec author owns the tuning.
+- Each chunk gets its own embedding and is independently retrievable.
+- A chunk match retrieves its parent document; the document is then loaded into context (potentially with surrounding chunks for coherence).
+- Whole-document embeddings are NOT used. They scale poorly (embedding quality drops as documents get longer) and produce worse retrieval.
+
+This decision determines whether the system handles a 50-page playbook gracefully or chokes. The spec author should treat chunking as a first-class engineering concern with explicit tests for boundary conditions (very short documents, very long documents, mixed-content documents).
+
+**For the *Reference only* mode** (large manuals, codebases): chunks are still indexed for the manifest preview, but the full content is fetched on-demand by the agent rather than auto-loaded. This preserves the manifest-only behaviour while still benefiting from chunked semantic indexing.
+
+## 9. Retrieval observability
+
+Without this, debugging is guesswork and operators won't trust the system. **First-class concept, not an afterthought.**
+
+For every agent run, the system must record:
+
+- **Candidate pool size** for each tier (org / sub-account / agent / recurring task / task instance).
+- **Retrieved documents** with their final score, mode, and tier.
+- **Rejected documents that were above threshold** but didn't make it into context, with the reason: budget exhausted, lower-scoring at tie, etc.
+- **Rejected documents below threshold** (counts only, not full list): how many candidates were filtered before ranking.
+- **Token contribution per document** loaded.
+- **Retrieval score per document** loaded.
+- **Reference-only fetches** the agent invoked during the run via tool call.
+
+This data powers four operator-facing surfaces and one internal one:
+
+- **"Why was this loaded?" tooltip** on each document row in Agent Data Sources and Documents tabs. Hover shows the recent task contexts where this document scored above threshold, in plain language ("Frequently retrieved for CRM enrichment and lead scoring tasks").
+- **"Why wasn't this loaded?"** drill-in on a specific run trace, showing which documents were considered, scored, and rejected, with reasons.
+- **"Loaded in N of last 30 runs" relevance bar** (already in mockups) backed by this data.
+- **Token usage per workspace and per agent**, for the spending / budget surface.
+- **Internal telemetry** for the engineering team: relevance threshold tuning, retrieval drift detection, embedding model evaluation, RAG quality benchmarking.
+
+The data feed is structured (per-run JSON in the LLM observability ledger that already exists in the codebase). Spec author should choose between: (a) write to existing ledger with new event types, or (b) dedicated `retrieval_events` table. Recommend (a) for v1, can split later if volume justifies.
+
+Without retrieval observability, four things go wrong: operators don't trust retrieval, debugging is impossible, token optimisation is guesswork, support burden balloons. This section is non-negotiable for v1.
+
+## 10. Tenant isolation invariants
+
+This is a security concern, not just an architectural concern.
+
+**Hard invariants** the implementation must preserve:
+
+> **Authorization filtering occurs BEFORE semantic retrieval.** A document outside the agent's authorized scope MUST NEVER enter the retrieval candidate pool, regardless of semantic similarity.
+
+Concretely:
+
+- **Cross-org boundary is absolute.** Retrieval never crosses organisations. An agent in Org A cannot see Org B's documents under any condition.
+- **Sub-account isolation is enforced at the candidate-pool level.** An agent in sub-account X with sub-account-scoped documents available cannot see sub-account Y's documents.
+- **Org-pinned documents flow downward only.** An org-pinned document is visible to all sub-accounts in that org. The reverse is impossible.
+- **Embeddings are tenant-scoped.** The vector store schema must enforce org_id (and sub-account_id where relevant) on every embedding row. RLS policies apply before similarity search.
+- **The candidate pool is constructed from authorization first, then filtered by relevance.** The order matters: never retrieve, then filter; always filter, then retrieve.
+
+This applies equally to memory blocks and to documents (both run through the shared RetrievalService). The spec must include explicit RLS / authorization tests that verify cross-tenant queries return empty pools, never partial results.
+
+## 11. Lifecycle, versioning, and re-embedding
+
+Knowledge artifacts are not static. The system must handle change over time without requiring operator intervention.
+
+**Lifecycle philosophy** the spec must build to:
+
+> **Knowledge artifacts are versioned and re-indexable. Embedding generations are replaceable infrastructure, not permanent truth. The system supports background re-embedding and retrieval regeneration without operator intervention.**
+
+Concretely, the system handles:
+
+- **Document edited.** Re-summarise (cheap LLM) and re-embed in the background. Retrieval continues using the prior version until the new version is ready, then swaps atomically. UI shows a `summary_stale` flag during the brief catch-up window.
+- **Source file changes** (e.g. underlying CSV updated). Same as document edit.
+- **Bundle changes.** Bundle composition affects which documents are pulled into a scope; the affected documents' linkage is updated, no re-embedding needed.
+- **Embedding model upgrades.** When OpenAI ships text-embedding-4-small or we choose to migrate, the system supports a background re-embedding job that walks every document and replaces the vectors. No operator intervention. Old embeddings remain valid until the new ones are ready, then swapped.
+- **Extraction quality improvements.** As text extraction from PDFs / images improves, documents derived from those sources should support being re-extracted and re-embedded without losing their linkage history or scope settings.
+
+What the spec must include:
+
+- A `summary_stale` flag (or equivalent) that surfaces transitional states.
+- A background job that re-embeds documents whose source has changed, on a configurable cadence.
+- A migration path for embedding-model upgrades.
+- Clear ownership: re-embedding is the system's job, not the operator's. The UI never asks the user to "click here to update embeddings."
+
+This is the difference between v1 working at scale and v1 becoming a pile of operational debt the team has to manually maintain.
+
+## 12. What this enables (Phase 2, agent workspace)
 
 This work ships as Phase 1 of the broader agent workspace strategy described in `docs/agent-cloud-compute-dev-brief.md`. It is valuable in its own right — smarter knowledge retrieval improves every agent run regardless of whether the workspace UI ever ships. But it is also a prerequisite for several Phase 2 surfaces:
 
@@ -193,7 +321,7 @@ This work ships as Phase 1 of the broader agent workspace strategy described in 
 
 In short: shipping Phase 1 first means Phase 2 mockups are simpler, the agent workspace surface has better content to display, and several Phase 2 decisions get easier.
 
-## 10. Decisions made
+## 13. Decisions made
 
 All decisions reached and approved through reviewer iteration. Recorded here for the spec authors.
 
@@ -220,7 +348,26 @@ All decisions reached and approved through reviewer iteration. Recorded here for
 | 19 | Relevance threshold | Calibrated empirically. Start with default (e.g. cosine 0.6). Tune from telemetry. |
 | 20 | Branch separation | Ship as its own feature on `claude/auto-knowledge-retrieval` (or similar) before agent workspace work resumes. |
 
-## 11. Out of scope for v1
+## 14. Spec-risk areas to watch
+
+The spec author and implementer should treat these as the messy areas. Each one is more likely than average to require iteration, careful design, and explicit testing.
+
+| Area | Risk |
+|---|---|
+| Chunking strategy (§8) | Huge downstream impact on retrieval quality. Wrong choice scales poorly. |
+| Relevance threshold tuning (§3) | Threshold drift over time as document corpora grow. Needs telemetry-driven tuning. |
+| Cross-tier ranking (§3) | Non-deterministic behaviour if scope bonus is unbounded. Hard invariant in §3 must be tested. |
+| Reference-only mode UX | Risk that agents ignore the manifest and don't fetch when they should. Tool-call behaviour needs prompt-level reinforcement. |
+| Massive documents (>50K tokens) | Potential token explosions if Reference-only mode isn't selected correctly. Default behaviour for large uploads needs care. |
+| Bundle semantics (§5) | User confusion: are bundles for retrieval, organisation, security, or all? Brief locks the answer (organisational only); spec must enforce. |
+| Re-embedding lifecycle (§11) | Operational debt if not built in from v1. Stale embeddings produce silent retrieval drift. |
+| Retrieval observability (§9) | Without it, debugging is impossible. Build it day one, not as a v1.1 follow-on. |
+| Tenant isolation (§10) | Security risk if RLS / authorization order is wrong. Must be explicitly tested with cross-tenant query attempts. |
+| "Always available" abuse | Cost blowout if users mark many documents as Always available. v1 has soft warning only; revisit hard caps if real abuse emerges. |
+
+The spec author should produce explicit test cases for each of these. Where ambiguity remains after the spec, flag back to the brief author rather than guessing.
+
+## 15. Out of scope for v1
 
 - **Document version-aware retrieval.** A document can be revised; the system uses the latest version. Diff-based retrieval (load the old version when relevant context is older) is not in v1.
 - **Cross-encoder re-ranking.** Pure cosine similarity for v1; future re-ranking with a small LLM if telemetry shows we need it.
@@ -231,7 +378,7 @@ All decisions reached and approved through reviewer iteration. Recorded here for
 - **Multilingual retrieval.** Embeddings work across languages but retrieval quality is best in English. Future improvement.
 - **Custom embedding provider per workspace.** All workspaces use OpenAI text-embedding-3-small for v1.
 
-## 12. Success criteria for v1
+## 16. Success criteria for v1
 
 A non-technical operator can:
 
@@ -250,7 +397,7 @@ A reasonable internal observer can:
 
 The competitive frame writes itself: *"Your agents see the right knowledge at the right moment, automatically. You curate; we route."*
 
-## 13. UI patterns established through mockups
+## 17. UI patterns established through mockups
 
 Three rounds of mockup feedback (May 2026) established a set of UI decisions for this feature. They are captured here so the spec author and the implementer don't re-litigate them, and so future surfaces in the product can adopt the same patterns. Many of these have been promoted into `docs/frontend-design-principles.md` as recurring patterns.
 
@@ -291,4 +438,4 @@ These decisions are visible in the mockups linked in the brief header. The mocku
 
 ---
 
-> **Note for the next reviewer.** This is Rev 2. All 20 design decisions in §10 are approved; mockups capture the UX in §13 and are linked in the header. The remaining work is engineering: schema design, migration plan, telemetry shape, and the implementation spec. The next move is creating a fresh branch (`claude/auto-knowledge-retrieval` or similar), invoking the architect agent against this brief, and producing a proper implementation spec. After that ships, the agent workspace work in `docs/agent-cloud-compute-dev-brief.md` can resume on its branch with this foundation in place.
+> **Note for the next reviewer.** This is Rev 3. Design decisions are in §13; UX is captured in §17 and the linked mockups. New in Rev 3: explicit retrieval ordering and invariants (§3), chunking model (§8), three engineering-invariant sections (§9 observability, §10 tenant isolation, §11 lifecycle), bundle conceptual framing (§5), system-generated documents reservation (§6), and §14 spec-risk areas. The remaining work is engineering: schema design, telemetry shape, and the implementation spec. The next move is creating a fresh branch (`claude/auto-knowledge-retrieval` or similar), invoking the architect agent against this brief, and producing a proper implementation spec.
