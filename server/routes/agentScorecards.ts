@@ -3,10 +3,11 @@
 // Trust & Verification Layer spec §12.2.
 
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { validateBody } from '../middleware/validate.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { scorecardService } from '../services/scorecardService.js';
 import { attachScorecardBody } from '../schemas/scorecards.js';
 
@@ -42,7 +43,7 @@ router.post(
   }),
 );
 
-// ── DELETE /api/agents/:agentId/scorecards/:scorecardId ──────────────────────
+// ── DELETE /api/agents/:agentId/scorecards/:scorecardId (org-admin / system-admin) ──
 
 router.delete(
   '/api/agents/:agentId/scorecards/:scorecardId',
@@ -53,6 +54,21 @@ router.delete(
     const role = req.user?.role;
     const callerScope = role === 'system_admin' ? 'system_admin' : 'org_admin';
     await scorecardService.detachFromAgent(agentId, scorecardId, callerScope);
+    res.status(204).end();
+  }),
+);
+
+// ── DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:scorecardId ──
+// Subaccount-scoped detach — only removes `suggested` attachments (authority guard in service).
+
+router.delete(
+  '/api/subaccounts/:subaccountId/agents/:agentId/scorecards/:scorecardId',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SCORECARDS_MANAGE),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, agentId, scorecardId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    await scorecardService.detachFromAgent(agentId, scorecardId, 'subaccount');
     res.status(204).end();
   }),
 );

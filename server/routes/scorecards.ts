@@ -22,7 +22,10 @@ const router = Router();
 
 // ── Determine viewer context from request ────────────────────────────────────
 
-function viewerScope(req: Request): 'system_admin' | 'org_admin' | 'subaccount' {
+// Org-scoped routes (requireOrgPermission gate) treat all callers as org_admin
+// visibility so the full org library is returned. Subaccount-scoped visibility
+// is served via /api/subaccounts/:id/scorecards which uses viewerScope='subaccount'.
+function viewerScope(req: Request): 'system_admin' | 'org_admin' {
   const role = req.user?.role;
   if (role === 'system_admin') return 'system_admin';
   return 'org_admin';
@@ -33,10 +36,10 @@ function withSourcePills(
   scope: 'system_admin' | 'org_admin' | 'subaccount',
 ) {
   if (scope === 'system_admin') return cards;
-  const vs = scope as 'org_admin' | 'subaccount';
+  const pillScope: 'org_admin' | 'subaccount' = scope === 'org_admin' ? 'org_admin' : 'subaccount';
   return cards.map(sc => ({
     ...sc,
-    sourcePill: compressSourcePill(sc.scopeType as 'system' | 'org' | 'subaccount', vs),
+    sourcePill: compressSourcePill(sc.scopeType as 'system' | 'org' | 'subaccount', pillScope),
   }));
 }
 

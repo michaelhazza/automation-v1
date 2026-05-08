@@ -5,7 +5,7 @@
 
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { scorecards, agentScorecardAttachments } from '../db/schema/index.js';
+import { scorecards, agentScorecardAttachments, agents, organisations, systemAgents } from '../db/schema/index.js';
 import type { Scorecard, NewScorecard } from '../db/schema/scorecards.js';
 import type { AgentScorecardAttachment } from '../db/schema/agentScorecardAttachments.js';
 import type { CreateScorecardInput, UpdateScorecardInput, DuplicateScorecardInput } from '../schemas/scorecards.js';
@@ -203,22 +203,52 @@ export const scorecardService = {
     orgId: string,
     opts: {
       gradingFrequency?: 'off' | 'q1' | 'q2' | 'q3';
-      orgMandatorySlugs?: string[];
-      systemAgentDefaults?: { default_system_scorecard_slugs: string[]; default_org_scorecard_slugs: string[] } | null;
-      agentTemplateDefaults?: string[] | null;
     } = {},
   ): Promise<AgentScorecardAttachment> {
     const db = getOrgScopedDb('scorecardService.attachToAgent');
 
-    // Look up scorecard slug (name used as slug for authority lookup)
+    // Load scorecard (name is used as the stable slug key per data model)
     const sc = await scorecardService.getById(scorecardId);
     if (!sc || sc.deletedAt) throwNotFound();
 
+    // Load the agent to get its system agent FK
+    const agentRows = await db
+      .select({ id: agents.id, systemAgentId: agents.systemAgentId })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)));
+    if (agentRows.length === 0) throwNotFound();
+    const agent = agentRows[0];
+
+    // Load org mandatory slugs
+    const orgRows = await db
+      .select({ orgMandatoryScorecardSlugs: organisations.orgMandatoryScorecardSlugs })
+      .from(organisations)
+      .where(eq(organisations.id, orgId));
+    const orgMandatorySlugs = orgRows[0]?.orgMandatoryScorecardSlugs ?? [];
+
+    // Load system agent defaults if the agent has a system agent parent
+    let systemAgentDefaults: { default_system_scorecard_slugs: string[]; default_org_scorecard_slugs: string[] } | null = null;
+    if (agent.systemAgentId) {
+      const saRows = await db
+        .select({
+          defaultSystemScorecardSlugs: systemAgents.defaultSystemScorecardSlugs,
+          defaultOrgScorecardSlugs: systemAgents.defaultOrgScorecardSlugs,
+        })
+        .from(systemAgents)
+        .where(eq(systemAgents.id, agent.systemAgentId));
+      if (saRows[0]) {
+        systemAgentDefaults = {
+          default_system_scorecard_slugs: saRows[0].defaultSystemScorecardSlugs ?? [],
+          default_org_scorecard_slugs: saRows[0].defaultOrgScorecardSlugs ?? [],
+        };
+      }
+    }
+
     const authority = resolveAttachAuthority({
       scorecardSlug: sc.name,
-      systemAgentDefaults: opts.systemAgentDefaults ?? null,
-      orgMandatorySlugs: opts.orgMandatorySlugs ?? [],
-      agentTemplateDefaults: opts.agentTemplateDefaults ?? null,
+      systemAgentDefaults,
+      orgMandatorySlugs,
+      agentTemplateDefaults: null,
       operatorChecked: true,
     });
 
