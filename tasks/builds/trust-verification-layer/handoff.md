@@ -247,3 +247,31 @@ PR #274 (auto-knowledge-retrieval) merged to `main` 2026-05-08 after TVL Phase 2
 **ready-to-merge label applied at:** 2026-05-08T22:44:51Z
 
 **Final phase status:** PHASE_3_COMPLETE. CI runs G5 on label apply. Operator drives the merge sequence per the end-of-phase prompt: update `current-focus.md` to NONE on the feature branch first → commit → push → `gh pr merge 275 --squash --delete-branch`. finalisation-coordinator does NOT auto-merge.
+
+---
+
+## Phase 3 — re-opened post-MERGE_READY (chatgpt-pr-review iterative-loop correction)
+
+**Operator correction received 2026-05-09 after Round 1 was prematurely auto-closed.** The chatgpt-pr-review contract is iterative — coordinator must wait silently for operator paste-back or explicit `done`, never auto-finalise after a single APPROVED round. Round 2 was reopened on operator paste, and Round 3 followed.
+
+**Round 2 — 2026-05-09T08:55:00Z:** strategic / framing only — 7 items, 0 code changes, 2 new deferrals routed (`CHATGPT-R2-RISK-1` operator-correction taxonomy enrichment, `CHATGPT-R2-RISK-2` future Trust Kernel core layer), 1 duplicate auto-applied (Item 3 → `CHATGPT-R1-RISK-1`), 4 observation-only.
+
+**Round 3 — 2026-05-09T09:30:00Z:** acknowledgment + strategic framing — 8 items, 0 code changes, 2 new deferrals routed (`CHATGPT-R3-RISK-1` formal review-loop state-machine taxonomy, `CHATGPT-R3-RISK-2` reviewer benchmarking and trust-weighting framework), 6 observation-only (praise + framing).
+
+**Iterative-loop discipline locked (2026-05-09 commit `8397d4dc`):**
+- `chatgpt-pr-review.md` line 230 (empty-findings + APPROVED edge case): no longer asks the user; proceeds to standard round summary instead.
+- `chatgpt-pr-review.md` step 9 [MANUAL]: round-N+1 diff regeneration runs unconditionally, even when step 8 commit was skipped (zero code changes).
+- `finalisation-coordinator.md` Step 5: explicit "iterative-loop discipline (locked)" section with three "never" rules.
+- `KNOWLEDGE.md` `[2026-05-09]` correction entry.
+
+**CI fix commits during Phase 3 (between rounds 1 and 2):**
+- `82986096` — migration `0300_bench_runs.sql` IMMUTABLE index expression. CI verify job blocked merge with `functions in index expression must be marked IMMUTABLE`. Fix: pinned timezone with `AT TIME ZONE 'UTC'` to make `date_trunc('minute', created_at)` IMMUTABLE.
+- `2de2b513` — corrections route raw `db` import. CI gate `verify-rls-contract-compliance.sh` blocked merge. Fix: moved run-ownership lookup into `correctionCaptureService.getRunOwnership(runId, orgId)`; route now imports the service helper instead of `db` directly.
+
+**Final disposition (chatgpt-pr-review):** `APPROVED — operator finalised after Round 3` at 2026-05-09T09:45:00Z (operator said `done`).
+
+**Total deferrals from chatgpt-pr-review across all 3 rounds:** 8 forward-looking strategic risks (`CHATGPT-R1-RISK-1/2/3/5`, `CHATGPT-R2-RISK-1/2`, `CHATGPT-R3-RISK-1/2`) + 1 consolidated (`R1-RISK-4` → existing M1 retention deferral). All have explicit activation triggers — none should be implemented proactively.
+
+**Branch HEAD at final close:** `9a1e3a16`, 53 commits ahead of `main`, 0 behind. CI: ALL GREEN on `9a1e3a16` (verify, unit tests, integration tests, Lint+Typecheck, Grep invariants, Portable framework tests).
+
+**Final phase status (re-locked):** PHASE_3_COMPLETE. Ready for operator merge sequence.

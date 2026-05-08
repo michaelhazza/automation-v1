@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
-last_updated: 2026-05-08
-last_merge_ready_pr: #275
-last_merge_ready_slug: trust-verification-layer
-last_merge_ready_branch: claude/synthetos-work-primitive-improvements-P17SD
-last_merged_pr: #273
-last_merged_slug: consolidation-govern
-last_merged_branch: ui-consolidation-govern
-last_merged_at: 2026-05-07T23:18:59Z
-last_merged_commit: dfa53e58
+status: NONE
+last_updated: 2026-05-09
+last_merged_pr: #275
+last_merged_slug: trust-verification-layer
+last_merged_branch: claude/synthetos-work-primitive-improvements-P17SD
+last_merged_at: 2026-05-09T09:45:00Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete 2026-05-08. PR #275 — `trust-verification-layer` — `ready-to-merge` label applied at 2026-05-08T22:44:51Z; CI runs G5. chatgpt-pr-review Round 1 closed APPROVED (no code changes; 5/5 verifications PASS — idempotency, retention strategy commitment, RLS coverage, deterministic replay, queue dedupe). 4 forward-looking strategic risks deferred to Stage-2-GA backlog (`CHATGPT-R1-RISK-1/2/3/5`); `CHATGPT-R1-RISK-4` consolidated into existing M1 retention deferral. Doc-sync sweep: 13 verdicts recorded (no doc updates required this round; Phase 2 chunk 16 already covered architecture.md + capabilities.md + KNOWLEDGE.md). Phase 3 handoff section appended to `tasks/builds/trust-verification-layer/handoff.md`. Branch HEAD at finalisation: `d0ae8c57`, 51 commits ahead of `main`, 0 behind. **Recommended next action — when CI is green and the operator says "merge":** update `tasks/current-focus.md` ON THE FEATURE BRANCH to clear `last_merge_ready_*` keys + set `last_merged_*` keys + status `MERGE_READY → NONE`; commit; push; then `gh pr merge 275 --squash --delete-branch`. Order matters: doc update → commit → push → merge. finalisation-coordinator does NOT auto-merge.
+**Status:** **NONE** — no active spec.
+
+**Just merged:** PR #275 — `trust-verification-layer` (squash-commit `pending-squash`, 2026-05-09T09:45:00Z). Three-stage Trust & Verification Layer (runtime checks → scorecards + bench → operator corrections). Spec: `tasks/builds/trust-verification-layer/spec.md` (LOCKED, 1087 lines, chatgpt-spec-review Rounds 1+2). Phase 3 handoff: `tasks/builds/trust-verification-layer/handoff.md`. Pipeline: 16 chunks built (per-chunk pr-reviewer fixes inline) → G2 PASS → spec-conformance CONFORMANT_AFTER_FIXES (11 directional + 2 ambiguous gaps deferred) → adversarial-reviewer HOLES_FOUND (1 confirmed + 3 likely + 2 worth-confirming routed to `tasks/todo.md`) → pr-reviewer CHANGES_REQUESTED (B-1 / B-2 / B-3 / S-1 / S-2 / S-4 fixed in `999ec0bf`; B-4 / S-3 deferred to operator) → Codex dual-reviewer APPROVED with 4 [ACCEPT] decisions all fixed in `c1ed1535` (2 PostgreSQL migration bugs that would have failed to apply, 1 broken corrections route, 1 wrong column reference) → operator-elected pre-merge fix-loop closed B-4 + S-3 + TVL-DG-1 + TVL-DG-3 (commits `2655acbf` / `effce969` / `3c213e16` / `05255c11`); Codex re-pass caught + fixed P1 wrapper-shape `verify` (every review-gated send would have evaluated inconclusive) and P2 slug-match `linkToolCallsToEventIds` (mis-attached cross-slug) in `9f99874c` → S2 collision with PR #274 (auto-knowledge-retrieval) closed via focused merge-resolution chunk: 7 conflicts resolved + 10 TVL migrations renumbered 0288-0297 → 0295-0304 + spec/architecture/plan/RLS-manifest/scorecard-RLS-script all updated (commits `11903b86` / `859645a9` / `d0ae8c57`) → ready-to-merge label applied → CI 1st run hit migration 0300 `date_trunc(timestamptz)` IMMUTABLE failure (fixed `82986096` — pinned `AT TIME ZONE 'UTC'`) → CI 2nd run hit `verify-rls-contract-compliance.sh` blocking gate on direct `db` import in corrections route (fixed `2de2b513` — moved run-ownership lookup into `correctionCaptureService.getRunOwnership`) → CI ALL GREEN. **chatgpt-pr-review:** 3 rounds closed `APPROVED — operator finalised after Round 3`. R1 verifications 5/5 PASS (idempotency, retention commitment, RLS coverage, deterministic replay, queue dedupe). R1 originally auto-closed prematurely "round-2 not requested" — operator-corrected; iterative-loop discipline locked in commit `8397d4dc` (chatgpt-pr-review.md line 230 + step 9 [MANUAL] + finalisation-coordinator.md Step 5 + KNOWLEDGE.md `[2026-05-09]` correction). R2 + R3 strategic / framing only — 4 new deferrals (`CHATGPT-R2-RISK-1/2`, `CHATGPT-R3-RISK-1/2`). Total deferrals across all 3 rounds: 8 forward-looking strategic risks + 1 consolidated into existing M1 retention; all have explicit activation triggers. Doc-sync sweep complete across 13 registered docs (no updates required Round 1; Phase 2 chunk 16 already covered architecture.md + capabilities.md + KNOWLEDGE.md). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-trust-verification-layer-2026-05-08T21-11-04Z.md`.
 
 **Just merged:** PR #273 — `consolidation-govern` (squash-commit `dfa53e58`, 2026-05-07T23:18:59Z). Govern surface — Knowledge / Spending / Connections consolidated UI shipped across 13 build chunks. Spec: `tasks/builds/consolidation-govern/spec.md`. Phase 3 handoff: `tasks/builds/consolidation-govern/handoff.md`. Pipeline: spec-conformance NON_CONFORMANT (18 directional gaps deferred) → pr-reviewer CHANGES_REQUESTED (5 blockers + 7 strong recommendations all fixed in `3d4f1cfe`) → adversarial-reviewer 3 findings deferred (CONSOL-GOV-DEF-17/18/19) → dual-reviewer commit `5566880c` → S2 sync (auto-resolved via finalisation-coordinator) → G4 regression-guard fixes in `997e940a` (App.tsx route handlers consolidated post-S2 with main's PR #271/#272 page-deletion pattern; migration 0286 → 0287 collision rename; architecture.md migration filename updated) → Phase 3 commit `9188981f` (KNOWLEDGE.md +4 patterns, handoff.md created, current-focus.md → MERGE_READY, CONSOL-GOV-DEF-9 closed) → ready-to-merge label applied → CI ALL GREEN → auto-merged. **chatgpt-pr-review SKIPPED** in Phase 3 (operator instructed autonomous mode, incompatible with manual ChatGPT-web loop). 4 KNOWLEDGE.md patterns appended: closed-enum service-boundary mapping, targeted onConflictDoNothing, migration-number collision after S2, App.tsx route regression after upstream page deletions. Doc-sync sweep complete (13 verdicts recorded). 1 todo item closed (CONSOL-GOV-DEF-9 testConnection error.code mapping shipped via Phase 2 pr-reviewer Blocker B-1). 18 spec-conformance directional gaps + 3 adversarial-reviewer findings deferred to post-merge backlog in `tasks/todo.md`.
 
@@ -81,7 +80,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-08T12:38:00Z
+**Last updated:** 2026-05-09T09:45:00Z
 
 ---
 
