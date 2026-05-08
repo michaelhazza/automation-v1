@@ -35,6 +35,7 @@ interface FileSnapshotEntry {
   id: string;
   name: string;
   mimeType: string | null;
+  versionId: string | null;
   producingRunId: string | null;
   producingEventId: string | null;
   createdAt: string;

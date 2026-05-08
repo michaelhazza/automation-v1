@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import api from '../lib/api';
 import type { AgentPresenceState, CurrentFocus } from '../../../shared/types/agentPresence';
 import type { AgentObservation } from '../../../shared/types/agentObservations';
+import type { KnowledgeInUseEntry } from '../components/agent-workspace/KnowledgeInUseCard';
+import type { FileSnapshotEntry } from '../components/agent-workspace/FilesSnapshotCard';
 
 export interface OverviewPresence {
   state: AgentPresenceState;
@@ -25,8 +27,8 @@ export interface AgentOverviewData {
   presence: OverviewPresence;
   activeGoals: unknown[];
   recentObservations: AgentObservation[];
-  knowledgeInUse: unknown[];
-  filesSnapshot: unknown[];
+  knowledgeInUse: KnowledgeInUseEntry[];
+  filesSnapshot: FileSnapshotEntry[];
   toolsUsageBands: { frequently: string[]; occasionally: string[]; rarely: string[]; asOf: string; };
   schedulePeek: { nextRunAt: string | null; trigger: string | null; label: string | null; } | null;
   connectionsHealth: unknown[];
