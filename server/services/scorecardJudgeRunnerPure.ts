@@ -43,7 +43,7 @@ export function shouldSample(
 export interface JudgePromptInput {
   scorecardName: string;
   qualityCheckName: string;
-  qualityCheckDesc: string | undefined;
+  qualityCheckDesc: string | null | undefined;
   runSummary: string;
   agentName: string;
 }
@@ -129,10 +129,11 @@ export function buildFanoutJobs(
     shouldSample(a.gradingFrequency, runId, a.scorecardId) && a.qualityChecks.length > 0
   );
 
-  // Sort by attachedAt for deterministic truncation order
-  const sortedSampled = [...sampled].sort(
-    (a, b) => a.attachedAt.getTime() - b.attachedAt.getTime(),
-  );
+  // Sort by attachedAt for deterministic truncation order; scorecardId as stable tiebreaker
+  const sortedSampled = [...sampled].sort((a, b) => {
+    const dt = a.attachedAt.getTime() - b.attachedAt.getTime();
+    return dt !== 0 ? dt : a.scorecardId.localeCompare(b.scorecardId);
+  });
 
   const all: JudgeJobSpec[] = [];
   for (const attachment of sortedSampled) {

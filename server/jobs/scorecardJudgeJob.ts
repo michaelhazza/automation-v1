@@ -2,8 +2,7 @@
 // Scorecard judge job — runs one LLM call to evaluate a single quality check.
 // Trust & Verification Layer spec §12.3, §6.5 F1 snapshot invariant, §10.1.
 
-import { createHash } from 'crypto';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { withOrgTx } from '../instrumentation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
@@ -55,11 +54,11 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
           return;
         }
 
-        // 2. Load scorecard — F1 snapshot captured at judgement time
+        // 2. Load scorecard — F1 snapshot captured at judgement time; skip soft-deleted
         const scRows = await db
           .select()
           .from(scorecards)
-          .where(eq(scorecards.id, scorecardId));
+          .where(and(eq(scorecards.id, scorecardId), isNull(scorecards.deletedAt)));
         const sc = scRows[0];
         if (!sc) {
           logger.warn('scorecard_judge.scorecard_not_found', { runId, scorecardId, qualityCheckSlug });
@@ -85,19 +84,18 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
           agentName,
         });
 
-        // 4. Call LLM with idempotency key
-        const idempotencyKey = createHash('sha256')
-          .update(`${runId}:${scorecardId}:${qualityCheckSlug}:${triggerSource}`)
-          .digest('hex');
-
+        // 4. Call LLM — retry up to MAX_JSON_RETRIES on malformed JSON.
+        // Append attempt marker on retries so the router computes a distinct
+        // idempotency key per attempt (router key is hash of messages + ctx).
         let observedScore: number | null = null;
         let judgeReasoning: string = '';
         let verdict: 'pass' | 'fail' | 'inconclusive' = 'inconclusive';
 
         for (let attempt = 0; attempt < MAX_JSON_RETRIES; attempt++) {
+          const userMsg = attempt === 0 ? user : `${user}\n\n[Retry attempt: ${attempt}]`;
           try {
             const response = await routeCall({
-              messages: [{ role: 'user', content: user }],
+              messages: [{ role: 'user', content: userMsg }],
               system,
               maxTokens: 512,
               context: {
@@ -108,6 +106,8 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
                 taskType: 'review',
                 routingMode: 'ceiling',
                 featureTag: 'scorecard-judge',
+                systemCallerPolicy: 'bypass_routing',
+                provider: 'anthropic',
                 model: judgeModelId,
               },
             });
@@ -140,7 +140,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
           qualityCheckSlug,
           triggerSource: toDbTriggerSource(triggerSource),
           verdict,
-          score: observedScore ?? undefined,
+          score: verdict === 'inconclusive' ? null : (observedScore ?? undefined),
           reasoning: judgeReasoning || null,
           snapshotScorecardName: sc.name,
           snapshotQualityCheckName: qc.name,

@@ -153,16 +153,15 @@ describe('buildFanoutJobs', () => {
   });
 
   it('applies bounded-fanout cap and sets capped=true', () => {
-    // Make 6 attachments × 4 checks = 24 potential jobs, maxJobs=10
-    const attachments = Array.from({ length: 6 }, (_, i) =>
+    // 40 attachments × 4 checks = 160 candidates at q3 (75%).
+    // Even in the unlucky bottom quartile, ~0.25 × 160 = 40 > maxJobs=10.
+    // Pigeonhole: the cap MUST be hit regardless of run-id hash.
+    const attachments = Array.from({ length: 40 }, (_, i) =>
       makeAttachment(`sc-${i}`, 'q3', ['c1', 'c2', 'c3', 'c4'], new Date(i))
     );
-    // Use a run-id that will cause q3 to sample most of them
-    const { jobs, capped } = buildFanoutJobs('run-fixed-high-sample', attachments, 10);
-    if (capped) {
-      expect(jobs).toHaveLength(10);
-    }
-    // If not capped (q3 sampled fewer than 10 jobs), that's also valid
+    const { jobs, capped } = buildFanoutJobs('run-cap-test', attachments, 10);
+    expect(capped).toBe(true);
+    expect(jobs).toHaveLength(10);
   });
 
   it('capped=false when total jobs within limit', () => {
@@ -172,6 +171,16 @@ describe('buildFanoutJobs', () => {
     );
     const { capped } = buildFanoutJobs('run-small', attachments, 20);
     // May or may not sample but should never cap (3 scorecards × 1 check = max 3 < 20)
+    expect(capped).toBe(false);
+  });
+
+  it('excludes attachments with empty qualityChecks even when sampled', () => {
+    const attachments = [
+      makeAttachment('sc-empty', 'q3', [], new Date(0)),
+      makeAttachment('sc-has-checks', 'q3', ['c1'], new Date(1)),
+    ];
+    const { jobs, capped } = buildFanoutJobs('run-empty-check-test', attachments, 20);
+    expect(jobs.every(j => j.scorecardId !== 'sc-empty')).toBe(true);
     expect(capped).toBe(false);
   });
 

@@ -15,6 +15,10 @@ const JUDGE_MAX_JOBS_PER_RUN = Number(process.env['JUDGE_MAX_JOBS_PER_RUN'] ?? '
  * Called after `agent:run:completed` to determine which quality checks to grade
  * and enqueue `scorecard:judge` jobs via pg-boss (or no-op in dev/in-memory).
  *
+ * Precondition: caller MUST be inside an active withOrgTx block (HTTP handler or
+ * pg-boss createWorker job) — scorecardService.listForAgent uses getOrgScopedDb
+ * which throws 'missing_org_context' outside any org transaction.
+ *
  * Non-blocking: caller should fire-and-forget with `.catch(logger.error)`.
  */
 export async function scheduleForRun(
@@ -80,6 +84,8 @@ export async function scheduleForRun(
 /**
  * Enqueues forced judge jobs (e.g. triggered by runtime check fail or correction).
  * No-op when agent has zero attached scorecards.
+ *
+ * Precondition: caller MUST be inside an active withOrgTx block — see scheduleForRun.
  */
 export async function scheduleForcedGrade(args: {
   runId: string;
@@ -91,7 +97,11 @@ export async function scheduleForcedGrade(args: {
   let attachments: Awaited<ReturnType<typeof scorecardService.listForAgent>>;
   try {
     attachments = await scorecardService.listForAgent(agentId);
-  } catch {
+  } catch (err) {
+    logger.warn('scorecard_judge_runner.forced_list_failed', {
+      runId, agentId, triggerSource,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return;
   }
 
