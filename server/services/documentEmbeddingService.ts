@@ -17,6 +17,10 @@ const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
 const EMBEDDING_DIMENSIONS = 1536;
 const FETCH_TIMEOUT_MS = 60_000;
 const BATCH_SIZE = 100;
+// OpenAI text-embedding-3-* hard input ceiling. Chunk content above this
+// length is truncated by the wrapper before send; chunks above the ceiling
+// indicate a chunker bug or pathological non-Latin input. (PR-REV-S1)
+export const EMBEDDING_INPUT_BYTE_LIMIT = 8192;
 
 export interface EmbedChunksInput {
   versionId: string;
@@ -55,7 +59,7 @@ async function callEmbeddingApi(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      input: texts.map((t) => t.slice(0, 8192)),
+      input: texts,
       model,
       dimensions: EMBEDDING_DIMENSIONS,
     }),
@@ -120,7 +124,21 @@ export async function embedChunks(
     // Process in batches of BATCH_SIZE.
     for (let batchStart = 0; batchStart < modelChunks.length; batchStart += BATCH_SIZE) {
       const batch = modelChunks.slice(batchStart, batchStart + BATCH_SIZE);
-      const texts = batch.map((c) => c.content);
+      const texts = batch.map((c) => {
+        if (c.content.length > EMBEDDING_INPUT_BYTE_LIMIT) {
+          // Vector represents only the first EMBEDDING_INPUT_BYTE_LIMIT bytes;
+          // the persisted chunk row carries full content. Surface the silent
+          // truncation so chunker regressions are observable. (PR-REV-S1)
+          logger.warn('documentEmbeddingService.input_truncated', {
+            versionId: c.versionId,
+            chunkIndex: c.chunkIndex,
+            originalLength: c.content.length,
+            truncatedLength: EMBEDDING_INPUT_BYTE_LIMIT,
+          });
+          return c.content.slice(0, EMBEDDING_INPUT_BYTE_LIMIT);
+        }
+        return c.content;
+      });
 
       let embeddings: number[][];
       try {

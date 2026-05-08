@@ -25,13 +25,15 @@ export function truncateForEmission(result: RetrievalResult): RetrievalResult {
       aboveThreshold: {
         total: result.rejected.aboveThreshold.total,
         retained: Math.min(result.rejected.aboveThreshold.items.length, MAX_REJECTED_ABOVE_THRESHOLD),
-        items: result.rejected.aboveThreshold.items
+        // Clone before sort — Array.prototype.sort mutates in place; a Pure
+        // helper must not mutate its input. (PR-REV-S5)
+        items: [...result.rejected.aboveThreshold.items]
           .sort((a, b) => b.finalScore - a.finalScore || a.id.localeCompare(b.id))
           .slice(0, MAX_REJECTED_ABOVE_THRESHOLD),
       },
       belowThreshold: {
         count: result.rejected.belowThreshold.count,
-        sample: result.rejected.belowThreshold.sample
+        sample: [...result.rejected.belowThreshold.sample]
           .sort((a, b) => b.finalScore - a.finalScore || a.id.localeCompare(b.id))
           .slice(0, MAX_REJECTED_BELOW_THRESHOLD_SAMPLE),
       },

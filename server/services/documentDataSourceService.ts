@@ -41,6 +41,12 @@ export async function linkDocumentToScope(input: {
     if (e?.code === '23505') {
       throw { statusCode: 409, errorCode: 'DOCUMENT_ALREADY_LINKED' };
     }
+    // Migration 0290 CHECK constraint: exactly zero or one non-null scope FK.
+    // Map to a 400 so a malformed multi-tier insert returns a useful error
+    // rather than a generic 500. (PR-REV-S7)
+    if (e?.code === '23514') {
+      throw { statusCode: 400, errorCode: 'INVALID_SCOPE_TIER_COMBINATION' };
+    }
     throw err;
   }
 }

@@ -24,9 +24,13 @@ export async function emitRetrievalSummary(input: {
   chunkConfig: { targetTokens: number; overlapTokens: number };
 }): Promise<void> {
   const { runId, organisationId, result, chunkConfig } = input;
-  const db = getOrgScopedDb('retrievalObservabilityService.emitRetrievalSummary');
 
   try {
+    // getOrgScopedDb() must live inside the try so a missing-org-context throw
+    // is captured by the log-and-swallow boundary rather than escaping into
+    // the fire-and-forget caller. (PR-REV-B1, architecture pattern 5)
+    const db = getOrgScopedDb('retrievalObservabilityService.emitRetrievalSummary');
+
     // Allocate a sequence number and insert atomically.
     await db.transaction(async (tx) => {
       const runRows = await tx
