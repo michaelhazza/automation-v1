@@ -2977,6 +2977,8 @@ When a feature lets operators flag documents as "always available" (loaded on ev
 
 **Pattern:** the primary surface is preventive, in the configuration tab. Soft warning fires at thresholds well below the runtime cliff (`doc_count >= 30` OR `token_cost >= 30000` for v1) and surfaces in the Documents tab as an inline chip. The runtime degradation path still exists as the last-line-of-defence safety net, but operators see the chip first and reconfigure before any run degrades. Constants live in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred to a post-launch amendment once production telemetry exists to inform tuning.
 
+**Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
+
 ### [2026-05-09] Pattern — Single-node SSE topology with reconnect-snapshot recovery
 
 `agentPresenceStreamPublisher.ts` uses an in-process singleton `Map` keyed by scope (no Redis, no message broker). Each scope holds a sorted ring buffer (300 events, canonical order `(eventTimestamp ASC, eventId ASC)`). On reconnect the route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer. The `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; query param is consulted only when the header is absent. Multi-node fan-out is explicitly deferred (spec §18 Agent Workspace). File: `server/services/agentPresenceStreamPublisher.ts`; routes: `server/routes/agentPresenceStream.ts`.
@@ -2996,5 +2998,3 @@ When a feature lets operators flag documents as "always available" (loaded on ev
 ### [2026-05-09] Pattern — withOrgTx external side-effect boundary
 
 `ieeSessionService.tearDown()` uses `withOrgTx` for the DB update. The external container release (IEE infra teardown) MUST be placed AFTER the `await withOrgTx(...)` call returns — never inside the transaction callback. Pattern: commit first, then side-effect. Placing the release inside the callback violates atomicity: if the release throws before the implicit commit, the transaction may roll back leaving the DB row in a stale state while the container is already gone. `markFailed()` and `recordSummary()` use `getOrgScopedDb` because a single UPDATE needs no full transaction wrapper. File: `server/services/ieeSessionService.ts`.
-
-**Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.

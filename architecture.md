@@ -3868,9 +3868,9 @@ Persistent Embodiment Layer — surfaces an agent's ongoing state (presence, wor
 
 ### Overview tab
 
-Composition root: `client/src/components/agent-workspace/AgentOverviewTab.tsx`. Ten cards layout, each wired to a dedicated REST endpoint via `useAgentOverview` hook. Server-side payload built by `server/services/agentOverviewAggregator.ts` — lazy-load delegations: each of the 8 `GET /api/agents/:id/...` endpoints calls the aggregator independently so the page can load cards in parallel. Routes: `server/routes/agentOverview.ts`.
+Composition root: `client/src/components/agent-workspace/AgentOverviewTab.tsx`. Eleven components in layout order, each wired to a dedicated REST endpoint via `useAgentOverview` hook; server-side payload built by `server/services/agentOverviewAggregator.ts` — lazy-load delegations to 8 `GET /api/agents/:id/...` endpoints so cards load in parallel. Routes: `server/routes/agentOverview.ts`.
 
-Cards: `IdentityCard`, `PresenceHero`, `RecentObservationsCard`, `KnowledgeInUseCard`, `FilesSnapshotCard`, `ActiveGoalsCard`, `WorkingTimeChart`, `ActivityFeedCard`. Zero-data state rendered by `FirstRunOverview`.
+Components: `IdentityCard`, `PresenceHero`, `ActiveGoalsCard` (conditional), `RecentObservationsCard`, `KnowledgeInUseCard`, `FilesSnapshotCard`, `WorkingTimeChart`, `ActivityFeedCard`, `ToolsUsageBandsCard`, `ConnectionsHealthCard`, `SchedulePeekCard`. Zero-data state rendered by `FirstRunOverview`.
 
 ### Presence stream topology
 
