@@ -29,12 +29,17 @@ CREATE TABLE IF NOT EXISTS bench_runs (
 -- same target within the same minute. Cannot live inside CREATE TABLE as a
 -- table-level UNIQUE constraint because PostgreSQL does not allow expressions
 -- (date_trunc) in table-level UNIQUE constraints.
+--
+-- date_trunc(text, timestamptz) is volatile (depends on session TimeZone), so
+-- we pin the timezone with AT TIME ZONE 'UTC' first, which makes the resulting
+-- expression IMMUTABLE and index-safe. The semantic is equivalent because
+-- timestamptz is stored as a UTC instant internally.
 CREATE UNIQUE INDEX bench_runs_user_target_minute_uniq
   ON bench_runs (
     triggered_by_user_id,
     target_agent_id,
     target_skill_slug,
-    date_trunc('minute', created_at)
+    date_trunc('minute', created_at AT TIME ZONE 'UTC')
   );
 
 CREATE TABLE IF NOT EXISTS bench_results (
