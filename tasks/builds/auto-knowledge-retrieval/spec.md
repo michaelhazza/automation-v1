@@ -577,6 +577,8 @@ The "always-available bypass-but-still-budget-bound" rule (brief §3) is the tri
 - If `sum(alwaysAvailable token_cost) > context_budget`, the system flags the run as `degraded` in the retrieval result and emits operator guidance via `RetrievalResult.alwaysAvailable[i].degraded = true`. It does NOT silently truncate; the agent execution continues but the run-summary surface marks it. Operator-facing copy in the UI reads "Context limits prevented some always-available documents from loading."
 - Threshold-passing documents that don't fit the remaining budget are tracked in `rejected.aboveThreshold[i].reason = 'budget_exhausted'` so the "why wasn't this loaded?" drill-in (§11) can surface the truth.
 
+The runtime degradation path above is paired with a **preventive surface** at §11.5 (always-available capacity telemetry: per-org `doc_count` and `token_cost` metrics, soft-warning banner in the Documents tab, mode-change history event). Operators see the pressure building before a run degrades; runtime degradation remains the safety net.
+
 ### 10.6 Unique-constraint-to-HTTP mapping
 
 | Constraint | HTTP status | Body |
@@ -635,6 +637,7 @@ Engineering-only:
 - Relevance threshold tuning histograms (per organisation).
 - Embedding model evaluation (RAG quality benchmarking).
 - Retrieval drift detection (week-over-week candidate-pool size and rejection-reason distribution).
+- Always-available capacity per org (`doc_count`, `token_cost` aggregate, mode-change history). See §11.5 for the metric definitions, soft-warning threshold behaviour, and the `retrieval.always_available.mode_changed` event.
 
 These surfaces are not gated behind the new `knowledge` permission; they're admin-only.
 
@@ -653,6 +656,32 @@ The contract:
 - **`loaded[i].chunkIds`:** unbounded per loaded document (chunk count is bounded by document size).
 
 The truncation rule is **deterministic** (sort + slice) so two replays of the same input produce identical payloads. The N values are constants in `retrievalObservabilityService`; tuning is a code change, not a per-org configuration. If telemetry shows payload size is still problematic, the next move is the deferred dedicated `retrieval_events` table (§15) — not raising the caps.
+
+### 11.5 Always-available capacity telemetry (preventive surface)
+
+§10.5 defines the runtime degradation path: when an org's pinned set exceeds the context budget, retrieval flags the run `degraded` and surfaces operator copy in the run trace. This subsection defines the **preventive** surface so operators discover the problem before a degraded run, not from one. No hard cap and no UI block are part of v1 (per §15: hard caps are deferred); the goal is visibility plus a soft nudge.
+
+**Engineering-only metrics (admin surface, not gated by `knowledge` permission):**
+
+- **`retrieval.always_available.doc_count` (per org).** Count of `reference_documents` in the org with `mode = 'always_available'`. Derived from a `COUNT(*)` query over `reference_documents`; no new column, no new table.
+- **`retrieval.always_available.token_cost` (per org, aggregate).** Sum of estimated token cost across the org's pinned set. Derived from `reference_document_versions.token_count` (already maintained for the runtime budget calculation in `retrievalServicePure`); no new column.
+
+These two metrics surface in the existing engineering telemetry surfaces alongside the items in §11.3. Both are point-in-time queries; neither requires backfill.
+
+**Soft warning in the Documents tab (operator-facing).** When an org's pinned set exceeds **either** of the following thresholds, the Documents tab renders an inline warning banner above the table:
+
+- `doc_count >= 30` (count threshold), OR
+- `token_cost >= 30000` (token threshold).
+
+Banner copy: *"This organisation has N always-available documents (~M tokens). Large pinned sets can push other relevant context out of the budget. Consider switching less-critical documents to Auto mode."* The banner links to the documents tab filter `mode = always_available` so the operator can review the set in one click.
+
+The threshold values (`30` docs, `30000` tokens) are constants in `retrievalObservabilityService` for v1. **Configurability is deferred to post-launch** — the right values will surface from telemetry. When configurability lands, the constants become per-org overrides on `organisations` (column shape TBD); spec amendment required.
+
+**Telemetry event on mode change.** Whenever a document's `mode` column transitions to or from `always_available`, the system emits a `retrieval.always_available.mode_changed` event into `agent_execution_events`. Payload: `{ organisationId, documentId, oldMode, newMode, actorUserId, occurredAt }`. This gives engineering a history of how the pinned set evolves per org without scanning audit logs. Bounded payload (fixed shape, no arrays); subject to the §11.4 contract by structure.
+
+The event is the only new telemetry surface introduced by this preventive layer; the two metrics above are derived queries, not stored events.
+
+**Cross-ref:** runtime degradation behaviour at §10.5; payload bounding at §11.4; deferred hard caps at §15.
 
 ## 12. Tenant isolation invariants
 
@@ -799,6 +828,7 @@ Per checklist §8. Read pass complete. Findings:
   - "Bundles are organisational only" -> mechanism: bundle attachments are deduplicated against direct attachments at retrieval time; mode chip is read-only in the bundle edit modal (§6.8, §14.8).
   - "Ranking is deterministic and replay-stable" -> mechanism: §10.8 four-step comparator chain (`finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC`) plus best-of-chunk document relevance.
   - "Observability payloads are bounded" -> mechanism: §11.4 deterministic top-N truncation per array with truncation indicators.
+  - "Always-available starvation has a preventive surface, not just runtime degradation" -> mechanism: §11.5 per-org `doc_count` and `token_cost` engineering metrics (derived queries, no new tables), soft-warning banner at thresholds (30 docs / 30k tokens, configurability deferred), and `retrieval.always_available.mode_changed` event for history. Paired with the §10.5 runtime safety net.
   - "Exactly one scope tier per link row" -> mechanism: §4.1 CHECK constraint at table level; org scope = all FK columns NULL.
   - "Retrieval pointer always names a complete chunk set" -> mechanism: §13.1 invariant; chunking job flips `retrieval_version_id` only after every chunk for the new version is embedded under `active_embedding_model`.
 
@@ -813,6 +843,7 @@ Per checklist §9. Aligned with `docs/spec-context.md` framing.
   - `documentRetrievalServicePure.test.ts`, mode resolution, version pinning, chunk grouping.
   - `documentChunkingServicePure.test.ts`, boundary correctness, edge cases (very short docs, very long docs, mixed content).
   - Cross-tenant defence-in-depth: ranker with mixed-org candidates filters by `organisationId`.
+  - Always-available capacity threshold predicate (§11.5): pure function `shouldShowAlwaysAvailableWarning({ docCount, tokenCost })` returns `true` when `docCount >= 30` OR `tokenCost >= 30000`, `false` otherwise. Boundary cases tested at exactly the thresholds and one below.
 - **Static gates** (CI):
   - `verify-rls-coverage.sh` covers the two new tables.
   - `verify-rls-contract-compliance.sh` confirms no direct DB access bypasses `withOrgTx`.
