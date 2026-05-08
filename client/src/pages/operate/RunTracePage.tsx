@@ -31,6 +31,10 @@ import { WorkspaceBadge } from '../../components/WorkspaceBadge';
 import { PageShell } from '../../components/PageShell';
 import type { RunDetail } from '../../components/runs/RunTraceView';
 import { RunTraceEventRenderer } from './components/RunTraceEventRenderer';
+import type { RuntimeCheckResult } from '../../../../shared/types/runtimeCheck';
+import { fetchRunRuntimeChecks } from '../../lib/api/runtimeChecks';
+import { RuntimeCheckSummaryStrip } from '../../components/runtimeCheck/RuntimeCheckSummaryStrip';
+import { collapseToOperatorBadge } from '../../lib/runtimeCheckBadgePure';
 
 // ── IEE progress polling (ported from RunTraceViewerPage) ─────────────────────
 
@@ -60,6 +64,7 @@ export default function RunTracePage({ user: _user }: { user: User }) {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [runtimeChecks, setRuntimeChecks] = useState<RuntimeCheckResult[]>([]);
 
   const [chainRuns, setChainRuns] = useState<Array<{
     id: string; agentName: string; isSubAgent: boolean; runSource: string;
@@ -92,6 +97,11 @@ export default function RunTracePage({ user: _user }: { user: User }) {
     api.get(`/api/agent-runs/${runId}/chain`)
       .then(({ data }) => setChainRuns(data.runs ?? []))
       .catch(() => setChainRuns([]));
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId) return;
+    fetchRunRuntimeChecks(runId).then(setRuntimeChecks).catch(() => setRuntimeChecks([]));
   }, [runId]);
 
   // ── WebSocket room subscription (ported from RunTraceViewerPage) ─────────────
@@ -299,6 +309,18 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       </div>
     ) : null;
 
+  // ── Runtime check summary counts ────────────────────────────────────────────
+
+  let rcPassCount = 0;
+  let rcFailCount = 0;
+  let rcPendingCount = 0;
+  for (const rc of runtimeChecks) {
+    const badge = collapseToOperatorBadge(rc.state);
+    if (badge === 'pass') rcPassCount++;
+    else if (badge === 'fail') rcFailCount++;
+    else rcPendingCount++;
+  }
+
   // ── Embedded mode: full-viewport container without PageShell chrome ─────────
 
   if (embedded) {
@@ -309,7 +331,7 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       >
         {ieePanel}
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
-        <RunTraceEventRenderer runId={run.id} embedded={true} />
+        <RunTraceEventRenderer runId={run.id} embedded={true} runtimeChecks={runtimeChecks} />
       </div>
     );
   }
@@ -321,8 +343,14 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       <div className="animate-[fadeIn_0.2s_ease-out_both]">
         {chainInfo}
         {ieePanel}
+        <RuntimeCheckSummaryStrip
+          passCount={rcPassCount}
+          failCount={rcFailCount}
+          pendingCount={rcPendingCount}
+          runId={run.id}
+        />
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
-        <RunTraceEventRenderer runId={run.id} embedded={false} />
+        <RunTraceEventRenderer runId={run.id} embedded={false} runtimeChecks={runtimeChecks} />
       </div>
     </PageShell>
   );

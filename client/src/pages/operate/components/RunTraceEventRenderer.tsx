@@ -13,6 +13,8 @@
 // invariant comment).
 
 import { useEffect, useState } from 'react';
+import type { RuntimeCheckResult } from '../../../../../shared/types/runtimeCheck';
+import { RuntimeCheckBadge } from '../../../components/runtimeCheck/RuntimeCheckBadge';
 import api from '../../../lib/api';
 
 // ── Wire shape returned by /api/agent-runs/:id/trace-events ─────────────────
@@ -106,7 +108,13 @@ function OutputField({
 
 // ── Single event card ────────────────────────────────────────────────────────
 
-function ToolCallEventCard({ event }: { event: RunTraceToolCallEvent }) {
+function ToolCallEventCard({
+  event,
+  runtimeCheck,
+}: {
+  event: RunTraceToolCallEvent;
+  runtimeCheck?: RuntimeCheckResult;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -126,6 +134,15 @@ function ToolCallEventCard({ event }: { event: RunTraceToolCallEvent }) {
         <span className="flex-1 text-[13px] font-medium text-slate-800 truncate">
           {event.toolName}
         </span>
+
+        {/* Runtime check badge */}
+        {runtimeCheck && (
+          <RuntimeCheckBadge
+            state={runtimeCheck.state}
+            reasonText={runtimeCheck.reasonText}
+            suggestedFix={runtimeCheck.suggestedFix}
+          />
+        )}
 
         {/* Duration */}
         {event.durationMs > 0 && (
@@ -168,12 +185,17 @@ interface RunTraceEventRendererProps {
    * Required by the embedded-mode recursion guard (see RunTracePage.tsx invariant).
    */
   embedded?: boolean;
+  /**
+   * Optional runtime check results keyed by sequenceNumber (= event.iteration).
+   * When provided, a badge is rendered inline on the matching event card.
+   */
+  runtimeChecks?: RuntimeCheckResult[];
 }
 
 // embedded: reserved for the recursion-guard invariant (RunTracePage.tsx). No modal affordances
 // exist in this renderer today, so the prop is intentionally unused — future contributors adding
 // run-id links or "view in modal" buttons MUST check this flag and suppress those affordances.
-export function RunTraceEventRenderer({ runId, embedded: _embedded }: RunTraceEventRendererProps) {
+export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeChecks }: RunTraceEventRendererProps) {
   const [events, setEvents] = useState<RunTraceToolCallEvent[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -226,13 +248,26 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded }: RunTraceEv
     );
   }
 
+  // Build a lookup from sequenceNumber → RuntimeCheckResult for O(1) badge lookup per card.
+  // sequenceNumber in the DB corresponds to event.iteration (0-based step index).
+  const checkBySequence = new Map<number, RuntimeCheckResult>();
+  if (runtimeChecks) {
+    for (const rc of runtimeChecks) {
+      checkBySequence.set(rc.sequenceNumber, rc);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-2 animate-[fadeIn_0.2s_ease-out_both]">
       <div className="text-[12px] text-slate-400 font-medium uppercase tracking-wider mb-1">
         Tool calls ({events.length})
       </div>
       {events.map((event, idx) => (
-        <ToolCallEventCard key={`${event.toolName}-${idx}`} event={event} />
+        <ToolCallEventCard
+          key={`${event.toolName}-${idx}`}
+          event={event}
+          runtimeCheck={checkBySequence.get(event.iteration)}
+        />
       ))}
     </div>
   );
