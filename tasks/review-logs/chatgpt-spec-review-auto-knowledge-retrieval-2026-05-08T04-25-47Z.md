@@ -96,7 +96,7 @@ The operator-decision prompt (presented in chat) asks for: warning thresholds + 
 |---|---|
 | Spec at end of spec-reviewer iter 5 | `ec39dc30` (committed earlier in the build) |
 | ChatGPT round 1 mechanical edits applied | `48d8c7b6` |
-| Item A operator-decision applied (option a — telemetry now) | (this commit) |
+| Item A operator-decision applied (option a — telemetry now) | `8a44844c` |
 
 ### Round status
 
