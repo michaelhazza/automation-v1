@@ -321,57 +321,78 @@ test('linkToolCallsToEventIds: empty inputs return empty array', () => {
   expect(linkToolCallsToEventIds([], [])).toEqual([]);
 });
 
-test('linkToolCallsToEventIds: prefers skill.completed events when available 1:1', () => {
+test('linkToolCallsToEventIds: matches by skillSlug, prefers skill.completed', () => {
   const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
   const events = [
-    { id: 'e1-inv', eventType: 'skill.invoked' },
-    { id: 'e1-cmp', eventType: 'skill.completed' },
-    { id: 'e2-inv', eventType: 'skill.invoked' },
-    { id: 'e2-cmp', eventType: 'skill.completed' },
+    { id: 'a-inv', eventType: 'skill.invoked', payload: { skillSlug: 'a' } },
+    { id: 'a-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+    { id: 'b-inv', eventType: 'skill.invoked', payload: { skillSlug: 'b' } },
+    { id: 'b-cmp', eventType: 'skill.completed', payload: { skillSlug: 'b' } },
   ];
-  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-cmp', 'e2-cmp']);
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a-cmp', 'b-cmp']);
 });
 
-test('linkToolCallsToEventIds: falls back to skill.invoked when no completed event', () => {
-  // run died after invoke but before completed
+test('linkToolCallsToEventIds: falls back to skill.invoked for the same slug', () => {
+  // skill `a` died after invoke but before completed
   const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
   const events = [
-    { id: 'e1-inv', eventType: 'skill.invoked' },
-    { id: 'e2-inv', eventType: 'skill.invoked' },
+    { id: 'a-inv', eventType: 'skill.invoked', payload: { skillSlug: 'a' } },
+    { id: 'b-inv', eventType: 'skill.invoked', payload: { skillSlug: 'b' } },
   ];
-  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-inv', 'e2-inv']);
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a-inv', 'b-inv']);
 });
 
-test('linkToolCallsToEventIds: trailing tool calls without events resolve to null', () => {
-  // legacy run / fail_run path that pushed a tool call without emitting an event
-  const toolCalls = [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }];
+test('linkToolCallsToEventIds: tool calls without matching events resolve to null', () => {
+  // ordinary tool call that did not emit a skill event (the agent loop only
+  // emits these for special paths). Must NOT mis-attach to an event from a
+  // different slug.
+  const toolCalls = [{ tool: 'foo' }, { tool: 'bar' }, { tool: 'baz' }];
   const events = [
-    { id: 'e1-cmp', eventType: 'skill.completed' },
+    { id: 'foo-cmp', eventType: 'skill.completed', payload: { skillSlug: 'foo' } },
   ];
-  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-cmp', null, null]);
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['foo-cmp', null, null]);
 });
 
-test('linkToolCallsToEventIds: mix of completed + invoked when partial coverage', () => {
-  // first tool got a skill.completed; second only got skill.invoked
-  const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
+test('linkToolCallsToEventIds: does NOT mis-attach across slugs (Codex P2)', () => {
+  // crm.query (special path) emits a skill.completed; an unrelated `foo` tool
+  // call does NOT have a matching event. The unrelated tool call must NOT
+  // pick up the crm.query event id.
+  const toolCalls = [{ tool: 'foo' }, { tool: 'crm.query' }];
   const events = [
-    { id: 'e1-inv', eventType: 'skill.invoked' },
-    { id: 'e1-cmp', eventType: 'skill.completed' },
-    { id: 'e2-inv', eventType: 'skill.invoked' },
+    { id: 'crm-cmp', eventType: 'skill.completed', payload: { skillSlug: 'crm.query' } },
   ];
-  // 1 completed total < 2 toolCalls → enter fallback branch:
-  // toolCalls[0] uses completed[0]; toolCalls[1] uses invoked[1]
-  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['e1-cmp', 'e2-inv']);
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual([null, 'crm-cmp']);
+});
+
+test('linkToolCallsToEventIds: ordinal-within-slug for repeated calls of same skill', () => {
+  // Same skill called twice. First toolCall pairs with first completed,
+  // second toolCall pairs with second completed.
+  const toolCalls = [{ tool: 'a' }, { tool: 'a' }];
+  const events = [
+    { id: 'a1-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+    { id: 'a2-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a1-cmp', 'a2-cmp']);
 });
 
 test('linkToolCallsToEventIds: ignores unrelated event types', () => {
   const toolCalls = [{ tool: 'a' }];
   const events = [
-    { id: 'r1', eventType: 'run.started' },
-    { id: 'p1', eventType: 'prompt.assembled' },
-    { id: 'sc-cmp', eventType: 'skill.completed' },
+    { id: 'r1', eventType: 'run.started', payload: null },
+    { id: 'p1', eventType: 'prompt.assembled', payload: null },
+    { id: 'a-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
   ];
-  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['sc-cmp']);
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a-cmp']);
+});
+
+test('linkToolCallsToEventIds: ignores events with missing skillSlug payload', () => {
+  // Event exists but payload doesn't carry skillSlug — cannot match.
+  const toolCalls = [{ tool: 'a' }];
+  const events = [
+    { id: 'noslug-cmp', eventType: 'skill.completed', payload: null },
+    { id: 'noslug-inv', eventType: 'skill.invoked', payload: { skillSlug: undefined } as { skillSlug?: string } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual([null]);
 });
 
 test('projectForRole: passes eventId through by position', () => {

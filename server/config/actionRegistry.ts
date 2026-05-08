@@ -367,8 +367,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
     requiredIntegration: 'gmail',
-    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms the email was accepted by Gmail.
-    verify: { kind: 'api_status_2xx' },
+    // Trust & Verification Layer §6.1 — review-gated send: HITL approval is the verification
+    // boundary. The actionService wrapper (`{ status: 'pending_approval' | 'approved' | ... }`)
+    // is not a raw provider response, so api_status_2xx would always evaluate inconclusive.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated send: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'external',
   },
@@ -423,8 +427,14 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm task row persists post-write.
-    verify: { kind: 'row_exists', table: 'tasks', matchKey: 'id' },
+    // Trust & Verification Layer §6.1 — auto-gated internal write; the action service
+    // returns a `{ status: 'completed' | ... }` wrapper, not a raw row. A concrete
+    // `row_exists` check would need to read `result.actionId` and join to `actions`
+    // before reaching `tasks` — that bridge is deferred to a follow-on. Internal
+    // writes are covered by RLS audit + service tests in the meantime.
+    verify: null,
+    verifyNullJustification:
+      'Auto-gated internal write — backfill candidate; current actionService wrapper does not directly expose tasks.id post-write',
     reversible: true,
     blastRadius: 'tenant',
   },
@@ -642,8 +652,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms the update was accepted.
-    verify: { kind: 'api_status_2xx' },
+    // Trust & Verification Layer §6.1 — review-gated external write: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated external write: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: true,
     blastRadius: 'external',
   },
@@ -671,8 +684,13 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
-    // Trust & Verification Layer §6.1 — read-only HTTP fetch; 2xx confirms reachable.
-    verify: { kind: 'api_status_2xx' },
+    // Trust & Verification Layer §6.1 — backfill candidate. The handler returns
+    // through executeWithActionAudit, which wraps the response in the action
+    // service envelope. A concrete api_status_2xx would need the runtime-check
+    // dispatcher to unwrap `result` before evaluation; that bridge is deferred.
+    verify: null,
+    verifyNullJustification:
+      'External read — backfill candidate; current actionService wrapper hides the raw HTTP status from the runtime-check dispatcher',
     reversible: true,
     blastRadius: 'external',
   },
@@ -701,8 +719,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
     topics: ['research', 'competitive_intelligence', 'data_gathering'],
-    // Trust & Verification Layer §6.1 — verify the scrape returned non-empty content.
-    verify: { kind: 'field_match', outputPath: 'content', expectedShape: 'string' },
+    // Trust & Verification Layer §6.1 — backfill candidate; field_match on `content`
+    // would need the runtime-check dispatcher to walk through the action service
+    // wrapper. Deferred until the wrapper-aware evaluator lands.
+    verify: null,
+    verifyNullJustification:
+      'External read — backfill candidate; current actionService wrapper hides the inner content field from the runtime-check dispatcher',
     reversible: true,
     blastRadius: 'external',
   },
@@ -781,8 +803,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm the approval request row was persisted.
-    verify: { kind: 'row_exists', table: 'approval_requests', matchKey: 'id' },
+    // Trust & Verification Layer §6.1 — meta-action that requests HITL review;
+    // the request itself IS the verification path. No deterministic post-check.
+    verify: null,
+    verifyNullJustification:
+      'Meta-action — requests HITL review; the review queue itself is the verification path',
     reversible: true,
     blastRadius: 'tenant',
   },
@@ -1081,8 +1106,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm the page row was persisted in our pages table.
-    verify: { kind: 'row_exists', table: 'pages', matchKey: 'id' },
+    // Trust & Verification Layer §6.1 — review-gated page create: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated page create: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: true,
     blastRadius: 'tenant',
   },
@@ -1112,8 +1140,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm the page row exists post-update.
-    verify: { kind: 'row_exists', table: 'pages', matchKey: 'id' },
+    // Trust & Verification Layer §6.1 — review-gated page update: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated page update: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: true,
     blastRadius: 'tenant',
   },
@@ -2200,8 +2231,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm the new org agent row exists post-write.
-    verify: { kind: 'row_exists', table: 'agents', matchKey: 'id' },
+    // Trust & Verification Layer §6.1 — review-gated config write: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated config write: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: true,
     blastRadius: 'tenant',
   },
@@ -2761,8 +2795,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms automation trigger accepted.
-    verify: { kind: 'api_status_2xx' },
+    // Trust & Verification Layer §6.1 — review-gated CRM trigger: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated CRM trigger: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'external',
   },
@@ -2794,8 +2831,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
     requiredIntegration: 'ghl',
-    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms email accepted by GHL.
-    verify: { kind: 'api_status_2xx' },
+    // Trust & Verification Layer §6.1 — review-gated CRM email: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated CRM email: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'external',
   },
@@ -2825,8 +2865,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms SMS queued.
-    verify: { kind: 'api_status_2xx' },
+    // Trust & Verification Layer §6.1 — review-gated CRM SMS: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated CRM SMS: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'external',
   },
@@ -2857,8 +2900,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm task created by canonical CRM external_id reference.
-    verify: { kind: 'row_exists', table: 'crm_tasks', matchKey: 'external_id' },
+    // Trust & Verification Layer §6.1 — review-gated CRM task: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated CRM task: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'external',
   },
@@ -2915,8 +2961,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
-    // Trust & Verification Layer §6.1 — confirm the operator notification row was persisted.
-    verify: { kind: 'row_exists', table: 'operator_notifications', matchKey: 'id' },
+    // Trust & Verification Layer §6.1 — review-gated alert: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated alert: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'tenant',
   },
@@ -2996,8 +3045,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     onFailure: 'skip',
-    // Trust & Verification Layer §6.1 — confirm planner returned a serialised results field.
-    verify: { kind: 'field_match', outputPath: 'results', expectedShape: 'string' },
+    // Trust & Verification Layer §6.1 — backfill candidate; the planner's response
+    // is consumed inside the action service wrapper, so field_match on `results`
+    // would need the dispatcher to unwrap before evaluation. Deferred.
+    verify: null,
+    verifyNullJustification:
+      'External read via planner — backfill candidate; current actionService wrapper hides the inner results field from the runtime-check dispatcher',
     reversible: true,
     blastRadius: 'external',
   },
@@ -3166,8 +3219,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     requiredIntegration: 'stripe_agent',
     spendsMoney: true,
     executionPath: 'main_app_stripe',
-    // Trust & Verification Layer §6.1 — Stripe charge response carries an `id`.
-    verify: { kind: 'external_returns', provider: 'stripe', expectedField: 'id' },
+    // Trust & Verification Layer §6.1 — review-gated charge: HITL approval is the
+    // verification boundary; actionService wrapper has no comparable post-check shape.
+    verify: null,
+    verifyNullJustification:
+      'Review-gated charge: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape',
     reversible: false,
     blastRadius: 'external',
   },

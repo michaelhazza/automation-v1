@@ -240,9 +240,17 @@ router.get(
     // Trust & Verification Layer §9 cross-entity guard — look up canonical
     // agent_execution_events.id per tool-call so the Run-trace UI can pass a
     // real eventId to the corrections route. The toolCallsLog blob in the
-    // snapshot does not carry event UUIDs; we position-match here.
+    // snapshot does not carry event UUIDs; we match by (skillSlug, ordinal-
+    // within-slug). The agent loop does NOT emit skill.invoked / skill.completed
+    // for every tool call — those are emitted by special paths only — so
+    // tool calls that don't have matching events resolve to eventId: null
+    // and the UI hides the Correct affordance.
     const eventRows = await db
-      .select({ id: agentExecutionEvents.id, eventType: agentExecutionEvents.eventType })
+      .select({
+        id: agentExecutionEvents.id,
+        eventType: agentExecutionEvents.eventType,
+        payload: agentExecutionEvents.payload,
+      })
       .from(agentExecutionEvents)
       .where(
         and(
@@ -255,9 +263,19 @@ router.get(
       )
       .orderBy(asc(agentExecutionEvents.sequenceNumber));
 
+    // Narrow payload's runtime shape to the field linkToolCallsToEventIds reads.
+    const eventRowsForLink = eventRows.map((r) => ({
+      id: r.id,
+      eventType: r.eventType,
+      payload:
+        typeof r.payload === 'object' && r.payload !== null && 'skillSlug' in r.payload
+          ? { skillSlug: String((r.payload as { skillSlug: unknown }).skillSlug) }
+          : null,
+    }));
+
     const role: string = req.user?.role ?? 'user';
     const { projectForRole, linkToolCallsToEventIds } = await import('../services/agentRunMessageServicePure.js');
-    const eventIdsByPosition = linkToolCallsToEventIds(toolCallsLog, eventRows);
+    const eventIdsByPosition = linkToolCallsToEventIds(toolCallsLog, eventRowsForLink);
     const projected = projectForRole(toolCallsLog, role, eventIdsByPosition);
 
     // Cache-Control: private, no-store — role-aware masking projection — must not
