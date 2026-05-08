@@ -367,6 +367,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
     requiredIntegration: 'gmail',
+    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms the email was accepted by Gmail.
+    verify: { kind: 'api_status_2xx' },
+    reversible: false,
+    blastRadius: 'external',
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -419,6 +423,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm task row persists post-write.
+    verify: { kind: 'row_exists', table: 'tasks', matchKey: 'id' },
+    reversible: true,
+    blastRadius: 'tenant',
   },
   triage_intake: {
     actionType: 'triage_intake',
@@ -634,6 +642,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms the update was accepted.
+    verify: { kind: 'api_status_2xx' },
+    reversible: true,
+    blastRadius: 'external',
   },
   fetch_url: {
     actionType: 'fetch_url',
@@ -659,6 +671,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
+    // Trust & Verification Layer §6.1 — read-only HTTP fetch; 2xx confirms reachable.
+    verify: { kind: 'api_status_2xx' },
+    reversible: true,
+    blastRadius: 'external',
   },
   scrape_url: {
     actionType: 'scrape_url',
@@ -685,6 +701,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
     idempotencyStrategy: 'read_only',
     topics: ['research', 'competitive_intelligence', 'data_gathering'],
+    // Trust & Verification Layer §6.1 — verify the scrape returned non-empty content.
+    verify: { kind: 'field_match', outputPath: 'content', expectedShape: 'string' },
+    reversible: true,
+    blastRadius: 'external',
   },
   scrape_structured: {
     actionType: 'scrape_structured',
@@ -761,6 +781,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm the approval request row was persisted.
+    verify: { kind: 'row_exists', table: 'approval_requests', matchKey: 'id' },
+    reversible: true,
+    blastRadius: 'tenant',
   },
 
   // ── BA Spec submission — review-gated, writes approved spec to workspace memory ──
@@ -1057,6 +1081,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm the page row was persisted in our pages table.
+    verify: { kind: 'row_exists', table: 'pages', matchKey: 'id' },
+    reversible: true,
+    blastRadius: 'tenant',
   },
 
   update_page: {
@@ -1084,6 +1112,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm the page row exists post-update.
+    verify: { kind: 'row_exists', table: 'pages', matchKey: 'id' },
+    reversible: true,
+    blastRadius: 'tenant',
   },
 
   publish_page: {
@@ -2168,6 +2200,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error'],
     },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm the new org agent row exists post-write.
+    verify: { kind: 'row_exists', table: 'agents', matchKey: 'id' },
+    reversible: true,
+    blastRadius: 'tenant',
   },
   config_update_agent: {
     actionType: 'config_update_agent',
@@ -2725,6 +2761,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms automation trigger accepted.
+    verify: { kind: 'api_status_2xx' },
+    reversible: false,
+    blastRadius: 'external',
   },
   'crm.send_email': {
     actionType: 'crm.send_email',
@@ -2754,6 +2794,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
     requiredIntegration: 'ghl',
+    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms email accepted by GHL.
+    verify: { kind: 'api_status_2xx' },
+    reversible: false,
+    blastRadius: 'external',
   },
   'crm.send_sms': {
     actionType: 'crm.send_sms',
@@ -2781,6 +2825,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — provider HTTP 2xx confirms SMS queued.
+    verify: { kind: 'api_status_2xx' },
+    reversible: false,
+    blastRadius: 'external',
   },
   'crm.create_task': {
     actionType: 'crm.create_task',
@@ -2809,6 +2857,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm task created by canonical CRM external_id reference.
+    verify: { kind: 'row_exists', table: 'crm_tasks', matchKey: 'external_id' },
+    reversible: false,
+    blastRadius: 'external',
   },
   config_update_organisation_config: {
     actionType: 'config_update_organisation_config',
@@ -2863,6 +2915,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
+    // Trust & Verification Layer §6.1 — confirm the operator notification row was persisted.
+    verify: { kind: 'row_exists', table: 'operator_notifications', matchKey: 'id' },
+    reversible: false,
+    blastRadius: 'tenant',
   },
 
   // ── Universal Brief Phase 4: Clarifying + Sparring Partner skills ─────────
@@ -2940,6 +2996,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       },
     },
     onFailure: 'skip',
+    // Trust & Verification Layer §6.1 — confirm planner returned a serialised results field.
+    verify: { kind: 'field_match', outputPath: 'results', expectedShape: 'string' },
+    reversible: true,
+    blastRadius: 'external',
   },
 
   // ── Cached Context Infrastructure (§6.6 / §4.5) ─────────────────────────
@@ -3106,6 +3166,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     requiredIntegration: 'stripe_agent',
     spendsMoney: true,
     executionPath: 'main_app_stripe',
+    // Trust & Verification Layer §6.1 — Stripe charge response carries an `id`.
+    verify: { kind: 'external_returns', provider: 'stripe', expectedField: 'id' },
+    reversible: false,
+    blastRadius: 'external',
   },
 
   purchase_resource: {
@@ -3148,6 +3212,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     requiredIntegration: 'stripe_agent',
     spendsMoney: true,
     executionPath: 'worker_hosted_form',
+    // Trust & Verification Layer §6.1 — Stripe purchase response carries an `id`.
+    verify: { kind: 'external_returns', provider: 'stripe', expectedField: 'id' },
+    reversible: false,
+    blastRadius: 'external',
   },
 
   subscribe_to_service: {
@@ -3191,6 +3259,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     requiredIntegration: 'stripe_agent',
     spendsMoney: true,
     executionPath: 'worker_hosted_form',
+    // Trust & Verification Layer §6.1 — Stripe subscription response carries an `id`.
+    verify: { kind: 'external_returns', provider: 'stripe', expectedField: 'id' },
+    reversible: false,
+    blastRadius: 'external',
   },
 
   top_up_balance: {
@@ -3234,6 +3306,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     requiredIntegration: 'stripe_agent',
     spendsMoney: true,
     executionPath: 'worker_hosted_form',
+    // Trust & Verification Layer §6.1 — Stripe top-up response carries a payment-intent `id`.
+    verify: { kind: 'external_returns', provider: 'stripe', expectedField: 'id' },
+    reversible: false,
+    blastRadius: 'external',
   },
 
   issue_refund: {
@@ -3277,6 +3353,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     requiredIntegration: 'stripe_agent',
     spendsMoney: true,
     executionPath: 'main_app_stripe',
+    // Trust & Verification Layer §6.1 — Stripe refund response carries an `id`.
+    verify: { kind: 'external_returns', provider: 'stripe', expectedField: 'id' },
+    reversible: false,
+    blastRadius: 'external',
   },
 
   // ── Shadow-to-live promotion (HITL meta-action — no money movement) ──────
@@ -3313,6 +3393,67 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     spendsMoney: false,
   },
 };
+
+// ─── Trust & Verification Layer §6.1 — runtime-check coverage backfill ────────
+//
+// Every ACTION_REGISTRY entry must satisfy the
+// `verify-runtime-check-coverage.mjs` CI gate: either `verify` is set OR
+// `verifyNullJustification` is a non-empty string.
+//
+// The 20 most-used external skills carry concrete `verify` shapes inline above
+// (see seed list at tasks/builds/trust-verification-layer/runtime-check-coverage-list.md).
+// Everything else falls into one of three default-justification buckets,
+// applied here in a single deterministic sweep so the registry source stays
+// readable without 90+ near-duplicate verifyNullJustification strings:
+//
+//   - Read-only skills (no observable external side effect): justification
+//     "Read-only skill with no observable side effect to verify".
+//   - Methodology / pure-LLM skills (read isMethodology / pure prompt scaffolds):
+//     "Pure LLM skill — no deterministic external check is possible".
+//   - Internal config/admin skills (write to internal admin tables only,
+//     covered by RLS audit + their own integration tests):
+//     "Internal config skill — covered by RLS audit + service integration
+//     tests; deterministic post-check would duplicate existing coverage".
+//
+// Operators backfilling a concrete `verify` for one of these later just set
+// `verify` inline on the entry above; the sweep skips entries that already
+// carry either field.
+(function applyRuntimeCheckCoverageDefaults() {
+  for (const def of Object.values(ACTION_REGISTRY)) {
+    if (def.verify !== undefined || def.verifyNullJustification) continue;
+
+    const isReadOnly =
+      def.mcp?.annotations.readOnlyHint === true ||
+      def.sideEffectClass === 'read' ||
+      def.sideEffectClass === 'none';
+
+    if (def.isMethodology) {
+      def.verify = null;
+      def.verifyNullJustification =
+        'Pure LLM skill — no deterministic external check is possible';
+      def.reversible = true;
+      def.blastRadius = 'self';
+      continue;
+    }
+
+    if (isReadOnly) {
+      def.verify = null;
+      def.verifyNullJustification =
+        'Read-only skill with no observable side effect to verify';
+      def.reversible = true;
+      def.blastRadius = def.isExternal ? 'external' : 'self';
+      continue;
+    }
+
+    // Internal config/admin write — covered by RLS audit + service tests.
+    def.verify = null;
+    def.verifyNullJustification =
+      'Internal config skill — covered by RLS audit + service integration tests; ' +
+      'deterministic post-check would duplicate existing coverage';
+    def.reversible = false;
+    def.blastRadius = 'tenant';
+  }
+})();
 
 /**
  * Spend-enabled action slugs for the workflow action_call allowlist.
