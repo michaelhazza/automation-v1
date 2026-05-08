@@ -65,13 +65,6 @@ export default function FirstRunOverview({ agentId, identity }: Props) {
       </div>
 
       <div className="bg-white rounded-lg border border-slate-100 p-4">
-        <h4 className="text-sm font-semibold text-slate-700 mb-2">Tools</h4>
-        <p className="text-xs text-slate-400 text-center py-2">
-          Tool usage will appear here after the agent's first run.
-        </p>
-      </div>
-
-      <div className="bg-white rounded-lg border border-slate-100 p-4">
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-slate-700">Connections</h4>
           <a href="/connections" className="text-xs text-slate-500 hover:text-slate-700 underline">
