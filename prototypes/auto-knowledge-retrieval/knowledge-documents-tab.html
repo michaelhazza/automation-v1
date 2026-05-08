@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<!--
+  Mockup 4 — Knowledge page Documents tab with scope and mode indicators
+  Auto Knowledge Retrieval — Phase 1
+  Shows: Documents tab refreshed for new model.
+  Demonstrates: scope (org / sub-account / agent / recurring task), mode (Auto / Always available / Reference only),
+                "used by N agents" indicator, source provenance (manually authored / promoted from file / extracted from run).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge — Documents tab | Auto Knowledge Retrieval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  /* Sidebar mini */
+  .sidebar-pad { padding: 14px 16px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sidebar-item { padding: 8px 16px; color: rgba(255,255,255,0.78); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-500); padding-left: 13px; }
+
+  /* Topbar */
+  .topbar {
+    background: white; border-bottom: 1px solid var(--border); padding: 12px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
+  .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
+  .breadcrumb-sep { color: var(--slate-300); }
+
+  .page-content { padding: 24px 32px; max-width: 1280px; margin: 0 auto; }
+  .page-h1 { font-size: 22px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
+  .page-sub { font-size: 13px; color: var(--slate-500); margin-bottom: 18px; }
+
+  /* Tab strip */
+  .tab-strip { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 18px; }
+  .tab-btn {
+    background: none; border: none; padding: 10px 16px; font-size: 13.5px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .tab-btn:hover { color: var(--slate-700); }
+  .tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .tab-count { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--slate-100); color: var(--slate-500); }
+  .tab-btn.active .tab-count { background: var(--indigo-100); color: var(--indigo-700); }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap;
+  }
+  .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .filter-pill {
+    padding: 5px 12px; border-radius: 14px; font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600); background: white; cursor: pointer;
+  }
+  .filter-pill.active { background: var(--slate-900); color: white; border-color: var(--slate-900); }
+  .search-input {
+    padding: 7px 12px; border: 1px solid var(--slate-200); border-radius: 6px; font-size: 13px;
+    width: 280px; outline: none;
+  }
+  .btn {
+    padding: 7px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .btn-secondary { background: white; color: var(--slate-700); border-color: var(--slate-300); }
+  .btn-primary { background: var(--indigo-600); color: white; }
+  .btn-primary:hover { background: var(--indigo-700); }
+
+  /* Document cards */
+  .doc-list { display: flex; flex-direction: column; gap: 8px; }
+  .doc-card {
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    padding: 14px 18px; cursor: pointer; transition: all 0.1s;
+    display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 14px; align-items: center;
+  }
+  .doc-card:hover { border-color: var(--slate-300); box-shadow: 0 2px 8px rgba(15,23,42,0.04); }
+  .doc-card.org-pinned { border-left: 4px solid #8b5cf6; padding-left: 14px; }
+  .doc-card.from-file { border-left: 4px solid var(--indigo-500); padding-left: 14px; }
+
+  .doc-name { font-size: 14px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; }
+  .doc-meta {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate-500);
+  }
+  .doc-meta-item { display: flex; align-items: center; gap: 4px; }
+  .source-badge {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 500;
+  }
+  .source-manual { background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200); }
+  .source-from-file { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+  .source-from-run { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .source-uploaded { background: var(--sky-50); color: #0369a1; border: 1px solid #bae6fd; }
+
+  /* Tier and mode chips */
+  .tier-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 600;
+  }
+  .tier-org { background: #fdf4ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+  .tier-subaccount { background: var(--sky-50); color: #0369a1; border: 1px solid #bae6fd; }
+  .tier-agent { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+  .tier-recurring { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+
+  .mode-chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 600;
+  }
+  .mode-auto { background: var(--slate-100); color: var(--slate-700); border: 1px solid var(--slate-200); }
+  .mode-always { background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a; }
+  .mode-reference { background: var(--slate-50); color: var(--slate-500); border: 1px solid var(--slate-200); }
+
+  .agents-count {
+    display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 8px;
+    background: var(--slate-50); border: 1px solid var(--slate-200); font-size: 11.5px; color: var(--slate-700); font-weight: 500;
+    white-space: nowrap;
+  }
+  .agents-count strong { color: var(--slate-900); }
+
+  .col-label { font-size: 10.5px; color: var(--slate-400); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+
+  .three-dot-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--slate-400);
+  }
+  .three-dot-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+
+  /* Stats row */
+  .stats-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px; margin-bottom: 18px;
+  }
+  .stat-card {
+    background: white; border: 1px solid var(--slate-200); border-radius: 8px; padding: 12px 14px;
+  }
+  .stat-label { font-size: 10.5px; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; margin-bottom: 4px; }
+  .stat-value { font-size: 18px; font-weight: 700; color: var(--slate-900); }
+  .stat-sub { font-size: 11px; color: var(--slate-500); margin-top: 1px; }
+
+  /* Sub-tabs (Documents / Bundles existing pattern) */
+  .sub-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .sub-tab {
+    padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    color: var(--slate-600); cursor: pointer; background: white; border: 1px solid var(--slate-200);
+  }
+  .sub-tab.active { background: var(--slate-900); color: white; border-color: var(--slate-900); }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div style="width:28px;height:28px;border-radius:7px;background:var(--indigo-500);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:14px;">S</div>
+        <div style="color:white;font-weight:700;font-size:14px;">Synthetos</div>
+      </div>
+    </div>
+    <div class="sidebar-pad">Work</div>
+    <div class="sidebar-item">Home</div>
+    <div class="sidebar-item">Inbox</div>
+    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-item active" style="color:white;">Knowledge</div>
+    <div class="sidebar-item">Connections</div>
+    <div class="sidebar-pad">Agents</div>
+    <div class="sidebar-item">Outreach Agent</div>
+    <div class="sidebar-item">Research Agent</div>
+  </aside>
+
+  <main style="flex:1;min-width:0;">
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span>Acme Corp</span>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Knowledge</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-secondary">+ Upload document</button>
+        <button class="btn btn-primary">+ Add manually</button>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <h1 class="page-h1">Knowledge</h1>
+      <div class="page-sub">Everything your agents know, learn, and produce in this workspace.</div>
+
+      <!-- Tab strip -->
+      <div class="tab-strip">
+        <button class="tab-btn">Authored memory <span class="tab-count">14</span></button>
+        <button class="tab-btn">Auto-memory <span class="tab-count">5</span></button>
+        <button class="tab-btn active">Documents <span class="tab-count">23</span></button>
+        <button class="tab-btn">Files <span class="tab-count">187</span></button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Total documents</div>
+          <div class="stat-value">23</div>
+          <div class="stat-sub">across all scopes</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Org-wide</div>
+          <div class="stat-value">3</div>
+          <div class="stat-sub">flow to all clients</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sub-account</div>
+          <div class="stat-value">14</div>
+          <div class="stat-sub">all agents in Acme Corp</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">From files</div>
+          <div class="stat-value">8</div>
+          <div class="stat-sub">promoted from runs</div>
+        </div>
+      </div>
+
+      <!-- Sub-tabs -->
+      <div class="sub-tabs">
+        <span class="sub-tab active">Documents</span>
+        <span class="sub-tab">Bundles</span>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span class="filter-pill active">All scopes (23)</span>
+          <span class="filter-pill">Org-wide (3)</span>
+          <span class="filter-pill">Sub-account (14)</span>
+          <span class="filter-pill">Agent (5)</span>
+          <span class="filter-pill">Recurring (1)</span>
+        </div>
+        <div class="toolbar-right">
+          <input class="search-input" type="text" placeholder="Search documents...">
+          <select class="filter-pill" style="padding:5px 10px;">
+            <option>Sort: Most relevant</option>
+            <option>Most recently updated</option>
+            <option>A-Z</option>
+            <option>Used by most agents</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Document list -->
+      <div class="doc-list">
+
+        <!-- Org-wide pinned -->
+        <div class="doc-card org-pinned">
+          <div>
+            <div class="doc-name">Synthetos Agency — Master Brand Voice Playbook</div>
+            <div class="doc-meta">
+              <span class="source-badge source-manual">Manually authored</span>
+              <span class="doc-meta-item">2,300 tokens</span>
+              <span class="doc-meta-item">Updated 5 days ago by Michael H.</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-org">📌 Org-wide</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-always">! Always available</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>27</strong> agents · 4 clients</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Org-wide manual -->
+        <div class="doc-card org-pinned">
+          <div>
+            <div class="doc-name">Agency-wide compliance and disclosure rules</div>
+            <div class="doc-meta">
+              <span class="source-badge source-manual">Manually authored</span>
+              <span class="doc-meta-item">1,400 tokens</span>
+              <span class="doc-meta-item">Updated 12 days ago by Michael H.</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-org">📌 Org-wide</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-always">! Always available</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>27</strong> agents · 4 clients</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Sub-account, Auto, manual -->
+        <div class="doc-card">
+          <div>
+            <div class="doc-name">Acme Corp — Account Context</div>
+            <div class="doc-meta">
+              <span class="source-badge source-manual">Manually authored</span>
+              <span class="doc-meta-item">1,800 tokens</span>
+              <span class="doc-meta-item">Updated 2 days ago by Sarah M.</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-subaccount">Sub-account</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-auto">A Auto</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>9</strong> agents in Acme Corp</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Sub-account, from file -->
+        <div class="doc-card from-file">
+          <div>
+            <div class="doc-name">Acme Corp enriched contacts</div>
+            <div class="doc-meta">
+              <span class="source-badge source-from-file">📎 From file: acme-contacts-enriched-2026-05-06.csv</span>
+              <span class="doc-meta-item">800 tokens</span>
+              <span class="doc-meta-item">Promoted by CRM Hygiene Agent · 2 days ago</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-subaccount">Sub-account</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-auto">A Auto</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>3</strong> agents in Acme Corp</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Sub-account, Auto, from agent run (auto-extracted) -->
+        <div class="doc-card from-file">
+          <div>
+            <div class="doc-name">Acme Corp Q1 pipeline insights</div>
+            <div class="doc-meta">
+              <span class="source-badge source-from-run">Approved from auto-memory</span>
+              <span class="doc-meta-item">900 tokens</span>
+              <span class="doc-meta-item">Suggested by Research Agent · approved 5 days ago</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-subaccount">Sub-account</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-auto">A Auto</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>4</strong> agents in Acme Corp</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Sub-account, manual -->
+        <div class="doc-card">
+          <div>
+            <div class="doc-name">Acme Corp — ICP and disqualification rules</div>
+            <div class="doc-meta">
+              <span class="source-badge source-manual">Manually authored</span>
+              <span class="doc-meta-item">1,200 tokens</span>
+              <span class="doc-meta-item">Updated 8 days ago by Michael H.</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-subaccount">Sub-account</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-auto">A Auto</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>9</strong> agents in Acme Corp</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Agent-specific, uploaded PDF -->
+        <div class="doc-card">
+          <div>
+            <div class="doc-name">Outreach product manual (full)</div>
+            <div class="doc-meta">
+              <span class="source-badge source-uploaded">Uploaded PDF</span>
+              <span class="doc-meta-item">38,000 tokens</span>
+              <span class="doc-meta-item">Uploaded 3 weeks ago by Sarah M.</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-agent">Agent</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-reference">R Reference only</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>1</strong> agent: Outreach Agent</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Recurring task scope -->
+        <div class="doc-card">
+          <div>
+            <div class="doc-name">Heartbeat task — sequence step rules</div>
+            <div class="doc-meta">
+              <span class="source-badge source-manual">Manually authored</span>
+              <span class="doc-meta-item">600 tokens</span>
+              <span class="doc-meta-item">Updated 20 days ago by Michael H.</span>
+            </div>
+          </div>
+          <div>
+            <div class="col-label">Tier</div>
+            <span class="tier-chip tier-recurring">Recurring task</span>
+          </div>
+          <div>
+            <div class="col-label">Mode</div>
+            <span class="mode-chip mode-auto">A Auto</span>
+          </div>
+          <div>
+            <div class="col-label">Used by</div>
+            <span class="agents-count"><strong>1</strong> recurring task</span>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+      </div>
+
+      <!-- Footer note -->
+      <div style="margin-top:24px;padding:14px 18px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">
+        <strong style="color:var(--slate-800);">How smart loading works:</strong>
+        Documents in <em>Auto</em> mode are loaded into agent context only when relevant to the task being run.
+        <em>Always available</em> documents load every run regardless. <em>Reference only</em> documents are not auto-loaded — agents fetch them on demand.
+        Most documents should stay in Auto. Use the others sparingly.
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

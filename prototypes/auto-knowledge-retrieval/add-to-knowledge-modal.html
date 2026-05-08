@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<!--
+  Mockup 2 — Add to Knowledge modal
+  Auto Knowledge Retrieval — Phase 1
+  Shows: the file → document promotion flow modal in its open state.
+  Demonstrates: scope inheritance, "apply to" defaults, advanced mode override expander.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Add to Knowledge — Modal | Auto Knowledge Retrieval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  body { background: var(--slate-100); }
+
+  /* Modal overlay (always visible to demonstrate) */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.5);
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px 20px; z-index: 100;
+  }
+  .modal {
+    background: white; border-radius: 14px; box-shadow: 0 20px 60px rgba(15,23,42,0.25);
+    width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto;
+  }
+  .modal-head {
+    padding: 20px 24px 16px; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  }
+  .modal-head-text { flex: 1; }
+  .modal-title { font-size: 17px; font-weight: 700; color: var(--slate-900); margin-bottom: 4px; }
+  .modal-sub { font-size: 12.5px; color: var(--slate-500); line-height: 1.5; }
+  .modal-close {
+    background: none; border: none; font-size: 20px; color: var(--slate-400); cursor: pointer;
+    width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  }
+  .modal-close:hover { background: var(--slate-100); color: var(--slate-700); }
+
+  .modal-body { padding: 22px 24px; }
+  .modal-foot {
+    padding: 14px 24px; border-top: 1px solid var(--slate-200);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    background: var(--slate-50);
+  }
+
+  /* Source file pill at top of modal */
+  .source-file-pill {
+    display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 8px;
+    margin-bottom: 22px;
+  }
+  .source-file-icon {
+    width: 32px; height: 32px; border-radius: 6px; background: var(--emerald-500);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: white;
+    flex-shrink: 0;
+  }
+  .source-file-name { font-size: 13px; font-weight: 600; color: var(--slate-800); margin-bottom: 1px; }
+  .source-file-sub { font-size: 11.5px; color: var(--slate-500); }
+
+  /* Form fields */
+  .field-group { margin-bottom: 18px; }
+  .field-label {
+    display: block; font-size: 12.5px; font-weight: 600; color: var(--slate-700);
+    margin-bottom: 6px;
+  }
+  .field-help { font-size: 11.5px; color: var(--slate-500); margin-top: 4px; line-height: 1.5; }
+  .field-input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--slate-300); border-radius: 7px;
+    font-size: 13.5px; font-family: inherit; outline: none; transition: border-color 0.12s;
+    color: var(--slate-800);
+  }
+  .field-input:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+
+  textarea.field-input {
+    resize: vertical; min-height: 90px; line-height: 1.5; font-family: inherit;
+  }
+
+  /* Scope picker (segmented) */
+  .scope-segmented {
+    display: flex; gap: 0; border: 1px solid var(--slate-300); border-radius: 8px; overflow: hidden;
+  }
+  .scope-seg {
+    flex: 1; padding: 10px 12px; background: white; border: none; border-right: 1px solid var(--slate-200);
+    font-size: 12.5px; font-weight: 500; color: var(--slate-600); cursor: pointer; text-align: center;
+    transition: all 0.1s;
+  }
+  .scope-seg:last-child { border-right: none; }
+  .scope-seg:hover { background: var(--slate-50); }
+  .scope-seg.active { background: var(--indigo-600); color: white; }
+  .scope-seg.disabled { color: var(--slate-300); cursor: not-allowed; background: var(--slate-50); }
+
+  /* Apply to (radio group) */
+  .radio-group { display: flex; flex-direction: column; gap: 8px; }
+  .radio-row {
+    display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px;
+    border: 1px solid var(--slate-200); border-radius: 8px; cursor: pointer;
+    transition: all 0.1s;
+  }
+  .radio-row:hover { border-color: var(--slate-300); background: var(--slate-50); }
+  .radio-row.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .radio-circle {
+    width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--slate-300);
+    background: white; flex-shrink: 0; margin-top: 2px;
+  }
+  .radio-row.selected .radio-circle { border-color: var(--indigo-500); }
+  .radio-row.selected .radio-circle::after {
+    content: ''; display: block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--indigo-500); margin: 2px auto;
+  }
+  .radio-text { font-size: 13px; font-weight: 500; color: var(--slate-800); margin-bottom: 2px; }
+  .radio-help { font-size: 11.5px; color: var(--slate-500); line-height: 1.4; }
+
+  /* Cost preview box */
+  .cost-preview {
+    background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 22px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .cost-icon {
+    width: 24px; height: 24px; border-radius: 6px; background: var(--indigo-600); color: white;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .cost-title { font-size: 12.5px; font-weight: 600; color: var(--indigo-700); margin-bottom: 2px; }
+  .cost-body { font-size: 11.5px; color: var(--slate-700); line-height: 1.5; }
+
+  /* Advanced expander */
+  .advanced {
+    margin-top: 18px; border: 1px solid var(--slate-200); border-radius: 8px; overflow: hidden;
+  }
+  .advanced-head {
+    padding: 11px 14px; background: var(--slate-50); cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12.5px; font-weight: 600; color: var(--slate-700);
+  }
+  .advanced-head .chevron { transition: transform 0.15s; font-size: 11px; color: var(--slate-400); }
+  .advanced.open .advanced-head .chevron { transform: rotate(90deg); }
+  .advanced-body {
+    padding: 14px; border-top: 1px solid var(--slate-200); display: none;
+  }
+  .advanced.open .advanced-body { display: block; }
+
+  /* Buttons */
+  .btn {
+    padding: 9px 18px; border-radius: 7px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 1px solid transparent; transition: all 0.1s;
+  }
+  .btn-secondary { background: white; color: var(--slate-700); border-color: var(--slate-300); }
+  .btn-secondary:hover { background: var(--slate-50); }
+  .btn-primary { background: var(--indigo-600); color: white; }
+  .btn-primary:hover { background: var(--indigo-700); }
+
+  /* Mode option (inside advanced) */
+  .mode-option {
+    display: flex; align-items: flex-start; gap: 12px; padding: 12px;
+    border: 1px solid var(--slate-200); border-radius: 7px; margin-bottom: 8px;
+    cursor: pointer;
+  }
+  .mode-option:hover { border-color: var(--slate-300); background: var(--slate-50); }
+  .mode-option.active { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .mode-option:last-child { margin-bottom: 0; }
+  .mode-icon {
+    width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 13px; font-weight: 700; flex-shrink: 0;
+  }
+  .mode-icon.auto { background: var(--indigo-500); }
+  .mode-icon.always { background: var(--amber-600); }
+  .mode-icon.reference { background: var(--slate-500); }
+  .mode-name { font-size: 13px; font-weight: 600; color: var(--slate-800); margin-bottom: 2px; }
+  .mode-desc { font-size: 11.5px; color: var(--slate-500); line-height: 1.45; }
+
+</style>
+</head>
+<body>
+
+<div class="overlay">
+  <div class="modal">
+    <!-- ── Modal head ──────────────────────────────────────────────────── -->
+    <div class="modal-head">
+      <div class="modal-head-text">
+        <div class="modal-title">Add to Knowledge</div>
+        <div class="modal-sub">
+          Promote this file to a durable document. Your agents will pick it up automatically when it's relevant to a task.
+        </div>
+      </div>
+      <button class="modal-close">×</button>
+    </div>
+
+    <!-- ── Modal body ──────────────────────────────────────────────────── -->
+    <div class="modal-body">
+
+      <!-- Source file pill -->
+      <div class="source-file-pill">
+        <div class="source-file-icon">CSV</div>
+        <div>
+          <div class="source-file-name">acme-contacts-enriched-2026-05-06.csv</div>
+          <div class="source-file-sub">86 KB · produced by CRM Hygiene Agent · run #1281</div>
+        </div>
+      </div>
+
+      <!-- Title -->
+      <div class="field-group">
+        <label class="field-label">Title</label>
+        <input class="field-input" type="text" value="Acme Corp enriched contacts">
+        <div class="field-help">Edit if you want to give the document a clearer name in your Knowledge base.</div>
+      </div>
+
+      <!-- Content preview -->
+      <div class="field-group">
+        <label class="field-label">Content preview</label>
+        <textarea class="field-input">Acme Corp contacts enriched 2026-05-06. 412 contacts across 4 divisions: Sales, Operations, Engineering, Customer Success. Primary buyer persona is VP of Operations or Head of RevOps. Secondary buyer: IT Director where compliance is a gating factor. Avoid SMB deals under 50 seats. Key revenue contacts flagged: 23 high-priority, 86 mid, 303 low. Refresh interval: weekly heartbeat.</textarea>
+        <div class="field-help">We auto-extracted text from the file. Edit before adding if you want to clean it up.</div>
+      </div>
+
+      <!-- Scope -->
+      <div class="field-group">
+        <label class="field-label">Scope</label>
+        <div class="scope-segmented">
+          <button class="scope-seg active">This sub-account (Acme Corp)</button>
+          <button class="scope-seg">Org-wide</button>
+        </div>
+        <div class="field-help">Defaulted to this sub-account because that's where the file was created. Org-wide makes the document available to every client. (Org-admin only.)</div>
+      </div>
+
+      <!-- Apply to -->
+      <div class="field-group">
+        <label class="field-label">Apply to</label>
+        <div class="radio-group">
+          <div class="radio-row selected">
+            <div class="radio-circle"></div>
+            <div>
+              <div class="radio-text">All agents in Acme Corp</div>
+              <div class="radio-help">Document is available to every agent in this sub-account. Recommended.</div>
+            </div>
+          </div>
+          <div class="radio-row">
+            <div class="radio-circle"></div>
+            <div>
+              <div class="radio-text">Specific agents only</div>
+              <div class="radio-help">Pick which agents should have access. Use when only a few agents need this.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cost preview -->
+      <div class="cost-preview">
+        <div class="cost-icon">!</div>
+        <div>
+          <div class="cost-title">Roughly 800 tokens of context when relevant</div>
+          <div class="cost-body">
+            This document loads automatically into agent context only when relevant to the task being run. Estimated cost when loaded: under 1¢ per run.
+          </div>
+        </div>
+      </div>
+
+      <!-- Advanced expander -->
+      <div class="advanced">
+        <div class="advanced-head">
+          <span>Advanced — change loading mode</span>
+          <span class="chevron">›</span>
+        </div>
+        <!-- Visible to demonstrate; in real UI it would collapse by default -->
+        <div class="advanced-body" style="display:block;">
+          <div class="mode-option active">
+            <div class="mode-icon auto">A</div>
+            <div>
+              <div class="mode-name">Auto <span style="font-weight:500;color:var(--slate-500);">(recommended)</span></div>
+              <div class="mode-desc">The system loads this only when it's relevant to the task being run.</div>
+            </div>
+          </div>
+          <div class="mode-option">
+            <div class="mode-icon always">!</div>
+            <div>
+              <div class="mode-name">Always available</div>
+              <div class="mode-desc">Loads into context every run, even when not directly relevant. Use for rules the agent must always follow (compliance, brand voice).</div>
+            </div>
+          </div>
+          <div class="mode-option">
+            <div class="mode-icon reference">R</div>
+            <div>
+              <div class="mode-name">Reference only</div>
+              <div class="mode-desc">Never auto-loaded. The agent will fetch this only when it explicitly decides it needs to. Use for large manuals or reference material.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Modal foot ──────────────────────────────────────────────────── -->
+    <div class="modal-foot">
+      <div style="font-size:11.5px;color:var(--slate-500);">
+        File will be marked durable (no expiry) once added.
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Add to Knowledge</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 # Agent Cloud Compute — Development Brief
 
-> **Status:** Rev 5 — LOCKED. Strategy phase complete. Next moves are validation interviews, UX exploration, and the §10.2 session-persistence spec.
+> **Status:** Rev 5 — LOCKED. Strategy phase complete. Phase 1 has been split out as its own feature (see note below).
+> **Phase 1 split (2026-05-08):** During mockup planning it became clear that the *"persistent agent workspace"* surface needs a smarter knowledge retrieval foundation than what ships today. That foundation has been pulled out as Phase 1 and lives in its own brief: `docs/auto-knowledge-retrieval-dev-brief.md`. Phase 1 ships first on its own branch; the agent workspace work (everything in this brief) resumes once Phase 1 lands. The strategic spine is unchanged — Phase 1 is what makes the embodiment surface in §10.1 actually deliver on its promise.
 > **Date:** 2026-05-07
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii`
 > **Audience:** Internal engineering, plus LLM and external reviewers without prior context.
