@@ -158,26 +158,12 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { description, apiSpec } = req.body as { description?: unknown; apiSpec?: unknown };
-
-    if (typeof description !== 'string' || description.length < 20) {
-      res.status(422).json({ error: 'description must be at least 20 characters', errorCode: 'DESCRIPTION_TOO_SHORT' });
-      return;
-    }
-
-    try {
-      const suggestion = await suggestRuntimeCheck({
-        description,
-        apiSpec: typeof apiSpec === 'string' ? apiSpec : undefined,
-        organisationId: req.orgId!,
-      });
-      res.json(suggestion);
-    } catch (err: unknown) {
-      if (err !== null && typeof err === 'object' && (err as { errorCode?: string }).errorCode === 'SUGGESTION_UNAVAILABLE') {
-        res.status(503).json({ error: 'Runtime check suggestion unavailable', errorCode: 'SUGGESTION_UNAVAILABLE' });
-        return;
-      }
-      throw err;
-    }
+    const suggestion = await suggestRuntimeCheck({
+      description: typeof description === 'string' ? description : '',
+      apiSpec: typeof apiSpec === 'string' ? apiSpec : undefined,
+      organisationId: req.orgId!,
+    });
+    res.json(suggestion);
   }),
 );
 

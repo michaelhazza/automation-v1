@@ -103,6 +103,22 @@ describe('validateSuggestionResponse', () => {
     })).toBeNull();
   });
 
+  it('returns null when suggestedCheck.kind is an unknown value (hallucination guard)', () => {
+    expect(validateSuggestionResponse({
+      ...validPayload,
+      suggestedCheck: { kind: 'made_up_check', parameters: {} },
+    })).toBeNull();
+  });
+
+  it('accepts all valid check kinds', () => {
+    for (const kind of ['api_status_2xx', 'row_exists', 'field_match', 'external_returns', 'custom_handler']) {
+      expect(validateSuggestionResponse({
+        ...validPayload,
+        suggestedCheck: { kind, parameters: {} },
+      })).not.toBeNull();
+    }
+  });
+
   it('returns null when suggestedCheck.parameters is an array', () => {
     expect(validateSuggestionResponse({
       ...validPayload,

@@ -24,6 +24,14 @@ export function deriveCacheKey(description: string, apiSpec?: string): string {
 
 // ── validateSuggestionResponse ────────────────────────────────────────────────
 
+const VALID_CHECK_KINDS = new Set([
+  'api_status_2xx',
+  'row_exists',
+  'field_match',
+  'external_returns',
+  'custom_handler',
+]);
+
 export function validateSuggestionResponse(raw: unknown): SuggestionResult | null {
   if (raw === null || typeof raw !== 'object') return null;
 
@@ -37,7 +45,7 @@ export function validateSuggestionResponse(raw: unknown): SuggestionResult | nul
 
   if (r.suggestedCheck === null || typeof r.suggestedCheck !== 'object') return null;
   const sc = r.suggestedCheck as Record<string, unknown>;
-  if (typeof sc.kind !== 'string' || sc.kind.length === 0) return null;
+  if (typeof sc.kind !== 'string' || !VALID_CHECK_KINDS.has(sc.kind)) return null;
   if (sc.parameters === null || typeof sc.parameters !== 'object' || Array.isArray(sc.parameters)) return null;
 
   if (typeof r.plainEnglish !== 'string' || r.plainEnglish.length === 0) return null;
