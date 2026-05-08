@@ -1,10 +1,11 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
+active_spec: tasks/builds/auto-knowledge-retrieval/spec.md
+active_plan: tasks/builds/auto-knowledge-retrieval/plan.md
 build_slug: auto-knowledge-retrieval
 branch: auto-knowledge-retrieval
-status: PLANNING
+status: BUILDING
 last_updated: 2026-05-08
+phase_1_completed: 2026-05-08
 last_merged_pr: #273
 last_merged_slug: consolidation-govern
 last_merged_branch: ui-consolidation-govern
@@ -24,11 +25,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** tasks/builds/auto-knowledge-retrieval/spec.md (in flight)
-**Active plan:** tasks/builds/auto-knowledge-retrieval/plan.md (Phase 2)
+**Active spec:** tasks/builds/auto-knowledge-retrieval/spec.md (frozen at commit `8a44844c`, 875 lines)
+**Active plan:** tasks/builds/auto-knowledge-retrieval/plan.md (Phase 2 — to be authored by `feature-coordinator`)
 **Active build slug:** auto-knowledge-retrieval
 **Branch:** auto-knowledge-retrieval
-**Status:** **PLANNING** — `spec-coordinator` running Phase 1 against `docs/auto-knowledge-retrieval-dev-brief.md` (Rev 4). Mockups already iterated and approved across 5 prior rounds (`prototypes/auto-knowledge-retrieval/`). Spec authoring + `spec-reviewer` + `chatgpt-spec-review` next, then handoff to `feature-coordinator`.
+**Phase 1 completed:** 2026-05-08
+**Status:** **BUILDING** — Phase 1 (SPEC) complete. Spec frozen after `spec-reviewer` (5 iter, 20 mechanical findings, lifetime cap reached) + `chatgpt-spec-review` Round 1 (9 findings, all resolved; Round 2 declined). 8 prototypes pre-approved across 5 prior operator rounds (`prototypes/auto-knowledge-retrieval/`). Handoff: `tasks/builds/auto-knowledge-retrieval/handoff.md`. Triage log: `tasks/review-logs/chatgpt-spec-review-auto-knowledge-retrieval-2026-05-08T04-25-47Z.md`. **Next:** launch `feature-coordinator` in a new Claude Code session for Phase 2 (plan decomposition on Opus → plan gate → execution on Sonnet).
 
 **Just merged:** PR #273 — `consolidation-govern` (squash-commit `dfa53e58`, 2026-05-07T23:18:59Z). Govern surface — Knowledge / Spending / Connections consolidated UI shipped across 13 build chunks. Spec: `tasks/builds/consolidation-govern/spec.md`. Phase 3 handoff: `tasks/builds/consolidation-govern/handoff.md`. Pipeline: spec-conformance NON_CONFORMANT (18 directional gaps deferred) → pr-reviewer CHANGES_REQUESTED (5 blockers + 7 strong recommendations all fixed in `3d4f1cfe`) → adversarial-reviewer 3 findings deferred (CONSOL-GOV-DEF-17/18/19) → dual-reviewer commit `5566880c` → S2 sync (auto-resolved via finalisation-coordinator) → G4 regression-guard fixes in `997e940a` (App.tsx route handlers consolidated post-S2 with main's PR #271/#272 page-deletion pattern; migration 0286 → 0287 collision rename; architecture.md migration filename updated) → Phase 3 commit `9188981f` (KNOWLEDGE.md +4 patterns, handoff.md created, current-focus.md → MERGE_READY, CONSOL-GOV-DEF-9 closed) → ready-to-merge label applied → CI ALL GREEN → auto-merged. **chatgpt-pr-review SKIPPED** in Phase 3 (operator instructed autonomous mode, incompatible with manual ChatGPT-web loop). 4 KNOWLEDGE.md patterns appended: closed-enum service-boundary mapping, targeted onConflictDoNothing, migration-number collision after S2, App.tsx route regression after upstream page deletions. Doc-sync sweep complete (13 verdicts recorded). 1 todo item closed (CONSOL-GOV-DEF-9 testConnection error.code mapping shipped via Phase 2 pr-reviewer Blocker B-1). 18 spec-conformance directional gaps + 3 adversarial-reviewer findings deferred to post-merge backlog in `tasks/todo.md`.
 
@@ -78,7 +80,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-07T23:21:30Z
+**Last updated:** 2026-05-08 (Phase 1 close-out — auto-knowledge-retrieval)
 
 ---
 

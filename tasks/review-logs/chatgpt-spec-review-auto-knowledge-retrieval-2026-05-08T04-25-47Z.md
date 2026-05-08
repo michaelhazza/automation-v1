@@ -103,3 +103,26 @@ The operator-decision prompt (presented in chat) asks for: warning thresholds + 
 **Round 1 status:** all 9 findings resolved. Mechanical edits (7): items 1, 3, 4, 5, B, C, D — applied in `48d8c7b6`. Item 2 confirmed no-change. Item A applied in this commit (option a — lightweight starvation telemetry included in v1 scope).
 
 **Next step:** operator decision — continue to Round 2 (further ChatGPT pass on the spec), or proceed directly to Step 9 (handoff write).
+
+---
+
+## Round 2 close-out — operator declined Round 2, spec frozen
+
+**Step 8 closure summary:** all 9 Round 1 findings resolved (7 mechanical from initial pass — items 1, 3, 4, 5, B, C, D; 1 confirmed-no-change — item 2; 1 operator-approved — item A: always-available starvation telemetry, option a). No Round 2 conducted. Spec frozen at commit `8a44844c`.
+
+### Operator close-out reasoning (verbatim)
+
+> Spec has crossed the "structurally hardened" threshold. The latest additions closed the only remaining systemic concern (operator-induced starvation risk). Preventive layer implemented correctly: derived metrics instead of new schema, deterministic thresholds, paired runtime + preventive surfaces, no hidden behavioural coupling, telemetry history via bounded events, explicit deferment of hard caps. Right maturity level for v1.
+>
+> A Round 2 pass is unlikely to produce architectural findings — likely outputs would be wording tweaks, naming polish, micro-clarifications, nice-to-have operational notes, not foundational corrections.
+>
+> Spec is now notably strong in the areas that usually fail late: deterministic ranking semantics, atomic retrieval-version swaps, observability payload bounding, RLS-before-retrieval, explicit source-of-truth ownership, idempotency posture, replay stability, deferred-boundary discipline, operator degradation semantics. Retrieval-version completeness invariant especially important and now properly pinned. Bounded observability payload contract is exactly what most teams miss until production pain.
+>
+> Recommendation: freeze the spec, move to handoff, preserve momentum, let implementation pressure surface any remaining gaps organically. Ready for build-phase planning and chunk decomposition.
+
+### Final disposition
+
+- **Round 1 findings:** 9/9 closed.
+- **Rounds conducted:** 1.
+- **Spec frozen at:** commit `8a44844c` (875 lines).
+- **Phase 1 outcome:** PHASE_1_COMPLETE. Proceeding to handoff write (Step 9) and lock transition (Step 10).
