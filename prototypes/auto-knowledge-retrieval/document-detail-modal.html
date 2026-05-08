@@ -157,6 +157,20 @@
     font-size: 10.5px; font-weight: 600;
   }
   .tier-subaccount { background: var(--sky-50); color: #0369a1; border: 1px solid #bae6fd; }
+
+  /* Size widget in side panel */
+  .size-widget {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .size-bar-track {
+    width: 100%; height: 8px; background: var(--slate-100); border-radius: 4px; overflow: hidden;
+  }
+  .size-bar-fill { height: 100%; background: var(--indigo-500); border-radius: 4px; }
+  .size-bar-fill.over { background: var(--red-500); }
+  .size-status { font-size: 11px; color: var(--slate-600); display: flex; justify-content: space-between; align-items: center; }
+  .size-status .label { font-weight: 600; }
+  .size-status.over { color: var(--red-600); }
+  .size-help { font-size: 10.5px; color: var(--slate-500); line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -228,14 +242,15 @@ Data quality:
           </div>
         </div>
 
-        <!-- Scope -->
-        <div class="field-group">
+        <!-- Scope (only visible to org admins; sub-account admins do not see this control) -->
+        <div class="field-group" style="position:relative;">
+          <div style="position:absolute;top:-12px;right:0;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#7c3aed;background:#fdf4ff;border:1px solid #ddd6fe;padding:2px 8px;border-radius:10px;">Org admin only</div>
           <label class="field-label">Scope</label>
           <div class="scope-segmented">
             <button class="scope-seg active">This sub-account (Acme Corp)</button>
             <button class="scope-seg">Org-wide</button>
           </div>
-          <div class="field-help">Scope was set when the document was added. Change to make it available to more agents or restrict it.</div>
+          <div class="field-help">Sub-account admins don't see this control. They see the document at whatever scope it was created at, with no option to change it.</div>
         </div>
 
         <!-- Available to -->
@@ -255,6 +270,18 @@ Data quality:
         <div class="side-section">
           <div class="side-label">Tier</div>
           <span class="tier-chip tier-subaccount">Sub-account</span>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Document size</div>
+          <div class="size-widget">
+            <div class="size-bar-track"><div class="size-bar-fill" style="width:8%;"></div></div>
+            <div class="size-status">
+              <span class="label">Small</span>
+              <span>Well within recommended size</span>
+            </div>
+            <div class="size-help">Bigger documents take longer to retrieve and may be harder to match. Keep individual documents focused for best results.</div>
+          </div>
         </div>
 
         <div class="side-section">

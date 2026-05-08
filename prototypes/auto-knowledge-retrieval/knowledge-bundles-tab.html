@@ -124,9 +124,26 @@
   .three-dot-btn {
     width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--slate-200);
     background: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
-    font-size: 14px; color: var(--slate-400); flex-shrink: 0;
+    font-size: 14px; color: var(--slate-400); flex-shrink: 0; position: relative;
   }
   .three-dot-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+  .three-dot-wrap { position: relative; display: inline-block; }
+  .menu {
+    position: absolute; right: 0; top: 32px; z-index: 50;
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(15,23,42,0.14);
+    min-width: 230px; padding: 4px; display: none;
+  }
+  .menu.open { display: block; }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 6px;
+    cursor: pointer; font-size: 12.5px; color: var(--slate-700);
+  }
+  .menu-item:hover { background: var(--slate-50); }
+  .menu-item.danger { color: var(--red-600); }
+  .menu-item.danger:hover { background: var(--red-50); }
+  .menu-item-icon { width: 16px; text-align: center; opacity: 0.85; font-size: 13px; }
+  .menu-divider { height: 1px; background: var(--slate-200); margin: 4px 6px; }
 
   /* Bundle expanded view — embedded mini documents table */
   .bundle-expanded-body {
@@ -238,13 +255,26 @@
       <!-- Bundle grid -->
       <div class="bundle-grid">
 
-        <!-- Bundle 1 (collapsed) -->
+        <!-- Bundle 1 (collapsed) — three-dots menu open to demonstrate options -->
         <div class="bundle-card">
           <div class="bundle-head">
             <div>
               <div class="bundle-title">Onboarding pack</div>
             </div>
-            <button class="three-dot-btn">⋮</button>
+            <div class="three-dot-wrap">
+              <button class="three-dot-btn" style="background:var(--slate-100);color:var(--slate-700);">⋮</button>
+              <div class="menu open">
+                <div class="menu-item"><span class="menu-item-icon">↗</span> Open bundle</div>
+                <div class="menu-item"><span class="menu-item-icon">✎</span> Edit bundle</div>
+                <div class="menu-item"><span class="menu-item-icon">📋</span> Edit documents in bundle</div>
+                <div class="menu-divider"></div>
+                <div class="menu-item"><span class="menu-item-icon">↑</span> Promote to org-wide</div>
+                <div class="menu-item"><span class="menu-item-icon">👥</span> Apply to specific agents</div>
+                <div class="menu-divider"></div>
+                <div class="menu-item"><span class="menu-item-icon">⎘</span> Duplicate bundle</div>
+                <div class="menu-item danger"><span class="menu-item-icon">🗑</span> Delete bundle</div>
+              </div>
+            </div>
           </div>
           <div class="bundle-desc">Core documents for onboarding new clients. Welcome message, success criteria, and standard checklists.</div>
           <div class="bundle-meta-row">

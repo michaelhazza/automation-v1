@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<!--
+  Mockup 7 — Bundle Edit modal
+  Auto Knowledge Retrieval — Phase 1
+  Shows: the modal that opens when clicking three-dots → Edit bundle.
+  Demonstrates: bundle-level fields (name, description, scope, applied-to)
+                are editable here, but per-document mode is NOT — that's set on each
+                individual document. Documents can be added or removed from the bundle.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Edit Bundle | Auto Knowledge Retrieval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  body { background: var(--slate-100); }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px 20px; z-index: 100;
+  }
+  .modal {
+    background: white; border-radius: 14px; box-shadow: 0 20px 60px rgba(15,23,42,0.25);
+    width: 100%; max-width: 880px; max-height: 92vh; overflow-y: auto;
+  }
+  .modal-head {
+    padding: 18px 24px 14px; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  }
+  .modal-head-text { flex: 1; }
+  .modal-eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--slate-400); margin-bottom: 4px;
+  }
+  .modal-title { font-size: 18px; font-weight: 700; color: var(--slate-900); line-height: 1.3; }
+  .modal-sub { font-size: 12px; color: var(--slate-500); margin-top: 4px; }
+  .modal-close {
+    background: none; border: none; font-size: 22px; color: var(--slate-400); cursor: pointer;
+    width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  }
+  .modal-close:hover { background: var(--slate-100); color: var(--slate-700); }
+
+  .modal-body {
+    display: grid; grid-template-columns: 1fr 280px;
+    min-height: 460px;
+  }
+  .modal-main { padding: 22px 24px; border-right: 1px solid var(--slate-200); }
+  .modal-side { padding: 22px 24px; background: var(--slate-50); }
+
+  .modal-foot {
+    padding: 12px 24px; border-top: 1px solid var(--slate-200);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    background: white;
+  }
+
+  /* Field groups */
+  .field-group { margin-bottom: 18px; }
+  .field-label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--slate-700);
+    margin-bottom: 6px;
+  }
+  .field-input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--slate-300); border-radius: 7px;
+    font-size: 13.5px; outline: none; color: var(--slate-800); font-family: inherit;
+  }
+  .field-input:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+  textarea.field-input { resize: vertical; min-height: 70px; line-height: 1.5; font-family: inherit; }
+  .field-help { font-size: 11px; color: var(--slate-500); margin-top: 4px; line-height: 1.45; }
+
+  /* Documents list inside bundle (mode read-only) */
+  .docs-mini {
+    border: 1px solid var(--slate-200); border-radius: 8px; overflow: hidden;
+  }
+  .docs-mini-row {
+    display: grid; grid-template-columns: 1fr auto auto;
+    gap: 12px; align-items: center;
+    padding: 10px 12px; border-bottom: 1px solid var(--slate-100);
+    font-size: 12.5px;
+  }
+  .docs-mini-row:last-child { border-bottom: none; }
+  .docs-mini-row:hover { background: var(--slate-50); }
+  .docs-mini-name { font-weight: 600; color: var(--slate-800); }
+  .docs-mini-sub { font-size: 11px; color: var(--slate-500); margin-top: 1px; }
+  .docs-mini-remove {
+    width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; color: var(--slate-400); font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .docs-mini-remove:hover { color: var(--red-600); border-color: var(--red-300); }
+
+  .add-doc-row {
+    padding: 10px 12px; background: var(--slate-50); border-top: 1px solid var(--slate-200);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Mode chip (read-only display) */
+  .mode-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 9px;
+    font-size: 10px; font-weight: 600;
+  }
+  .mode-auto { background: var(--slate-100); color: var(--slate-700); border: 1px solid var(--slate-200); }
+  .mode-always { background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a; }
+  .mode-reference { background: var(--slate-50); color: var(--slate-500); border: 1px solid var(--slate-200); }
+
+  /* Tier chip */
+  .tier-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 600;
+  }
+  .tier-subaccount { background: var(--sky-50); color: #0369a1; border: 1px solid #bae6fd; }
+
+  /* Scope segmented (org-admin-only) */
+  .scope-segmented { display: flex; gap: 0; border: 1px solid var(--slate-300); border-radius: 8px; overflow: hidden; }
+  .scope-seg {
+    flex: 1; padding: 9px 12px; background: white; border: none; border-right: 1px solid var(--slate-200);
+    font-size: 12.5px; font-weight: 500; color: var(--slate-600); cursor: pointer; text-align: center;
+  }
+  .scope-seg:last-child { border-right: none; }
+  .scope-seg.active { background: var(--indigo-600); color: white; }
+
+  /* Side panel */
+  .side-section { margin-bottom: 18px; }
+  .side-label {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--slate-400); margin-bottom: 6px;
+  }
+  .side-value { font-size: 12.5px; color: var(--slate-800); }
+  .side-sub { font-size: 11px; color: var(--slate-500); margin-top: 2px; }
+
+  .applied-agent {
+    display: flex; align-items: center; gap: 6px; padding: 4px 9px; background: white;
+    border: 1px solid var(--slate-200); border-radius: 14px; font-size: 11.5px;
+    color: var(--slate-700); margin-right: 4px; margin-bottom: 4px;
+  }
+  .applied-agent-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald-500); }
+
+  /* Buttons */
+  .btn { padding: 8px 16px; border-radius: 7px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
+  .btn-secondary { background: white; color: var(--slate-700); border-color: var(--slate-300); }
+  .btn-secondary:hover { background: var(--slate-50); }
+  .btn-primary { background: var(--indigo-600); color: white; }
+  .btn-primary:hover { background: var(--indigo-700); }
+  .btn-danger { background: white; color: var(--red-600); border-color: var(--slate-300); }
+  .btn-danger:hover { background: var(--red-50); border-color: #fca5a5; }
+
+  /* Info note about per-document mode */
+  .info-note {
+    background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 7px;
+    padding: 9px 12px; margin-bottom: 14px;
+    font-size: 11.5px; color: var(--slate-700); line-height: 1.5;
+  }
+  .info-note strong { color: var(--indigo-700); }
+
+  /* Org-admin-only badge */
+  .org-only-badge {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: #7c3aed; background: #fdf4ff; border: 1px solid #ddd6fe;
+    padding: 2px 8px; border-radius: 10px; display: inline-block;
+  }
+</style>
+</head>
+<body>
+
+<div class="overlay">
+  <div class="modal">
+    <!-- Head -->
+    <div class="modal-head">
+      <div class="modal-head-text">
+        <div class="modal-eyebrow">Edit bundle</div>
+        <div class="modal-title">Onboarding pack</div>
+        <div class="modal-sub">Sub-account · 5 documents · used by 2 agents</div>
+      </div>
+      <button class="modal-close">×</button>
+    </div>
+
+    <!-- Body -->
+    <div class="modal-body">
+
+      <!-- Main column -->
+      <div class="modal-main">
+
+        <!-- Name -->
+        <div class="field-group">
+          <label class="field-label">Name</label>
+          <input class="field-input" type="text" value="Onboarding pack">
+        </div>
+
+        <!-- Description -->
+        <div class="field-group">
+          <label class="field-label">Description</label>
+          <textarea class="field-input">Core documents for onboarding new clients. Welcome message, success criteria, and standard checklists.</textarea>
+        </div>
+
+        <!-- Scope (org admin only) -->
+        <div class="field-group" style="position:relative;">
+          <div style="position:absolute;top:-12px;right:0;"><span class="org-only-badge">Org admin only</span></div>
+          <label class="field-label">Scope</label>
+          <div class="scope-segmented">
+            <button class="scope-seg active">This sub-account (Acme Corp)</button>
+            <button class="scope-seg">Org-wide</button>
+          </div>
+          <div class="field-help">Sub-account admins don't see this control. They see the bundle at whatever scope it was created at.</div>
+        </div>
+
+        <!-- Documents in bundle -->
+        <div class="field-group">
+          <label class="field-label">Documents in bundle</label>
+
+          <div class="info-note">
+            <strong>Mode is set on each document, not on the bundle.</strong> The mode chips below are read-only here. To change a document's loading mode, open the document itself.
+          </div>
+
+          <div class="docs-mini">
+            <div class="docs-mini-row">
+              <div>
+                <div class="docs-mini-name">Welcome message — new client kickoff</div>
+                <div class="docs-mini-sub">Manually authored</div>
+              </div>
+              <span class="mode-chip mode-always">! Always available</span>
+              <button class="docs-mini-remove" title="Remove from bundle">×</button>
+            </div>
+            <div class="docs-mini-row">
+              <div>
+                <div class="docs-mini-name">Onboarding success criteria checklist</div>
+                <div class="docs-mini-sub">Manually authored</div>
+              </div>
+              <span class="mode-chip mode-auto">A Auto</span>
+              <button class="docs-mini-remove" title="Remove from bundle">×</button>
+            </div>
+            <div class="docs-mini-row">
+              <div>
+                <div class="docs-mini-name">Common onboarding objections — playbook</div>
+                <div class="docs-mini-sub">Manually authored</div>
+              </div>
+              <span class="mode-chip mode-auto">A Auto</span>
+              <button class="docs-mini-remove" title="Remove from bundle">×</button>
+            </div>
+            <div class="docs-mini-row">
+              <div>
+                <div class="docs-mini-name">Sample onboarding emails (4 weeks)</div>
+                <div class="docs-mini-sub">Manually authored</div>
+              </div>
+              <span class="mode-chip mode-auto">A Auto</span>
+              <button class="docs-mini-remove" title="Remove from bundle">×</button>
+            </div>
+            <div class="docs-mini-row">
+              <div>
+                <div class="docs-mini-name">First-90-days reference manual</div>
+                <div class="docs-mini-sub">Uploaded PDF</div>
+              </div>
+              <span class="mode-chip mode-reference">R Reference only</span>
+              <button class="docs-mini-remove" title="Remove from bundle">×</button>
+            </div>
+            <div class="add-doc-row">
+              <button class="btn btn-secondary" style="padding:5px 12px;font-size:12px;">+ Add document to bundle</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Side column -->
+      <div class="modal-side">
+
+        <div class="side-section">
+          <div class="side-label">Tier</div>
+          <span class="tier-chip tier-subaccount">Sub-account</span>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Created</div>
+          <div class="side-value">2 weeks ago</div>
+          <div class="side-sub">by Michael H.</div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Last updated</div>
+          <div class="side-value">2 days ago</div>
+          <div class="side-sub">by Sarah M.</div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Applied to</div>
+          <div style="display:flex;flex-wrap:wrap;margin-top:4px;">
+            <span class="applied-agent"><span class="applied-agent-dot"></span> CRM Hygiene Agent</span>
+            <span class="applied-agent"><span class="applied-agent-dot"></span> Onboarding Agent</span>
+          </div>
+          <button class="btn btn-secondary" style="padding:5px 11px;font-size:11.5px;margin-top:6px;">+ Add agent</button>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Bundle activity</div>
+          <div class="side-value">28 of 30 runs</div>
+          <div class="side-sub">at least one document loaded</div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Foot -->
+    <div class="modal-foot">
+      <button class="btn btn-danger">Delete bundle</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Save changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

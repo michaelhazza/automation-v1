@@ -78,8 +78,9 @@
     color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em;
     border-bottom: 1px solid var(--slate-200); white-space: nowrap;
   }
+  .docs-table thead th.col-size { width: 110px; }
   .docs-table thead th.col-tier { width: 130px; }
-  .docs-table thead th.col-mode { width: 170px; }
+  .docs-table thead th.col-mode { width: 150px; }
   .docs-table thead th.col-usedby { width: 200px; }
   .docs-table thead th.col-action { width: 50px; }
   .docs-table tbody tr {
@@ -105,6 +106,18 @@
     background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a;
     font-size: 10.5px; font-weight: 600; margin-left: 8px;
   }
+
+  /* Size column visual bar */
+  .size-cell {
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .size-bar-track {
+    width: 80px; height: 6px; background: var(--slate-100); border-radius: 3px; overflow: hidden;
+  }
+  .size-bar-fill { height: 100%; border-radius: 3px; background: var(--indigo-400); }
+  .size-bar-fill.over { background: var(--red-500); }
+  .size-label { font-size: 10px; color: var(--slate-500); white-space: nowrap; }
+  .size-label.over { color: var(--red-600); font-weight: 600; }
   .source-badge {
     display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
     font-size: 10.5px; font-weight: 500;
@@ -302,6 +315,7 @@
         <thead>
           <tr>
             <th>Document</th>
+            <th class="col-size">Size</th>
             <th class="col-tier">Tier</th>
             <th class="col-mode">Mode</th>
             <th class="col-usedby">Used by</th>
@@ -318,8 +332,14 @@
                 <span class="doc-meta-item">Updated 5 days ago by Michael H.</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:23%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-always">! Always available</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-always">! Always available</span></td>
             <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -332,8 +352,14 @@
                 <span class="doc-meta-item">Updated 12 days ago by Michael H.</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:14%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-always">! Always available</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-always">! Always available</span></td>
             <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -346,8 +372,14 @@
                 <span class="doc-meta-item">Updated 2 days ago by Sarah M.</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:18%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
             <td><span class="agents-count"><strong>9</strong> agents in Acme Corp</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -360,8 +392,14 @@
                 <span class="doc-meta-item">Promoted by CRM Hygiene Agent · 2 days ago</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:8%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
             <td><span class="agents-count"><strong>3</strong> agents in Acme Corp</span></td>
             <td>
               <div class="three-dot-wrap">
@@ -397,8 +435,14 @@
                 <span class="doc-meta-item">Suggested by Research Agent · approved 5 days ago</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:9%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
             <td><span class="agents-count"><strong>4</strong> agents in Acme Corp</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -411,25 +455,34 @@
                 <span class="doc-meta-item">Updated 8 days ago by Michael H.</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:12%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
             <td><span class="agents-count"><strong>9</strong> agents in Acme Corp</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
 
           <tr>
             <td>
-              <div class="doc-name">
-                Outreach product manual (full)
-                <span class="warn-chip" title="This document is much larger than typical. Consider splitting it into smaller, more focused sections.">⚠ Large document</span>
-              </div>
+              <div class="doc-name">Outreach product manual (full)</div>
               <div class="doc-meta">
                 <span class="source-badge source-uploaded">Uploaded PDF</span>
                 <span class="doc-meta-item">Uploaded 3 weeks ago by Sarah M.</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell" title="This document is much larger than recommended. Consider splitting it into smaller, focused sections for better retrieval.">
+                <div class="size-bar-track"><div class="size-bar-fill over" style="width:100%;"></div></div>
+                <div class="size-label over">⚠ Over recommended</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-agent">Agent</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-reference">R Reference only</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-reference">R Reference only</span></td>
             <td><span class="agents-count"><strong>1</strong> agent: Outreach Agent</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -442,8 +495,14 @@
                 <span class="doc-meta-item">Updated 20 days ago by Michael H.</span>
               </div>
             </td>
+            <td>
+              <div class="size-cell">
+                <div class="size-bar-track"><div class="size-bar-fill" style="width:6%;"></div></div>
+                <div class="size-label">Small</div>
+              </div>
+            </td>
             <td><span class="tier-chip tier-recurring">Recurring task</span></td>
-            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
+            <td><span class="mode-chip mode-auto">A Auto</span></td>
             <td><span class="agents-count"><strong>1</strong> recurring task</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
