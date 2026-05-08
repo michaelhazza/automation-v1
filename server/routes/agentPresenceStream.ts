@@ -94,6 +94,7 @@ router.get(
   '/api/agent-presence/stream/:agentId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
   async (req: import('express').Request, res: import('express').Response) => {
     try {
       sseSetup(res);
@@ -112,6 +113,7 @@ router.get(
   '/api/agent-presence/stream/workspace/:subaccountId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
   async (req: import('express').Request, res: import('express').Response) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
