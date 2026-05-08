@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 1. Pre-spec, mockups attached.
+> **Status:** Rev 2. Pre-spec, mockups attached. Audited against the Rev 5 strategic brief.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -59,7 +59,13 @@ This is a brief, not a spec. Engineering detail belongs in the spec(s) that foll
 
 Synthetos is building **a persistent operational identity layer for AI workers**, not a compute platform. The agent is an entity that exists; compute is interchangeable underneath. The Workspace UI is the *embodiment layer* for that identity, not an admin dashboard. Memory persists in the database, files in object storage, runtime is ephemeral, and the experience the customer feels is *"my agent is alive in my workspace."*
 
-For full reasoning see `docs/agent-cloud-compute-dev-brief.md`.
+The one-line principle from Rev 5 §6.4 that this brief operationalises:
+
+> **Compute is something Synthetos uses. Identity is something Synthetos builds.**
+
+Every component in this brief follows from that. The Agent Overview tab is the visible carrier of identity. The Home Active Agents widget is the workspace-level view of identities currently in motion. The session-scoped runtime is the implementation detail that makes the felt-aliveness real. The Run trace file lineage is the audit trail of what each identity has produced.
+
+For full reasoning see `docs/agent-cloud-compute-dev-brief.md` (Rev 5, locked).
 
 ## 3. Scope: what is in, what is out
 
@@ -78,6 +84,35 @@ For full reasoning see `docs/agent-cloud-compute-dev-brief.md`.
 - Memory tab refresh on Agent edit. Phase 1 already exposes per-agent memory via the relevance signal on Data Sources; no separate tab needed in v1.
 - Dedicated Agent Runtime tier (Rev 5 §10.5). Reserved for validated future demand. Not in v1.
 - Validation interviews (Rev 5 §15 Phase 0). Run separately by product, not implemented as code.
+
+### Coverage of the Rev 5 strategic brief
+
+This implementation brief delivers the strategic concepts from `docs/agent-cloud-compute-dev-brief.md` (Rev 5, locked) as follows:
+
+| Rev 5 concept | Status here | Where |
+|---|---|---|
+| Path C: architecture from B, presentation from A | Operationalised | Whole brief; embodiment via Overview tab + Home widget. |
+| Identity layer composition: workspace, memory, files, tools, credentials, history, continuity, orchestration | Mostly covered | Overview tab state surface (§5). Orchestration (hierarchical delegation) is an adjacent concern not built here. |
+| Workspace UI as embodiment layer (Rev 5 §10.1) | Built | §5 Agent Overview tab; Mockups 2-4. |
+| Ambient presence: heartbeat, current focus, recent observations, active goals, activity feed | Built | §5 Presence surface; visible in Mockup 2. |
+| Three states: active / idle / first-run | Built | §5; Mockups 2, 3, 4. |
+| Workspace exists by default (identity instantiation) | Built | §5 + Mockup 4 first-run state demonstrates it. |
+| Session-scoped runtime persistence (Rev 5 §10.2) | Built | §7. |
+| Workspace artifact store (Rev 5 §10.3) | **Owned by Phase 1** | Auto-knowledge-retrieval brief. Cloud compute consumes Phase 1 surface. |
+| Capabilities and positioning rewrite (Rev 5 §10.4) | Built (copy only) | §3 in-scope; ships with this brief. |
+| Dedicated Agent Runtime tier (Rev 5 §10.5) | **Deferred** | §13 out of scope; reserved for validated demand. |
+| Multi-tenant agency fit | Honoured | Per-agent Overview composes cleanly with the agency / sub-account / agent hierarchy. |
+| State as moat | Honoured | Memory, files, history all persist in the app, visible in Overview. |
+| Local / edge execution trajectory | Not addressed (out of scope) | Future work. Architectural separation in this brief preserves the option. |
+| Reversibility | Honoured | Sessions are bounded; no idle compute commitments; Dedicated Runtime tier is an additive future option. |
+| Architectural separation (memory in DB, credentials in Connections, runtime ephemeral, skills separate) | Honoured | All four primitives stay separate; Overview composes them in the UI without collapsing them. |
+| Cost-of-goods advantage / no idle compute | Honoured | Sessions tear down on idle (§7); no always-on compute primitives introduced. |
+| Ephemeral compute as evolved architecture | Honoured | Session-scoped runtime is on-demand by design; positioning rewrite (§3) reframes IEE in these terms. |
+| "Always-on" via schedulers + persistent state | Honoured | Schedule peek (Overview) and Scheduled-next agents (Home widget) make this visible without idle compute. |
+| Embodiment language discipline (no container / runtime / VM in customer surfaces) | Honoured | Mockups use Files / Tools / Memory / Schedule / Knowledge in use. Engineering language sits behind operator surfaces. |
+| Internal discipline: this is not a "workspace UI project" | Honoured at scope level | This implementation brief is UI-heavy by nature, but the strategic spine in §2 keeps the framing as identity-layer-first. |
+
+**Bottom line:** every concept from Rev 5 is either (a) built by this brief, (b) owned by Phase 1 (auto knowledge retrieval), or (c) explicitly deferred out of scope with a documented reason. Nothing strategic is silently dropped.
 
 ## 4. Dependencies on Phase 1 (knowledge retrieval)
 
@@ -106,12 +141,14 @@ If Phase 1 slips, the Agent Overview tab can ship a degraded version (no per-doc
 Two surfaces composed onto one page:
 
 **State surface** (what the agent has):
-- Memory snapshot, top entries the agent uses most, with a link to the workspace Knowledge page filtered by this agent.
-- Files snapshot, recent files this agent produced or used, with a link to Knowledge → Files filtered by this agent.
-- Schedule peek, when the agent runs next, what triggers it.
-- Connections health, at-a-glance status of the credentials this agent depends on.
+- **Identity card** (first-run only or always-visible compact form): name, role, reports-to, sub-account. Establishes the agent as an entity from the moment it is created, before any history exists. See Mockup 4.
+- **Memory snapshot**, top entries the agent uses most, with a link to the workspace Knowledge page filtered by this agent. The "Knowledge in use" card on Mockup 2.
+- **Files snapshot**, recent files this agent produced or used, with a link to Knowledge → Files filtered by this agent.
+- **Tools / Skills snapshot**, what the agent can do: skills installed or granted, last-used signal, link out to the Skills tab for management. Surfaces *capability* alongside *state* so the operator sees what the agent IS as well as what the agent HAS.
+- **Schedule peek**, when the agent runs next, what triggers it.
+- **Connections health**, at-a-glance status of the credentials this agent depends on.
 - **Working Time chart**, a per-agent activity chart with timeframe pills (Today / This week / This month / This quarter), matching the visual pattern of the Home page Runs widget. Shows when the agent has been working, with success/failure colouring on bars. Compact stat row underneath: runs in period, total working time, success rate, average run duration. Gives the operator a single visual answer to "how busy is this agent and how is it trending?"
-- Performance, small stat block as a compact summary alongside the chart.
+- **Performance**, small stat block as a compact summary alongside the chart.
 
 **Presence surface** (what the agent is doing or about to do):
 - **Status pill**: *Working*, *Idle*, *Scheduled*, *Failing*. Single source of truth for liveness.
@@ -126,6 +163,17 @@ Two surfaces composed onto one page:
 1. **Active state** (Mockup 2): agent is currently running. Status pill is *Working*. Hero shows current focus and elapsed time. Active session card is visible.
 2. **Idle state** (Mockup 3): agent is not running but has a recent history. Status pill is *Idle* or *Scheduled*. Hero shows last seen and next scheduled run. Activity feed prominent.
 3. **First-run / empty state** (Mockup 4): agent was created recently and has no run history. Status pill is *Just created*. Sections show empty states with helpful copy. **The page must still feel like an entity that exists.** This is the identity-instantiation demo per the Rev 5 strategic spine.
+
+### Workspace exists from creation (identity instantiation)
+
+A core principle from Rev 5 §6.3 that this brief operationalises:
+
+> **The workspace is identity instantiation, not infrastructure provisioning.** Every agent gets a workspace the moment it is created. There is no "spin up workspace" step, no provisioning delay, no "your workspace is ready" notification. The agent now exists as an entity with its own state, and the Overview tab is its visible carrier.
+
+Implementation consequences:
+- Creating an agent must *immediately* render a usable Overview tab. No async provisioning.
+- The Overview tab's first-run state is a real surface, not a placeholder. Identity card is populated. Quick actions guide the next steps. Empty states explain what each section will hold.
+- The customer should never see a "workspace not ready" condition.
 
 ### What the tab is NOT
 
@@ -144,6 +192,8 @@ This brief ships that richer widget.
 - Row per running agent: status dot (pulsing), agent name, current step in plain language, elapsed time.
 - Below the running agents: scheduled-next agents, with next-run time.
 - Footer link: *All agents* → Agents list.
+
+**Why this widget delivers the "always-on" promise without idle compute.** Per Rev 5 §10.4, "always-on" is delivered via schedulers + persistent state, not via continuously running compute. This widget makes that visible: the operator sees what's running NOW (3 of 18) plus what's scheduled to run next (5 today). The workspace feels staffed even though no compute is idle. The cost story (you only pay when work is happening) ships alongside the perceptual story.
 
 **Data source:** the same source that powers the Agent Overview tab's presence surface, exposed at workspace scope (filter by current sub-account).
 
