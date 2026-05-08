@@ -38,6 +38,9 @@ export const auditEvent = {
     rateLimitTrip:           { name: 'security.rate_limit_trip',           severity: 'rate_limit' as const },
   },
   audit: {},   // reserved for future audit-control events; empty in Phase 3
+  agent: {
+    observationsRetentionPrune: { name: 'agent.observations.retention_prune' },
+  },
 } as const satisfies Record<string, Record<string, AuditEventSpec>>;
 
 // Derive SecurityAuditEventName as a union of all .name literal values across all namespaces.
@@ -50,4 +53,5 @@ export type SecurityAuditEventName =
   | EventNamesInNamespace<AuditEventFactory['auth']>
   | EventNamesInNamespace<AuditEventFactory['oauth']>
   | EventNamesInNamespace<AuditEventFactory['security']>
-  | EventNamesInNamespace<AuditEventFactory['audit']>;
+  | EventNamesInNamespace<AuditEventFactory['audit']>
+  | EventNamesInNamespace<AuditEventFactory['agent']>;
