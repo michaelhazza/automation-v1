@@ -124,6 +124,28 @@
   .etype-tool_result  { color: var(--emerald-500); }
   .etype-run_start    { color: var(--slate-400); }
   .etype-delegation   { color: var(--violet-500); }
+
+  /* Trust verification badges (owned by Trust spec, shown here for coordination only) */
+  .trust-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 6px; border-radius: 9px; font-size: 9.5px; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    margin-left: 6px; vertical-align: middle;
+  }
+  .trust-badge.pass { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .trust-badge.fail { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+  .trust-badge.pending { background: var(--amber-50); color: var(--amber-700); border: 1px solid #fde68a; }
+  .trust-badge::before { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; }
+  .trust-badge.pass::before { background: var(--emerald-500); }
+  .trust-badge.fail::before { background: var(--red-500); }
+  .trust-badge.pending::before { background: var(--amber-500); }
+
+  /* Trust Correct affordance, hover-only by spec; shown faintly here for layout demo */
+  .trust-correct {
+    font-size: 10.5px; color: var(--indigo-500); font-weight: 600; cursor: pointer;
+    margin-left: 8px; opacity: 0.4; transition: opacity 0.1s;
+  }
+  .event-row:hover .trust-correct { opacity: 1; }
   .dot-llm     { background: var(--indigo-500); }
   .dot-tool    { background: var(--sky-500); }
   .dot-result  { background: var(--emerald-500); }
@@ -266,10 +288,14 @@
 
         <!-- The annotation showing what's new on this page -->
         <div class="annotation">
-          <strong>What's new on this page:</strong> the existing Run trace structure is unchanged. The only addition is the
+          <strong>What's new on this page (cloud compute):</strong> the only addition by this brief is the
           <span class="accent">📎 Outputs</span> chip row that appears inline below any event that produced a file. Click a file
-          chip to deep-link into the file on the Knowledge: Files tab (Phase 1). All other run trace functionality (event detail
-          panel, live tail, run chain, trace/graph tabs, runtime checks if present) is unchanged.
+          chip to deep-link into the file on the Knowledge: Files tab (Phase 1).<br><br>
+          <strong>Trust Verification Layer (separate branch) also ships on this page:</strong> Pass / Fail / Pending badges
+          next to event type labels (Stage 1), an inline "Correct" hover action per event (Stage 3), and quality-check counts
+          in the run summary (Stage 2). All four features compose on the same event row without collision: badge next to label,
+          file chips below content, Correct on hover. <strong>Cloud compute does not own those Trust additions; they are shown
+          here in sample form for visual coordination only.</strong>
         </div>
 
         <div class="col-scroll">
@@ -307,12 +333,16 @@
             <div class="event-time">+4s</div>
           </div>
 
-          <!-- Event 4: TOOL_RESULT (with file output) -->
+          <!-- Event 4: TOOL_RESULT (with file output AND Trust Pass badge for coexistence demo) -->
           <div class="event-row selected">
             <div class="event-seq">4</div>
             <div class="event-type-dot dot-result"></div>
             <div class="event-body">
-              <div class="event-type-label etype-tool_result">tool_result: search_crm</div>
+              <div class="event-type-label etype-tool_result">
+                tool_result: search_crm
+                <span class="trust-badge pass" title="Trust verification: runtime check passed">Pass</span>
+                <span class="trust-correct">Correct ✎</span>
+              </div>
               <div class="event-content">Found 1 contact. Sarah Chen, VP Operations, sarah.chen@acmecorp.com. Last contacted Apr 28.</div>
               <!-- INLINE FILE OUTPUT, the new bit -->
               <div class="file-outputs">
@@ -332,7 +362,10 @@
             <div class="event-seq">5</div>
             <div class="event-type-dot dot-llm"></div>
             <div class="event-body">
-              <div class="event-type-label etype-llm_call">llm_call</div>
+              <div class="event-type-label etype-llm_call">
+                llm_call
+                <span class="trust-badge pending" title="Trust verification: pending review by judge">Pending</span>
+              </div>
               <div class="event-content">Drafting email body using retrieved contact data and memory blocks (brand voice, key stakeholders, competitor context).</div>
               <!-- INLINE FILE OUTPUT -->
               <div class="file-outputs">

@@ -1,6 +1,6 @@
 # Agent Workspace, Implementation Brief
 
-> **Status:** Rev 2. Pre-spec, mockups attached. Audited against the Rev 5 strategic brief.
+> **Status:** Rev 3. Pre-spec, mockups attached. Audited against Rev 5 strategic brief, Phase 1 auto-knowledge-retrieval spec, and Trust & Verification Layer spec.
 > **Date:** 2026-05-08
 > **Branch:** `claude/add-agent-cloud-compute-Kb4ii` (continues here after Phase 1 splits off)
 > **Audience:** Internal stakeholders, plus LLM and external reviewers without prior context.
@@ -111,8 +111,10 @@ This implementation brief delivers the strategic concepts from `docs/agent-cloud
 | "Always-on" via schedulers + persistent state | Honoured | Schedule peek (Overview) and Scheduled-next agents (Home widget) make this visible without idle compute. |
 | Embodiment language discipline (no container / runtime / VM in customer surfaces) | Honoured | Mockups use Files / Tools / Memory / Schedule / Knowledge in use. Engineering language sits behind operator surfaces. |
 | Internal discipline: this is not a "workspace UI project" | Honoured at scope level | This implementation brief is UI-heavy by nature, but the strategic spine in §2 keeps the framing as identity-layer-first. |
+| Coordination with Trust & Verification Layer | Captured in §11 with concrete spec details | Run-trace, Agent edit tab order, and Inbox feed all coordinated. Trust owns its surfaces; cloud compute owns its surfaces; both compose without shared state. |
+| Coordination with Phase 1 (auto knowledge retrieval) | Captured in §11 with concrete spec details | Phase 1 ships Files / Documents / Data sources surfaces; cloud compute consumes them via deep links. Phase 1 ships the retrieval observability events that power cloud compute's Overview Knowledge-in-use card. |
 
-**Bottom line:** every concept from Rev 5 is either (a) built by this brief, (b) owned by Phase 1 (auto knowledge retrieval), or (c) explicitly deferred out of scope with a documented reason. Nothing strategic is silently dropped.
+**Bottom line:** every concept from Rev 5 is either (a) built by this brief, (b) owned by Phase 1 (auto knowledge retrieval), (c) owned by Trust & Verification Layer, or (d) explicitly deferred out of scope with a documented reason. Nothing strategic is silently dropped, and nothing collides with concurrent work.
 
 ## 4. Dependencies on Phase 1 (knowledge retrieval)
 
@@ -134,7 +136,7 @@ If Phase 1 slips, the Agent Overview tab can ship a degraded version (no per-doc
 - **Name:** "Overview" (per the existing `frontend-design-principles.md` Recurring UI Patterns guidance, neutral term that doesn't collide with "Workspace" already used in the ViewModeSwitcher).
 - **Position:** Leftmost tab on the per-agent edit page tab strip. Default landing.
 - **Tab strip today** (per `prototypes/consolidation-2026-05-06/agent-edit.html` and shipped code): Configure (default), Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs. **There is no current Overview tab.** The page today lands on Configure, which is an authoring surface, not a status surface.
-- **Tab strip after change:** Overview (new default), Configure, Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs.
+- **Tab strip after change:** Overview (new default), Configure, Behaviour, Personality, Skills, **Scorecards** (added by Trust spec, Stage 2), Data sources, Schedule, Budget, Runs. **Locked at 10 tabs.** Scorecards sits adjacent to Skills because both are about agent capability and quality. Confirmed with the trust-verification-layer spec to avoid concurrent-merge collision.
 
 ### What the tab shows
 
@@ -266,23 +268,67 @@ This brief follows the patterns codified in `docs/frontend-design-principles.md`
 
 ### Phase 1 (auto knowledge retrieval)
 
-Owned by separate branch. Cloud compute consumes Phase 1 surfaces via deep links (Knowledge → Files filtered by agent, Knowledge → Documents filtered by agent). Cloud compute does not modify the Data Sources tab on Agent edit; Phase 1 owns it.
+Spec at `tasks/builds/auto-knowledge-retrieval/spec.md` (draft 2026-05-08). Owned by separate branch.
 
-If Phase 1 ships first: integration is clean.
+What Phase 1 ships that this brief consumes:
 
-If parallel: coordinate the merge order; Phase 1 lands first because cloud compute references its surfaces.
+- **Knowledge → Files tab**, with per-agent filtering. Cloud compute deep-links into this from the Overview tab and Run trace lineage.
+- **Knowledge → Documents tab refresh** with mode chips and scope chips.
+- **Agent edit → Data sources tab refresh.** Cloud compute does NOT modify this tab; Phase 1 owns it.
+- **`retrieval.summary` events on `agent_execution_events`** (Phase 4 of the auto-knowledge-retrieval build). These power "why was this loaded?" tooltips on documents. Cloud compute's Overview tab "Knowledge in use" card consumes the same data.
+- **`reference_document_data_sources` table** (Phase 1 schema). Cloud compute does not write to it.
 
-### AI agent quality verification
+If Phase 1 ships first: integration is clean. If parallel: Phase 1 lands first because cloud compute references its surfaces.
 
-Both streams add features to Run trace (cloud compute: file lineage chips; verification: pass/fail markers). Both are additive composition. Whoever ships second adapts visually but no logic conflict.
+### Trust & Verification Layer
 
-If the verification work touches the Behaviour tab significantly, that's adjacent to the Configure / Personality tabs but not the Overview tab; no conflict on the centerpiece.
+Spec at `tasks/builds/trust-verification-layer/spec.md` (draft 2026-05-08). Three stages, each ships independently. **Material overlap with this brief on Run trace and Agent edit.**
+
+#### What Trust ships that affects this brief
+
+| Trust stage | Surface affected by this brief | Coordination |
+|---|---|---|
+| **Stage 1: Runtime checks** | **Run trace** | Adds Pass/Fail/Pending badge per step + summary strip + "Correct this output" affordance. **Visually coexists with cloud compute's file lineage chips on the same event row.** Cloud compute's chips appear under event content; Trust's badge appears next to event type label. Both are additive composition. |
+| **Stage 1: Runtime checks** | **Inbox** | Trust feeds runtime-check failures (external blast-radius) into Inbox. Cloud compute's Home Active Agents widget shows Inbox preview; sample data should reflect this. |
+| **Stage 1: Runtime checks** | **Agent execution path** | `agentExecutionService.dispatchAction()` extension. Cloud compute's session-scoped runtime (§7) is at a different layer (container lifecycle), no logic conflict. |
+| **Stage 2: Scorecards + library + bench** | **Agent edit tab strip** | **Adds Scorecards tab.** Brief tab order updated to include it (§5): Overview, Configure, Behaviour, Personality, Skills, Scorecards, Data sources, Schedule, Budget, Runs. **10 tabs locked.** |
+| **Stage 2: Scorecards + library + bench** | **Govern surface** | New Quality page as 4th Govern primitive (Knowledge / Spending / Connections / **Quality**). No conflict with this brief; Govern is workspace-level, this brief is per-agent. |
+| **Stage 2: Scorecards + library + bench** | **Run trace** | Trust adds `scorecard_judgements` per run; visible as a quality score chip in the run summary or detail panel. Coexists with cloud compute's file lineage. |
+| **Stage 3: Correction-sourced auto-memory** | **Run trace** | Inline "Correct" hover action per step (per Round 5 mockup). Coexists with cloud compute's file chips and Trust Stage 1 badges. Three additive features per event row. |
+| **Stage 3: Correction-sourced auto-memory** | **Knowledge page** | Trust adds correction-source filter chip and Source column. Owned by Phase 1 (Knowledge page) + Trust together. No conflict with this brief. |
+
+#### Run-trace event row visual budget
+
+Three additive features land on every event row:
+
+```
+[seq] [type-dot] [type-label + Trust badge] [event content + cloud-compute file chips + Trust Correct hover] [event time]
+```
+
+- **Trust Stage 1 badge** sits next to or after the event type label. Three states: Pass / Fail / Pending. Small (10-12px text in a chip).
+- **Cloud compute file chips** appear in a "📎 Output" row inside event content, below the main text. One row per event that produced files; chips wrap.
+- **Trust Stage 3 Correct action** is a hover-only affordance (not visible at rest). Appears on hover near the event content.
+
+Visual coordination: both teams add via composition, neither replaces. PR review confirms layout; no shared mutable state.
 
 ### Practical merge protocol
 
-- AgentEditPage tab order is locked at: Overview, Configure, Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs.
-- Run trace step renderer accepts composable extensions (file chips, verification markers, future additions).
-- Each branch adds its hooks via composition. PR review checks for visual fit; no shared mutable state.
+- **AgentEditPage tab order locked at 10 tabs** (§5). Cloud compute owns the Overview tab insertion; Trust owns the Scorecards tab insertion. Sequence: cloud compute lands Overview, Trust lands Scorecards in its position.
+- **Run trace event renderer accepts composable extensions.** Cloud compute adds file chips below event content; Trust adds badges next to event labels and Correct hover affordance. PR-merge review confirms visual fit.
+- **Inbox feed.** Trust populates runtime-check failures; cloud compute's Home widget surfaces them via the existing Inbox preview pattern.
+- **Phase 1 deep links.** Cloud compute's file chips link into Phase 1's Knowledge → Files tab. The query parameter shape (`?agentId=...&runId=...`) needs to be locked between this brief and Phase 1 spec author before mockup-to-spec conversion.
+
+### What this brief explicitly does NOT do
+
+To prevent ambiguity at merge time:
+
+- Cloud compute does NOT add Pass/Fail badges to event rows. (Trust Stage 1)
+- Cloud compute does NOT add a Correct hover action to event rows. (Trust Stage 3)
+- Cloud compute does NOT add a Quality page or Scorecards tab. (Trust Stage 2)
+- Cloud compute does NOT add quality-score chips to the run summary. (Trust Stage 2)
+- Cloud compute does NOT modify the Inbox surface itself. (existing Inbox + Trust Stage 1 feed)
+- Cloud compute does NOT modify the Knowledge page. (Phase 1)
+- Cloud compute does NOT modify the Data Sources tab. (Phase 1)
 
 ## 12. Spec-risk areas to watch
 
@@ -298,6 +344,8 @@ The implementation spec author should treat these as the messy areas. Each is mo
 | Tab order migration | Existing users land on Configure (the current default). Switching default to Overview is a behavioural change for returning users. Decide: hard cutover, or per-user preference, or a one-time tour. |
 | Files snapshot on Overview | Phase 1's Files tab is workspace-scoped; the per-agent filter is a query parameter. Cloud compute relies on that query parameter being stable. Lock the contract with Phase 1 spec author. |
 | Run trace lineage rendering | Files can be large; chips must show metadata only. No image previews inline. |
+| Run trace event-row visual budget | Three additive features land on every event row: cloud compute's file chips, Trust Stage 1 Pass/Fail/Pending badges, Trust Stage 3 Correct hover action. Without explicit visual coordination, the row gets noisy fast. Layout contract pinned in §11; merge-time PR review must confirm. Spec author should mock the worst-case row (failed runtime check + multiple file outputs + visible Correct affordance) before declaring the integrated layout shippable. |
+| AgentEditPage tab strip width | 10 tabs is at the edge of comfortable. If the page is rendered at narrow widths, tabs need horizontal scroll (already implemented per the existing pattern). Verify the new Scorecards tab doesn't push above an acceptable threshold; if it does, consider tab grouping or condensing labels. |
 
 ## 13. Out of scope for v1
 
