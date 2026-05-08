@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-08
-last_merge_ready_pr: #274
-last_merge_ready_slug: auto-knowledge-retrieval
-last_merge_ready_branch: auto-knowledge-retrieval
-last_merged_pr: #273
-last_merged_slug: consolidation-govern
-last_merged_branch: ui-consolidation-govern
-last_merged_at: 2026-05-07T23:18:59Z
-last_merged_commit: dfa53e58
+last_merged_pr: #274
+last_merged_slug: auto-knowledge-retrieval
+last_merged_branch: auto-knowledge-retrieval
+last_merged_at: 2026-05-08T12:28:35Z
+last_merged_commit: b1c4d14d
 -->
 
 # Current Focus
@@ -27,12 +24,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Status:** **MERGE_READY** — PR #274 (`auto-knowledge-retrieval`) labelled `ready-to-merge` at 2026-05-08T12:06:00Z. CI runs G5 (full lint + typecheck + test gates). Operator drives the merge sequence per the Phase 3 end-of-phase prompt: post-merge `current-focus.md` update on the feature branch first → commit + push → `gh pr merge 274 --squash --delete-branch`.
+**Status:** **NONE** — no spec in flight.
 
-**Active spec:** none (cleared at MERGE_READY)
+**Active spec:** none
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
+
+**Just merged:** PR #274 — `auto-knowledge-retrieval` (squash-commit `b1c4d14d`, 2026-05-08T12:28:35Z). Auto-knowledge-retrieval pipeline + Files / Documents tabs in Govern. Post-MERGE_READY fixes added two extra commits before merge: `fd48b023` made migration 0293/0294 down-scripts idempotent (the migrate runner picks up `*.down.sql` files in lex order, which placed them BEFORE `*.sql` against a fresh DB; existing convention is defensive `IF EXISTS`/`IF NOT EXISTS`); `fa78a601` collapsed `CREATE POLICY ... ON ...` onto a single line in migration 0294 (the `verify-rls-coverage` gate uses line-oriented grep) AND extracted the `/api/files` GET query out of `server/routes/files.ts` into a new `fileService.listFiles()` using `getOrgScopedDb()` — closes both the `verify-rls-contract-compliance` blocking gate AND the deferred `AKR-ADV-2` finding. CI ALL GREEN at second re-run on `fa78a601`.
 
 > ⚠ **chatgpt-pr-review was SKIPPED for this build — reduced review coverage.** Operator instructed autonomous mode in Phase 3, which is incompatible with the manual ChatGPT-web review loop. The PR did receive: spec-conformance (NON_CONFORMANT, 14 directional gaps deferred), pr-reviewer (CHANGES_REQUESTED → APPROVED on re-check, 4 mechanical fixes applied, 9 design/UX deferred), adversarial-reviewer (3 confirmed holes fixed inline, 5 likely-holes deferred), dual-reviewer (APPROVED after 2 Codex iterations, 2 P1 RLS-context bugs fixed across 3 worker files), and an external ChatGPT PR review (APPROVE-with-follow-up, 4 net-new items appended, 95% overlap with existing deferred items). Consider running `chatgpt-pr-review` retrospectively against the merged commit if the build's risk profile warrants further review. Same precedent as PR #273 (`consolidation-govern`) and PR #267 (`pre-launch-phase-3-deferred-backlog`).
 
