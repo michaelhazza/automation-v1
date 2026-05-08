@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-03 (GHL agency-level OAuth: agency token stored per org + GHL company, location tokens minted on demand; agency-scoped adapter methods added)
+> **Last updated:** 2026-05-09 (Agent Workspace: persistent workspace tab, presence stream, working time accounting, IEE session lifecycle, maintenance retention jobs)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -532,14 +532,14 @@ Agents that need to do real work on systems without APIs — filling forms, navi
 
 ### Persistent Agent Workspace
 
-Every agent has a named, persistent workspace that operators can open at any time — not just during a run. The workspace shows what the agent is doing right now, what it learned in its last run, and what it produced, without having to wait for a report or dig through logs.
+Every agent has a named, persistent workspace that operators can open at any time — not just during a run. The workspace shows what the agent is doing right now, what it learned in its last run, and what it produced — no waiting for a report or digging through logs.
 
 - **Always-on visibility** — the workspace stays open between runs. Operators check in at any moment to see current state, recent observations the agent has logged, knowledge sources it drew on, files it delivered, and the tools it reaches for most often.
 - **Named presence states** — agents surface in plain terms: Running, Waiting on you, Scheduled, Failing, or Idle. No abstract status codes — operators immediately know where every agent stands.
 - **Knowledge in use** — the workspace shows which sources the agent drew on in its last run, so operators can see exactly what informed the agent's decisions.
 - **Files produced** — every file the agent delivered appears in the workspace with a direct link. No hunting through run logs to find what the agent generated.
 - **Working time** — billable compute time is tracked automatically and shown as a working-time chart inside the workspace. The chart is the invoice line — what the agent was actively running, not idle time.
-- **Home page live widget** — the Home page shows all agents at a glance, sectioned by what they're doing: Waiting on you, Working now, Failing, Scheduled next, Idle. One screen replaces the need to check each agent individually.
+- **Fleet view at a glance** — the Home page shows all agents at a glance, sectioned by what they're doing: Waiting on you, Working now, Failing, Scheduled next, Idle. One screen replaces the need to check each agent individually.
 
 ---
 
