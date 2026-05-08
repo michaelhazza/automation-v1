@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<!--
+  Mockup 5 — Document Detail modal
+  Auto Knowledge Retrieval — Phase 1
+  Shows: the modal that opens when clicking three-dots → Edit details on a document.
+  Demonstrates: full edit surface — title, content, mode picker, scope, available to,
+                source provenance, linked agents (usage), action buttons.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Detail — Modal | Auto Knowledge Retrieval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  body { background: var(--slate-100); }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px 20px; z-index: 100;
+  }
+  .modal {
+    background: white; border-radius: 14px; box-shadow: 0 20px 60px rgba(15,23,42,0.25);
+    width: 100%; max-width: 880px; max-height: 92vh; overflow-y: auto;
+  }
+  .modal-head {
+    padding: 18px 24px 14px; border-bottom: 1px solid var(--slate-200);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  }
+  .modal-head-text { flex: 1; }
+  .modal-eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--slate-400); margin-bottom: 4px;
+  }
+  .modal-title { font-size: 18px; font-weight: 700; color: var(--slate-900); line-height: 1.3; }
+  .modal-sub { font-size: 12px; color: var(--slate-500); margin-top: 4px; }
+  .modal-close {
+    background: none; border: none; font-size: 22px; color: var(--slate-400); cursor: pointer;
+    width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  }
+  .modal-close:hover { background: var(--slate-100); color: var(--slate-700); }
+
+  /* Two-column body */
+  .modal-body {
+    display: grid; grid-template-columns: 1fr 280px;
+    min-height: 480px;
+  }
+  .modal-main { padding: 22px 24px; border-right: 1px solid var(--slate-200); }
+  .modal-side { padding: 22px 24px; background: var(--slate-50); }
+
+  .modal-foot {
+    padding: 12px 24px; border-top: 1px solid var(--slate-200);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    background: white;
+  }
+
+  /* Field groups */
+  .field-group { margin-bottom: 18px; }
+  .field-label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--slate-700);
+    margin-bottom: 6px;
+  }
+  .field-input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--slate-300); border-radius: 7px;
+    font-size: 13.5px; outline: none; color: var(--slate-800); font-family: inherit;
+    transition: border-color 0.12s;
+  }
+  .field-input:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+  textarea.field-input { resize: vertical; min-height: 220px; line-height: 1.55; font-family: inherit; }
+  .field-help { font-size: 11px; color: var(--slate-500); margin-top: 4px; line-height: 1.45; }
+
+  /* Mode picker (segmented horizontal) */
+  .mode-picker { display: flex; gap: 6px; margin-top: 4px; }
+  .mode-pick {
+    flex: 1; padding: 8px 10px; border: 1px solid var(--slate-200); border-radius: 7px;
+    background: white; cursor: pointer; transition: all 0.1s;
+    display: flex; flex-direction: column; gap: 3px; text-align: left; min-width: 0;
+  }
+  .mode-pick:hover { border-color: var(--slate-300); }
+  .mode-pick.active { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .mode-pick-label {
+    font-size: 12px; font-weight: 600; color: var(--slate-800);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .mode-pick-icon {
+    width: 18px; height: 18px; border-radius: 5px; color: white; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .mode-pick-icon.auto { background: var(--indigo-500); }
+  .mode-pick-icon.always { background: var(--amber-600); }
+  .mode-pick-icon.reference { background: var(--slate-500); }
+  .mode-pick-desc { font-size: 10.5px; color: var(--slate-500); line-height: 1.35; }
+
+  /* Scope segmented */
+  .scope-segmented { display: flex; gap: 0; border: 1px solid var(--slate-300); border-radius: 8px; overflow: hidden; }
+  .scope-seg {
+    flex: 1; padding: 9px 12px; background: white; border: none; border-right: 1px solid var(--slate-200);
+    font-size: 12.5px; font-weight: 500; color: var(--slate-600); cursor: pointer; text-align: center;
+  }
+  .scope-seg:last-child { border-right: none; }
+  .scope-seg.active { background: var(--indigo-600); color: white; }
+
+  /* Side panel sections */
+  .side-section { margin-bottom: 18px; }
+  .side-label {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--slate-400); margin-bottom: 6px;
+  }
+  .side-value { font-size: 12.5px; color: var(--slate-800); }
+  .side-sub { font-size: 11px; color: var(--slate-500); margin-top: 2px; }
+
+  /* Source badge (matches Documents tab) */
+  .source-badge {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 500;
+  }
+  .source-from-file { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+
+  /* Linked agents list */
+  .linked-agent {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 0; border-bottom: 1px dashed var(--slate-200); font-size: 12px;
+  }
+  .linked-agent:last-child { border-bottom: none; }
+  .linked-agent-name { font-weight: 500; color: var(--slate-800); }
+  .linked-agent-stat { font-size: 11px; color: var(--slate-500); }
+  .linked-agent-bar {
+    display: inline-block; width: 50px; height: 4px; background: var(--slate-200); border-radius: 2px;
+    margin-right: 6px; vertical-align: middle; overflow: hidden;
+  }
+  .linked-agent-bar-fill { height: 100%; background: var(--indigo-500); }
+
+  /* Source file callout */
+  .source-callout {
+    background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 14px; font-size: 11.5px; color: var(--slate-700); line-height: 1.5;
+  }
+  .source-callout strong { color: var(--indigo-700); }
+  .source-callout a { color: var(--indigo-600); font-weight: 600; text-decoration: none; }
+  .source-callout a:hover { text-decoration: underline; }
+
+  /* Buttons */
+  .btn { padding: 8px 16px; border-radius: 7px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
+  .btn-secondary { background: white; color: var(--slate-700); border-color: var(--slate-300); }
+  .btn-secondary:hover { background: var(--slate-50); }
+  .btn-primary { background: var(--indigo-600); color: white; }
+  .btn-primary:hover { background: var(--indigo-700); }
+  .btn-danger { background: white; color: var(--red-600); border-color: var(--slate-300); }
+  .btn-danger:hover { background: var(--red-50); border-color: #fca5a5; }
+
+  /* Tier chip */
+  .tier-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 600;
+  }
+  .tier-subaccount { background: var(--sky-50); color: #0369a1; border: 1px solid #bae6fd; }
+</style>
+</head>
+<body>
+
+<div class="overlay">
+  <div class="modal">
+    <!-- Head -->
+    <div class="modal-head">
+      <div class="modal-head-text">
+        <div class="modal-eyebrow">Document detail</div>
+        <div class="modal-title">Acme Corp enriched contacts</div>
+        <div class="modal-sub">Sub-account · Auto · used by 3 agents in Acme Corp</div>
+      </div>
+      <button class="modal-close">×</button>
+    </div>
+
+    <!-- Body -->
+    <div class="modal-body">
+
+      <!-- Main column -->
+      <div class="modal-main">
+
+        <!-- Source callout (shown because this doc was promoted from a file) -->
+        <div class="source-callout">
+          <strong>📎 Promoted from file</strong> — created from
+          <a href="#">acme-contacts-enriched-2026-05-06.csv</a> by CRM Hygiene Agent two days ago.
+        </div>
+
+        <!-- Title -->
+        <div class="field-group">
+          <label class="field-label">Title</label>
+          <input class="field-input" type="text" value="Acme Corp enriched contacts">
+        </div>
+
+        <!-- Content -->
+        <div class="field-group">
+          <label class="field-label">Content</label>
+          <textarea class="field-input">Acme Corp contacts enriched 2026-05-06. 412 contacts across 4 divisions: Sales, Operations, Engineering, Customer Success. Primary buyer persona is VP of Operations or Head of RevOps. Secondary buyer: IT Director where compliance is a gating factor. Avoid SMB deals under 50 seats. Key revenue contacts flagged: 23 high-priority, 86 mid, 303 low. Refresh interval: weekly heartbeat.
+
+Notable patterns:
+- 14 contacts changed roles in last 30 days (potential churn risk on departing side, expansion opportunity on receiving side)
+- 8 new VP-level contacts joined since last enrichment
+- 3 high-priority contacts flagged with no recent engagement (re-engagement candidates)
+
+Data quality:
+- Email coverage: 94%
+- Phone coverage: 67%
+- LinkedIn URL coverage: 88%
+- Job title freshness (last 90 days): 78%</textarea>
+          <div class="field-help">Edit the content the agent uses. Changes re-summarise and re-embed automatically.</div>
+        </div>
+
+        <!-- Mode picker -->
+        <div class="field-group">
+          <label class="field-label">Loading mode</label>
+          <div class="mode-picker">
+            <button class="mode-pick active">
+              <div class="mode-pick-label"><span class="mode-pick-icon auto">A</span> Auto</div>
+              <div class="mode-pick-desc">Loaded only when relevant.</div>
+            </button>
+            <button class="mode-pick">
+              <div class="mode-pick-label"><span class="mode-pick-icon always">!</span> Always available</div>
+              <div class="mode-pick-desc">Loaded every run.</div>
+            </button>
+            <button class="mode-pick">
+              <div class="mode-pick-label"><span class="mode-pick-icon reference">R</span> Reference only</div>
+              <div class="mode-pick-desc">Agent fetches on demand.</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Scope -->
+        <div class="field-group">
+          <label class="field-label">Scope</label>
+          <div class="scope-segmented">
+            <button class="scope-seg active">This sub-account (Acme Corp)</button>
+            <button class="scope-seg">Org-wide</button>
+          </div>
+          <div class="field-help">Scope was set when the document was added. Change to make it available to more agents or restrict it.</div>
+        </div>
+
+        <!-- Available to -->
+        <div class="field-group">
+          <label class="field-label">Available to</label>
+          <div class="scope-segmented">
+            <button class="scope-seg active">All agents in Acme Corp</button>
+            <button class="scope-seg">Specific agents only</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Side column -->
+      <div class="modal-side">
+
+        <div class="side-section">
+          <div class="side-label">Tier</div>
+          <span class="tier-chip tier-subaccount">Sub-account</span>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Source</div>
+          <span class="source-badge source-from-file">📎 From file</span>
+          <div class="side-sub">acme-contacts-enriched-2026-05-06.csv</div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Created</div>
+          <div class="side-value">2 days ago</div>
+          <div class="side-sub">by CRM Hygiene Agent during run #1281</div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Last updated</div>
+          <div class="side-value">2 days ago</div>
+          <div class="side-sub">on creation</div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-label">Used by</div>
+          <div style="margin-top:4px;">
+            <div class="linked-agent">
+              <div>
+                <div class="linked-agent-name">Outreach Agent</div>
+              </div>
+              <div class="linked-agent-stat">
+                <span class="linked-agent-bar"><span class="linked-agent-bar-fill" style="width:78%;"></span></span>
+                23/30
+              </div>
+            </div>
+            <div class="linked-agent">
+              <div>
+                <div class="linked-agent-name">CRM Hygiene Agent</div>
+              </div>
+              <div class="linked-agent-stat">
+                <span class="linked-agent-bar"><span class="linked-agent-bar-fill" style="width:60%;"></span></span>
+                18/30
+              </div>
+            </div>
+            <div class="linked-agent">
+              <div>
+                <div class="linked-agent-name">Research Agent</div>
+              </div>
+              <div class="linked-agent-stat">
+                <span class="linked-agent-bar"><span class="linked-agent-bar-fill" style="width:33%;"></span></span>
+                10/30
+              </div>
+            </div>
+          </div>
+          <div class="side-sub" style="margin-top:8px;">Loaded in last 30 runs per agent.</div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Foot -->
+    <div class="modal-foot">
+      <button class="btn btn-danger">Delete document</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary">Save changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

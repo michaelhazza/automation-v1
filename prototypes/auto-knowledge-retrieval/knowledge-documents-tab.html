@@ -144,9 +144,41 @@
   .three-dot-btn {
     width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--slate-200);
     background: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
-    font-size: 15px; color: var(--slate-400);
+    font-size: 15px; color: var(--slate-400); position: relative;
   }
   .three-dot-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+
+  /* Mode button (matches Agent Data Sources page for consistency) */
+  .mode-button {
+    background: white; border: 1px solid var(--slate-200); border-radius: 6px; padding: 3px 8px;
+    font-size: 11.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+    color: var(--slate-700);
+  }
+  .mode-button:hover { border-color: var(--slate-300); }
+  .mode-button .chev { font-size: 9px; color: var(--slate-400); }
+
+  /* Three-dot menu */
+  .three-dot-wrap { position: relative; display: inline-block; }
+  .menu {
+    position: absolute; right: 0; top: 34px; z-index: 50;
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(15,23,42,0.14);
+    min-width: 240px; padding: 4px; display: none;
+  }
+  .menu.open { display: block; }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 6px;
+    cursor: pointer; font-size: 12.5px; color: var(--slate-700);
+  }
+  .menu-item:hover { background: var(--slate-50); }
+  .menu-item.danger { color: var(--red-600); }
+  .menu-item.danger:hover { background: var(--red-50); }
+  .menu-item-icon { width: 16px; text-align: center; opacity: 0.85; font-size: 13px; }
+  .menu-divider { height: 1px; background: var(--slate-200); margin: 4px 6px; }
+  .menu-section-label {
+    padding: 8px 12px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--slate-400);
+  }
 
   /* Stats row */
   .stats-row {
@@ -287,7 +319,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
-            <td><span class="mode-chip mode-always">! Always available</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-always">! Always available</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -301,7 +333,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-org">📌 Org-wide</span></td>
-            <td><span class="mode-chip mode-always">! Always available</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-always">! Always available</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>27</strong> agents · 4 clients</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -315,7 +347,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>9</strong> agents in Acme Corp</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -329,9 +361,32 @@
               </div>
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>3</strong> agents in Acme Corp</span></td>
-            <td><button class="three-dot-btn">⋮</button></td>
+            <td>
+              <div class="three-dot-wrap">
+                <button class="three-dot-btn" style="background:var(--slate-100);color:var(--slate-700);">⋮</button>
+                <div class="menu open">
+                  <div class="menu-item"><span class="menu-item-icon">↗</span> Open document</div>
+                  <div class="menu-item"><span class="menu-item-icon">✎</span> Edit details</div>
+                  <div class="menu-item"><span class="menu-item-icon">📎</span> View source file</div>
+                  <div class="menu-divider"></div>
+                  <div class="menu-section-label">Change mode</div>
+                  <div class="menu-item"><span class="menu-item-icon">A</span> Auto <span style="margin-left:auto;color:var(--indigo-600);">●</span></div>
+                  <div class="menu-item"><span class="menu-item-icon">!</span> Always available</div>
+                  <div class="menu-item"><span class="menu-item-icon">R</span> Reference only</div>
+                  <div class="menu-divider"></div>
+                  <div class="menu-section-label">Change scope</div>
+                  <div class="menu-item"><span class="menu-item-icon">↑</span> Promote to org-wide</div>
+                  <div class="menu-item"><span class="menu-item-icon">↓</span> Restrict to specific agents</div>
+                  <div class="menu-divider"></div>
+                  <div class="menu-item"><span class="menu-item-icon">👥</span> View linked agents</div>
+                  <div class="menu-item"><span class="menu-item-icon">⎘</span> Duplicate</div>
+                  <div class="menu-divider"></div>
+                  <div class="menu-item danger"><span class="menu-item-icon">🗑</span> Delete document</div>
+                </div>
+              </div>
+            </td>
           </tr>
 
           <tr class="from-file">
@@ -343,7 +398,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>4</strong> agents in Acme Corp</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -357,7 +412,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-subaccount">Sub-account</span></td>
-            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>9</strong> agents in Acme Corp</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -374,7 +429,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-agent">Agent</span></td>
-            <td><span class="mode-chip mode-reference">R Reference only</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-reference">R Reference only</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>1</strong> agent: Outreach Agent</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>
@@ -388,7 +443,7 @@
               </div>
             </td>
             <td><span class="tier-chip tier-recurring">Recurring task</span></td>
-            <td><span class="mode-chip mode-auto">A Auto</span></td>
+            <td><button class="mode-button"><span class="mode-chip mode-auto">A Auto</span><span class="chev">▾</span></button></td>
             <td><span class="agents-count"><strong>1</strong> recurring task</span></td>
             <td><button class="three-dot-btn">⋮</button></td>
           </tr>

@@ -44,14 +44,16 @@
   <div class="eyebrow">Phase 1 — Auto Knowledge Retrieval</div>
   <h1>Mockups for review</h1>
   <p class="desc">
-    Four mockups demonstrating the new knowledge model: Files alongside Documents on the Knowledge page,
+    Six mockups demonstrating the new knowledge model: Files alongside Documents on the Knowledge page,
     a one-click promotion flow from Files to Documents, the refreshed per-agent Data Sources tab with smart
-    loading indicators, and the Documents tab with scope and mode visibility. Brief: <code>docs/auto-knowledge-retrieval-dev-brief.md</code>.
+    loading indicators, the Documents tab with scope and mode visibility, the Document Detail modal that
+    opens for editing, and the Bundles sub-tab showing how grouping works in the new model.
+    Brief: <code>docs/auto-knowledge-retrieval-dev-brief.md</code>.
   </p>
 
   <div class="info">
-    <strong>Reading order:</strong> Mockup 1 first (where the new tab lives), then Mockup 2 (the promotion flow),
-    then Mockup 4 (Documents tab refresh), then Mockup 3 (per-agent view of how it all comes together).
+    <strong>Reading order:</strong> 1 (Files tab on Knowledge) → 2 (Add to Knowledge modal) → 4 (Documents tab) →
+    5 (Document Detail modal — what opens when you click Edit) → 6 (Bundles sub-tab) → 3 (per-agent view of how it all comes together).
   </div>
 
   <div class="card-grid">
@@ -91,8 +93,31 @@
       <a href="knowledge-documents-tab.html" class="card-title-link">Knowledge — Documents tab refreshed</a>
       <div class="card-file">knowledge-documents-tab.html</div>
       <div class="card-desc">
-        Documents tab with new tier and mode chips, source provenance (manually authored / from file / from auto-memory / uploaded),
-        and "used by N agents" indicator. Org-pinned and from-file documents have left-border highlights.
+        Documents tab with new tier and mode chips, source provenance, and "used by N agents" indicator.
+        Mode is editable inline (matches Agent Data Sources). One row shows the three-dots action menu open
+        with the full set of options.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 5</div>
+      <a href="document-detail-modal.html" class="card-title-link">Document Detail modal</a>
+      <div class="card-file">document-detail-modal.html</div>
+      <div class="card-desc">
+        The full edit surface that opens when you click three-dots → Edit details on any document.
+        Shows title, content, mode picker, scope, available-to controls, source provenance,
+        and a side panel with linked agents and usage signal.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 6</div>
+      <a href="knowledge-bundles-tab.html" class="card-title-link">Knowledge — Bundles sub-tab</a>
+      <div class="card-file">knowledge-bundles-tab.html</div>
+      <div class="card-desc">
+        Bundles in the new model. Bundles are still curatorial groupings; each document inside still
+        has its own loading mode. One bundle is shown expanded with its mini documents table, so the
+        relationship between bundle and per-document smart loading is explicit.
       </div>
     </div>
   </div>
