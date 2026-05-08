@@ -57,15 +57,40 @@
   }
   .search-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
 
-  /* ── Source pill ── */
+  /* ── Source pill — 2 values: Platform / Custom ── */
   .source-pill {
-    display: inline-flex; align-items: center;
+    display: inline-flex; align-items: center; gap: 4px;
     font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em;
     border-radius: 4px; padding: 2px 8px; white-space: nowrap; text-transform: uppercase;
+    position: relative; cursor: default;
   }
-  .source-system { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-  .source-org { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
-  .source-sub { background: var(--violet-50); color: #5b21b6; border: 1px solid var(--violet-200); }
+  .source-platform { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .source-custom   { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+
+  /* Tooltip on Custom pill showing actual scope */
+  .source-pill[data-scope-tip]::after {
+    content: attr(data-scope-tip);
+    position: absolute; bottom: calc(100% + 5px); left: 0;
+    background: var(--slate-800); color: white;
+    font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0;
+    padding: 5px 9px; border-radius: 6px; white-space: nowrap;
+    z-index: 50; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .source-pill[data-scope-tip]:hover::after { opacity: 1; }
+
+  /* ── Empty state ── */
+  .empty-state {
+    padding: 56px 24px; text-align: center;
+  }
+  .empty-state-icon {
+    width: 48px; height: 48px; background: var(--slate-100); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+  }
+  .empty-state h3 { font-size: 15px; font-weight: 700; color: var(--slate-700); margin-bottom: 8px; }
+  .empty-state p { font-size: 13px; color: var(--slate-500); max-width: 380px; margin: 0 auto 20px; line-height: 1.5; }
 
   /* ── Library table ── */
   .library-table { width: 100%; border-collapse: collapse; }
@@ -209,9 +234,8 @@
       <div class="page-toolbar">
         <div class="filter-chips">
           <button class="filter-chip active" onclick="filterLibrary('all',this)">All</button>
-          <button class="filter-chip" onclick="filterLibrary('system',this)">System</button>
-          <button class="filter-chip" onclick="filterLibrary('org',this)">Organisation</button>
-          <button class="filter-chip" onclick="filterLibrary('sub',this)">Mine</button>
+          <button class="filter-chip" onclick="filterLibrary('platform',this)">Platform</button>
+          <button class="filter-chip" onclick="filterLibrary('custom',this)">Custom</button>
         </div>
         <input class="search-input" type="text" placeholder="Search scorecards..." oninput="searchLibrary(this.value)">
         <div class="page-toolbar-right">
@@ -231,15 +255,33 @@
               <th style="width:100px;"></th>
             </tr>
           </thead>
+          <!-- Empty state row — shown when Custom filter has no results -->
+          <tbody id="empty-tbody" style="display:none;">
+            <tr>
+              <td colspan="6" style="padding:0;">
+                <div class="empty-state">
+                  <div class="empty-state-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--slate-400)" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+                  </div>
+                  <h3>No custom scorecards yet</h3>
+                  <p>Duplicate a Platform scorecard to start from a template, or create one from scratch.</p>
+                  <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button class="btn btn-secondary" onclick="filterLibrary('platform',document.querySelector('[onclick*=platform]'))">Browse Platform scorecards</button>
+                    <a href="scorecard-create.html" class="btn btn-primary">Create scorecard</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
           <tbody id="library-rows">
 
-            <!-- System rows -->
-            <tr data-scope="system" data-name="Hallucination check">
+            <!-- Platform rows -->
+            <tr data-scope="platform" data-name="Hallucination check">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Hallucination check</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Factual grounding and source citation</div>
               </td>
-              <td><span class="source-pill source-system">System</span></td>
+              <td><span class="source-pill source-platform">Platform</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">2 checks</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('Hallucination check', ['Outreach Agent','Content Agent','CRM Enrichment Agent','Scheduling Agent','Inbox Triage Agent','Reporting Agent','Research Agent']);return false;">
@@ -263,12 +305,12 @@
               </td>
             </tr>
 
-            <tr data-scope="system" data-name="External action safety">
+            <tr data-scope="platform" data-name="External action safety">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">External action safety</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Blast radius and reversibility checks</div>
               </td>
-              <td><span class="source-pill source-system">System</span></td>
+              <td><span class="source-pill source-platform">Platform</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">3 checks</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('External action safety', ['Outreach Agent','Content Agent','Scheduling Agent']);return false;">3 agents</a>
@@ -290,13 +332,13 @@
               </td>
             </tr>
 
-            <!-- Organisation rows -->
-            <tr data-scope="org" data-name="Outreach tone and voice">
+            <!-- Custom rows (org and subaccount) -->
+            <tr data-scope="custom" data-name="Outreach tone and voice">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Outreach tone and voice</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Tone match, hook strength, length discipline</div>
               </td>
-              <td><span class="source-pill source-org">Organisation</span></td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This organisation">Custom</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">3 checks</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('Outreach tone and voice', ['Outreach Agent','Content Agent','Research Agent','Prospecting Agent']);return false;">4 agents</a>
@@ -320,12 +362,12 @@
               </td>
             </tr>
 
-            <tr data-scope="org" data-name="Content quality v1">
+            <tr data-scope="custom" data-name="Content quality v1">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Content quality v1</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Readability, structure, SEO signals</div>
               </td>
-              <td><span class="source-pill source-org">Organisation</span></td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This organisation">Custom</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">4 checks</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('Content quality v1', ['Content Agent','Blog Agent','Newsletter Agent']);return false;">3 agents</a>
@@ -349,12 +391,12 @@
               </td>
             </tr>
 
-            <tr data-scope="org" data-name="Data quality v1">
+            <tr data-scope="custom" data-name="Data quality v1">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Data quality v1</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Completeness, accuracy, format compliance</div>
               </td>
-              <td><span class="source-pill source-org">Organisation</span></td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This organisation">Custom</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">4 checks</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('Data quality v1', ['CRM Enrichment Agent','Research Agent']);return false;">2 agents</a>
@@ -378,13 +420,13 @@
               </td>
             </tr>
 
-            <!-- Subaccount rows (no Share toggle) -->
-            <tr data-scope="sub" data-name="Outbound conversion v2">
+            <!-- Custom rows (subaccount-created, no Share toggle) -->
+            <tr data-scope="custom" data-name="Outbound conversion v2">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Outbound conversion v2</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Call to action, personalisation</div>
               </td>
-              <td><span class="source-pill source-sub">This subaccount</span></td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This subaccount">Custom</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">2 checks</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('Outbound conversion v2', ['Outreach Agent']);return false;">1 agent</a>
@@ -405,12 +447,12 @@
               </td>
             </tr>
 
-            <tr data-scope="sub" data-name="Response brevity">
+            <tr data-scope="custom" data-name="Response brevity">
               <td>
                 <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Response brevity</div>
                 <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Length discipline for support responses</div>
               </td>
-              <td><span class="source-pill source-sub">This subaccount</span></td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This subaccount">Custom</span></td>
               <td style="font-size:12.5px;color:var(--slate-600);">1 check</td>
               <td>
                 <a href="#" class="used-by-link" onclick="showUsedBy('Response brevity', ['Support Agent']);return false;">1 agent</a>
@@ -459,11 +501,16 @@
 <script>
 function filterLibrary(scope, btn) {
   document.querySelectorAll('.filter-chips .filter-chip').forEach(function(c) { c.classList.remove('active'); });
-  btn.classList.add('active');
+  if (btn) btn.classList.add('active');
+  var visibleCount = 0;
   document.querySelectorAll('#library-rows tr').forEach(function(row) {
-    if (scope === 'all') row.style.display = '';
-    else row.style.display = row.dataset.scope === scope ? '' : 'none';
+    var show = scope === 'all' || row.dataset.scope === scope;
+    row.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
   });
+  // Show empty state if Custom filter and no rows
+  var emptyTbody = document.getElementById('empty-tbody');
+  emptyTbody.style.display = (scope === 'custom' && visibleCount === 0) ? '' : 'none';
 }
 
 function searchLibrary(q) {

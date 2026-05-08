@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Trust Verification Layer — Model Bench (Round 2)
+  Trust Verification Layer — Model Bench (Round 3)
 
   Round 2 changes:
     - Mode switcher at top: Agent bench | Skill bench
@@ -12,6 +12,16 @@
     - Skill bench mode: skill picker instead of full scorecard attach list
     - All terminology updated (percentages, Pass mark, Quality check)
     - "Approve as default" toast text updated to match brief spec
+
+  Round 3 changes:
+    - Recent real runs: replaced auto-pick-15 with multi-select table of last ~50 runs.
+      Columns: checkbox, relative timestamp, task summary, original cost.
+      Sort: newest first. Pre-tick the most recent 15 on load.
+      Control buttons: "Pick newest 15" / "Clear all" / counter footer.
+    - Paste-in: replaced textarea-per-line with vertical list of prompt cards.
+      Each card has label field, multi-line textarea, remove button.
+      "Add prompt" button at bottom. Footer counter shows prompts added.
+    - Cost estimates updated to include source: "(charged to this account's token budget)"
 
   Three-state flow still visible: Setup / Running / Results tabs
 -->
@@ -112,7 +122,54 @@
   .radio-extra { margin-top: 12px; display: none; }
   .radio-option.selected .radio-extra { display: block; }
 
-  /* ── Preview table ── */
+  /* ── Multi-select runs table ── */
+  .runs-table { width: 100%; border-collapse: collapse; }
+  .runs-table th {
+    text-align: left; padding: 8px 10px; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400);
+    border-bottom: 1px solid var(--slate-200); background: var(--slate-50);
+  }
+  .runs-table td { padding: 8px 10px; font-size: 12px; color: var(--slate-700); border-bottom: 1px solid var(--slate-100); }
+  .runs-table tbody tr:last-child td { border-bottom: none; }
+  .runs-table tbody tr:hover { background: var(--indigo-50); cursor: pointer; }
+  .runs-table tbody tr.selected-row { background: #eef2ff; }
+  .runs-cb { width: 14px; height: 14px; cursor: pointer; accent-color: var(--indigo-600); }
+  .runs-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .runs-counter { font-size: 11.5px; color: var(--slate-500); margin-left: auto; }
+  .runs-counter strong { color: var(--indigo-700); font-weight: 700; }
+
+  /* ── Prompt cards ── */
+  .prompt-cards-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .prompt-card {
+    border: 1px solid var(--slate-200); border-radius: 10px; overflow: hidden; background: white;
+    position: relative;
+  }
+  .prompt-card-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--slate-100); background: var(--slate-50);
+  }
+  .prompt-card-label-input {
+    flex: 1; border: none; background: transparent; font-size: 12px; font-weight: 600;
+    color: var(--slate-700); outline: none;
+  }
+  .prompt-card-label-input::placeholder { color: var(--slate-400); }
+  .prompt-card-remove {
+    width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--slate-200);
+    background: white; color: var(--slate-400); cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .prompt-card-remove:hover { background: var(--red-50); color: var(--red-500); border-color: #fca5a5; }
+  .prompt-card textarea {
+    width: 100%; padding: 10px 12px; border: none; outline: none;
+    font-size: 12.5px; color: var(--slate-700); resize: vertical; min-height: 80px;
+    font-family: inherit; background: white; box-sizing: border-box; line-height: 1.5;
+  }
+  .prompt-footer-counter {
+    font-size: 12px; color: var(--slate-500); margin-top: 10px;
+  }
+  .prompt-footer-counter strong { color: var(--indigo-700); font-weight: 700; }
+
+  /* ── Preview table (kept for date-range preview) ── */
   .preview-table { width: 100%; border-collapse: collapse; }
   .preview-table th {
     text-align: left; padding: 8px 10px; font-size: 10.5px; font-weight: 700;
@@ -319,32 +376,30 @@
           <div class="bench-card-body">
             <div class="radio-group">
 
-              <!-- Option 1: Recent real runs (default) -->
+              <!-- Option 1: Recent real runs (default) — multi-select table -->
               <div class="radio-option selected" id="input-recent" onclick="selectInput('recent')">
                 <div class="radio-dot"></div>
                 <div style="flex:1;">
                   <div class="radio-label">Recent real runs (recommended)</div>
-                  <div class="radio-hint">Picks 15 runs at random from the last 30 days. Most representative of production.</div>
+                  <div class="radio-hint">Select from the last 50 runs. Most recent 15 are pre-selected by default.</div>
                   <div class="radio-extra">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                      <span style="font-size:12px;font-weight:600;color:var(--slate-600);">Sample (15 of 234 runs)</span>
-                      <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation();rerollSample()">Re-roll</button>
+                    <div class="runs-controls" onclick="event.stopPropagation()">
+                      <button class="btn btn-xs btn-secondary" onclick="pickNewest15()">Pick newest 15</button>
+                      <button class="btn btn-xs btn-secondary" onclick="clearAllRuns()">Clear all</button>
+                      <div class="runs-counter"><strong id="runs-selected-count">15</strong> runs selected &middot; est. <strong id="runs-selected-cost">$1.80-$2.70</strong></div>
                     </div>
-                    <div style="border:1px solid var(--slate-200);border-radius:8px;overflow:hidden;">
-                      <table class="preview-table">
+                    <div style="border:1px solid var(--slate-200);border-radius:8px;overflow:hidden;max-height:280px;overflow-y:auto;">
+                      <table class="runs-table" id="runs-table">
                         <thead>
                           <tr>
-                            <th>Timestamp</th>
+                            <th style="width:32px;"></th>
+                            <th>When</th>
                             <th>Task summary</th>
-                            <th>Original cost</th>
+                            <th style="white-space:nowrap;">Original cost</th>
                           </tr>
                         </thead>
-                        <tbody id="preview-rows">
-                          <tr><td>May 6 14:22</td><td>Outreach email, Acme Corp — re-engage lapsed</td><td>$0.006</td></tr>
-                          <tr><td>May 6 11:08</td><td>Cold outreach, TechStack Ltd — product fit intro</td><td>$0.007</td></tr>
-                          <tr><td>May 5 09:41</td><td>Follow-up, GlobalHR — demo scheduled nudge</td><td>$0.005</td></tr>
-                          <tr><td>May 4 16:55</td><td>Outreach email, Vertex AI — partnership enquiry</td><td>$0.008</td></tr>
-                          <tr style="background:var(--slate-50);"><td colspan="3" style="text-align:center;color:var(--slate-400);font-size:11.5px;">+ 11 more runs included</td></tr>
+                        <tbody id="runs-rows">
+                          <!-- rows injected by JS -->
                         </tbody>
                       </table>
                     </div>
@@ -380,20 +435,18 @@
                 </div>
               </div>
 
-              <!-- Option 3: Paste in -->
+              <!-- Option 3: Paste in — prompt cards -->
               <div class="radio-option" id="input-paste" onclick="selectInput('paste')">
                 <div class="radio-dot"></div>
                 <div style="flex:1;">
-                  <div class="radio-label">Paste in prompts</div>
-                  <div class="radio-hint">Paste 3 to 15 example prompts. Use this when the agent has no run history yet.</div>
-                  <div class="radio-extra">
-                    <textarea
-                      rows="5"
-                      placeholder="Paste one prompt per line. Each line is treated as a separate test input."
-                      onclick="event.stopPropagation()"
-                      style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--slate-200);font-size:12.5px;resize:vertical;outline:none;font-family:inherit;margin-top:6px;"
-                    ></textarea>
-                    <div class="form-hint" style="margin-top:4px;">Enter 3 to 15 prompts, one per line.</div>
+                  <div class="radio-label">Add prompts</div>
+                  <div class="radio-hint">Write or paste example prompts directly. Use this when the agent has no run history yet.</div>
+                  <div class="radio-extra" onclick="event.stopPropagation()">
+                    <div class="prompt-cards-list" id="prompt-cards"></div>
+                    <button class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="addPromptCard()">+ Add prompt</button>
+                    <div class="prompt-footer-counter" id="prompt-counter">
+                      <strong id="prompt-count">3</strong> prompts added &middot; est. <strong>$1.40-$2.10</strong> (charged to this account's token budget)
+                    </div>
                   </div>
                 </div>
               </div>
@@ -436,6 +489,7 @@
           <div>
             <div class="cost-estimate-label">Estimated cost to run bench</div>
             <div class="cost-estimate-value" id="cost-estimate-value">$4.20 to $5.80</div>
+            <div style="font-size:11.5px;color:var(--slate-400);margin-top:3px;">Charged to this account's token budget</div>
           </div>
           <div style="font-size:12px;color:var(--slate-400);" id="cost-breakdown">3 models x 15 samples x judge model (Opus 4.7)</div>
         </div>
@@ -648,6 +702,131 @@
 <script>
 var currentMode = 'agent';
 
+// ── Runs data (50 fake runs, newest first) ──────────────────────────────────
+var ALL_RUNS = (function() {
+  var tasks = [
+    'Cold outreach, NexGen SaaS — ICP match',
+    'Follow-up, Bright Media — awaiting decision',
+    'Re-engagement, DataFlow Inc — 90-day lapse',
+    'Intro, SkyHigh Cloud — referral mention',
+    'Nurture, Axiom Labs — trial expiry soon',
+    'Re-activation, Pulse Corp — churned 60d ago',
+    'Intro, GreenLeaf Tech — inbound enquiry',
+    'Follow-up, Summit Analytics — demo requested',
+    'Cold outreach, Vortex AI — LinkedIn match',
+    'Renewal reminder, TechStack Pro — Q2 contract',
+    'Personalised pitch, Orbis Consulting — ICP fit',
+    'Win-back, CloudBase Inc — competitor switch',
+    'Warm intro, DataMesh Labs — mutual contact',
+    'Cross-sell, Acme Corp — new product launch',
+    'Follow-up, Zenith Media — 2-week silence',
+    'Cold outreach, BrightPath SaaS — series B',
+    'Re-engagement, Atlas Digital — 45-day lapse',
+    'Intro, Quantum Dynamics — webinar attendee',
+    'Follow-up, Stellar CRM — trial user',
+    'Cold outreach, Apex Systems — job change trigger',
+  ];
+  var times = [
+    '2 hours ago', '4 hours ago', '6 hours ago', '9 hours ago',
+    '12 hours ago', '18 hours ago', '1 day ago', '1 day ago',
+    '2 days ago', '2 days ago', '2 days ago', '3 days ago',
+    '3 days ago', '4 days ago', '4 days ago', '5 days ago',
+    '5 days ago', '6 days ago', '6 days ago', '1 week ago',
+    '1 week ago', '1 week ago', '8 days ago', '8 days ago',
+    '9 days ago', '9 days ago', '10 days ago', '10 days ago',
+    '11 days ago', '11 days ago', '12 days ago', '12 days ago',
+    '13 days ago', '13 days ago', '2 weeks ago', '2 weeks ago',
+    '15 days ago', '15 days ago', '16 days ago', '16 days ago',
+    '17 days ago', '18 days ago', '19 days ago', '20 days ago',
+    '21 days ago', '22 days ago', '23 days ago', '24 days ago',
+    '25 days ago', '26 days ago',
+  ];
+  var costs = ['$0.004','$0.005','$0.006','$0.007','$0.008','$0.009'];
+  var rows = [];
+  for (var i = 0; i < 50; i++) {
+    rows.push({
+      id: i,
+      time: times[i] || ((i+1) + ' days ago'),
+      task: tasks[i % tasks.length],
+      cost: costs[i % costs.length],
+      selected: i < 15 // newest 15 pre-selected
+    });
+  }
+  return rows;
+})();
+
+function renderRunsTable() {
+  var tbody = document.getElementById('runs-rows');
+  tbody.innerHTML = ALL_RUNS.map(function(r) {
+    var cls = r.selected ? 'selected-row' : '';
+    return '<tr class="' + cls + '" onclick="toggleRun(' + r.id + ')">' +
+      '<td style="width:32px;text-align:center;"><input type="checkbox" class="runs-cb" ' + (r.selected ? 'checked' : '') + ' onclick="event.stopPropagation();toggleRun(' + r.id + ')"></td>' +
+      '<td style="color:var(--slate-500);">' + escHtml(r.time) + '</td>' +
+      '<td>' + escHtml(r.task) + '</td>' +
+      '<td style="white-space:nowrap;">' + r.cost + '</td>' +
+      '</tr>';
+  }).join('');
+  updateRunsCounter();
+}
+
+function toggleRun(id) {
+  ALL_RUNS[id].selected = !ALL_RUNS[id].selected;
+  renderRunsTable();
+}
+
+function pickNewest15() {
+  ALL_RUNS.forEach(function(r, i) { r.selected = i < 15; });
+  renderRunsTable();
+}
+
+function clearAllRuns() {
+  ALL_RUNS.forEach(function(r) { r.selected = false; });
+  renderRunsTable();
+}
+
+function updateRunsCounter() {
+  var count = ALL_RUNS.filter(function(r) { return r.selected; }).length;
+  var low = (count * 0.09).toFixed(2);
+  var high = (count * 0.14).toFixed(2);
+  document.getElementById('runs-selected-count').textContent = count;
+  document.getElementById('runs-selected-cost').textContent = '$' + low + '-$' + high;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Prompt cards ────────────────────────────────────────────────────────────
+var promptCount = 0;
+
+function addPromptCard(defaultLabel) {
+  promptCount++;
+  var label = defaultLabel || ('Prompt ' + promptCount);
+  var card = document.createElement('div');
+  card.className = 'prompt-card';
+  card.id = 'pcard-' + promptCount;
+  card.innerHTML =
+    '<div class="prompt-card-header">' +
+      '<input class="prompt-card-label-input" type="text" value="' + escHtml(label) + '" placeholder="Prompt label (optional)">' +
+      '<button class="prompt-card-remove" onclick="removePromptCard(\'' + card.id + '\')" title="Remove">&times;</button>' +
+    '</div>' +
+    '<textarea placeholder="Paste or type the prompt for this test case..." style="width:100%;padding:10px 12px;border:none;outline:none;font-size:12.5px;color:var(--slate-700);resize:vertical;min-height:80px;font-family:inherit;background:white;box-sizing:border-box;line-height:1.5;"></textarea>';
+  document.getElementById('prompt-cards').appendChild(card);
+  updatePromptCounter();
+}
+
+function removePromptCard(id) {
+  var el = document.getElementById(id);
+  if (el) el.remove();
+  updatePromptCounter();
+}
+
+function updatePromptCounter() {
+  var count = document.querySelectorAll('#prompt-cards .prompt-card').length;
+  document.getElementById('prompt-count').textContent = count;
+}
+
+// ── Mode and state ───────────────────────────────────────────────────────────
 function switchMode(mode) {
   currentMode = mode;
   document.getElementById('mode-agent').classList.toggle('active', mode === 'agent');
@@ -656,11 +835,11 @@ function switchMode(mode) {
 }
 
 function showState(id, btn) {
-  ['setup','running','results'].forEach(s => {
+  ['setup','running','results'].forEach(function(s) {
     document.getElementById('state-' + s).classList.remove('active');
   });
   document.getElementById('state-' + id).classList.add('active');
-  document.querySelectorAll('.bench-nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.bench-nav-btn').forEach(function(b) { b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
 }
 
@@ -670,7 +849,7 @@ function goToRunning() {
 }
 
 function selectInput(type) {
-  ['recent','daterange','paste'].forEach(t => {
+  ['recent','daterange','paste'].forEach(function(t) {
     document.getElementById('input-' + t).classList.toggle('selected', t === type);
   });
   updateCostEstimate();
@@ -685,19 +864,6 @@ function updateCostEstimate() {
   document.getElementById('cost-breakdown').textContent = models + ' models x ' + count + ' samples x judge model (Opus 4.7)';
 }
 
-function rerollSample() {
-  var tasks = [
-    ['May 5 08:15', 'Re-engagement, DataFlow Inc — 90-day lapse', '$0.006'],
-    ['May 4 17:33', 'Cold outreach, NexGen SaaS — ICP match', '$0.007'],
-    ['May 3 10:12', 'Follow-up, Bright Media — awaiting decision', '$0.005'],
-    ['May 2 14:40', 'Intro, SkyHigh Cloud — referral mention', '$0.008'],
-  ];
-  var tbody = document.getElementById('preview-rows');
-  tbody.innerHTML = tasks.map(function(t) {
-    return '<tr><td>' + t[0] + '</td><td>' + t[1] + '</td><td>' + t[2] + '</td></tr>';
-  }).join('') + '<tr style="background:var(--slate-50);"><td colspan="3" style="text-align:center;color:var(--slate-400);font-size:11.5px;">+ 11 more runs included</td></tr>';
-}
-
 function toggleChip(label) {
   label.classList.toggle('selected');
   updateCostEstimate();
@@ -709,6 +875,12 @@ function approveModel(modelName) {
   t.classList.remove('hidden');
   setTimeout(function() { t.classList.add('hidden'); }, 4500);
 }
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+renderRunsTable();
+addPromptCard('Prompt 1');
+addPromptCard('Prompt 2');
+addPromptCard('Prompt 3');
 </script>
 </body>
 </html>

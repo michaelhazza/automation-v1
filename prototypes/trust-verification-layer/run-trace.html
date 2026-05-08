@@ -105,11 +105,11 @@
 
   /* ── Verify badge ───────────────────────────────────────────────── */
   /*
-    Four states:
-      pass        — green, checkmark
-      fail        — red, X
-      inconclusive — amber, question
-      n/a         — slate, dash (not-applicable)
+    Three states:
+      pass    — green checkmark
+      fail    — red X
+      pending — grey clock (covers async-not-yet-resolved AND inconclusive)
+    Skills with no verify check get NO badge at all.
   */
   .verify-badge {
     display: inline-flex; align-items: center; gap: 3px;
@@ -121,8 +121,7 @@
   }
   .verify-pass        { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
   .verify-fail        { background: var(--red-50);     color: var(--red-600);     border: 1px solid #fecaca; }
-  .verify-inconclusive{ background: var(--amber-50);   color: var(--amber-600);   border: 1px solid #fde68a; }
-  .verify-na          { background: var(--slate-100);  color: var(--slate-400);   border: 1px solid var(--slate-200); }
+  .verify-pending     { background: var(--slate-100);  color: var(--slate-500);   border: 1px solid var(--slate-200); }
 
   /* Verify tooltip on hover */
   .verify-badge::after {
@@ -414,7 +413,7 @@
           <!-- Trace tab -->
           <div id="tab-trace" style="display:flex;flex:1;overflow:hidden;flex-direction:column;">
 
-            <!-- Verify summary bar -->
+            <!-- Verify summary bar — 3 states only: Pass / Fail / Pending -->
             <div class="verify-summary-bar">
               <span class="verify-summary-label">Verify:</span>
               <span class="vsb-item">
@@ -426,23 +425,22 @@
                 1 failed
               </span>
               <span class="vsb-item">
-                <span style="width:7px;height:7px;border-radius:50%;background:var(--amber-500);display:inline-block;"></span>
-                1 inconclusive
+                <span style="width:7px;height:7px;border-radius:50%;background:var(--slate-400);display:inline-block;"></span>
+                1 pending
               </span>
-              <span class="vsb-item" style="color:var(--slate-400);">1 n/a</span>
             </div>
 
             <div style="display:flex;flex:1;overflow:hidden;">
               <div class="trace-scroll" id="event-list">
 
-                <!-- Event 1: RUN_START — verify n/a -->
+                <!-- Event 1: RUN_START — no verify badge (lifecycle event, no skill check) -->
                 <div class="event-row" onclick="selectEvent(1)">
                   <div class="event-seq">1</div>
                   <div class="event-type-dot dot-meta"></div>
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-run_start">run_start</span>
-                      <span class="verify-badge verify-na" data-reason="No verify hook: run_start is a lifecycle event, not a skill action.">n/a</span>
+                      <!-- No verify badge: lifecycle events have no verify check -->
                     </div>
                     <div class="event-content">Run initiated. Input: "Draft follow-up email to Sarah Chen at Acme Corp..."</div>
                   </div>
@@ -456,7 +454,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-llm_call">llm_call</span>
-                      <span class="verify-badge verify-pass" data-reason="Planning output verified: 3 required actions identified, all valid skill names.">pass</span>
+                      <span class="verify-badge verify-pass" data-reason="Planning output verified: 3 required actions identified, all valid skill names.">Pass</span>
                     </div>
                     <div class="event-content">Planning step: identified 3 required actions, retrieve memory, draft email, confirm send.</div>
                   </div>
@@ -473,7 +471,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-tool_call">tool_call: search_crm</span>
-                      <span class="verify-badge verify-pass" data-reason="CRM query formed correctly: required fields present, query string non-empty.">pass</span>
+                      <span class="verify-badge verify-pass" data-reason="CRM query formed correctly: required fields present, query string non-empty.">Pass</span>
                     </div>
                     <div class="event-content">Querying HubSpot for "Sarah Chen" at "Acme Corp"</div>
                   </div>
@@ -487,7 +485,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-tool_result">tool_result: search_crm</span>
-                      <span class="verify-badge verify-pass" data-reason="search_crm returned HTTP 200. Contact record found with required fields: email, title, last_contact.">pass</span>
+                      <span class="verify-badge verify-pass" data-reason="search_crm returned HTTP 200. Contact record found with required fields: email, title, last_contact.">Pass</span>
                     </div>
                     <div class="event-content">Found 1 contact. Sarah Chen, VP Operations, sarah.chen@acmecorp.com. Last contacted Apr 28.</div>
                   </div>
@@ -504,7 +502,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-llm_call">llm_call</span>
-                      <span class="verify-badge verify-pass" data-reason="Email draft contains required fields: subject line, greeting, body, sign-off. No hallucinated contact details detected.">pass</span>
+                      <span class="verify-badge verify-pass" data-reason="Email draft contains required fields: subject line, greeting, body, sign-off. No hallucinated contact details detected.">Pass</span>
                     </div>
                     <div class="event-content">Drafting email body using retrieved contact data and memory blocks (brand voice, key stakeholders, competitor context)</div>
                   </div>
@@ -521,21 +519,24 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-tool_call">tool_call: send_email</span>
-                      <span class="verify-badge verify-fail" data-reason="send_email verify failed: recipient domain 'acmecorp.com' is on the suppression list. Email was not sent. Run flagged for review.">fail</span>
+                      <span class="verify-badge verify-fail" data-reason="send_email verify failed: recipient domain 'acmecorp.com' is on the suppression list. Email was not sent. Run flagged for review.">Fail</span>
                     </div>
                     <div class="event-content">Preparing email to sarah.chen@acmecorp.com, subject "Following up on our Q2 proposal"</div>
                   </div>
                   <div class="event-time">+18s</div>
                 </div>
 
-                <!-- Event 7: HITL_GATE — verify inconclusive -->
-                <div class="event-row" onclick="selectEvent(7)" style="border-left:3px solid var(--amber-400);">
+                <!-- Event 7: HITL_GATE — verify pending (async, awaiting operator) -->
+                <div class="event-row" onclick="selectEvent(7)" style="border-left:3px solid var(--slate-300);">
                   <div class="event-seq">7</div>
-                  <div class="event-type-dot dot-meta" style="background:var(--amber-400);"></div>
+                  <div class="event-type-dot dot-meta" style="background:var(--slate-400);"></div>
                   <div class="event-body">
                     <div class="event-label-row">
-                      <span class="event-type-label" style="color:var(--amber-600);">hitl_gate: send_email</span>
-                      <span class="verify-badge verify-inconclusive" data-reason="Awaiting operator decision. Verify result will be recorded after approval or rejection.">pending</span>
+                      <span class="event-type-label" style="color:var(--slate-600);">hitl_gate: send_email</span>
+                      <span class="verify-badge verify-pending" data-reason="Awaiting operator decision. Verify result will be recorded after approval or rejection.">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        Pending
+                      </span>
                     </div>
                     <div class="event-content">Awaiting operator approval before sending. Email queued in review.</div>
                   </div>
@@ -549,7 +550,7 @@
                   <div class="event-body">
                     <div class="event-label-row">
                       <span class="event-type-label etype-delegation">delegation: crm-enrichment-agent</span>
-                      <span class="verify-badge verify-pass" data-reason="Sub-agent completed successfully. Enrichment result returned with phone, LinkedIn, and interaction history.">pass</span>
+                      <span class="verify-badge verify-pass" data-reason="Sub-agent completed successfully. Enrichment result returned with phone, LinkedIn, and interaction history.">Pass</span>
                     </div>
                     <div class="event-content">Delegating contact enrichment to CRM sub-agent. Awaiting completion.</div>
                   </div>
@@ -636,9 +637,12 @@
         <input class="form-input" type="text" id="correct-reason" placeholder="e.g. Tone was too formal for this contact">
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeCorrectModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCorrection()">Save correction</button>
+    <div class="modal-footer" style="flex-direction:column;align-items:flex-start;gap:10px;">
+      <div style="font-size:12px;color:var(--slate-500);width:100%;">Your correction will appear in Knowledge for review and will improve future runs of this agent.</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="closeCorrectModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveCorrection()">Save correction</button>
+      </div>
     </div>
   </div>
 </div>
@@ -670,7 +674,7 @@ const EVENTS = {
     fields:{ trigger_source:'manual', started_by:'sarah@agency.io', agent_version:'outreach-agent@v2.4.1', parent_run:null,
       input_payload:'{\n  "task": "Draft follow-up email to Sarah Chen at Acme Corp",\n  "context": "Last meeting was Apr 28, discussed Q2 renewal proposal",\n  "tone": "warm-professional"\n}' },
     raw:'{\n  "event_id": "evt_01HXYZ123",\n  "type": "run_start",\n  "seq": 1,\n  "timestamp": "2026-05-06T09:00:00.000Z"\n}',
-    verify:{ state:'na', reason:'No verify hook: run_start is a lifecycle event.' },
+    verify:{ state:'none', reason:'' },
     hasOutput: false
   },
   2: { type:'LLM_CALL', label:'llm_call', seq:2, total:47, timeIntoRun:'+3s', iso:'2026-05-06T09:00:03.421Z',
@@ -713,7 +717,7 @@ const EVENTS = {
   7: { type:'HITL_GATE', label:'hitl_gate', seq:7, total:47, timeIntoRun:'+19s', iso:'2026-05-06T09:00:19.210Z',
     fields:{ gate_type:'approval', awaiting:'send_email tool execution', who_can_approve:'Role: operator / admin (this org)', queued_at:'2026-05-06T09:00:19Z', inbox_link:'#' },
     raw:'{\n  "event_id": "evt_01HXYZ129",\n  "type": "hitl_gate",\n  "seq": 7,\n  "timestamp": "2026-05-06T09:00:19.210Z"\n}',
-    verify:{ state:'inconclusive', reason:'Awaiting operator decision. Verify result recorded after approval or rejection.' },
+    verify:{ state:'pending', reason:'Awaiting operator decision. Verify result will be recorded after approval or rejection.' },
     hasOutput: false
   },
   8: { type:'DELEGATION', label:'delegation', seq:8, total:47, timeIntoRun:'+28s', iso:'2026-05-06T09:00:28.003Z',
@@ -726,7 +730,7 @@ const EVENTS = {
     fields:{ model:'claude-sonnet-4-6', prompt_tokens:0, completion_tokens:0, latency_ms:null, cost_usd:null, temperature:1.0,
       prompt_preview:'...', response_preview:'Streaming...' },
     raw:'{\n  "event_id": "evt_01HXYZ_streaming",\n  "type": "llm_call",\n  "seq": 47,\n  "status": "streaming",\n  "timestamp": "2026-05-06T09:00:42.000Z"\n}',
-    verify:{ state:'na', reason:'Streaming in progress.' },
+    verify:{ state:'none', reason:'' },
     hasOutput: false
   }
 };
@@ -736,16 +740,17 @@ function buildDetailHtml(evt) {
   const f = evt.fields;
   let html = '';
 
-  // Verify block at top of detail
-  const vColors = { pass:'green', fail:'red', inconclusive:'amber', na:'slate' };
-  const vLabels = { pass:'Pass', fail:'Fail', inconclusive:'Pending', na:'N/A' };
-  html += `<div class="detail-field">
-    <div class="detail-field-label">Verify result</div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-      <span class="verify-badge verify-${evt.verify.state}" style="cursor:default;">${vLabels[evt.verify.state]}</span>
-      <span style="font-size:12px;color:var(--slate-600);">${escHtml(evt.verify.reason)}</span>
-    </div>
-  </div>`;
+  // Verify block at top of detail (3 states: pass / fail / pending — none = no badge shown)
+  if (evt.verify.state !== 'none') {
+    const vLabels = { pass:'Pass', fail:'Fail', pending:'Pending' };
+    html += `<div class="detail-field">
+      <div class="detail-field-label">Verify result</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span class="verify-badge verify-${evt.verify.state}" style="cursor:default;">${vLabels[evt.verify.state] || evt.verify.state}</span>
+        <span style="font-size:12px;color:var(--slate-600);">${escHtml(evt.verify.reason)}</span>
+      </div>
+    </div>`;
+  }
 
   if (evt.type === 'RUN_START') {
     html += field('Trigger source', badge(f.trigger_source, 'slate'));

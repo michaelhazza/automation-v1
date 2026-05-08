@@ -114,3 +114,31 @@ Files CREATED:
 - `prototypes/trust-verification-layer/scorecard-create.html` (created)
 - `prototypes/trust-verification-layer/agent-create.html` (created)
 - `tasks/builds/trust-verification-layer/mockup-log.md` (updated)
+
+## Round 3 — 2026-05-08 00:00
+**Operator feedback:** Simplification pass. Reduce cognitive load across all eight screens. Hard rules: "Quality check" not dimension, sentence case names, 80% everywhere, "Pass mark", "How often to grade", "Share with sub-accounts" toggle, no em-dashes, no emoji. No "Override pass marks" feature, no new screens, Source pill stays at 2 values, no marketing copy.
+
+**Changes made:**
+- `agent-edit-scorecard.html`: Fixed default grade frequency from 80% (bug introduced round 3 session start) to 20%. Six-button segmented control (Off / 20% / 40% / 60% / 80% / 100%) with live help text per selection.
+- `agent-create.html`: Locked "Always attached" scorecard rows made expandable via caret toggle. Clicking a row or its caret reveals read-only quality checks (name, description, pass mark). Two locked rows expanded: Hallucination check (2 checks) and External action safety (3 checks). CSS added: `.caret-btn`, `.sc-required-checks-panel`, `.sc-check-row`, `.sc-check-name`, `.sc-check-desc`, `.sc-check-pass`, `.sc-checks-label`. JS: `toggleRequiredRow()`.
+- `scorecard-create.html`: Each pass mark input now has a `.pass-mark-cell` wrapper containing the input and a `.pass-mark-ref` note below it. Row 1: "Similar checks: 76-92%", Row 2: "Similar checks: 68-85%", Row 3: "No reference data yet". `addQC()` function updated to include the ref note on new rows.
+- `govern-quality.html`: Empty state added to Agents tab (`#agents-empty-state`, shown when `filterRows()` returns zero visible rows). Empty state added to Bench history tab (`#bench-empty-state`, togglable via "Toggle empty state" button for demo; hides the data card when active). CSS: `.tab-empty-state`.
+- `index.html`: Status updated to Round 3. Round 3 design decisions box added. Round 2 design decisions archived (pink box). All eight card descriptions updated to describe round 3 changes. Round 3 green badge added to all updated cards. `badge-r3` CSS class added.
+- `tasks/builds/trust-verification-layer/mockup-log.md`: this entry.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — agent-create still starts from "install an agent with quality coverage day one"; the expandable rows let the operator inspect checks without the flow requiring it. scorecard-create still starts from "write a check that will be graded."
+- Default to hidden: yes — expanded check panels on agent-create are hidden by default (operator chooses to inspect); empty states are hidden by default (only shown when conditions are met); bench empty state is demo-accessible via toggle not default view.
+- One primary action: yes — all screens retain single primary actions from round 2. No new actions added.
+- Inline state: yes — pass mark reference data is contextually inline below each pass mark input; grade frequency hint updates inline without leaving the page; agents empty state guides the operator without a separate page.
+- Re-check passed: yes — a non-technical operator on agent-create can now read what each required scorecard checks before installing. On scorecard-create, they see typical ranges to calibrate pass marks without knowing the domain.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/trust-verification-layer/agent-edit-scorecard.html` (updated)
+- `prototypes/trust-verification-layer/agent-create.html` (updated)
+- `prototypes/trust-verification-layer/scorecard-create.html` (updated)
+- `prototypes/trust-verification-layer/govern-quality.html` (updated)
+- `prototypes/trust-verification-layer/index.html` (updated)
+- `tasks/builds/trust-verification-layer/mockup-log.md` (updated)

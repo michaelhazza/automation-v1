@@ -93,14 +93,20 @@
   .provenance-label { font-size: 12.5px; color: var(--indigo-700); }
   .provenance-label strong { font-weight: 600; }
 
-  /* ── Slider ── */
-  .slider-wrap { display: flex; align-items: center; gap: 14px; }
-  .slider-wrap input[type=range] {
-    flex: 1; height: 4px; border-radius: 2px; cursor: pointer;
-    accent-color: var(--indigo-600);
+  /* ── Segmented control for grading frequency ── */
+  .seg-control {
+    display: inline-flex; border: 1px solid var(--slate-200); border-radius: 9px;
+    overflow: hidden; background: var(--slate-50);
   }
-  .slider-value {
-    font-size: 13px; font-weight: 600; color: var(--slate-700); width: 42px; text-align: right;
+  .seg-btn {
+    padding: 6px 14px; font-size: 12.5px; font-weight: 500; color: var(--slate-500);
+    border: none; background: transparent; cursor: pointer; transition: all 0.12s;
+    border-right: 1px solid var(--slate-200); white-space: nowrap;
+  }
+  .seg-btn:last-child { border-right: none; }
+  .seg-btn.active {
+    background: white; color: var(--indigo-700); font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   }
 
   /* ── Tab strip ── */
@@ -365,12 +371,16 @@
               <div class="config-grid">
                 <!-- How often to grade -->
                 <div>
-                  <div class="form-label" style="margin-bottom:6px;">How often to grade</div>
-                  <div class="slider-wrap">
-                    <input type="range" id="sample-slider" min="0" max="100" value="20" oninput="updateSlider(this.value)">
-                    <span class="slider-value" id="slider-display">20%</span>
+                  <div class="form-label" style="margin-bottom:8px;">How often to grade</div>
+                  <div class="seg-control">
+                    <button class="seg-btn" id="seg-off" onclick="setGradeFreq('off',this)">Off</button>
+                    <button class="seg-btn active" id="seg-20" onclick="setGradeFreq('20',this)">20%</button>
+                    <button class="seg-btn" id="seg-40" onclick="setGradeFreq('40',this)">40%</button>
+                    <button class="seg-btn" id="seg-60" onclick="setGradeFreq('60',this)">60%</button>
+                    <button class="seg-btn" id="seg-80" onclick="setGradeFreq('80',this)">80%</button>
+                    <button class="seg-btn" id="seg-100" onclick="setGradeFreq('100',this)">100%</button>
                   </div>
-                  <div class="form-hint" style="margin-top:6px;">Of every 100 agent runs, score this many. More grading = better drift detection but higher cost. Runs flagged by verify failures are always graded.</div>
+                  <div class="form-hint" style="margin-top:7px;" id="grade-freq-hint">Of every 100 runs, 20 will be graded. Estimated extra cost: ~$1.20 / week.</div>
                 </div>
                 <!-- Judge model -->
                 <div>
@@ -685,8 +695,18 @@ function switchAgentTab(id, btn) {
   btn.classList.add('active');
 }
 
-function updateSlider(val) {
-  document.getElementById('slider-display').textContent = val + '%';
+function setGradeFreq(val, btn) {
+  document.querySelectorAll('.seg-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  var hint = document.getElementById('grade-freq-hint');
+  var costMap = { '20': '$1.20', '40': '$2.40', '60': '$3.60', '80': '$4.80', '100': '$6.00' };
+  if (val === 'off') {
+    hint.textContent = 'No grading. Drift detection disabled for this agent.';
+  } else if (val === '100') {
+    hint.textContent = 'Every run graded. Highest cost, fastest drift detection.';
+  } else {
+    hint.textContent = 'Of every 100 runs, ' + val + ' will be graded. Estimated extra cost: ~' + (costMap[val] || '$?') + ' / week.';
+  }
 }
 
 function toggleScorecard(id) {

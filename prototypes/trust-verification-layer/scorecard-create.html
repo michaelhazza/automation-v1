@@ -98,6 +98,11 @@
   }
   .pass-mark-wrap input:focus { border-color: var(--indigo-500); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
   .pass-mark-pct { font-size: 12.5px; color: var(--slate-500); font-weight: 600; }
+  .pass-mark-ref {
+    font-size: 10.5px; color: var(--slate-400); margin-top: 4px; line-height: 1.4;
+    font-style: italic;
+  }
+  .pass-mark-cell { display: flex; flex-direction: column; gap: 0; }
 
   /* ── Fixed footer ── */
   .form-footer {
@@ -226,9 +231,12 @@
             <div class="qc-row" id="qcrow-1">
               <input type="text" class="form-input" value="Tone match" style="font-size:12.5px;">
               <input type="text" class="form-input" placeholder="Describe what the judge should check..." value="Output tone matches brand voice: warm, direct, not corporate." style="font-size:12px;">
-              <div class="pass-mark-wrap">
-                <input type="number" value="80" min="1" max="100" step="5">
-                <span class="pass-mark-pct">%</span>
+              <div class="pass-mark-cell">
+                <div class="pass-mark-wrap">
+                  <input type="number" value="80" min="1" max="100" step="5">
+                  <span class="pass-mark-pct">%</span>
+                </div>
+                <div class="pass-mark-ref">Similar checks: 76-92%</div>
               </div>
               <div style="display:flex;justify-content:center;">
                 <input type="checkbox" id="qc-tog-1" class="toggle-input" checked>
@@ -241,9 +249,12 @@
             <div class="qc-row" id="qcrow-2">
               <input type="text" class="form-input" value="Hook strength" style="font-size:12.5px;">
               <input type="text" class="form-input" placeholder="Describe what the judge should check..." value="Subject line or opening creates a reason to read on. Specific, not generic." style="font-size:12px;">
-              <div class="pass-mark-wrap">
-                <input type="number" value="70" min="1" max="100" step="5">
-                <span class="pass-mark-pct">%</span>
+              <div class="pass-mark-cell">
+                <div class="pass-mark-wrap">
+                  <input type="number" value="70" min="1" max="100" step="5">
+                  <span class="pass-mark-pct">%</span>
+                </div>
+                <div class="pass-mark-ref">Similar checks: 68-85%</div>
               </div>
               <div style="display:flex;justify-content:center;">
                 <input type="checkbox" id="qc-tog-2" class="toggle-input" checked>
@@ -256,9 +267,12 @@
             <div class="qc-row" id="qcrow-3">
               <input type="text" class="form-input" value="Length discipline" style="font-size:12.5px;">
               <input type="text" class="form-input" placeholder="Describe what the judge should check..." value="Body under 180 words. Gets to the point within the first two sentences." style="font-size:12px;">
-              <div class="pass-mark-wrap">
-                <input type="number" value="75" min="1" max="100" step="5">
-                <span class="pass-mark-pct">%</span>
+              <div class="pass-mark-cell">
+                <div class="pass-mark-wrap">
+                  <input type="number" value="75" min="1" max="100" step="5">
+                  <span class="pass-mark-pct">%</span>
+                </div>
+                <div class="pass-mark-ref">No reference data yet</div>
               </div>
               <div style="display:flex;justify-content:center;">
                 <input type="checkbox" id="qc-tog-3" class="toggle-input" checked>
@@ -335,7 +349,7 @@ function addQC() {
   row.innerHTML =
     '<input type="text" class="form-input" placeholder="Quality check name" style="font-size:12.5px;">' +
     '<input type="text" class="form-input" placeholder="What the judge should look for..." style="font-size:12px;">' +
-    '<div class="pass-mark-wrap"><input type="number" value="75" min="1" max="100" step="5"><span class="pass-mark-pct">%</span></div>' +
+    '<div class="pass-mark-cell"><div class="pass-mark-wrap"><input type="number" value="75" min="1" max="100" step="5"><span class="pass-mark-pct">%</span></div><div class="pass-mark-ref">No reference data yet</div></div>' +
     '<div style="display:flex;justify-content:center;"><input type="checkbox" id="qc-tog-' + qcCount + '" class="toggle-input" checked><label for="qc-tog-' + qcCount + '" class="toggle-track" style="width:30px;height:17px;"></label></div>' +
     '<button onclick="removeQC(\'' + id + '\')" style="background:none;border:none;color:var(--slate-300);cursor:pointer;font-size:18px;padding:2px;">&#215;</button>';
   // Insert before the add button footer
