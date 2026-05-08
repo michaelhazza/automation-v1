@@ -3,6 +3,7 @@
 **Files reviewed:** branch `auto-knowledge-retrieval` HEAD `b16cbf20`, diff against `origin/main` (98 files, +17848/-256). Iteration 1 ran via `codex review --base origin/main`; iteration 2 ran via `codex review --uncommitted` against the in-flight fixes.
 **Iterations run:** 2/3
 **Timestamp:** 2026-05-08T11:47:27Z
+**Commit at finish:** 9662b8b7
 
 ---
 
