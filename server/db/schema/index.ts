@@ -273,3 +273,6 @@ export * from './securityAuditEvents.js';
 // F3 Baseline Capture — baseline rows + per-metric rows (migrations 0280/0283)
 export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
+
+// Trust & Verification Layer — runtime check verdicts (migration 0289)
+export * from './runtimeCheckResults';

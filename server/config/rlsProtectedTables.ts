@@ -1060,6 +1060,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0284_baseline_rls_and_dictionary.sql',
     rationale: 'Per-baseline metric values — pipeline value, lead count, revenue. Cross-tenant leak would expose customer-specific revenue figures.',
   },
+  // 0289 — Trust & Verification Layer: runtime check verdicts
+  {
+    tableName: 'runtime_check_results',
+    schemaFile: 'runtimeCheckResults.ts',
+    policyMigration: '0289_runtime_check_results.sql',
+    rationale: 'Per-step runtime check verdict with blast-radius and reversibility metadata — contains action verification outcomes that are scoped per org and must not leak cross-tenant.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
