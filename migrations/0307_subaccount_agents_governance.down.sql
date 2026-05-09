@@ -3,7 +3,7 @@
 -- Sibling file in migrations/ (not under migrations/_down/ — repo convention).
 
 ALTER TABLE subaccount_agents
-  DROP COLUMN controller_style_allowed,
-  DROP COLUMN allowed_environments,
-  DROP COLUMN max_risk_tier,
-  DROP COLUMN require_approval_at_tier;
+  DROP COLUMN IF EXISTS controller_style_allowed,
+  DROP COLUMN IF EXISTS allowed_environments,
+  DROP COLUMN IF EXISTS max_risk_tier,
+  DROP COLUMN IF EXISTS require_approval_at_tier;

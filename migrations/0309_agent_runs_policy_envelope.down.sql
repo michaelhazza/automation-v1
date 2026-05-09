@@ -1,1 +1,1 @@
-ALTER TABLE agent_runs DROP COLUMN policy_envelope_snapshot;
+ALTER TABLE agent_runs DROP COLUMN IF EXISTS policy_envelope_snapshot;
