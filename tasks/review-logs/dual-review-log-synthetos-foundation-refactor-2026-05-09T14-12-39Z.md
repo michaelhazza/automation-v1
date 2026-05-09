@@ -4,6 +4,7 @@
 **Iterations run:** 3/3
 **Timestamp:** 2026-05-09T14:12:39Z
 **Codex CLI:** `/c/Users/micha/AppData/Roaming/npm/codex` v0.125.0 (`--base main`)
+**Commit at finish:** `39ed92fb`
 
 **Prior reviews on this branch (not re-litigated):**
 - spec-conformance NON_CONFORMANT (2 deferred naming gaps SCD-1, SCD-2)
