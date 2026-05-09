@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin, hasOrgPermission } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
@@ -16,6 +17,8 @@ import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 import { mapAgentRunToTestResult } from '../services/agentTestRunMapperPure.js';
 import { ControllerStyleNotAllowedForAgentError } from '../services/controllerStyleResolver.js';
 import { logger } from '../lib/logger.js';
+import { runTraceService, InvalidRunTraceCursorError } from '../services/runTraceService.js';
+import type { RunTraceEventType } from '../../shared/types/runTraceEvent.js';
 
 const router = Router();
 
@@ -645,6 +648,70 @@ router.post(
       conversationId,
     });
     res.json({ ...result, conversationId: conversationId ?? '' });
+  }),
+);
+
+// ─── Run Trace: unified event stream (spec §4.4.3) ────────────────────────────
+//
+// GET /api/agent-runs/:runId/trace
+// Read-only (INV-10). Returns unified events across eight source ledger tables
+// with cursor pagination, late-event marking, and policy envelope embedding.
+
+const runTraceQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  eventTypes: z
+    .string()
+    .optional()
+    .transform((val) =>
+      val
+        ? val.split(',').map((s) => s.trim()).filter(Boolean) as RunTraceEventType[]
+        : undefined,
+    ),
+  sinceTimestamp: z.string().datetime().optional(),
+  untilTimestamp: z.string().datetime().optional(),
+  toolSlug: z.string().optional(),
+});
+
+router.get(
+  '/api/agent-runs/:runId/trace',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const parsed = runTraceQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: 'INVALID_QUERY_PARAMS', message: 'Invalid query parameters' },
+        details: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const { cursor, limit, eventTypes, sinceTimestamp, untilTimestamp, toolSlug } = parsed.data;
+
+    try {
+      const result = await runTraceService.query(
+        {
+          runId: req.params.runId,
+          cursor,
+          limit,
+          eventTypes,
+          sinceTimestamp,
+          untilTimestamp,
+          toolSlug,
+        },
+        req.orgId!,
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof InvalidRunTraceCursorError) {
+        res.status(400).json({
+          errorCode: err.errorCode,
+          message: err.message,
+        });
+        return;
+      }
+      throw err;
+    }
   }),
 );
 
