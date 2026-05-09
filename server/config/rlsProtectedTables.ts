@@ -1167,6 +1167,12 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0308_canonical_support_agents.sql',
     rationale: 'Helpdesk agent roster per organisation — cross-tenant leak exposes staffing and assignment data.',
   },
+  {
+    tableName: 'canonical_tickets',
+    schemaFile: 'canonicalTickets.ts',
+    policyMigration: '0309_canonical_tickets.sql',
+    rationale: 'Per-ticket support state including customer identity, status, priority, and collision primitives — cross-tenant leak exposes customer support data and agent operations.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
