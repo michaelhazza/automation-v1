@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Support Desk — Ticket Detail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .thread-layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+  .thread-main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+  }
+  .thread-rail {
+    width: 260px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--sl-200);
+    background: white;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  /* Ticket header */
+  .ticket-header {
+    background: white;
+    border-bottom: 1px solid var(--sl-200);
+    padding: 14px 24px;
+    flex-shrink: 0;
+  }
+  .ticket-header .back {
+    font-size: 12px; color: var(--sl-500); text-decoration: none;
+    display: inline-flex; align-items: center; gap: 4px; margin-bottom: 8px;
+  }
+  .ticket-header .back:hover { color: var(--indigo-600); }
+  .ticket-header .subject {
+    font-size: 17px; font-weight: 600; color: var(--sl-900); margin-bottom: 10px; line-height: 1.3;
+  }
+  .ticket-meta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ticket-meta-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--sl-600); }
+  .ticket-meta-item .label { color: var(--sl-400); }
+
+  /* Thread messages */
+  .msg-block { margin-bottom: 20px; }
+  .msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .msg-author { font-size: 13px; font-weight: 600; color: var(--sl-900); }
+  .msg-role { font-size: 11px; color: var(--sl-500); }
+  .msg-time { font-size: 11px; color: var(--sl-400); margin-left: auto; }
+
+  .msg-content {
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 13px; line-height: 1.65; color: var(--sl-800);
+  }
+  .msg-content.inbound    { background: var(--sl-100); }
+  .msg-content.agent-human { background: white; border: 1px solid var(--sl-200); }
+  .msg-content.agent-bot  { background: var(--indigo-50); border: 1px solid var(--indigo-100); }
+  .msg-content.internal   { background: var(--amber-50); border: 1px solid var(--amber-100); }
+  .msg-content.dispatching { background: var(--indigo-50); border: 1px dashed var(--indigo-300); opacity: 0.85; }
+
+  .msg-provenance {
+    font-size: 10px; color: var(--sl-400); margin-top: 5px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .msg-provenance a { color: var(--indigo-400); text-decoration: none; }
+  .msg-provenance a:hover { text-decoration: underline; color: var(--indigo-600); }
+  .source-link { display: none; }
+  .msg-block:hover .source-link { display: inline; }
+
+  .internal-note-label {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 600; color: var(--amber-700);
+    background: var(--amber-100); padding: 2px 7px; border-radius: 999px; margin-bottom: 6px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  .dispatching-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 500; color: var(--indigo-600);
+    margin-top: 6px;
+  }
+
+  /* Rail sections */
+  .rail-section { margin-bottom: 20px; }
+  .rail-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--sl-400); margin-bottom: 10px; }
+  .rail-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .rail-row .rk { color: var(--sl-500); }
+  .rail-row .rv { color: var(--sl-800); font-weight: 500; text-align: right; }
+
+  .customer-ticket-item {
+    padding: 7px 0; border-bottom: 1px solid var(--sl-100); font-size: 12px; cursor: pointer;
+  }
+  .customer-ticket-item:last-child { border-bottom: 0; }
+  .customer-ticket-item .ct-subject { color: var(--sl-800); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .customer-ticket-item .ct-meta { color: var(--sl-500); margin-top: 2px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span>
+    <a href="tickets-list.html">Support Desk</a>
+    <span class="sep">/</span>
+    <span style="color: var(--sl-900);">Cannot update billing address</span>
+  </span>
+  <span class="right">
+    <span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span>
+  </span>
+</div>
+
+<div class="shell">
+  <nav class="sidenav">
+    <div class="sidenav-section">Support Desk</div>
+    <a href="tickets-list.html" class="sidenav-item active">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Tickets
+      <span class="badge">307</span>
+    </a>
+    <a href="draft-review.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Draft review
+      <span class="badge-red badge">4</span>
+    </a>
+    <a href="inbox-config.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Inboxes
+    </a>
+    <div class="sidenav-divider"></div>
+    <div class="sidenav-section">Settings</div>
+    <a href="integration-setup.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41M19.07 19.07l-1.41-1.41M20 12h-2M6 12H4M12 20v-2M12 6V4"/></svg>
+      Connection setup
+    </a>
+  </nav>
+
+  <div class="content" style="overflow: hidden;">
+
+    <!-- Ticket header -->
+    <div class="ticket-header">
+      <a href="tickets-list.html" class="back">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        All tickets
+      </a>
+      <div class="subject">Cannot update billing address after card change</div>
+      <div class="ticket-meta-row">
+        <div class="ticket-meta-item">
+          <span class="status-badge status-open"><span class="dot"></span>Open</span>
+        </div>
+        <div class="ticket-meta-item">
+          <span class="priority-badge priority-urgent">Urgent</span>
+        </div>
+        <div class="ticket-meta-item">
+          <span class="label">Inbox:</span>
+          <span>Billing</span>
+        </div>
+        <div class="ticket-meta-item">
+          <span class="label">Assignee:</span>
+          <span style="display: flex; align-items: center; gap: 5px;">
+            <span class="avatar avatar-sm avatar-bot" style="width: 18px; height: 18px; font-size: 9px;">SA</span>
+            Support Agent
+          </span>
+        </div>
+        <div class="ticket-meta-item">
+          <span class="label">SLA:</span>
+          <span class="sla-warn">3h 12m remaining</span>
+        </div>
+        <div style="margin-left: auto; display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm">Assign</button>
+          <button class="btn btn-secondary btn-sm">Change status</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="thread-layout">
+
+      <!-- Thread main -->
+      <div class="thread-main">
+
+        <!-- Message 1: Customer inbound -->
+        <div class="msg-block">
+          <div class="msg-header">
+            <span class="avatar avatar-sm avatar-customer">JW</span>
+            <span class="msg-author">James Walsh</span>
+            <span class="msg-role muted">james.walsh@acmecorp.com</span>
+            <span class="msg-time">9 May, 09:14</span>
+          </div>
+          <div class="msg-content inbound">
+            Hi, I updated my payment card this morning but now when I try to change the billing address on my account it just spins and never saves. I've tried three browsers and it's the same everywhere. Our accounting team needs the address updated before end of month for invoicing purposes. Can you look into this urgently?
+          </div>
+        </div>
+
+        <!-- Message 2: Bot reply (confirmed, with source_draft_id on hover) -->
+        <div class="msg-block">
+          <div class="msg-header">
+            <span class="avatar avatar-sm avatar-bot">SA</span>
+            <span class="msg-author">Support Agent</span>
+            <span class="msg-role muted">via Automation OS</span>
+            <span class="msg-time">9 May, 09:17</span>
+          </div>
+          <div class="msg-content agent-bot">
+            Hi James, thanks for getting in touch. I can see there's a known issue affecting billing address updates for accounts that recently changed payment methods. Our engineering team is aware and working on a fix. In the meantime, I've escalated your ticket to urgent priority. I'll update you as soon as the fix is deployed, which should be later today. Apologies for the disruption.
+          </div>
+          <div class="msg-provenance">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Sent by Support Agent
+            <span class="source-link">
+              &nbsp;&middot;&nbsp;
+              <a href="draft-review.html" title="View originating draft">draft #d_7f3a2b &nearr;</a>
+            </span>
+          </div>
+        </div>
+
+        <!-- Message 3: Internal note -->
+        <div class="msg-block">
+          <div class="msg-header">
+            <div class="internal-note-label">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Internal note
+            </div>
+            <span class="msg-time" style="margin-left: auto;">9 May, 09:45</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: flex-start;">
+            <span class="avatar avatar-sm avatar-human">TK</span>
+            <div style="flex: 1;">
+              <div style="font-size: 12px; font-weight: 500; color: var(--sl-700); margin-bottom: 5px;">Tom K. (internal)</div>
+              <div class="msg-content internal">
+                Checked with eng — the card-change migration script has a bug that clears the billing_address_locked flag incorrectly. Fix is in PR #2847, should ship tonight. James's account ID is ACM-00392. Marking urgent.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message 4: Customer follow-up -->
+        <div class="msg-block">
+          <div class="msg-header">
+            <span class="avatar avatar-sm avatar-customer">JW</span>
+            <span class="msg-author">James Walsh</span>
+            <span class="msg-role muted">james.walsh@acmecorp.com</span>
+            <span class="msg-time">9 May, 11:02</span>
+          </div>
+          <div class="msg-content inbound">
+            Thanks for the quick update. Any ETA on the fix? Our accounting team is asking. If it won't be today we may need to raise a manual invoice as a workaround.
+          </div>
+        </div>
+
+        <!-- Message 5: In-flight bot draft (dispatching) -->
+        <div class="msg-block">
+          <div class="msg-header">
+            <span class="avatar avatar-sm avatar-bot">SA</span>
+            <span class="msg-author">Support Agent</span>
+            <span class="msg-role muted">via Automation OS</span>
+            <span class="msg-time" style="display: flex; align-items: center; gap: 5px;">
+              <span class="spinner"></span>
+              Sending...
+            </span>
+          </div>
+          <div class="msg-content dispatching">
+            Hi James, the engineering fix is scheduled to deploy at 6 PM today (UTC). I'll send you a confirmation once the address update is live for your account. If you'd prefer a manual invoice in the meantime, please let me know the address you need and I'll arrange it with our billing team right away.
+          </div>
+          <div class="dispatching-label">
+            <span class="spinner"></span>
+            Sending via Teamwork Desk
+          </div>
+        </div>
+
+        <!-- Spacer so thread doesn't run into the bottom -->
+        <div style="height: 16px;"></div>
+      </div>
+
+      <!-- Right rail -->
+      <div class="thread-rail">
+
+        <div class="rail-section">
+          <div class="rail-section-title">Customer</div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+            <span class="avatar avatar-sm avatar-customer" style="width: 34px; height: 34px; font-size: 13px;">JW</span>
+            <div>
+              <div style="font-size: 13px; font-weight: 600; color: var(--sl-900);">James Walsh</div>
+              <div style="font-size: 11px; color: var(--indigo-600);">Acme Corp</div>
+            </div>
+          </div>
+          <div class="rail-row">
+            <span class="rk">Email</span>
+            <span class="rv" style="font-size: 11px;">james.walsh@acmecorp.com</span>
+          </div>
+          <div class="rail-row">
+            <span class="rk">Contact</span>
+            <span class="rv" style="color: var(--indigo-600); cursor: pointer;">View in CRM</span>
+          </div>
+          <div class="rail-row">
+            <span class="rk">Account</span>
+            <span class="rv">Acme Corp</span>
+          </div>
+        </div>
+
+        <hr class="hr">
+
+        <div class="rail-section">
+          <div class="rail-section-title">Recent tickets</div>
+          <div class="customer-ticket-item">
+            <div class="ct-subject">Bulk export broke after March update</div>
+            <div class="ct-meta"><span class="status-badge status-resolved" style="font-size: 10px; padding: 1px 6px;"><span class="dot"></span>Resolved</span> &nbsp;&middot;&nbsp; 22 Apr</div>
+          </div>
+          <div class="customer-ticket-item">
+            <div class="ct-subject">Cannot update billing address</div>
+            <div class="ct-meta"><span class="status-badge status-open" style="font-size: 10px; padding: 1px 6px;"><span class="dot"></span>Open</span> &nbsp;&middot;&nbsp; Today</div>
+          </div>
+          <div class="customer-ticket-item">
+            <div class="ct-subject">SSO setup assistance needed</div>
+            <div class="ct-meta"><span class="status-badge status-resolved" style="font-size: 10px; padding: 1px 6px;"><span class="dot"></span>Resolved</span> &nbsp;&middot;&nbsp; 11 Mar</div>
+          </div>
+        </div>
+
+        <hr class="hr">
+
+        <div class="rail-section">
+          <div class="rail-section-title">Revenue</div>
+          <div class="rail-row">
+            <span class="rk">Plan</span>
+            <span class="rv">Enterprise</span>
+          </div>
+          <div class="rail-row">
+            <span class="rk">MRR</span>
+            <span class="rv">$4,200</span>
+          </div>
+          <div class="rail-row">
+            <span class="rk">Since</span>
+            <span class="rv">Jan 2024</span>
+          </div>
+        </div>
+
+        <hr class="hr">
+
+        <div class="rail-section">
+          <div class="rail-section-title">Ticket details</div>
+          <div class="rail-row">
+            <span class="rk">Opened</span>
+            <span class="rv">9 May 09:14</span>
+          </div>
+          <div class="rail-row">
+            <span class="rk">Source</span>
+            <span class="rv">Email</span>
+          </div>
+          <div class="rail-row">
+            <span class="rk">First response</span>
+            <span class="rv" style="color: var(--green-700);">3m (within SLA)</span>
+          </div>
+        </div>
+
+      </div><!-- /thread-rail -->
+    </div><!-- /thread-layout -->
+
+  </div><!-- /content -->
+</div><!-- /shell -->
+
+</body>
+</html>
