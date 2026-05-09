@@ -7,32 +7,34 @@
 
 ---
 
-## Phase 1 (SPEC) — in flight
+## Phase 1 (SPEC) — COMPLETE
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Context loaded + PLANNING lock acquired | done | tasks/current-focus.md → status PLANNING, build_slug=support-desk-canonical |
-| 1 — TodoWrite list emitted | done | 12 items |
+| 0 — Context loaded + PLANNING lock acquired | done | tasks/current-focus.md → PLANNING |
+| 1 — TodoWrite list emitted | done | 15 items (expanded from 12 as substeps emerged) |
 | 2 — Branch-sync S0 + freshness | done | 0 commits behind main; no merge required |
-| 3 — Brief intake + UI-touch detection | done | Major class; ui_touch=true; brief v5.3 LOCKED on disk |
-| 4 — Build slug derivation + directory | done | slug existed; progress.md created here |
+| 3 — Brief intake + UI-touch detection | done | Major class; ui_touch=true; brief v5.3 LOCKED |
+| 4 — Build slug derivation + directory | done | slug existed; progress.md created |
 | 5 — Mockup loop | skipped | operator confirmed frozen — `prototypes/support-desk-canonical/` is design source of truth |
-| 6 — Spec authoring | pending | Target: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` |
-| 7 — spec-reviewer (Codex) | pending | max 5 iterations lifetime |
-| 8 — chatgpt-spec-review | pending | MANUAL mode — operator pastes ChatGPT-web responses |
-| 9 — Handoff write | pending | `tasks/builds/support-desk-canonical/handoff.md` |
-| 10 — current-focus.md → BUILDING | pending | After handoff written (abort-write-order invariant) |
-| 11 — End-of-phase prompt + auto-commit | pending | Spec, handoff, progress, mockup-log, current-focus |
+| 6 — Spec authoring | done | `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (~1900 lines, 22 sections) |
+| 7 — spec-reviewer (Codex) | done | 5/5 iterations, READY_FOR_BUILD, 19 mechanical fixes auto-applied. Final report: `tasks/review-logs/spec-review-final-support-desk-canonical-2026-05-09T07-33-16Z.md` |
+| 8 — chatgpt-spec-review | done | 3 rounds, **APPROVED**, 14 findings closed (5 high-severity blockers + 1 user-facing rename + 8 medium/low-severity tightenings). Log: `tasks/review-logs/chatgpt-spec-review-support-desk-canonical-2026-05-09T08-14-57Z.md` |
+| 9 — Handoff write | done | `tasks/builds/support-desk-canonical/handoff.md` — captures OQ-1 + OQ-2 hard gate |
+| 10 — current-focus.md → BUILDING | done | Status enum transition complete |
+| 11 — End-of-phase prompt + auto-commit | done | Phase 1 closed |
 
-## Decisions made in Phase 1
+## Phase 1 outcome
 
-- Brief committed at v5.3 (commit `0e04cc0d`) before spec authoring — clean audit trail per operator confirmation.
-- Step 5 mockup loop skipped — five hi-fi screens (`integration-setup.html`, `tickets-list.html`, `ticket-detail.html`, `draft-review.html`, `inbox-config.html`) committed in `0a768abd` are the design source of truth for the spec's UI section. Brief v5.3 §5.12 (Operational state UI surface) and §6.1 (UI filter semantics) extensions confirmed in scope of existing mockups.
-- Scope classified Major: new subsystem (5 canonical entities), 12 design invariants, cross-cutting RLS/services/jobs/webhooks/UI/agent skills, plus Teamwork v1 extension.
+- **Spec:** `Status: reviewing` — locked at this state pending OQ-1 (Foundry parity) + OQ-2 (Teamwork status inventory). Cannot move to `accepted` and Phase 2 plan generation cannot begin until both close.
+- **Reviews:** spec-reviewer 5/5 READY_FOR_BUILD; chatgpt-spec-review 3 rounds APPROVED.
+- **Doc-sync at finalisation:** KNOWLEDGE.md +3 reusable patterns (deferred-FK migration, polymorphic-FK splitting, polling-absence-≠-deletion). spec-context.md `last_reviewed_at` bumped 2026-05-05 → 2026-05-09.
+- **Phase plan:** 15 chunks (C1–C15), single-PR shape, forward-only dependency graph.
 
-## Open questions for Phase 2
+## Phase 2 hard gate (recorded for handoff)
 
-To be enumerated at Step 9 (handoff). Candidates being tracked through spec authoring:
-- Status-mapping inventory for Teamwork (§10 #12 mandates the complete mapping table as a spec artefact — must be confirmed against live Teamwork API surface during spec authoring)
-- Action idempotency mechanism choice (§10 #13 — Teamwork-native vs. local action-attempt ledger; depends on API audit)
-- Attachment auth model (§10 #14 — URL-based vs. stream-based for `resolveAttachment`)
+OQ-1 + OQ-2 must close before Phase 2 plan generation. `feature-coordinator` pauses if either is open. OQ-3 + OQ-4 close inside Phase 2 chunk C7 (NOT Phase 1 → Phase 2 gates). OQ-5 was closed during chatgpt-spec-review Round 1.
+
+## Phase 2 entry
+
+Open a new Claude Code session and type `launch feature coordinator`.
