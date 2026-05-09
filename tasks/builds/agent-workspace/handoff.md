@@ -193,6 +193,52 @@ All verdicts recorded in `tasks/builds/agent-workspace/progress.md § Phase 2 cl
 
 ---
 
-## Phase 3 (FINALISE)
+## Phase 3 (FINALISATION) — complete
 
-To be filled in by `finalisation-coordinator` after Phase 3 completes. Do not pre-populate.
+**PR number:** #276 — https://github.com/michaelhazza/automation-v1/pull/276
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-agent-workspace-2026-05-09T01-52-09Z.md`
+**spec_deviations reviewed:** n/a (no `spec_deviations:` field in the Phase 2 handoff)
+
+**Doc-sync sweep verdicts (13 registered docs):**
+
+| Doc | Verdict | Notes |
+|---|---|---|
+| `architecture.md` | yes (Agent Workspace, Working time accounting, IEE session lifecycle) | Phase 2 already updated SSE topology + auth scheme; Phase 3 R1 B4 fixed migration numbers (0295/0296 → 0305/0306), table names (`agent_working_time_buckets` → `agent_working_time_rollups` + `agent_working_time_event_ledger`), and added the step-identity pairing rule. |
+| `docs/capabilities.md` | yes (Persistent Agent Workspace) | Added in Phase 2 (Chunk 13). No R1/R2 capability changes. |
+| `docs/integration-reference.md` | no — no integration behaviour change in this PR (no new scope, skill, status, write capability, OAuth provider, MCP preset, capability slug, or alias). Grep terms checked: `agent-workspace`, `agent_presence`, `working_time` — zero stale references. |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | no — no build-discipline / convention / agent-fleet / locked-rules change. Grep terms: `agent-workspace`, `defaultAgentTab`, `working_time`, `step_identity` — zero stale references. |
+| `CONTRIBUTING.md` | no — no lint-suppression / `// reason:` / contributor-convention change. |
+| `docs/frontend-design-principles.md` | no — the "Waiting on you" / "Waiting on system" distinction is a spec-pinned implementation detail, not a new design principle. The general pattern (operator-actionable vs system-actionable status copy) is implicit in the existing principle 5 (re-check operator load). |
+| `KNOWLEDGE.md` | yes (2 entries) | Two patterns appended: (a) paired-event accumulators need explicit stable identity; (b) permission-gated UI surfaces fail closed during async permission load. |
+| `docs/spec-context.md` | n/a (spec-review only) |
+| `docs/decisions/` | yes (ADR-0008 added in Phase 2 for SSE stream-token auth) | No new ADRs in R1/R2. |
+| `docs/context-packs/` | no — no `architecture.md` section anchor renamed; existing packs still resolve. |
+| `references/test-gate-policy.md` | no — no test-gate posture change. |
+| `references/spec-review-directional-signals.md` | no — no spec-reviewer drift. |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | no — no framework-level change in this PR (repo-specific feature work only). |
+
+**KNOWLEDGE.md entries added:** 2
+
+- `[2026-05-09] Pattern — Paired-event accumulators need explicit stable identity, never "latest prior in same scope"`
+- `[2026-05-09] Pattern — Permission-gated UI surfaces must fail closed during async permission load`
+
+**tasks/todo.md items removed:** 1 (AGW-DEF-3 — `users.default_agent_tab` read path closed by R1 B1 fix).
+
+**ready-to-merge label applied at:** 2026-05-09T02:45:11Z
+
+### chatgpt-pr-review summary
+
+**Mode:** manual. **Rounds:** 2. **Verdict:** APPROVED — operator finalised after Round 2.
+
+| Round | Verdict | Findings | Outcome |
+|---|---|---|---|
+| 1 | CHANGES_REQUESTED | 4 Blockers (B1..B4) + 3 Strong (S1..S3) | All 7 fixed in commit `6a105041`. Lint 0 errors, typecheck clean, pure-helper tests 12/12. |
+| 2 | APPROVED w/ minor follow-ups | 2 small follow-ups (R2-S1 fail-closed pre-fetch, R2-S2 strict pairing) + 1 polish (R2-Polish identity-language) | All 3 fixed in commit `3c4760ae`. Lint 0 errors, typecheck clean, pure-helper tests 15/15. |
+
+### Open issues remaining (from Phase 2; not addressed in Phase 3)
+
+These were carry-overs from Phase 2 that R1/R2 did not touch — they remain open as durable backlog:
+
+- **AGW-DEF-1, 2, 4, 5, 6** (5 spec-conformance directional gaps — non-architectural). In `tasks/todo.md`.
+- **AGW-ADV-2, AGW-ADV-3** (2 likely-hole adversarial findings — working-time split-brain on crash; unbounded pagination on Overview stub endpoints). NOT yet routed to `tasks/todo.md` — Phase 2 close did not write them. Recommend operator routing after merge.
+- **4 Strong carry-overs from pr-reviewer rounds 1/2** (S1 idempotency-UNIQUE follow-up migration; S2 permission-revocation lag on live SSE bounded by 120s TTL; S3 producer-wiring tests; S-NEW `finalStatus !== 'completed'` discriminator coarseness). NOT yet routed to `tasks/todo.md`.

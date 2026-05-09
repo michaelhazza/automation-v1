@@ -3578,11 +3578,6 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Gap: live data path missing.
   - Suggested approach: add `fanOut` call from `agentPresenceService.applyEventToPresence` (after upsert) and from `agentObservationService.append` (after insert), and from `agentWorkingTimeService.applyEvent` (after rollup write). Workspace fan-out (`fanOutToWorkspace`) needs `subaccountId` resolution at each call site.
 
-- [ ] **AGW-DEF-3 — `users.default_agent_tab` column added to schema/migration but never read.** `client/src/pages/build/AgentEditPage.tsx:80` hardcodes `'overview'` as the default `activeTab`. Spec §17 Open Q 2 (resolved): "v1 ships READ-ONLY: the column exists and the AgentEditPage reads it on mount." The column is dead code today.
-  - Spec section: §4 Phase 2, §17 Open Question 2 (resolved).
-  - Gap: write path deferred (correct), read path missing (wrong).
-  - Suggested approach: extend `/api/users/me` (or equivalent profile endpoint) to surface `defaultAgentTab`; client reads it via the existing user-context hook; fall back to `'overview'` when the field is null/missing. Single-line change in `AgentEditPage` `useState` initialiser once the data is in scope.
-
 - [ ] **AGW-DEF-4 — `accumulateWorkingTime` missing wait-state subtraction.** `server/services/agentWorkingTimeServicePure.ts:68-108` counts `step_started → step_completed` envelopes only. Spec §7.5 inclusion table requires SUBTRACTION of `external_call_started → external_call_completed`, `hitl_pause_started → hitl_pause_resolved`, `retry_backoff_started → retry_backoff_completed`, and `sub_agent_delegated → sub_agent_returned` as nested wait windows that close inside the parent step interval. JSDoc admits "simplified implementation". The reconciliation invariant in §11.6 (chart total = invoice total) holds for runs with no waits, but breaks the moment any real run waits on anything — invoice over-bills.
   - Spec section: §7.5 working-time accounting, §11.6 reconciliation invariant.
   - Gap: spec contract not delivered; reconciliation invariant fails on realistic runs.
