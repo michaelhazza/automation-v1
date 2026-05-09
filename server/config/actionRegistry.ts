@@ -1,6 +1,7 @@
 ﻿// @principal-context-import-only — reason: registry references canonicalDataService only in handler-classification documentation; future handlers that invoke it must pass fromOrgId(organisationId, subaccountId).
 import { z } from 'zod';
 import type { RuntimeCheckKind, RuntimeCheckBlastRadius } from '../../shared/types/runtimeCheck.js';
+import { SupportProposedActionsSchema } from '../../shared/types/supportProposedActions.js';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
 // Phase 1: TypeScript config object. Phase 2: promotes to DB table.
@@ -3496,12 +3497,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: z.object({
       ticketId: z.string().describe('Canonical ticket UUID'),
       body: z.string().min(1).describe('Reply body text'),
-      proposedActions: z.object({
-        setStatus: z.string().optional(),
-        setAssignee: z.string().nullable().optional(),
-        addTags: z.array(z.string()).optional(),
-        removeTags: z.array(z.string()).optional(),
-      }).optional().describe('Additional actions to propose alongside the reply'),
+      proposedActions: SupportProposedActionsSchema.optional().describe('Additional actions to propose alongside the reply'),
     }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed' as const, retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
