@@ -1,6 +1,6 @@
-**Status:** reviewing
+**Status:** reviewing — locked at this state pending OQ-1 (Foundry parity) + OQ-2 (Teamwork status inventory). chatgpt-spec-review closed `APPROVED — operator finalised after Round 2`. Spec MAY NOT move to `accepted` and Phase 2 plan generation MAY NOT begin until both OQs close.
 **Spec date:** 2026-05-09
-**Last updated:** 2026-05-09 (post chatgpt-spec-review Round 2 — 6 regression-pass findings closed: 1 high-severity blocker fixed [deletion-by-poll precondition tightened to full-reconciliation only], 5 polish tightenings [§14.2 propose_reply state-based wording, §5.5 supersession transaction order pinned, §18 test inventory updated, §18 access-controls rename, §17.2 capability-matrix `?`-row clarification]. Round 1 closed 8 findings — see commit `ff6e21b6`.)
+**Last updated:** 2026-05-09 (chatgpt-spec-review finalised after 2 rounds — 14 findings closed total: 5 high-severity blockers fixed [source_draft_id FK migration order, split author_id columns, manually_marked_sent state, deletion/redaction tombstone semantics, deletion-by-poll precondition], 1 user-facing rename ["Mark provider send as verified"], 8 medium/low-severity tightenings. Round logs: `ff6e21b6` (R1), `180d0347` (R2).)
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)

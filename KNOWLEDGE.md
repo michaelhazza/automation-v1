@@ -3227,3 +3227,72 @@ The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test fil
 **Apply to:** `.claude/agents/finalisation-coordinator.md` Step 12.3. Locked in by operator 2026-05-09.
 
 **Detection heuristic.** Any future Phase-3 merge that does NOT use `--admin` either: (a) skips the prep commit entirely (also valid — but loses the bundled `current-focus → NONE` state in the squash), OR (b) wastes a full CI run on a docs-only commit. If the playbook ever drops `--admin`, treat as a contract violation and surface to operator before merging.
+
+
+### [2026-05-09] Pattern — deferred-FK migration when two new tables reference each other (cross-cycle)
+
+**Date:** 2026-05-09
+**Source:** chatgpt-spec-review Round 1 finding F1 on `support-desk-canonical` spec. ChatGPT caught that `canonical_ticket_messages.source_draft_id` was declared as an inline FK to `canonical_ticket_drafts(id)`, but the schema chunks had `canonical_ticket_messages` (migration 0310) landing BEFORE `canonical_ticket_drafts` (migration 0311). The migration would have failed at apply time because the referenced table doesn't yet exist.
+
+When two new tables reference each other in either direction, you cannot satisfy both FKs at table-create time — at least one direction must be deferred to a later migration. Three valid strategies, in order of preference:
+
+1. **Order them so the cycle resolves.** If A.fk_b → B and B has no FK back to A, create B first. Always preferred when the cycle is one-way; the spec's chunk ordering should naturally land the producer table first.
+2. **Deferred FK via ALTER TABLE.** When the cycle is genuine (A → B and B → A), the second migration adds the FK constraint after the second table lands: `ALTER TABLE first_table ADD CONSTRAINT first_fk_x FOREIGN KEY (x) REFERENCES second_table(id);`. The first migration declares the column without the inline FK reference. The partial index (`WHERE x IS NOT NULL`) lands in the same later migration as the FK — both are only meaningful once the referenced table exists.
+3. **Drop the DB FK and enforce in service layer.** Last resort. Use only when the FK semantics are too weak for a real constraint (e.g. cross-tenant pointer where RLS would make the FK check fail anyway).
+
+**Pattern (mandatory shape).** Spec the migration ordering explicitly in the phase plan and again in the schema sections of each affected table. Make the deferred-FK pattern visible — name the migration that creates the column, AND the migration that adds the FK + partial index, in both schema sections. Do not rely on chunk ordering alone to communicate the deferral.
+
+**Detection heuristic.** When reviewing a spec's data-model section, grep for FKs whose target table is created in a later chunk than the source table. If any are found, the spec is broken — either reorder the chunks or document the deferred-FK pattern.
+
+**Applies to:** future spec authoring (`docs/spec-authoring-checklist.md` Section 6 phase sequencing — backward-dependency check should include "FKs to tables created later").
+
+
+### [2026-05-09] Pattern — polymorphic FK splitting in Postgres (no native support)
+
+**Date:** 2026-05-09
+**Source:** chatgpt-spec-review Round 1 finding F2 on `support-desk-canonical` spec. The first draft had `canonical_ticket_messages.author_id` as a single UUID column referencing `canonical_contacts.id` when `author_type='customer'` and `canonical_support_agents.id` when `author_type IN ('agent','bot')`. A single Postgres column cannot have conditional FKs to two different parent tables — the constraint syntax has no `WHEN <discriminator>` clause and there is no native polymorphic-association pattern.
+
+**Pattern (mandatory shape).** Split the polymorphic column into one nullable column per target table, plus a CHECK constraint enforcing exactly-one-non-null tied to the discriminator. Example:
+
+```sql
+author_type text NOT NULL CHECK (author_type IN ('customer','agent','bot','system')),
+author_contact_id uuid REFERENCES canonical_contacts(id),
+author_support_agent_id uuid REFERENCES canonical_support_agents(id),
+CONSTRAINT author_id_matches_type CHECK (
+  (author_type = 'customer' AND author_support_agent_id IS NULL)
+  OR (author_type IN ('agent','bot') AND author_contact_id IS NULL AND author_support_agent_id IS NOT NULL)
+  OR (author_type = 'system' AND author_contact_id IS NULL AND author_support_agent_id IS NULL)
+);
+```
+
+The `author_contact_id` column is allowed to be NULL even when `author_type='customer'` (e.g. customer email did not match a canonical contact at ingestion); the support-agent column is the only column that's NOT NULL for its discriminator.
+
+**Detection heuristic.** When reviewing a spec, grep for prose like "FK to X if Y, FK to Z if not" or column descriptions that reference multiple parent tables. If found, the column is impossible as written — split it.
+
+**Applies to:** future spec authoring. The spec-authoring checklist's "Existing primitives search" (Section 1) should add a sub-rule: "polymorphic FKs are not a primitive — split into typed nullable columns + CHECK constraint per discriminator."
+
+
+### [2026-05-09] Pattern — polling absence ≠ deletion; tombstoning requires either webhook or strict full-reconciliation
+
+**Date:** 2026-05-09
+**Source:** chatgpt-spec-review Round 2 finding F1 on `support-desk-canonical` spec. The first draft of the deletion logic in `canonical_tickets` set `provider_deleted=true` "when a poll cycle proves a previously-known ticket is no longer returned by the provider." With incremental polling, pagination, rate limits, partial page failure, cursor windows, inbox filters, or provider search semantics, "not returned" almost always means "not in this slice", NOT "deleted."
+
+A false tombstone is the worst-case correctness failure for a canonical-ingestion layer: it hides live tickets from the agent queue. The agent stops responding to them; the operator may not notice; the customer waits.
+
+**Pattern (mandatory shape).** Tombstone-by-poll requires ALL of the following preconditions to hold for the pass that issues the tombstone:
+
+1. Explicit **full-reconciliation pass** (a distinct cadence from the day-to-day incremental cycle — e.g. nightly per-inbox or operator-triggered).
+2. Every page of the relevant provider endpoint completed successfully (no partial pagination state).
+3. No `provider.poll_page_failed` was emitted during the pass for the relevant scope.
+4. No rate-limit truncation (`provider.rate_limited` did not interrupt the pass).
+5. The provider endpoint used has semantics where absence proves deletion (an unfiltered "all entities in this scope" endpoint, NOT a filtered or windowed search).
+
+**Incremental polls must NEVER tombstone.** A row missing from an incremental window is "not in this slice", not "deleted." Specs that conflate the two are unsafe.
+
+If any precondition fails, deletion is **webhook-only** for the affected scope until the next qualifying full-reconciliation pass succeeds. The webhook path is unconditional — provider deletion events are deterministic.
+
+**Detection heuristic.** When reviewing a spec that introduces tombstone columns (`*_deleted`, `deleted_at`, `tombstoned`), grep for "poll" within the same section. If polling can set the tombstone, the spec must enumerate the full-reconciliation precondition — otherwise it is unsafe. Same rule applies to "out of scope" / "removed from view" boolean columns where the source-of-truth is a polled provider.
+
+**Applies to:** future spec authoring. Any spec that mirrors provider entities and supports deletion must include this precondition in its data-model section. The spec-authoring checklist Section 10 (execution-safety contracts) should add a sub-rule for deletion-by-poll.
+
+

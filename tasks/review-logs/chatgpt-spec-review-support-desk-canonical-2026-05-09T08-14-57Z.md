@@ -3,9 +3,11 @@
 ## Session Info
 - Spec: docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md
 - Branch: claude/support-ticket-structure-xMcy8
-- PR: #277 — https://github.com/michaelhazza/2026-05-09-support-desk-canonical-spec
+- PR: #277 — https://github.com/michaelhazza/automation-v1/pull/277
 - Mode: manual
 - Started: 2026-05-09T08:14:57Z
+- Finalised: 2026-05-09T09:05:00Z
+- **Verdict:** APPROVED — operator finalised after Round 2. Spec stays at `Status: reviewing` per ChatGPT's recommendation: cannot move to `accepted` until OQ-1 (Foundry parity) + OQ-2 (Teamwork status inventory) close. Both are operator-owned and required before Phase 2 plan generation begins.
 
 ---
 
@@ -134,6 +136,73 @@ No new integrity issues introduced. Round 2 edits are internally consistent.
 
 ---
 
-## Round 3 — pending operator paste
+## Round 3 — 2026-05-09T09-00-00Z — finalisation pass
 
-(Operator: copy the updated spec into ChatGPT-web for one more pass, paste the response; or say "done" to finalise.)
+### ChatGPT Feedback (raw)
+
+> No further blockers. I'd finalise and move to handoff, with one caveat: the spec is still correctly marked reviewing until OQ-1 and OQ-2 are closed, because both are explicitly required before Phase 2 plan generation.
+>
+> Round 2 fixes landed cleanly: deletion-by-poll is now safe; support.propose_reply retry handling is now internally consistent; file inventory reflects new pure-test coverage; access control wording is cleaner; capability-matrix `?` rows are correctly framed.
+>
+> The only thing I would not forget in handoff is to make the acceptance condition crisp: proceed to handoff, but do not mark the spec accepted or start Phase 2 plan generation until OQ-1 Foundry parity and OQ-2 Teamwork status inventory are closed.
+>
+> That is not another spec finding. It is already captured in §22. My recommendation: done.
+
+### Operator decision
+
+> "Lock the spec after this and move forward."
+
+Round 3 closes with no spec edits — ChatGPT raised zero new findings. The session moves to finalisation per the operator's "done" signal.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| (none — regression-pass clean) | n/a | n/a | n/a | n/a | Round 3 verdict was APPROVED with no remediable findings. ChatGPT's only "caveat" — that the spec stays at `Status: reviewing` until OQ-1 + OQ-2 close — is already captured in §22 and the spec frontmatter. The operator-owned closure is part of Phase 1 → Phase 2 handoff, not a spec edit. |
+
+---
+
+## Final Summary
+
+- **Rounds:** 3 (R1: 8 findings closed, R2: 6 findings closed, R3: 0 findings, finalisation)
+- **Auto-accepted (technical):** 8 applied | 0 rejected | 0 deferred
+- **User-decided (technical-escalated + user-facing):** 5 applied | 0 rejected | 0 deferred
+- **Integrity-check fixes:** 1 applied (R1 stale `author_id` reference at §5.1)
+- **Index write failures:** 0 (clean)
+- **Deferred to `tasks/todo.md` § Spec Review deferred items / support-desk-canonical:** none — all findings closed in-round
+- **Implementation readiness checklist:**
+  - All inputs defined: yes (every contract in §11 names producer + consumer + example)
+  - All outputs defined: yes (every state machine has explicit terminal events; observability codes mapped to UI surfaces)
+  - Failure modes covered: yes (§14 idempotency / retry / concurrency / terminal events; deletion-by-poll precondition)
+  - Ordering guarantees explicit: yes (§5.2.A thread ordering rule; §8 dispatch state machine; §5.5 supersession transaction order; §3 chunk ordering)
+  - No unresolved forward references: yes (§16 dependency graph forward-only; integrity check passes)
+  - **OQ-1 + OQ-2 are the explicit acceptance gate** — spec stays at `Status: reviewing` until both close. Documented in §22 + spec frontmatter + handoff (per Phase 1 Step 9).
+- **PR:** #277 — https://github.com/michaelhazza/automation-v1/pull/277
+
+### Doc Sync Sweep
+
+Scope: this is a SPEC-review session. The change-set is a new spec doc + spec rounds. The spec proposes future code changes (Phase 2 chunks C1–C15); reference docs that describe IMPLEMENTED state are updated when those chunks land, not at spec authoring. Investigation procedure run per `docs/doc-sync.md`:
+
+- **architecture.md updated:** n/a — spec proposes future architecture changes (Phase 2 C15). No code changes in this session; reference doc describes implemented state. Verdict deferred to Phase 2 finalisation.
+- **capabilities.md updated:** n/a — Support Desk capability lands when Phase 2 C15 ships. No add/rename in this session.
+- **integration-reference.md updated:** n/a — `teamworkAdapter` extensions land in Phase 2 chunks C5–C7. No integration changes in this session.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — checked grep terms `support-desk-canonical`, `canonical_tickets`, `support.draft.approve`, `support.propose_reply`, polymorphic-FK, deferred-FK; zero stale references. Build discipline / agent fleet / RLS rules unchanged.
+- **CONTRIBUTING.md updated:** n/a — no lint policy or comment-format change.
+- **frontend-design-principles.md updated:** no — checked grep terms `support`, `tickets list`, `draft review`, `inbox config`; zero stale references. Mockups (frozen at `0a768abd`) applied existing principles; no new pattern introduced.
+- **KNOWLEDGE.md updated:** yes (3 entries added) — `[2026-05-09] Pattern — deferred-FK migration when two new tables reference each other (cross-cycle)` + `[2026-05-09] Pattern — polymorphic FK splitting in Postgres (no native support)` + `[2026-05-09] Pattern — polling absence ≠ deletion; tombstoning requires either webhook or strict full-reconciliation`. All three are reusable for future spec authoring; the "polling absence" pattern in particular is high-stakes (false tombstones hide live data from agents).
+- **spec-context.md updated:** yes — bumped `last_reviewed_at` from 2026-05-05 to 2026-05-09. Framing applies as-is (pre-production, static_gates_primary, runtime_tests: pure_function_only, commit_and_revert); no `accepted_primitives` or `convention_rejections` change. The spec proposes nothing in `none_for_now` or `defer_until_*` categories. Bump is the freshness confirmation.
+- **docs/decisions/ updated:** n/a — ADR `0009-support-desk-canonical-not-conversations.md` is itemised in §18 file inventory and is created in Phase 2 C15 alongside the architecture.md update. Not a Phase 1 artefact.
+- **docs/context-packs/ updated:** n/a — no architecture.md anchor changes.
+- **references/test-gate-policy.md updated:** n/a — no test-gate posture change.
+- **references/spec-review-directional-signals.md updated:** no — checked grep terms `polymorphic FK`, `deferred FK`, `tombstone`, `full reconciliation`, `manually_marked_sent`; zero stale references. The patterns from this session are routed to KNOWLEDGE.md per the doc's primary purpose (corrections + reusable patterns), not to the directional-signals classifier (which is for `spec-reviewer` Codex-loop signals).
+- **`.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` updated:** n/a — no framework-level change.
+
+### Consistency Warnings
+
+None across rounds. All findings classified consistently (same finding-type triaged the same way each round). No mid-session reversals.
+
+### Recommendation
+
+**Spec is implementation-ready except for OQ-1 + OQ-2 closure.** Phase 1 handoff captures the gate; Phase 2 plan generation must NOT begin until both close. The operator owns OQ-1 (Foundry schema parity verification — side-by-side comparison against Foundry's loader) and OQ-2 (Teamwork status vocabulary inventory — full enumeration locked into §11.2 of the spec).
+
+OQ-3 (Teamwork native action-idempotency) and OQ-4 (Teamwork attachment auth model) close inside Phase 2 chunk C7 per spec §22 — they are not Phase 1 → Phase 2 gates.
