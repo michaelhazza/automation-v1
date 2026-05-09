@@ -31,6 +31,13 @@ import { TestRunnerCard } from './components/TestRunnerCard';
 type TabKey = 'overview' | 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
 
 const TAB_ORDER: TabKey[] = ['overview', 'configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
+
+// Permission gates per spec §4.1 / plan Chunk 6 — Overview tab visibility is
+// gated on `org.agents.view`. Other tabs were already gated by the page's
+// outer route guards.
+const TAB_PERMISSION_KEYS: Partial<Record<TabKey, string>> = {
+  overview: 'org.agents.view',
+};
 // Note: 'budget' excluded from WRITE_ORDER - Phase 1 budget schema gap (see migration-gaps.md)
 // Note: 'schedule' excluded - org-level trigger editing not in Phase 1 scope (see spec §4.2 Q5)
 
@@ -77,11 +84,17 @@ export default function AgentEditPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const activeTab = (searchParams.get('tab') ?? 'overview') as TabKey;
 
   const [data, setData] = useState<AgentFull | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // User preference + permission state — populated on mount, used to compute
+  // visible tabs and the default-landing tab. Both fields default to a safe
+  // pre-fetch state (`null` / empty set); the resolution effect below redirects
+  // once both have loaded.
+  const [defaultAgentTab, setDefaultAgentTab] = useState<TabKey | null>(null);
+  const [orgPerms, setOrgPerms] = useState<Set<string> | null>(null);
 
   const [pendingPatches, setPendingPatches] = useState<TabPatchMap>({});
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -92,6 +105,60 @@ export default function AgentEditPage() {
 
   const userRole = getUserRole();
   const isOrgAdmin = userRole === 'admin' || userRole === 'system_admin';
+
+  // Visible tab set — Overview is hidden for users without `org.agents.view`
+  // (spec §4.1). System / org admins always see all tabs.
+  const visibleTabs = useMemo<TabKey[]>(() => {
+    if (orgPerms === null) return TAB_ORDER; // pre-fetch: render all to avoid flicker; redirect runs once perms load
+    return TAB_ORDER.filter((tab) => {
+      const required = TAB_PERMISSION_KEYS[tab];
+      if (!required) return true;
+      if (userRole === 'system_admin' || userRole === 'admin') return true;
+      return orgPerms.has(required);
+    });
+  }, [orgPerms, userRole]);
+
+  // Resolve activeTab from URL → user preference → first visible tab.
+  // Once perms have loaded, an invalid / hidden `?tab=` is replaced with the
+  // resolved tab so the user is never stranded on a tab they cannot view.
+  const urlTab = searchParams.get('tab') as TabKey | null;
+  const activeTab = useMemo<TabKey>(() => {
+    if (urlTab && visibleTabs.includes(urlTab)) return urlTab;
+    if (defaultAgentTab && visibleTabs.includes(defaultAgentTab)) return defaultAgentTab;
+    return visibleTabs[0] ?? 'configure';
+  }, [urlTab, visibleTabs, defaultAgentTab]);
+
+  useEffect(() => {
+    if (orgPerms === null) return; // wait for perms before redirecting
+    if (urlTab !== activeTab) {
+      setSearchParams({ tab: activeTab }, { replace: true });
+    }
+  }, [orgPerms, urlTab, activeTab, setSearchParams]);
+
+  // Fetch the user's default-landing-tab preference and org permissions
+  // in parallel. Failures are non-fatal — fall back to defaults.
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      api.get<{ defaultAgentTab?: string | null }>('/api/users/me')
+        .then((r) => {
+          if (cancelled) return;
+          const t = r.data?.defaultAgentTab as TabKey | undefined;
+          if (t && TAB_ORDER.includes(t)) setDefaultAgentTab(t);
+        })
+        .catch(() => { /* non-fatal — fall back to first visible tab */ }),
+      api.get<{ permissions: string[] }>('/api/my-permissions')
+        .then((r) => {
+          if (cancelled) return;
+          setOrgPerms(new Set(r.data?.permissions ?? []));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setOrgPerms(new Set()); // treat as no permissions; viewer-only tabs hidden
+        }),
+    ]);
+    return () => { cancelled = true; };
+  }, []);
 
   const loadAgent = useCallback(async () => {
     if (!id) return;
@@ -263,7 +330,7 @@ export default function AgentEditPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 px-6 pt-4 border-b border-slate-100 overflow-x-auto">
-        {TAB_ORDER.map(tab => (
+        {visibleTabs.map(tab => (
           <button
             key={tab}
             onClick={() => setSearchParams({ tab })}

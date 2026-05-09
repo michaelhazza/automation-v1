@@ -200,11 +200,12 @@ export default function HomePage({ user }: { user: User }) {
 
   // ── Mount: fire all fetches independently ─────────────────────────────────
   useEffect(() => {
-    // Org subaccount ID — for the HomeActiveAgentsWidget presence stream
-    api.get<Array<{ id: string; isOrgSubaccount: boolean }>>('/api/subaccounts')
+    // Workspace subaccount ID — single canonical fetch from the user profile,
+    // sourced from `orgSubaccountService.getOrgSubaccount` server-side. Avoids
+    // re-fetching all subaccounts and filtering ad-hoc by `isOrgSubaccount`.
+    api.get<{ workspaceSubaccountId: string | null }>('/api/users/me')
       .then((r) => {
-        const orgSub = r.data.find((s) => s.isOrgSubaccount);
-        if (orgSub) setOrgSubaccountId(orgSub.id);
+        if (r.data?.workspaceSubaccountId) setOrgSubaccountId(r.data.workspaceSubaccountId);
       })
       .catch(() => { /* non-fatal — widget stays hidden */ });
 

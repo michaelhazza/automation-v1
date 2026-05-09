@@ -96,4 +96,45 @@ describe('accumulateWorkingTime', () => {
     expect(result.runCount).toBe(2);
     expect(result.successfulRuns).toBe(2);
   });
+
+  it('pairs interleaved step starts/ends in the same run by stepId', () => {
+    // Two steps overlap inside one run. Without stepId the helper would
+    // mis-pair the inner end to the outer start (or vice-versa); with stepId
+    // each pair resolves correctly.
+    const events = [
+      { runId: 'run1', eventType: 'step_started',   stepId: 'A', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_started',   stepId: 'B', eventTimestamp: '2026-05-08T10:00:10.000Z' },
+      { runId: 'run1', eventType: 'step_completed', stepId: 'A', eventTimestamp: '2026-05-08T10:00:30.000Z' }, // 30s
+      { runId: 'run1', eventType: 'step_completed', stepId: 'B', eventTimestamp: '2026-05-08T10:00:50.000Z' }, // 40s
+    ];
+    const result = accumulateWorkingTime(events);
+    // 30 + 40 = 70 seconds. (Without stepId pairing the helper would have
+    // collapsed both ends to the latest start and produced a different total.)
+    expect(result.workingTimeSeconds).toBe(70);
+    expect(result.runCount).toBe(1);
+  });
+
+  it('handles a retried step (same stepId restarted) — last start wins', () => {
+    // Producer retries step A: re-emits step_started for the same stepId
+    // before the original completed. The end pairs to the most recent open
+    // start for that stepId, never to the abandoned earlier start.
+    const events = [
+      { runId: 'run1', eventType: 'step_started',   stepId: 'A', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_started',   stepId: 'A', eventTimestamp: '2026-05-08T10:00:20.000Z' }, // retry — overwrites
+      { runId: 'run1', eventType: 'step_completed', stepId: 'A', eventTimestamp: '2026-05-08T10:00:30.000Z' }, // 10s, not 30s
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(10);
+  });
+
+  it('falls back to runId pairing when stepId is missing on legacy events', () => {
+    // No stepId on either side — fallback path. Behaves identically to the
+    // pre-stepId implementation for backwards compatibility with fixtures.
+    const events = [
+      { runId: 'run1', eventType: 'step_started',   eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_completed', eventTimestamp: '2026-05-08T10:00:30.000Z' },
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(30);
+  });
 });

@@ -122,21 +122,91 @@ export async function applyEvent(
     return;
   }
 
-  // 3. step_completed — retrieve the matching step_started from the events table
+  // 3. step_completed — pair to the matching step_started by stable step
+  //    identity (spec §7.5). Pairing rule:
+  //      a) If `payload.stepId` is present, find the start with the same
+  //         `runId` AND matching `payload->>'stepId'`. This is the canonical
+  //         path — concurrent / nested / retried steps in the same run pair
+  //         correctly because each carries its own id.
+  //      b) Workflow-engine steps may use `(taskId, taskSequence)` instead;
+  //         when both are present, find the start with the matching pair.
+  //      c) Fallback: latest prior `step_started` in the same run by
+  //         sequenceNumber. Used only for legacy events emitted before the
+  //         producer wired a stepId — the writer logs a one-line warning so
+  //         operators can detect drift.
+  //
+  //    The fallback never pairs across runs (the runId scope is enforced)
+  //    so the worst case is a single mis-pair within one run rather than
+  //    cross-tenant or cross-run leakage.
   if (eventTypeStr === 'step_completed') {
-    const startRows = await db
-      .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
-      .from(agentExecutionEvents)
-      .where(
-        and(
-          eq(agentExecutionEvents.runId, event.runId),
-          eq(agentExecutionEvents.organisationId, organisationId),
-          eq(agentExecutionEvents.eventType, 'step_started'),
-          lt(agentExecutionEvents.sequenceNumber, event.sequenceNumber),
-        ),
-      )
-      .orderBy(desc(agentExecutionEvents.sequenceNumber))
-      .limit(1);
+    const completedPayload = (event.payload ?? {}) as { stepId?: string | null };
+    const stepId = typeof completedPayload.stepId === 'string' && completedPayload.stepId.length > 0
+      ? completedPayload.stepId
+      : null;
+    const completedTaskId = (event as { taskId?: string | null }).taskId ?? null;
+    const completedTaskSequence = (event as { taskSequence?: number | null }).taskSequence ?? null;
+
+    let startRows: Array<{ eventTimestamp: Date | string }> = [];
+
+    if (stepId) {
+      // Path (a): pair by explicit stepId.
+      startRows = await db
+        .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
+        .from(agentExecutionEvents)
+        .where(
+          and(
+            eq(agentExecutionEvents.runId, event.runId),
+            eq(agentExecutionEvents.organisationId, organisationId),
+            eq(agentExecutionEvents.eventType, 'step_started'),
+            lt(agentExecutionEvents.sequenceNumber, event.sequenceNumber),
+            sql`${agentExecutionEvents.payload}->>'stepId' = ${stepId}`,
+          ),
+        )
+        .orderBy(desc(agentExecutionEvents.sequenceNumber))
+        .limit(1);
+    }
+
+    if (startRows.length === 0 && completedTaskId && completedTaskSequence !== null) {
+      // Path (b): pair by workflow `(taskId, taskSequence)`.
+      startRows = await db
+        .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
+        .from(agentExecutionEvents)
+        .where(
+          and(
+            eq(agentExecutionEvents.runId, event.runId),
+            eq(agentExecutionEvents.organisationId, organisationId),
+            eq(agentExecutionEvents.eventType, 'step_started'),
+            lt(agentExecutionEvents.sequenceNumber, event.sequenceNumber),
+            eq(agentExecutionEvents.taskId, completedTaskId),
+            eq(agentExecutionEvents.taskSequence, completedTaskSequence),
+          ),
+        )
+        .orderBy(desc(agentExecutionEvents.sequenceNumber))
+        .limit(1);
+    }
+
+    if (startRows.length === 0) {
+      // Path (c): legacy fallback — latest prior step_started in same run.
+      logger.warn('working_time.step_completed_without_step_id', {
+        runId: event.runId,
+        eventId: event.id,
+        hasStepId: stepId !== null,
+        hasTaskKey: completedTaskId !== null && completedTaskSequence !== null,
+      });
+      startRows = await db
+        .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
+        .from(agentExecutionEvents)
+        .where(
+          and(
+            eq(agentExecutionEvents.runId, event.runId),
+            eq(agentExecutionEvents.organisationId, organisationId),
+            eq(agentExecutionEvents.eventType, 'step_started'),
+            lt(agentExecutionEvents.sequenceNumber, event.sequenceNumber),
+          ),
+        )
+        .orderBy(desc(agentExecutionEvents.sequenceNumber))
+        .limit(1);
+    }
 
     if (startRows.length === 0) {
       logger.warn('working_time.step_completed_without_start', { runId: event.runId, eventId: event.id });

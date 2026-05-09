@@ -96,6 +96,13 @@ export interface OverviewPayload {
     captionAverageRunDurationSeconds: number;
   };
   activityFeed: ActivityFeedRow[];
+  /**
+   * True if this agent has at least one run with `status = 'completed'`.
+   * Drives the first-run vs live-presence branch on AgentOverviewTab — empty
+   * observations / activity feed alone is not enough to declare first-run
+   * (an agent mid-run has neither but is past first-run).
+   */
+  hasCompletedRuns: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +415,24 @@ export async function buildOverviewPayload(
 
   const mostRecentRunId = recentRunRows[0]?.id ?? null;
 
+  // Has-completed-runs flag — drives the first-run vs live-presence branch on
+  // AgentOverviewTab. "First run" means no completed runs yet, NOT just empty
+  // observations / activity feed (an agent mid-run has neither but is not in
+  // first-run state). Spec §13 / brief contract.
+  const completedRunRows = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.agentId, agentId),
+        eq(agentRuns.organisationId, organisationId),
+        eq(agentRuns.status, 'completed'),
+      ),
+    )
+    .limit(1);
+
+  const hasCompletedRuns = completedRunRows.length > 0;
+
   // Knowledge in use (retrieval.summary events from most-recent run)
   let knowledgeInUse: KnowledgeInUseEntry[] = [];
   if (mostRecentRunId) {
@@ -527,5 +552,6 @@ export async function buildOverviewPayload(
     connectionsHealth: [],
     workingTime,
     activityFeed,
+    hasCompletedRuns,
   };
 }

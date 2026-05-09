@@ -3912,7 +3912,7 @@ The counter is process-local — multi-instance deployments under-count globally
 <a id="agent-workspace"></a>
 ## Agent Workspace
 
-Persistent Embodiment Layer — surfaces an agent's ongoing state (presence, working time, observations, active goals, files, knowledge in use) as a first-class tab on the agent detail page. Spec: `tasks/builds/agent-workspace/spec.md`. Migrations 0295–0296.
+Persistent Embodiment Layer — surfaces an agent's ongoing state (presence, working time, observations, active goals, files, knowledge in use) as a first-class tab on the agent detail page. Spec: `tasks/builds/agent-workspace/spec.md`. Migrations 0305 (`agent_workspace_presence_and_sessions`) and 0306 (`agent_default_landing_tab`) — renumbered from the original 0295/0296 plan after PR #275 (Trust & Verification Layer) absorbed 0295–0304.
 
 ### Overview tab
 
@@ -3942,12 +3942,13 @@ Service: `server/services/agentWorkingTimeService.ts` (tenant-aware) + `server/s
 
 - Uses `process.hrtime.bigint()` for monotonic elapsed measurement — NOT `Date.now()`, which is subject to wall-clock drift and NTP adjustments.
 - Intervals are UTC half-open `[start, end)` so midnight crossings are handled by splitting into two buckets rather than spanning the boundary. Double-counting at midnight is prevented by the half-open semantics.
-- Per-run bucket row in `agent_working_time_buckets` (migration 0305).
+- Per-day rollup row in `agent_working_time_rollups` (migration 0305) — one row per `(organisation_id, agent_id, bucket_date)` accumulating `working_time_seconds`, `successful_runs`, `failed_runs`, `partial_runs`, `total_run_count`. Idempotency is enforced by `agent_working_time_event_ledger` (migration 0305) — every applied event is recorded once; replays are no-ops.
+- Step pairing keyed by stable step identity. `step_started` and `step_completed` events carry a shared `payload.stepId` (or workflow `(taskId, taskSequence)` when present) — the writer pairs ends to starts by that identity, never by "latest prior start in same run". Concurrent or retried steps in the same run pair correctly because each carries its own id.
 - Monthly compact job (`server/jobs/workingTimeRollupCompactJob.ts`): keeps per-day rows for 1 year, then collapses to monthly resolution.
 
 ### IEE session lifecycle
 
-Service: `server/services/ieeSessionService.ts` (tenant-aware) + `server/services/ieeSessionServicePure.ts` (pure helpers). Manages `iee_sessions` rows (migration 0305) — distinct from the legacy `ieeRuns` table in the IEE section above.
+Service: `server/services/ieeSessionService.ts` (tenant-aware) + `server/services/ieeSessionServicePure.ts` (pure helpers). Manages `iee_sessions` rows (migration 0305 — `agent_workspace_presence_and_sessions`) — distinct from the legacy `ieeRuns` table in the IEE section above.
 
 Three lifecycle methods:
 

@@ -52,22 +52,50 @@ export interface WorkingTimeAccumulation {
   partialRuns: number;
 }
 
-/** Minimal event shape for working-time accumulation */
+/** Minimal event shape for working-time accumulation. */
 interface WtEvent {
   runId: string | null;
   eventType: string;
   eventTimestamp: string;
+  /**
+   * Stable step identity — required on `step_started` / `step_completed` so
+   * starts and ends pair correctly under nesting, retries, or interleaved
+   * steps in the same run. Producers populate from `payload.stepId`; for
+   * Workflow-engine steps this is `${taskId}:${taskSequence}`.
+   *
+   * Backwards-compatible fallback: when `stepId` is missing on both ends,
+   * pair by `runId` alone. The fallback opens at most ONE step per run and
+   * never pairs an end to an unrelated start, so the worst case is a
+   * dropped pair (under-count) rather than a mis-paired interval.
+   */
+  stepId?: string | null;
 }
 
 /**
  * Accumulates working time from events.
- * Counts step_started/step_completed pairs; subtracts wait states.
- * This is a simplified implementation — the full production version
- * in agentWorkingTimeService.ts handles nested subtraction of wait windows.
+ *
+ * Pairing rule (spec §7.5):
+ *   1. If both the `step_started` and the matching `step_completed` carry a
+ *      non-empty `stepId`, pair on `(runId, stepId)`. This is the canonical
+ *      path — concurrent / nested / retried steps in the same run pair
+ *      correctly because each carries its own id.
+ *   2. If `stepId` is missing on either side, fall back to `(runId)` — a
+ *      single open slot per run. Multiple concurrent step_started events on
+ *      the same run with no stepId are NOT supported (only the most recent
+ *      open is tracked); the matching end pairs to it. Producers should
+ *      always emit stepId; the fallback exists for legacy event fixtures.
+ *
+ * The fallback never mis-pairs across runs or step ids; the worst case is a
+ * dropped pair (under-count) rather than mis-attribution.
+ *
+ * Wait-state subtraction (HITL pause, external call, retry backoff,
+ * sub-agent delegation per §7.5) is NOT applied here — this helper is the
+ * step-envelope accumulator only. The full production flow in
+ * `agentWorkingTimeService.ts` composes this with the wait-state ledger.
  */
 export function accumulateWorkingTime(events: WtEvent[]): WorkingTimeAccumulation {
-  // Track the most recent open step interval per run (one slot per run — simplified implementation)
-  const openSteps = new Map<string, number>(); // key: runId, value: startMs
+  const openByStepId = new Map<string, number>();   // key: `${runId}::${stepId}`
+  const openByRunId = new Map<string, number>();    // fallback: runId only
   let totalMs = 0;
   const runIds = new Set<string>();
   const completedRuns = new Set<string>();
@@ -79,15 +107,26 @@ export function accumulateWorkingTime(events: WtEvent[]): WorkingTimeAccumulatio
     runIds.add(event.runId);
 
     if (event.eventType === 'step_started') {
-      const key = event.runId;
-      openSteps.set(key, new Date(event.eventTimestamp).getTime());
+      const startMs = new Date(event.eventTimestamp).getTime();
+      if (event.stepId) {
+        openByStepId.set(`${event.runId}::${event.stepId}`, startMs);
+      } else {
+        openByRunId.set(event.runId, startMs);
+      }
     } else if (event.eventType === 'step_completed') {
-      const key = event.runId;
-      const startMs = openSteps.get(key);
+      let startMs: number | undefined;
+      if (event.stepId) {
+        const k = `${event.runId}::${event.stepId}`;
+        startMs = openByStepId.get(k);
+        if (startMs !== undefined) openByStepId.delete(k);
+      }
+      if (startMs === undefined) {
+        startMs = openByRunId.get(event.runId);
+        if (startMs !== undefined) openByRunId.delete(event.runId);
+      }
       if (startMs !== undefined) {
         const endMs = new Date(event.eventTimestamp).getTime();
         totalMs += Math.max(0, endMs - startMs);
-        openSteps.delete(key);
       }
     } else if (event.eventType === 'run_completed') {
       completedRuns.add(event.runId);

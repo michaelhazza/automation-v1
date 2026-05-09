@@ -26,8 +26,10 @@ export default function AgentOverviewTab({ agentId }: Props) {
     return <div className="py-8 text-center text-red-500 text-sm">Failed to load overview.</div>;
   }
 
-  const isFirstRun =
-    data.recentObservations.length === 0 && data.activityFeed.length === 0;
+  // First-run = no completed runs yet (server-authoritative). An agent with a
+  // run in progress but no observations / activity yet is NOT first-run — the
+  // live presence surface must render so the operator can watch the active run.
+  const isFirstRun = !data.hasCompletedRuns;
 
   if (isFirstRun) {
     return (

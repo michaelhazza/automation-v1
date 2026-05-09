@@ -34,6 +34,8 @@ export interface AgentOverviewData {
   connectionsHealth: unknown[];
   workingTime: { range: string; buckets: Array<{ date: string; seconds: number }>; captionTotalSeconds: number; captionRunsCount: number; captionSuccessRate: number; captionAverageRunDurationSeconds: number; };
   activityFeed: Array<{ eventId: string; eventType: string; eventTimestamp: string; runId: string; }>;
+  /** True if the agent has at least one completed run. Drives the first-run branch. */
+  hasCompletedRuns: boolean;
 }
 
 export function useAgentOverview(agentId: string): {

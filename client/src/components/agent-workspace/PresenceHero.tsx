@@ -4,8 +4,11 @@ import type { AgentPresenceState } from '../../../../shared/types/agentPresence'
 const STATE_LABELS: Record<AgentPresenceState, string> = {
   idle: 'Idle',
   running: 'Running',
-  waiting_on_human: 'Waiting',
-  waiting_on_dependency: 'Waiting',
+  // Load-bearing distinction (spec §13 / brief): "Waiting on you" requires
+  // operator action; "Waiting on system" is not actionable. Home ordering and
+  // the operator workflow depend on this split.
+  waiting_on_human: 'Waiting on you',
+  waiting_on_dependency: 'Waiting on system',
   scheduled: 'Scheduled',
   degraded: 'Degraded',
   failed: 'Failed',
@@ -63,10 +66,13 @@ export default function PresenceHero({ presence, agentId: _agentId }: Props) {
   return (
     <div className="bg-white rounded-lg border border-slate-100 p-4">
       <div className="flex items-center gap-3">
-        {/* Fixed-width pill — same width for all 7 states per §13.8 */}
+        {/* Fixed-width pill — same width for all 7 states per §13.8.
+            Width sized to fit the longest label ("Waiting on system") with
+            comfortable inner padding; `whitespace-nowrap` prevents wrap if
+            the user zooms text size up. */}
         <span
           aria-live="polite"
-          className={`inline-flex items-center justify-center w-28 px-2 py-0.5 rounded-full text-xs font-medium ${STATE_COLORS[state]}`}
+          className={`inline-flex items-center justify-center w-36 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STATE_COLORS[state]}`}
         >
           {STATE_LABELS[state]}
         </span>
