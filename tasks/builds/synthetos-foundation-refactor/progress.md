@@ -32,10 +32,10 @@
 - pr-reviewer (re-review per §8.5): APPROVED (round 4). Log: tasks/review-logs/pr-review-log-synthetos-foundation-refactor-2026-05-10T00-30-00Z.md. 2 strong (SFR-S7, SFR-S8) + 2 nits (SFR-N8, SFR-N9) deferred to tasks/todo.md.
 
 ## Doc Sync gate
-- architecture.md updated: pending
-- capabilities.md updated: pending
-- integration-reference.md updated: pending
-- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: pending
-- frontend-design-principles.md updated: pending
-- KNOWLEDGE.md updated: pending
-- spec-context.md updated: n/a
+- architecture.md updated: yes (new "SynthetOS Phase 1 Foundation Primitives" section appended — schema additions, new shared types, new services table, new routes, new permission, stable foundation log codes registry, CI gate, current 11-tab Subaccount Agent Edit set, glossary pointer)
+- capabilities.md updated: n/a — the foundation refactor ships internal infrastructure (controllerStyle axis, risk tier classification, credential broker facade, run trace virtual view, policy envelope snapshot, naming pass) per spec §2 NG6 ("ships only the foundation refactor and the minimum UI to expose it"). No product / agency capability / skill / integration is added, removed, or renamed.
+- integration-reference.md updated: n/a — the credential broker is a structural facade over `connectionTokenService` + `integrationConnectionService` per INV-11; it does not change integration behaviour, scopes, OAuth providers, MCP presets, or capability slugs. No `last_verified` bump warranted.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no changes to build discipline, RLS rules, schema invariants, gate protocol, migration rules, fleet, review pipeline, or §8 development discipline. Foundation log codes use the existing structured-logger pattern.
+- frontend-design-principles.md updated: n/a — UI tabs (RunTraceHeadline, ApprovalRiskContext, CredentialsAuditLog, four agent-config tabs) follow existing patterns; no new UI rule, hard rule, or worked example introduced.
+- KNOWLEDGE.md updated: yes (5 patterns appended — first-resolver-wins UPDATE org-predicate sourcing; replace_all=true silently missing different-indentation duplicates; pagination correctness requires SQL filter pushdown not in-memory after LIMIT; subaccount-scoped fallback UPDATE needs subaccountId predicate not just organisationId; stable structured-log codes must use logger.info not console.log)
+- spec-context.md updated: n/a — feature-pipeline build, not a spec-review session.
