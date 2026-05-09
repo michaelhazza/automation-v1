@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-09
-last_merge_ready_pr: #276
-last_merge_ready_slug: agent-workspace
-last_merge_ready_branch: claude/add-agent-cloud-compute-Kb4ii
-last_merged_pr: #275
-last_merged_slug: trust-verification-layer
-last_merged_branch: claude/synthetos-work-primitive-improvements-P17SD
-last_merged_at: 2026-05-09T09:45:00Z
-last_merged_commit: d3709abb
+last_merged_pr: #276
+last_merged_slug: agent-workspace
+last_merged_branch: claude/add-agent-cloud-compute-Kb4ii
+last_merged_at: 2026-05-09T03:26:41Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — Agent Workspace (PR #276 — `agent-workspace`) finalised 2026-05-09. Phase 3 ran `chatgpt-pr-review` (2 rounds, APPROVED) and closed 7 findings in Round 1 + 3 small follow-ups in Round 2 (commits `6a105041`, `3c4760ae`); doc-sync sweep verified all 13 registered docs (`architecture.md` migration / table-name corrections, `KNOWLEDGE.md` +2 patterns); 1 todo item closed (AGW-DEF-3). Handoff: `tasks/builds/agent-workspace/handoff.md § Phase 3 (FINALISATION) — complete`. **Next:** finalisation-coordinator runs Step 11 (CI monitor + auto-fix loop) → Step 12 (auto-merge `--squash --delete-branch`).
+**Status:** **NONE** — no active build.
+
+**Just merged:** PR #276 — `agent-workspace` (squash-commit `pending-squash`, 2026-05-09T03:26:41Z). Persistent Agent Workspace + cloud-compute lifecycle. Spec: `tasks/builds/agent-workspace/spec.md` (1599 lines, LOCKED, 2 ChatGPT-spec-review rounds). Phase 3 handoff: `tasks/builds/agent-workspace/handoff.md`. Pipeline: 13 of 14 chunks built (Chunk 12 deferred per spec — Phase-1 contract lock) → branch-level review pass (spec-conformance CONFORMANT_AFTER_FIXES with 6 directional gaps deferred AGW-DEF-1..6, adversarial-reviewer 1 confirmed AGW-ADV-1 closed + 2 likely AGW-ADV-2/3 deferred, pr-reviewer 3 rounds APPROVED, dual-reviewer Codex APPROVED with 3 fixes, doc-sync sweep complete with ADR-0008 added for SSE stream-token decision) → chatgpt-pr-review 2 rounds APPROVED (Round 1 closed 4 Blockers + 3 Strong in `6a105041`; Round 2 closed 2 follow-ups + 1 polish in `3c4760ae`) → 3 CI auto-fix iterations (`4768ad23` 4 blocking gates fixed + preventive rules locked; `d0d79d14` chain FK + .js-extension imports; `5ec967b8` all 6 agent_runs FKs in migration 0305). CI ALL GREEN at merge time. KNOWLEDGE.md +5 patterns (paired-event accumulators need stable identity; permission-gated UI fails closed during async load; finalisation-coordinator commits Phase 3 BEFORE label; 4 CI-only gates G1 misses; .js extension required on relative imports inside `__tests__/`).
 
 **Just merged:** PR #275 — `trust-verification-layer` (squash-commit `d3709abb`, 2026-05-09T09:45:00Z). Three-stage Trust & Verification Layer (runtime checks → scorecards + bench → operator corrections). Spec: `tasks/builds/trust-verification-layer/spec.md` (LOCKED, 1087 lines, chatgpt-spec-review Rounds 1+2). Phase 3 handoff: `tasks/builds/trust-verification-layer/handoff.md`. Pipeline: 16 chunks built (per-chunk pr-reviewer fixes inline) → G2 PASS → spec-conformance CONFORMANT_AFTER_FIXES (11 directional + 2 ambiguous gaps deferred) → adversarial-reviewer HOLES_FOUND (1 confirmed + 3 likely + 2 worth-confirming routed to `tasks/todo.md`) → pr-reviewer CHANGES_REQUESTED (B-1 / B-2 / B-3 / S-1 / S-2 / S-4 fixed in `999ec0bf`; B-4 / S-3 deferred to operator) → Codex dual-reviewer APPROVED with 4 [ACCEPT] decisions all fixed in `c1ed1535` (2 PostgreSQL migration bugs that would have failed to apply, 1 broken corrections route, 1 wrong column reference) → operator-elected pre-merge fix-loop closed B-4 + S-3 + TVL-DG-1 + TVL-DG-3 (commits `2655acbf` / `effce969` / `3c213e16` / `05255c11`); Codex re-pass caught + fixed P1 wrapper-shape `verify` (every review-gated send would have evaluated inconclusive) and P2 slug-match `linkToolCallsToEventIds` (mis-attached cross-slug) in `9f99874c` → S2 collision with PR #274 (auto-knowledge-retrieval) closed via focused merge-resolution chunk: 7 conflicts resolved + 10 TVL migrations renumbered 0288-0297 → 0295-0304 + spec/architecture/plan/RLS-manifest/scorecard-RLS-script all updated (commits `11903b86` / `859645a9` / `d0ae8c57`) → ready-to-merge label applied → CI 1st run hit migration 0300 `date_trunc(timestamptz)` IMMUTABLE failure (fixed `82986096` — pinned `AT TIME ZONE 'UTC'`) → CI 2nd run hit `verify-rls-contract-compliance.sh` blocking gate on direct `db` import in corrections route (fixed `2de2b513` — moved run-ownership lookup into `correctionCaptureService.getRunOwnership`) → CI ALL GREEN. **chatgpt-pr-review:** 3 rounds closed `APPROVED — operator finalised after Round 3`.
 
