@@ -565,10 +565,12 @@ This is the LAST commit on the feature branch before merge. The squash-commit wi
 ### 12.3 — Run the merge
 
 ```bash
-gh pr merge {N} --squash --delete-branch
+gh pr merge {N} --admin --squash --delete-branch
 ```
 
-This is the only auto-merge command. Do not use `--admin`, `--rebase`, or `--merge` — `--squash` is the project convention. The `--delete-branch` flag deletes the feature branch from origin after merge.
+`--admin` is mandatory because the post-merge-prep commit from 12.2 (a docs-only `tasks/current-focus.md` edit) triggers a fresh CI run on push. Waiting for that CI to complete is wasteful — the prep commit changes nothing CI cares about, and the previous commit's CI was already green. `--admin` bypasses the required-status-checks gate and merges immediately. Operator-locked 2026-05-09 after a wasted-CI incident on PR #276.
+
+`--squash` is the project convention; do not use `--rebase` or `--merge`. The `--delete-branch` flag deletes the feature branch from origin after merge.
 
 If the merge command fails (branch protection, mergeability regression because main moved between Step 11 polling and now, label-required-but-not-applied, etc.):
 
