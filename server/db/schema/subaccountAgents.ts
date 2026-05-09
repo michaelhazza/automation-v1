@@ -116,6 +116,18 @@ export const subaccountAgents = pgTable(
       primitives: string[];
     } | null>(),
 
+    // ── Governance (spec §5.2.9) ─────────────────────────────────────────
+    // Which controller styles are permitted for runs against this agent link.
+    // 'native_only' = conservative default; 'operator_allowed' = operator mode enabled.
+    controllerStyleAllowed: text('controller_style_allowed').notNull().default('native_only').$type<'native_only' | 'operator_allowed'>(),
+    // Execution environments this agent is permitted to run in.
+    // DB stores raw text[]; app-layer Zod enforces closed enum (spec §3.6).
+    allowedEnvironments: text('allowed_environments').array().notNull().default(['api_tool', 'headless', 'browser']),
+    // Maximum risk tier for actions this agent may take without subaccount override (0–6).
+    maxRiskTier: integer('max_risk_tier').notNull().default(3),
+    // Require human approval for actions at or above this tier (0–6; 7 = never require).
+    requireApprovalAtTier: integer('require_approval_at_tier').notNull().default(4),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

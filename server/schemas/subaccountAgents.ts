@@ -32,6 +32,11 @@ const updateLinkBase = z.object({
   timeoutSeconds: z.number().int().positive(),
   maxCostPerRunCents: z.number().int().nonnegative().nullable(),
   maxLlmCallsPerRun: z.number().int().positive().nullable(),
+  // Governance (spec §5.2.9)
+  controllerStyleAllowed: z.enum(['native_only', 'operator_allowed']),
+  allowedEnvironments: z.array(z.enum(['api_tool', 'headless', 'browser', 'terminal_repo'])),
+  maxRiskTier: z.number().int().min(0).max(6),
+  requireApprovalAtTier: z.number().int().min(0).max(7),
 });
 export const updateLinkBody = updateLinkBase.partial().refine(
   obj => Object.keys(obj).length > 0,
