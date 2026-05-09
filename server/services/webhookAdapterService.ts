@@ -1,11 +1,26 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { db } from '../db/index.js';
-import { webhookAdapterConfigs, agentRuns, agents } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import {
+  webhookAdapterConfigs,
+  agentRuns,
+  agents,
+  canonicalTickets,
+  canonicalTicketMessages,
+  canonicalTicketDrafts,
+  canonicalSupportAgents,
+  canonicalInboxes,
+} from '../db/schema/index.js';
+import { eq, and, inArray } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 import { auditService } from './auditService.js';
+import { withOrgTx } from '../instrumentation.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { mapTeamworkStatus } from '../adapters/teamwork/teamworkSupportStatusMap.js';
+import { SUPPORT_LOG_CODES } from '../../shared/types/supportObservability.js';
+import { findBackLinkCandidate } from './supportDraftReconciliationPure.js';
+import type { NormalisedEvent } from '../adapters/integrationAdapter.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -517,3 +532,473 @@ export const webhookAdapterService = {
     return { success: true, message: `Run updated to ${newStatus}` };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Support Ticket Webhook Dispatcher
+// ---------------------------------------------------------------------------
+//
+// Handles Teamwork Desk webhook events normalised by teamworkAdapter.normaliseEvent.
+// The route (teamworkWebhook.ts) calls dispatchSupportEvent after ack.
+//
+// Event routing:
+//   ticket.created / updated / reopened / completed  → upsert canonical_tickets
+//   ticket.deleted                                   → tombstone canonical_tickets
+//   ticket.assigned                                  → update assignee_agent_id
+//   ticket.status_changed                            → update status
+//   ticket.reply.created / ticket.note.created       → upsert canonical_ticket_messages + back-link
+//   (unknown)                                        → emit PROVIDER_WEBHOOK_UNMAPPED_EVENT
+// ---------------------------------------------------------------------------
+
+export async function dispatchSupportEvent(
+  event: NormalisedEvent,
+  connectorConfigId: string,
+  organisationId: string,
+): Promise<void> {
+  const rawData = event.data as Record<string, unknown>;
+  const ticketData = rawData?.ticket as Record<string, unknown> | undefined;
+  const ticketExternalId = event.entityExternalId;
+
+  // ── Ticket upsert events ─────────────────────────────────────────────────
+  if (
+    event.eventType === 'ticket.created' ||
+    event.eventType === 'ticket.updated' ||
+    event.eventType === 'ticket.reopened' ||
+    event.eventType === 'ticket.completed'
+  ) {
+    await withOrgTx(
+      { tx: db, organisationId, source: 'webhookAdapterService.dispatchSupportEvent.ticketUpsert' },
+      async () => {
+        const orgDb = getOrgScopedDb('webhookAdapterService.dispatchSupportEvent.ticketUpsert');
+
+        // Resolve inbox canonical id (required — if missing, log and skip)
+        const inboxExternalId = ticketData?.inboxId ? String(ticketData.inboxId) : null;
+        if (!inboxExternalId) {
+          logger.warn('support.webhook.ticket_upsert_no_inbox', {
+            code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+            connectorConfigId,
+            ticketExternalId,
+            eventType: event.eventType,
+          });
+          return;
+        }
+
+        // Load inbox by connectorConfigId + externalId
+        const [inboxRow] = await orgDb
+          .select({ id: canonicalInboxes.id })
+          .from(canonicalInboxes)
+          .where(
+            and(
+              eq(canonicalInboxes.connectorConfigId, connectorConfigId),
+              eq(canonicalInboxes.externalId, inboxExternalId),
+            ),
+          );
+
+        if (!inboxRow) {
+          logger.warn('support.webhook.ticket_upsert_inbox_not_found', {
+            code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+            connectorConfigId,
+            ticketExternalId,
+            inboxExternalId,
+          });
+          return;
+        }
+
+        // Resolve status
+        const rawStatus = ticketData?.status as string | undefined;
+        const status = mapTeamworkStatus(rawStatus);
+
+        // Resolve priority
+        const rawPriority = ticketData?.priority as string | undefined;
+        const validPriorities = ['low', 'medium', 'high', 'urgent'] as const;
+        type Priority = typeof validPriorities[number];
+        const priority: Priority = validPriorities.includes(rawPriority as Priority)
+          ? (rawPriority as Priority)
+          : 'medium';
+
+        // Resolve sourceChannel
+        const rawChannel = ticketData?.channel as string | undefined;
+        const validChannels = ['email', 'chat', 'form', 'api'] as const;
+        type Channel = typeof validChannels[number];
+        const sourceChannel: Channel = validChannels.includes(rawChannel as Channel)
+          ? (rawChannel as Channel)
+          : 'email';
+
+        const externalMetadata: Record<string, unknown> = {};
+        if (status === 'unknown_provider_status' && rawStatus) {
+          externalMetadata['provider_status_raw'] = rawStatus;
+          logger.warn('support.webhook.unknown_status', {
+            code: SUPPORT_LOG_CODES.STATUS_UNKNOWN_PROVIDER_STATUS,
+            connectorConfigId,
+            ticketExternalId,
+            rawStatus,
+          });
+        }
+
+        // Resolve assignee
+        const assigneeExternalId = ticketData?.assigneeId ? String(ticketData.assigneeId) : null;
+        let assigneeAgentId: string | null = null;
+        if (assigneeExternalId) {
+          const [agentRow] = await orgDb
+            .select({ id: canonicalSupportAgents.id })
+            .from(canonicalSupportAgents)
+            .where(
+              and(
+                eq(canonicalSupportAgents.connectorConfigId, connectorConfigId),
+                eq(canonicalSupportAgents.externalId, assigneeExternalId),
+              ),
+            );
+          assigneeAgentId = agentRow?.id ?? null;
+        }
+
+        const upsertValues = {
+          organisationId,
+          connectorConfigId,
+          externalId: ticketExternalId,
+          inboxId: inboxRow.id,
+          status,
+          priority,
+          sourceChannel,
+          subject: (ticketData?.subject as string | undefined) ?? '(no subject)',
+          tags: Array.isArray(ticketData?.tags)
+            ? (ticketData.tags as unknown[]).map(String)
+            : [],
+          category: (ticketData?.category as string | undefined) ?? null,
+          customerEmail: (ticketData?.customerEmail as string | undefined) ?? null,
+          customerName: (ticketData?.customerName as string | undefined) ?? null,
+          customerExternalId: (ticketData?.customerExternalId as string | undefined) ?? null,
+          openedAt: event.sourceTimestamp ?? event.timestamp,
+          assigneeAgentId,
+          externalMetadata: Object.keys(externalMetadata).length > 0 ? externalMetadata : null,
+          lastSyncedAt: new Date(),
+        };
+
+        await orgDb
+          .insert(canonicalTickets)
+          .values(upsertValues)
+          .onConflictDoUpdate({
+            target: [canonicalTickets.connectorConfigId, canonicalTickets.externalId],
+            set: {
+              inboxId: upsertValues.inboxId,
+              status: upsertValues.status,
+              priority: upsertValues.priority,
+              subject: upsertValues.subject,
+              tags: upsertValues.tags,
+              category: upsertValues.category,
+              customerEmail: upsertValues.customerEmail,
+              customerName: upsertValues.customerName,
+              customerExternalId: upsertValues.customerExternalId,
+              assigneeAgentId: upsertValues.assigneeAgentId,
+              externalMetadata: upsertValues.externalMetadata,
+              lastSyncedAt: upsertValues.lastSyncedAt,
+              updatedAt: new Date(),
+            },
+          });
+      },
+    );
+    return;
+  }
+
+  // ── Ticket deleted ───────────────────────────────────────────────────────
+  if (event.eventType === 'ticket.deleted') {
+    await withOrgTx(
+      { tx: db, organisationId, source: 'webhookAdapterService.dispatchSupportEvent.ticketDeleted' },
+      async () => {
+        const orgDb = getOrgScopedDb('webhookAdapterService.dispatchSupportEvent.ticketDeleted');
+        const result = await orgDb
+          .update(canonicalTickets)
+          .set({
+            providerDeleted: true,
+            deletedAtExternal: event.timestamp,
+            deletedAtCanonical: new Date(),
+            deletionSource: 'provider_webhook',
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(canonicalTickets.connectorConfigId, connectorConfigId),
+              eq(canonicalTickets.externalId, ticketExternalId),
+            ),
+          )
+          .returning({ id: canonicalTickets.id });
+
+        if (result.length > 0) {
+          logger.info(SUPPORT_LOG_CODES.TICKET_PROVIDER_DELETED, {
+            code: SUPPORT_LOG_CODES.TICKET_PROVIDER_DELETED,
+            connectorConfigId,
+            ticketExternalId,
+            ticketId: result[0].id,
+          });
+        }
+      },
+    );
+    return;
+  }
+
+  // ── Ticket assigned ──────────────────────────────────────────────────────
+  if (event.eventType === 'ticket.assigned') {
+    await withOrgTx(
+      { tx: db, organisationId, source: 'webhookAdapterService.dispatchSupportEvent.ticketAssigned' },
+      async () => {
+        const orgDb = getOrgScopedDb('webhookAdapterService.dispatchSupportEvent.ticketAssigned');
+
+        const assigneeExternalId = ticketData?.assigneeId ? String(ticketData.assigneeId) : null;
+        let assigneeAgentId: string | null = null;
+        if (assigneeExternalId) {
+          const [agentRow] = await orgDb
+            .select({ id: canonicalSupportAgents.id })
+            .from(canonicalSupportAgents)
+            .where(
+              and(
+                eq(canonicalSupportAgents.connectorConfigId, connectorConfigId),
+                eq(canonicalSupportAgents.externalId, assigneeExternalId),
+              ),
+            );
+          assigneeAgentId = agentRow?.id ?? null;
+        }
+
+        await orgDb
+          .update(canonicalTickets)
+          .set({ assigneeAgentId, updatedAt: new Date() })
+          .where(
+            and(
+              eq(canonicalTickets.connectorConfigId, connectorConfigId),
+              eq(canonicalTickets.externalId, ticketExternalId),
+            ),
+          );
+      },
+    );
+    return;
+  }
+
+  // ── Ticket status changed ────────────────────────────────────────────────
+  if (event.eventType === 'ticket.status_changed') {
+    await withOrgTx(
+      { tx: db, organisationId, source: 'webhookAdapterService.dispatchSupportEvent.ticketStatusChanged' },
+      async () => {
+        const orgDb = getOrgScopedDb('webhookAdapterService.dispatchSupportEvent.ticketStatusChanged');
+
+        const rawStatus = ticketData?.status as string | undefined;
+        const status = mapTeamworkStatus(rawStatus);
+
+        if (status === 'unknown_provider_status' && rawStatus) {
+          // Preserve raw status in external_metadata; fetch existing metadata first
+          const [existing] = await orgDb
+            .select({ externalMetadata: canonicalTickets.externalMetadata })
+            .from(canonicalTickets)
+            .where(
+              and(
+                eq(canonicalTickets.connectorConfigId, connectorConfigId),
+                eq(canonicalTickets.externalId, ticketExternalId),
+              ),
+            );
+
+          const mergedMetadata = {
+            ...(existing?.externalMetadata ?? {}),
+            provider_status_raw: rawStatus,
+          };
+
+          logger.warn('support.webhook.unknown_status', {
+            code: SUPPORT_LOG_CODES.STATUS_UNKNOWN_PROVIDER_STATUS,
+            connectorConfigId,
+            ticketExternalId,
+            rawStatus,
+          });
+
+          await orgDb
+            .update(canonicalTickets)
+            .set({ status, externalMetadata: mergedMetadata, updatedAt: new Date() })
+            .where(
+              and(
+                eq(canonicalTickets.connectorConfigId, connectorConfigId),
+                eq(canonicalTickets.externalId, ticketExternalId),
+              ),
+            );
+          return;
+        }
+
+        await orgDb
+          .update(canonicalTickets)
+          .set({ status, updatedAt: new Date() })
+          .where(
+            and(
+              eq(canonicalTickets.connectorConfigId, connectorConfigId),
+              eq(canonicalTickets.externalId, ticketExternalId),
+            ),
+          );
+      },
+    );
+    return;
+  }
+
+  // ── Message events (reply / note) ────────────────────────────────────────
+  if (
+    event.eventType === 'ticket.reply.created' ||
+    event.eventType === 'ticket.note.created'
+  ) {
+    const messageData = rawData?.message as Record<string, unknown> | undefined;
+    const messageExternalId = messageData?.id ? String(messageData.id) : null;
+
+    if (!messageExternalId) {
+      logger.warn('support.webhook.message_event_no_id', {
+        code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+        connectorConfigId,
+        ticketExternalId,
+        eventType: event.eventType,
+      });
+      return;
+    }
+
+    const direction: 'inbound' | 'outbound' | 'internal_note' =
+      event.eventType === 'ticket.note.created'
+        ? 'internal_note'
+        : (messageData?.direction as 'inbound' | 'outbound' | undefined) ?? 'outbound';
+
+    const visibility: 'public' | 'internal' =
+      direction === 'internal_note' ? 'internal' : 'public';
+
+    const authorType: 'customer' | 'agent' | 'bot' | 'system' =
+      direction === 'inbound' ? 'customer' : 'agent';
+
+    await withOrgTx(
+      { tx: db, organisationId, source: 'webhookAdapterService.dispatchSupportEvent.messageUpsert' },
+      async () => {
+        const orgDb = getOrgScopedDb('webhookAdapterService.dispatchSupportEvent.messageUpsert');
+
+        // Resolve canonical ticket FK
+        const [ticketRow] = await orgDb
+          .select({ id: canonicalTickets.id })
+          .from(canonicalTickets)
+          .where(
+            and(
+              eq(canonicalTickets.connectorConfigId, connectorConfigId),
+              eq(canonicalTickets.externalId, ticketExternalId),
+            ),
+          );
+
+        if (!ticketRow) {
+          logger.warn('support.webhook.message_event_ticket_not_found', {
+            code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+            connectorConfigId,
+            ticketExternalId,
+            messageExternalId,
+          });
+          return;
+        }
+
+        const inserted = await orgDb
+          .insert(canonicalTicketMessages)
+          .values({
+            organisationId,
+            connectorConfigId,
+            ticketId: ticketRow.id,
+            ticketExternalId,
+            externalId: messageExternalId,
+            direction,
+            visibility,
+            authorType,
+            bodyText: (messageData?.body as string | undefined) ?? '',
+            bodyHtml: (messageData?.bodyHtml as string | undefined) ?? null,
+            createdAtExternal: event.sourceTimestamp ?? event.timestamp,
+            externalMetadata: null,
+          })
+          .onConflictDoNothing()
+          .returning({ id: canonicalTicketMessages.id });
+
+        // Back-link routine — only run when a new row was actually inserted
+        if (inserted.length === 0) {
+          logger.info(SUPPORT_LOG_CODES.INGEST_DUPLICATE_COLLAPSED, {
+            code: SUPPORT_LOG_CODES.INGEST_DUPLICATE_COLLAPSED,
+            connectorConfigId,
+            ticketExternalId,
+            messageExternalId,
+          });
+          return;
+        }
+
+        const newMessageId = inserted[0].id;
+        const newMessageBodyText = (messageData?.body as string | undefined) ?? '';
+
+        // Load drafts eligible for back-linking: manually_marked_sent or sent with no sent_message_id
+        const candidateDraftRows = await orgDb
+          .select({
+            id: canonicalTicketDrafts.id,
+            proposedBodyText: canonicalTicketDrafts.proposedBodyText,
+            proposedVisibility: canonicalTicketDrafts.proposedVisibility,
+            status: canonicalTicketDrafts.status,
+            sentMessageId: canonicalTicketDrafts.sentMessageId,
+          })
+          .from(canonicalTicketDrafts)
+          .where(
+            and(
+              eq(canonicalTicketDrafts.ticketId, ticketRow.id),
+              eq(canonicalTicketDrafts.organisationId, organisationId),
+              inArray(canonicalTicketDrafts.status, ['manually_marked_sent', 'sent']),
+            ),
+          );
+
+        const backLinkResult = findBackLinkCandidate({
+          newlyLandedMessage: {
+            direction,
+            visibility,
+            bodyText: newMessageBodyText,
+            createdAtExternal: event.sourceTimestamp ?? event.timestamp,
+          },
+          candidateDrafts: candidateDraftRows.map((d) => ({
+            id: d.id,
+            proposedBodyText: d.proposedBodyText,
+            proposedVisibility: d.proposedVisibility,
+            status: d.status,
+            sentMessageId: d.sentMessageId ?? null,
+          })),
+        });
+
+        if (backLinkResult.ambiguous) {
+          logger.warn(SUPPORT_LOG_CODES.DRAFT_BACKLINK_AMBIGUOUS, {
+            code: SUPPORT_LOG_CODES.DRAFT_BACKLINK_AMBIGUOUS,
+            connectorConfigId,
+            ticketExternalId,
+            messageExternalId,
+            candidateCount: candidateDraftRows.length,
+          });
+          return;
+        }
+
+        if (backLinkResult.match) {
+          const matchedDraftId = backLinkResult.match.id;
+
+          // Set source_draft_id on the message
+          await orgDb
+            .update(canonicalTicketMessages)
+            .set({ sourceDraftId: matchedDraftId })
+            .where(eq(canonicalTicketMessages.id, newMessageId));
+
+          // Set sent_message_id on the draft + transition to 'sent'
+          await orgDb
+            .update(canonicalTicketDrafts)
+            .set({
+              sentMessageId: newMessageId,
+              status: 'sent',
+              updatedAt: new Date(),
+            })
+            .where(eq(canonicalTicketDrafts.id, matchedDraftId));
+
+          logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, {
+            code: SUPPORT_LOG_CODES.DRAFT_SENT,
+            connectorConfigId,
+            ticketExternalId,
+            draftId: matchedDraftId,
+            messageId: newMessageId,
+          });
+        }
+      },
+    );
+    return;
+  }
+
+  // ── Unknown event type ───────────────────────────────────────────────────
+  logger.warn(SUPPORT_LOG_CODES.PROVIDER_WEBHOOK_UNMAPPED_EVENT, {
+    code: SUPPORT_LOG_CODES.PROVIDER_WEBHOOK_UNMAPPED_EVENT,
+    connectorConfigId,
+    eventType: event.eventType,
+  });
+}
