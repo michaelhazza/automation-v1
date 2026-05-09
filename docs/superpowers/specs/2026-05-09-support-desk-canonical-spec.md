@@ -1,6 +1,6 @@
-**Status:** reviewing — locked at this state pending OQ-1 (Foundry parity) + OQ-2 (Teamwork status inventory). chatgpt-spec-review closed `APPROVED — operator finalised after Round 2`. Spec MAY NOT move to `accepted` and Phase 2 plan generation MAY NOT begin until both OQs close.
+**Status:** accepted — OQ-2 closed inline 2026-05-09 (full Teamwork status inventory now locked in §11.2). OQ-1 (Foundry parity) deferred per operator override 2026-05-09 with brief §5.1 spec-drift risk acknowledged; tracked in `tasks/todo.md` § "Deferred from feature-coordinator hard-gate override — support-desk-canonical (2026-05-09)". chatgpt-spec-review closed `APPROVED — operator finalised after Round 2`.
 **Spec date:** 2026-05-09
-**Last updated:** 2026-05-09 (chatgpt-spec-review finalised after 2 rounds — 14 findings closed total: 5 high-severity blockers fixed [source_draft_id FK migration order, split author_id columns, manually_marked_sent state, deletion/redaction tombstone semantics, deletion-by-poll precondition], 1 user-facing rename ["Mark provider send as verified"], 8 medium/low-severity tightenings. Round logs: `ff6e21b6` (R1), `180d0347` (R2).)
+**Last updated:** 2026-05-09 (Phase 2 hard-gate close — OQ-2 inventory locked in §11.2; OQ-1 deferred per operator override; §19 + §22 updated. Earlier Phase 1 finalisation: chatgpt-spec-review 2 rounds — 14 findings closed [5 high-severity blockers, 1 user-facing rename, 8 medium/low tightenings], round logs `ff6e21b6` / `180d0347`.)
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)
@@ -1157,18 +1157,35 @@ Per spec-authoring-checklist §3, every data shape that crosses a service bounda
 - **Type**: `Record<string, Exclude<SupportCanonicalStatus, 'unknown_provider_status'>>`.
 - **Producer**: each adapter (one per provider). Teamwork's lives at `server/adapters/teamwork/teamworkSupportStatusMap.ts`.
 - **Consumer**: `mapTeamworkStatus()` and similar pure mapping functions. Tested with a fixture matrix.
-- **Nullability**: keys are case-insensitive (the mapping function lowercases input). NULL or empty input → `'unknown_provider_status'`.
-- **Example** (Teamwork v1, partial — full inventory in OQ-2):
+- **Nullability**: keys are case-insensitive (the mapping function lowercases input). NULL or empty input → `'unknown_provider_status'`. Custom (operator-defined) statuses NOT listed in the map below also fall through to `'unknown_provider_status'` — see "Custom-status fall-through" rationale below.
+- **Teamwork v1 — locked full inventory** (closes OQ-2). Teamwork Desk exposes 6 default system statuses, all non-customisable per Teamwork's product behaviour (Teamwork Support Center, "Ticket Statuses": Active, Waiting on customer, On hold, Solved, Closed, Spam — only deletable when ticket count = 0). The map below covers all 6 plus the historical aliases the existing `server/adapters/teamworkAdapter.ts` already normalises:
   ```ts
-  {
-    'active': 'open',
-    'open': 'open',
-    'pending': 'pending_internal',
-    'waiting_on_customer': 'waiting_on_customer',
-    'solved': 'resolved',
-    'closed': 'closed',
-  }
+  export const TEAMWORK_SUPPORT_STATUS_MAP: SupportStatusMap = {
+    // — Default system statuses (6, non-customisable per Teamwork) —
+    'active':              'open',
+    'waiting on customer': 'waiting_on_customer',
+    'on hold':             'pending_internal',
+    'solved':              'resolved',
+    'closed':              'closed',
+    'spam':                'closed',                // intentional: terminal/dead-letter (OQ-2 closer)
+    // — Historical aliases retained from existing adapter —
+    'new':                 'open',
+    'open':                'open',
+    'waiting':             'waiting_on_customer',
+    'waitingoncustomer':   'waiting_on_customer',   // no-space variant observed historically
+    'waiting_on_customer': 'waiting_on_customer',   // underscored variant
+    'awaiting_customer':   'waiting_on_customer',
+    'onhold':              'pending_internal',      // no-space variant
+    'on_hold':             'pending_internal',      // underscored variant
+    'pending':             'pending_internal',
+    'resolved':            'resolved',
+  };
   ```
+- **Judgment-call rationale** (OQ-2 closer, three explicit decisions):
+  - **`On hold → pending_internal`.** Teamwork docs describe this state as "a pause in resolution awaiting solution or colleague input"; semantically internal-pending, not customer-waiting. Diverges from the prior 4-state collapse in `server/adapters/teamworkAdapter.ts` which mapped `onhold` onto `waiting`; the canonical 6-state taxonomy makes the distinction explicit.
+  - **`Spam → closed`.** Terminal, no-action state. Mapping to `closed` keeps spam tickets out of the manual-review surface (which exists for genuinely unknown statuses, not expected dead-letters). The map's type signature (`Exclude<…, 'unknown_provider_status'>`) forbids mapping TO the quarantine state; the chosen alternative is the closest terminal canonical state.
+  - **Custom statuses (operator-defined per Teamwork workspace) — deliberately NOT listed.** Teamwork allows unlimited operator-defined custom statuses. v1 ships only the 6 default mappings; any custom status falls through to `'unknown_provider_status'` and surfaces on the manual-review path (§8.5). A "mapping-editor admin surface" is listed as deferred in §19. Brief §10 #12 fail-closed posture.
+- **API filter parameter shape note.** Teamwork Desk V2's search-tickets endpoint takes `statuses` as `array of integers` (status IDs). That filter mechanism is orthogonal to this map: the canonical map keys against the per-ticket `status` STRING returned in ticket-object responses, which the existing adapter already consumes as `t.status as string` (`server/adapters/teamworkAdapter.ts:244`). Adapters that need to send the integer-ID filter handle it inside `fetchTickets()` independent of the canonical-status map.
 
 ### 11.3 `CanonicalTicketData` — adapter ingestion → canonical write
 
@@ -1875,7 +1892,7 @@ Per spec-authoring-checklist §7, every prose mention of "deferred" / "later" / 
 - ~~**Provider-side deletion / redaction handling.**~~ **CLOSED — now in v1 scope.** Brief §12 final bullet mandated tombstone definition once provider webhooks expose deletion. Teamwork's existing `mapTeamworkEventType` already normalises `ticket.deleted`, so the canonical layer ships v1 tombstone semantics: `canonical_tickets.provider_deleted` + deletion timestamps + `deletion_source` (§5.1); `canonical_ticket_messages.redacted` + content nulling rule (§5.2); read filtering per §5.2.B; new log codes `support.ticket.provider_deleted`, `support.ticket.restored_after_deletion`, `support.message.redacted` (§15). OQ-5 closes with this design.
 - **Reconciliation queue UI for unmatched contacts.** Brief §10 #2 — "Reconciliation queue UI deferred." v1 surfaces unmatched at row level (right rail "Customer not in CRM"); a dedicated reconciliation surface lands later.
 - **Cost rollups, KPI dashboards, observability explorers for support volume.** Per `docs/frontend-design-principles.md`, these are deferred-by-default. v1 ships zero such surfaces.
-- **Foundry schema parity verification.** OQ-1. The spec author has not verified Foundry's current ticket schema against this spec. Resolved by operator before Phase 2 plan generation.
+- **Foundry schema parity verification.** OQ-1, deferred per operator override 2026-05-09 (§22). Brief §5.1 spec-drift risk acknowledged. Recommended close path: before the first Foundry-trained model is wired to this canonical layer, operator runs the field-by-field comparison and amends §11.3 + §22 OQ-1 inline. Backlog entry: `tasks/todo.md` § "Deferred from feature-coordinator hard-gate override — support-desk-canonical (2026-05-09)".
 - **Cross-provider reporting** ("average first-response time across all customers' helpdesks"). Brief §3 motivation — the canonical layer enables it; v1 ships no such report.
 - **Mapping-editor admin surface.** Brief §10 + mockup index page note. The status-mapping table is locked at the adapter source level in v1; an admin UI to edit it (without code change) is deferred.
 - **Platform-user ↔ canonical-support-agent join row.** Brief §6.4. Add when an agent skill needs the link.
@@ -1972,21 +1989,23 @@ All fourteen brief-locked decisions are either (a) implemented in this spec or (
 
 Four open questions block the move to `Status: accepted`. Each has a defined closer. (OQ-5 closed in this revision — see §19 deferred-items entry and §5.1 / §5.2 tombstone definitions.)
 
-### OQ-1 — Foundry ticket-schema parity verification
+### OQ-1 — Foundry ticket-schema parity verification (DEFERRED 2026-05-09 — operator override)
 
 **Question:** Does the runtime `CanonicalTicketData` shape (§6 + §11.3) match Foundry's current Teamwork ticket schema field-for-field? Brief §5.1 + §10 #1.
 
 **Why it matters:** the single biggest risk to an agentic system is a model trained against one shape and served a different shape at runtime.
 
-**Closer:** operator runs a side-by-side comparison of `CanonicalTicketData` against Foundry's schema, enumerates every divergence in this section as an explicit list with one of: (a) "match — identical", (b) "divergence — Foundry has X, runtime intentionally omits / renames because Y", (c) "divergence — runtime has X, Foundry intentionally omits because Y". Resolution: spec amendment with the divergence list inlined into §11.3. **Required before Phase 2 plan generation.**
+**Resolution (2026-05-09):** Operator deferred this OQ at the Phase 2 (`feature-coordinator`) hard gate, electing to proceed to Phase 2 plan generation without the field-by-field Foundry parity comparison. **Brief §5.1 spec-drift risk explicitly acknowledged**: any divergence between Foundry's training schema and this spec's runtime schema becomes a quality liability that must be reconciled before a Foundry-trained model is served against this runtime shape. Tracked in `tasks/todo.md` § "Deferred from feature-coordinator hard-gate override — support-desk-canonical (2026-05-09)" as durable backlog. Recommended close path (preserved below): before the first Foundry-trained model is wired to this canonical layer, operator runs the side-by-side comparison and amends §11.3 inline with the divergence list. Until that close pass runs, every Foundry/runtime serve uses the schema in §11.3 unverified — divergence may exist but is not enumerated.
 
-### OQ-2 — Teamwork status vocabulary inventory
+**Original closer (preserved for the eventual close pass):** operator runs a side-by-side comparison of `CanonicalTicketData` against Foundry's schema, enumerates every divergence in this section as an explicit list with one of: (a) "match — identical", (b) "divergence — Foundry has X, runtime intentionally omits / renames because Y", (c) "divergence — runtime has X, Foundry intentionally omits because Y". Resolution: spec amendment with the divergence list inlined into §11.3.
+
+### OQ-2 — Teamwork status vocabulary inventory (CLOSED 2026-05-09)
 
 **Question:** What is the complete set of values Teamwork Desk's API returns for ticket status? Brief §10 #12.
 
-**Why it matters:** the canonical status map (§6 + §11.2) is fail-closed; any provider value not in the map quarantines the ticket. An incomplete map produces unnecessary quarantine; a wrong map produces silent misclassification. Brief §10 #12 explicitly says "the spec cannot be approved until the inventory is complete" — this OQ is the reason this spec stays at `Status: reviewing` rather than `Status: accepted`.
+**Why it matters:** the canonical status map (§6 + §11.2) is fail-closed; any provider value not in the map quarantines the ticket. An incomplete map produces unnecessary quarantine; a wrong map produces silent misclassification.
 
-**Closer:** the operator inventories Teamwork's status values (from Teamwork API docs + a real Teamwork account's reported values) and the spec is amended with the full mapping table inlined into §11.2 (replacing the partial example) before the Phase 1 → Phase 2 handoff completes. The locked Phase 2 implementation in `server/adapters/teamwork/teamworkSupportStatusMap.ts` is then a direct transcription of the spec table. **Required before spec acceptance — i.e. before Phase 2 plan generation.** This is the only accepted pre-build discovery task the spec defers; every other open question may close inside Phase 2 chunks.
+**Resolution (2026-05-09):** Closed by inventory captured from the Teamwork Desk Support Center "Ticket Statuses" article (`https://support.teamwork.com/desk/inboxes/ticket-statuses`) and cross-checked against the V2 API reference (`https://apidocs.teamwork.com/docs/desk`). Teamwork Desk exposes exactly 6 non-customisable default system statuses (Active, Waiting on customer, On hold, Solved, Closed, Spam) plus operator-defined custom statuses. §11.2 now ships the full locked mapping table covering all 6 defaults + historical aliases consumed by the existing `server/adapters/teamworkAdapter.ts`. Three judgment calls captured inline in §11.2's "Judgment-call rationale" bullet: `On hold → pending_internal`, `Spam → closed`, custom statuses → fall-through to `'unknown_provider_status'`. The locked Phase 2 implementation in `server/adapters/teamwork/teamworkSupportStatusMap.ts` is a direct transcription of the §11.2 table.
 
 ### OQ-3 — Teamwork native action-idempotency mechanism
 

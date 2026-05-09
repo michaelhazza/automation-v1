@@ -38,3 +38,15 @@ OQ-1 + OQ-2 must close before Phase 2 plan generation. `feature-coordinator` pau
 ## Phase 2 entry
 
 Open a new Claude Code session and type `launch feature coordinator`.
+
+---
+
+## Phase 2 (BUILD) — in flight
+
+| Step | Status | Notes |
+|---|---|---|
+| 0 — Context loaded | done | feature-coordinator inline; current-focus.md status was BUILDING at entry |
+| 1 — TodoWrite (12 items) | done | per playbook §Step 1 |
+| 2 — Branch-sync S1 + freshness | done | 0 behind main, 22 ahead, no merge needed; no migration collisions; no overlapping files |
+| 2a — Hard gate: OQ-1 + OQ-2 | done | OQ-2 closed inline (Teamwork Desk inventory: 6 default system statuses Active/Waiting on customer/On hold/Solved/Closed/Spam + custom-status fall-through; spec §11.2 now carries full locked mapping table with 3 judgment calls captured); OQ-1 deferred per operator override (brief §5.1 spec-drift risk acknowledged, backlog entry SDC-OVERRIDE-1 in `tasks/todo.md`); spec status `reviewing` → `accepted` |
+| 3 — architect invocation | pending | next |

@@ -3592,3 +3592,12 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Spec section: §6.7 retention policy row "Working Time aggregates".
   - Gap: SQL bug, runtime failure.
   - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
+
+## Deferred from feature-coordinator hard-gate override — support-desk-canonical (2026-05-09)
+
+Phase 2 (`feature-coordinator`) entered the build pipeline with one of the two Phase 1 → Phase 2 hard gates explicitly overridden by the operator. The override is documented inline in `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (§22 OQ-1 marked DEFERRED, §19 deferred-items entry, status-line acknowledgement) and acknowledges the brief §5.1 spec-drift risk.
+
+- [ ] **SDC-OVERRIDE-1 — Foundry ticket-schema parity verification (OQ-1).** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` §11.3 declares `CanonicalTicketData` (the canonical runtime ticket shape) without a field-by-field comparison against Foundry's current Teamwork ticket schema. Brief §5.1 names training-runtime alignment as a non-negotiable design invariant; the single biggest risk to an agentic system is a model trained against one shape and served a different shape at runtime. **Risk:** every Foundry/runtime serve uses the schema in §11.3 unverified — divergence may exist but is not enumerated, and silent quality regressions become possible.
+  - Spec sections: §11.3 `CanonicalTicketData`, §22 OQ-1 (deferred-by-operator entry), §19 deferred-items entry.
+  - Gap: Phase 1 → Phase 2 hard gate override; comparison was not performed.
+  - Suggested close path: before the first Foundry-trained model is wired to this canonical layer (typically a pre-prod gate before the support agent's first deployment), operator runs a side-by-side comparison of `CanonicalTicketData` against Foundry's schema, enumerates every divergence as one of `match — identical` / `divergence — Foundry has X, runtime intentionally omits / renames because Y` / `divergence — runtime has X, Foundry intentionally omits because Y`, amends spec §11.3 with the divergence list inlined, and updates §22 OQ-1 + §19 to mark CLOSED. If a divergence is unintentional, it triggers a runtime schema migration before the Foundry-trained model is served.
