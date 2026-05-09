@@ -1,6 +1,6 @@
 # SynthetOS Phase 1 Foundation Refactor — Implementation Spec
 
-**Status:** reviewing  
+**Status:** reviewing (spec-reviewer iterations 1–3 complete; READY_FOR_BUILD per `tasks/review-logs/spec-review-final-synthetos-foundation-refactor-2026-05-09T07-34-15Z.md`; awaiting operator acceptance to flip to `accepted`)  
 **Spec date:** 2026-05-09  
 **Last updated:** 2026-05-09  
 **Author:** SynthetOS architecture group  
