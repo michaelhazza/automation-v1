@@ -10,6 +10,18 @@ export type { EventOrigin };
 import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.js';
 
 import type { RetrievalResult } from './retrieval.js';
+import type { ObservationType } from './agentObservations.js';
+
+/**
+ * Typed-observation payload embedded in run-step terminal events (spec §847).
+ * Optional field on `skill.completed` and `llm.completed` payloads.
+ * No producer populates this today; the hook fires only when present.
+ */
+export interface RunStepObservation {
+  type: ObservationType;
+  body: string;
+  metadata?: Record<string, unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Source-service tag
@@ -92,7 +104,8 @@ export type AgentExecutionEventType =
   | 'runtime_check.completed'
   | 'correction.captured'
   | 'retrieval.summary'
-  | 'retrieval.always_available.mode_changed';
+  | 'retrieval.always_available.mode_changed'
+  | 'observation_emitted';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -189,6 +202,8 @@ export type AgentExecutionEventPayload =
       // Idempotency flag from automations.idempotent. When false, the UI must
       // confirm before retry (since the side effect may have already occurred).
       idempotent?: boolean;
+      /** Run-step typed observation (spec §847). No producer populates this today; hook fires when present. */
+      observation?: RunStepObservation;
     }
   | {
       eventType: 'llm.requested';
@@ -211,6 +226,8 @@ export type AgentExecutionEventPayload =
       durationMs: number;
       payloadInsertStatus: 'ok' | 'failed';
       payloadRowId: string | null;
+      /** Run-step typed observation (spec §847). No producer populates this today; hook fires when present. */
+      observation?: RunStepObservation;
     }
   | {
       eventType: 'handoff.decided';
@@ -306,6 +323,15 @@ export type AgentExecutionEventPayload =
       newMode: string;
       actorUserId: string;
       occurredAt: string;
+    }
+  | {
+      /** Agent Workspace — emitted after an observation row is successfully written (spec §7.3). */
+      eventType: 'observation_emitted';
+      critical: false;
+      observationId: string;
+      observationType: 'learned' | 'detected' | 'decided' | 'flagged' | 'produced';
+      agentId: string;
+      sourceKind: 'run_step' | 'retrieval_summary' | 'tool_result' | 'memory_block_insert';
     };
 
 // ---------------------------------------------------------------------------
@@ -340,6 +366,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'correction.captured': false,
   'retrieval.summary': false,
   'retrieval.always_available.mode_changed': false,
+  'observation_emitted': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

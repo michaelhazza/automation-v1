@@ -1,6 +1,9 @@
 import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { ieeRuns } from './ieeRuns';
+import { agentRuns } from './agentRuns';
+import { agentExecutionEvents } from './agentExecutionEvents';
 
 // ---------------------------------------------------------------------------
 // iee_artifacts — file metadata for downloads, written files, log captures.
@@ -35,10 +38,18 @@ export const ieeArtifacts = pgTable(
     inlineTextTruncated:  boolean('inline_text_truncated').notNull().default(false),
 
     createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+
+    // 0295 — Agent Workspace: run/event/version lineage tracing
+    agentRunId:        uuid('agent_run_id').references(() => agentRuns.id),
+    producingEventId:  uuid('producing_event_id').references(() => agentExecutionEvents.id),
+    producedVersionId: uuid('produced_version_id'),
   },
   (table) => ({
     runIdx:        index('iee_artifacts_run_idx').on(table.ieeRunId),
     orgCreatedIdx: index('iee_artifacts_org_created_idx').on(table.organisationId, table.createdAt),
+    agentRunIdx:   index('iee_artifacts_agent_run_idx').on(table.agentRunId).where(sql`${table.agentRunId} IS NOT NULL`),
+    eventIdx:      index('iee_artifacts_event_idx').on(table.producingEventId).where(sql`${table.producingEventId} IS NOT NULL`),
+    versionIdx:    index('iee_artifacts_version_idx').on(table.producedVersionId).where(sql`${table.producedVersionId} IS NOT NULL`),
   }),
 );
 

@@ -290,3 +290,10 @@ export * from './scorecards.js';
 export * from './agentScorecardAttachments.js';
 export * from './scorecardJudgements.js';
 export * from './benchRuns.js';
+
+// Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
+export * from './agentObservations.js';
+export * from './ieeSessions.js';
+export * from './agentPresenceProjections.js';
+export * from './agentWorkingTimeRollups.js';
+export * from './agentWorkingTimeEventLedger.js';

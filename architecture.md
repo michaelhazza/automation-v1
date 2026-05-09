@@ -3617,6 +3617,24 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify Build stream project edit page | `client/src/pages/build/ProjectEditPage.tsx` (consolidated project edit, includes migrated goal management). Server: `server/services/projectService.ts` (project CRUD with `toApiProject` / `fromApiPatch` mappers). |
 | Modify Build stream identity-key diff helper | `server/lib/identityKeyDiff.ts` — safe full-replacement diff for arrays of objects with a stable identity key (e.g. skill slug arrays). Used by `agentTabs.ts` to compute add/remove deltas for agent skill attachment writes. |
 
+#### Agent Workspace (Persistent Embodiment Layer, 2026-05)
+
+| Concern | Files |
+|---|---|
+| Overview payload builder | `server/services/agentOverviewAggregator.ts` — lazy-load delegations to 8 endpoints |
+| Overview REST endpoints | `server/routes/agentOverview.ts` — 8 `GET /api/agents/:id/...` routes |
+| Overview composition root | `client/src/components/agent-workspace/AgentOverviewTab.tsx` |
+| SSE fan-out, ring buffer, payload cap | `server/services/agentPresenceStreamPublisher.ts` — single-node publisher; 300-event ring buffer per scope; 32KB per-event cap |
+| SSE stream endpoints | `server/routes/agentPresenceStream.ts` — agent-scope + workspace-scope SSE |
+| SSE + snapshot client hook | `client/src/hooks/useAgentPresence.ts` — server-authoritative; header `Last-Event-ID` supersedes query param |
+| IEE session lifecycle | `server/services/ieeSessionService.ts` — `tearDown` / `markFailed` / `recordSummary`; container release AFTER tx commit |
+| Working time accumulator | `server/services/agentWorkingTimeService.ts` — monotonic-clock (`process.hrtime.bigint()`); UTC half-open intervals; per-run buckets |
+| Presence operations | `server/services/agentPresenceService.ts` — tenant-aware presence state writes/reads |
+| Observation operations | `server/services/agentObservationService.ts` — tenant-aware; immutability enforced by DB trigger |
+| Retention prune job | `server/jobs/agentObservationsPruneJob.ts` — 90-day TTL; 1000-row batches; GUC bypass for immutability trigger |
+| Working time compact job | `server/jobs/workingTimeRollupCompactJob.ts` — keeps per-day for 1 year, then collapses to monthly |
+| IEE session orphan cleanup | `server/jobs/ieeSessionOrphanCleanup.ts` |
+
 #### Govern (consolidation-govern, 2026-05)
 
 | Concern | Files |
@@ -3888,3 +3906,66 @@ The counter is process-local — multi-instance deployments under-count globally
 ### Admin UI
 
 `/system/incidents` — `SystemIncidentsPage.tsx` with sortable/filterable table, inline detail drawer (ack/resolve/suppress/escalate), WebSocket-updated nav badge.
+
+---
+
+<a id="agent-workspace"></a>
+## Agent Workspace
+
+Persistent Embodiment Layer — surfaces an agent's ongoing state (presence, working time, observations, active goals, files, knowledge in use) as a first-class tab on the agent detail page. Spec: `tasks/builds/agent-workspace/spec.md`. Migrations 0305 (`agent_workspace_presence_and_sessions`) and 0306 (`agent_default_landing_tab`) — renumbered from the original 0295/0296 plan after PR #275 (Trust & Verification Layer) absorbed 0295–0304.
+
+### Overview tab
+
+Composition root: `client/src/components/agent-workspace/AgentOverviewTab.tsx`. Eleven components in layout order, each wired to a dedicated REST endpoint via `useAgentOverview` hook; server-side payload built by `server/services/agentOverviewAggregator.ts` — lazy-load delegations to 8 `GET /api/agents/:id/...` endpoints so cards load in parallel. Routes: `server/routes/agentOverview.ts`.
+
+Components: `IdentityCard`, `PresenceHero`, `ActiveGoalsCard` (conditional), `RecentObservationsCard`, `KnowledgeInUseCard`, `FilesSnapshotCard`, `WorkingTimeChart`, `ActivityFeedCard`, `ToolsUsageBandsCard`, `ConnectionsHealthCard`, `SchedulePeekCard`. Zero-data state rendered by `FirstRunOverview`.
+
+### Presence stream topology
+
+Single-node SSE publisher at `server/services/agentPresenceStreamPublisher.ts`. In-process singleton `Map` keyed by scope (agent or workspace). Each scope holds a sorted ring buffer (300 events max) with canonical order `(eventTimestamp ASC, eventId ASC)`. Per-event hard cap: 32KB (`Buffer.byteLength(JSON.stringify(event.data), 'utf8')`); over-limit events replaced with `{ truncated: true, byteLength }` — truncation logged once per 24h per event-type to suppress storms.
+
+On reconnect: the SSE route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer from the last seen event. `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; conflicts logged at DEBUG.
+
+**No Redis or message bus.** Single-node only in v1. Multi-node fan-out broker is an explicitly deferred concern (see spec §18).
+
+Routes: `server/routes/agentPresenceStream.ts`
+- `GET /api/agent-presence/stream/:agentId` — agent-scope SSE; verifies agent ownership (`resolveAgent`) before `res.flushHeaders()`.
+- `GET /api/agent-presence/stream/workspace/:subaccountId` — workspace-scope SSE; verifies subaccount ownership (`resolveSubaccount`) before `res.flushHeaders()`.
+
+**SSE auth:** Both SSE routes (`GET /api/agent-presence/stream/:agentId` and `GET /api/agent-presence/stream/workspace/:subaccountId`) use the `authenticateStreamToken` middleware. `EventSource` cannot set custom headers, so the SSE handshake uses a short-lived signed stream-token issued by `POST /api/agent-presence/stream-token`. The token is a JWT signed with `JWT_SECRET`, audience-bound to `agent-presence-stream`, with a 120-second TTL and claims for `(userId, orgId, scope, agentId|subaccountId)`. The browser fetches the stream-token using its long-lived JWT for that single request, holds the stream-token in memory only (never localStorage), and passes it as `?token=<stream-token>` on the SSE GET URL. `authenticateStreamToken` verifies the token, populates `req.user` / `req.orgId` / `req.streamTokenScope`, and strips `?token=` from `req.url` before any logger or downstream middleware sees it.
+
+Client hook: `client/src/hooks/useAgentPresence.ts` — SSE + snapshot; server-authoritative only; elapsed timer may tick client-side for visual smoothness but is never persisted or sent back.
+
+### Working time accounting
+
+Service: `server/services/agentWorkingTimeService.ts` (tenant-aware) + `server/services/agentWorkingTimeServicePure.ts` (pure helpers).
+
+- Uses `process.hrtime.bigint()` for monotonic elapsed measurement — NOT `Date.now()`, which is subject to wall-clock drift and NTP adjustments.
+- Intervals are UTC half-open `[start, end)` so midnight crossings are handled by splitting into two buckets rather than spanning the boundary. Double-counting at midnight is prevented by the half-open semantics.
+- Per-day rollup row in `agent_working_time_rollups` (migration 0305) — one row per `(organisation_id, agent_id, bucket_date)` accumulating `working_time_seconds`, `successful_runs`, `failed_runs`, `partial_runs`, `total_run_count`. Idempotency is enforced by `agent_working_time_event_ledger` (migration 0305) — every applied event is recorded once; replays are no-ops.
+- Step pairing keyed by stable step identity. `step_started` and `step_completed` events carry a shared `payload.stepId` (or workflow `(taskId, taskSequence)` when present) — the writer pairs ends to starts by that identity, never by "latest prior start in same run". Concurrent or retried steps in the same run pair correctly because each carries its own id.
+- Monthly compact job (`server/jobs/workingTimeRollupCompactJob.ts`): keeps per-day rows for 1 year, then collapses to monthly resolution.
+
+### IEE session lifecycle
+
+Service: `server/services/ieeSessionService.ts` (tenant-aware) + `server/services/ieeSessionServicePure.ts` (pure helpers). Manages `iee_sessions` rows (migration 0305 — `agent_workspace_presence_and_sessions`) — distinct from the legacy `ieeRuns` table in the IEE section above.
+
+Three lifecycle methods:
+
+- `tearDown(sessionId, orgId)` — uses `withOrgTx`. **External container release MUST happen AFTER the `await withOrgTx(...)` call returns, never inside the transaction callback.** Pattern: commit first, side-effect after. Placing the container release inside the callback violates atomicity if the release throws before the implicit commit.
+- `markFailed(sessionId, reason, orgId)` — uses `getOrgScopedDb`. Does not need a full transaction because a single UPDATE is sufficient.
+- `recordSummary(sessionId, summary, orgId)` — uses `getOrgScopedDb`.
+
+### Retention policy
+
+`agent_observations` rows are immutable by default (DB-level trigger). Non-pinned rows have a 90-day TTL enforced by `server/jobs/agentObservationsPruneJob.ts`:
+
+- Batched DELETE: 1000 rows per batch, ordered `(created_at ASC, id ASC)`, with `FOR UPDATE SKIP LOCKED` to tolerate concurrent job overlap.
+- The immutability trigger is bypassed within the DELETE transaction via `set_config('app.allow_observation_mutation', 'retention_prune', true)` (GUC scoped to that transaction only).
+- Every prune cycle emits a `recordSecurityEvent` with action `agent.observations.retention_prune` — the only authorised mutation path for non-pinned rows.
+
+### Knowledge In Use surface
+
+`KnowledgeInUseCard` reads `retrieval.summary` events from `agent_execution_events`. These events are written by `server/services/retrievalObservabilityService.ts` (PR #274). The agent-workspace surface composes with the Document Retrieval Pipeline rather than duplicating it.
+
+Cross-reference: see § *Document Retrieval Pipeline* above for chunk ranking, mode handling, scope precedence, and the observability service contract.

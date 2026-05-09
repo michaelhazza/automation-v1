@@ -59,6 +59,7 @@ import systemAgentsRouter from './routes/systemAgents.js';
 import systemSkillsRouter from './routes/systemSkills.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
+import agentOverviewRouter from './routes/agentOverview.js';
 import memoryBlocksRouter from './routes/memoryBlocks.js';
 import workspaceMemoryRouter from './routes/workspaceMemory.js';
 import knowledgeRouter from './routes/knowledge.js';
@@ -207,6 +208,8 @@ import benchRunsRouter from './routes/benchRuns.js';
 import governQualityRouter from './routes/governQuality.js';
 // Trust & Verification Layer Stage 3 — operator corrections
 import correctionsRouter from './routes/corrections.js';
+// Agent Workspace — presence SSE stream (Chunk 9)
+import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -339,6 +342,7 @@ app.use(systemAgentsRouter);
 app.use(systemSkillsRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
+app.use(agentOverviewRouter);
 app.use(memoryBlocksRouter);
 app.use(workspaceMemoryRouter);
 app.use(deliveryChannelsRouter);
@@ -459,6 +463,8 @@ app.use(agentScorecardsRouter);
 app.use(benchRunsRouter);
 app.use(governQualityRouter);
 app.use(correctionsRouter);
+// Agent Workspace — presence SSE stream (Chunk 9)
+app.use(agentPresenceStreamRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -755,6 +761,10 @@ async function start() {
   } catch (err) {
     console.warn('[boot] system-agent registry drift check could not run:', err);
   }
+
+  // Agent Workspace — files-snapshot cache invalidation subscribers (Chunk 5)
+  const { subscribeFilesSnapshotInvalidators } = await import('./services/agentOverviewAggregator.js');
+  subscribeFilesSnapshotInvalidators();
 
   initWebSocket(httpServer);
 

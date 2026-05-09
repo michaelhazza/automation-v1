@@ -6,6 +6,7 @@ import { users, organisations, orgUserRoles } from '../db/schema/index.js';
 import { emailService } from './emailService.js';
 import { assignOrgUserRole } from './permissionSeedService.js';
 import { env } from '../lib/env.js';
+import { getOrgSubaccount } from './orgSubaccountService.js';
 
 export class UserService {
   async listUsers(organisationId: string, params: { role?: string; status?: string; limit?: number; offset?: number }) {
@@ -176,6 +177,11 @@ export class UserService {
       throw { statusCode: 404, message: 'User not found' };
     }
 
+    // Workspace subaccount for the user's org — consumed by Home widget
+    // (live presence stream) and any other surface needing the canonical
+    // workspace-scope id without re-fetching `/api/subaccounts`.
+    const orgSubaccount = await getOrgSubaccount(user.organisationId);
+
     return {
       id: user.id,
       email: user.email,
@@ -185,6 +191,8 @@ export class UserService {
       status: user.status,
       lastLoginAt: user.lastLoginAt,
       organisationId: user.organisationId,
+      defaultAgentTab: user.defaultAgentTab,
+      workspaceSubaccountId: orgSubaccount?.id ?? null,
     };
   }
 

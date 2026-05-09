@@ -3056,6 +3056,26 @@ When a feature lets operators flag documents as "always available" (loaded on ev
 
 **Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
 
+### [2026-05-09] Pattern — Single-node SSE topology with reconnect-snapshot recovery
+
+`agentPresenceStreamPublisher.ts` uses an in-process singleton `Map` keyed by scope (no Redis, no message broker). Each scope holds a sorted ring buffer (300 events, canonical order `(eventTimestamp ASC, eventId ASC)`). On reconnect the route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer. The `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; query param is consulted only when the header is absent. Multi-node fan-out is explicitly deferred (spec §18 Agent Workspace). File: `server/services/agentPresenceStreamPublisher.ts`; routes: `server/routes/agentPresenceStream.ts`.
+
+### [2026-05-09] Pattern — Monotonic-clock hysteresis for working time
+
+`agentWorkingTimeService.ts` uses `process.hrtime.bigint()` for elapsed measurement to avoid `Date.now()` wall-clock drift and NTP adjustments. Elapsed accumulates into a per-run bucket in `agent_working_time_buckets`. UTC half-open intervals `[start, end)` prevent double-counting at midnight: runs that cross midnight are split into two buckets inside the pure helper `splitIntervalAcrossBuckets`. The monthly compact job (`workingTimeRollupCompactJob.ts`) keeps per-day rows for 1 year then collapses to monthly resolution. File: `server/services/agentWorkingTimeService.ts` + `agentWorkingTimeServicePure.ts`.
+
+### [2026-05-09] Pattern — Bounded-payload pattern reuse applied to SSE (KNOWLEDGE.md 2026-05-08 retrieval pattern applied)
+
+`agentPresenceStreamPublisher.ts` applies the same bounded-observability-payload pattern from `retrievalObservabilityService`: per-event hard cap is 32KB measured via `Buffer.byteLength(JSON.stringify(event.data), 'utf8')`. Over-limit events have their `data` replaced with `{ truncated: true, byteLength }` and `truncated: true` set on the envelope. Truncation is logged at most once per 24h per event-type (in-process Map keyed on event-type name, reset at UTC midnight) to prevent log storms on burst traffic. The 24h suppression key is `(eventType, host)` — same pattern as the cache-invalidation log suppression (plan Rev 3 tightening #3).
+
+### [2026-05-09] Pattern — Immutability GUC bypass for retention prune
+
+`agentObservationsPruneJob.ts` bypasses the `agent_observations` DB immutability trigger via `set_config('app.allow_observation_mutation', 'retention_prune', true)` issued as the first statement inside the DELETE transaction. The GUC is transaction-scoped only. Every prune cycle calls `recordSecurityEvent` with action `agent.observations.retention_prune` — this is the ONLY authorised mutation path for non-pinned rows. GUC + audit-log pairing is the canonical pattern for any table that uses a trigger-based immutability guard but needs a maintenance prune path. Delete batches: 1000 rows ordered `(created_at ASC, id ASC)` with `FOR UPDATE SKIP LOCKED`.
+
+### [2026-05-09] Pattern — withOrgTx external side-effect boundary
+
+`ieeSessionService.tearDown()` uses `withOrgTx` for the DB update. The external container release (IEE infra teardown) MUST be placed AFTER the `await withOrgTx(...)` call returns — never inside the transaction callback. Pattern: commit first, then side-effect. Placing the release inside the callback violates atomicity: if the release throws before the implicit commit, the transaction may roll back leaving the DB row in a stale state while the container is already gone. `markFailed()` and `recordSummary()` use `getOrgScopedDb` because a single UPDATE needs no full transaction wrapper. File: `server/services/ieeSessionService.ts`.
+
 ### [2026-05-09] Correction — chatgpt-pr-review is iterative until operator says done; never auto-close after a single APPROVED round
 
 **Date:** 2026-05-09
@@ -3095,3 +3115,99 @@ The `finalisation-coordinator` agent now owns the entire post-Step-10 lifecycle:
 **Detection heuristic for future drift.** If a future agent edit removes any guardrail (G1–G4), the iteration cap (5), the stuck-detection rule, or the no-`--no-verify` rule, treat it as a contract violation and surface to operator before merging the change. These four guardrails are the difference between automated maintenance and unbounded agentic merge.
 
 **Applies to:** `.claude/agents/finalisation-coordinator.md` Steps 11, 12, 13. Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Pattern — Paired-event accumulators need explicit stable identity, never "latest prior in same scope"
+
+**Date:** 2026-05-09
+**Source:** finalisation-coordinator finalisation pass on PR #276 (slug: agent-workspace); chatgpt-pr-review Round 1 B3 + Round 2 R2-S2 (agentWorkingTimeService.ts step pairing).
+
+Whenever a service pairs `*_started` / `*_completed` (or `*_open` / `*_closed`) events into intervals, the pairing key MUST be a stable identity carried by both ends — `payload.stepId`, `(taskId, taskSequence)`, span_id, observation_correlation_id, etc. The "latest prior `*_started` in the same scope" pattern silently mispairs under three real-world conditions: concurrent intervals in the same scope, retries (a started event re-fires before the previous completed), and nested intervals.
+
+**Pattern (mandatory shape).** Pair end-to-start by exact identity. If the end carries identity but no matching start exists, **drop the pair and warn** (`<service>.identity_missing`) — never cross-fall through to a fallback path that could match a different open. The cross-fallthrough is what destroys correctness: a stepId-bearing end that falls through to an unidentified slot pairs with whichever step happens to be open, not with its actual sibling.
+
+**Strict fallback rule.** A run-level / scope-level fallback (no identity on either side) is allowed ONLY when both ends lack identity AND no identified open exists in that scope. The "no identified open" check is what prevents an unidentified end from cross-pairing to an identified start. Pure-helper invariant: the fallback opens at most ONE slot per scope and never pairs an end to an unrelated start; the worst case is an under-count, never mis-attribution.
+
+**Detection heuristic.** Any service that uses `WHERE event_type = '<X>_started' AND sequenceNumber < <ours> ORDER BY sequenceNumber DESC LIMIT 1` to find a pair is using the broken pattern. Replace with identity-keyed lookup; keep the legacy fallback only if you also count identified opens and refuse to pair when one is in flight. Tests must include: (a) interleaved concurrent intervals in same scope with explicit identity, (b) retry where the same identity re-fires, (c) asymmetric identity (one end carries it, the other does not — must drop), (d) ambiguous unidentified end while an identified open is in flight (must drop). Files: `server/services/agentWorkingTimeService.ts` + `server/services/agentWorkingTimeServicePure.ts` + `server/services/agentWorkingTimeServicePure.test.ts`.
+
+### [2026-05-09] Pattern — Permission-gated UI surfaces must fail closed during async permission load
+
+**Date:** 2026-05-09
+**Source:** finalisation-coordinator finalisation pass on PR #276 (slug: agent-workspace); chatgpt-pr-review Round 2 R2-S1 (AgentEditPage.tsx Overview tab gate).
+
+When a UI surface is permission-gated and the permission set loads asynchronously (e.g. `/api/my-permissions` fetch on mount), the default during the pre-fetch window MUST be "hide everything that has a gate", not "show everything". The opposite default — render the gated affordance, redirect once perms arrive — has two failure modes: (a) UI contract violation (the "tab does not appear" guarantee is broken for the brief flicker window even when the backend rejects the data), and (b) the gated component can mount and fire a protected backend request before the redirect, producing 403s that look like real failures in observability.
+
+**Pattern (mandatory shape).** Treat `permissions === null` as "permission denied" for the purpose of visibility computation, not as "permission unknown, show everything". Hold the page-level loading state until both the resource fetch AND the permission fetch resolve — never render a tab strip / sidebar / button row that includes a gated affordance while permissions are loading. Admin / system_admin paths can short-circuit (always-visible, never gated) if the role flag is locally cached.
+
+**Detection heuristic.** Any `useMemo` / filter that returns the full unfiltered list when the permission state is `null` is using the broken pattern. The correct shape is: `if (perms === null) return false` (per-tab) inside the filter. Pair this with a top-level `if (permsAreLoading) return <Loading/>` so content rendering also waits.
+
+File: `client/src/pages/build/AgentEditPage.tsx`.
+
+
+### [2026-05-09] Correction — finalisation-coordinator must commit Phase 3 BEFORE applying ready-to-merge label
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation. The original `finalisation-coordinator` Step 10 ordered: apply label → write handoff → write current-focus → commit → push. Applying the label fired CI on the pre-Phase-3 HEAD; the Phase 3 commit then landed and re-fired CI from scratch. Operator caught it and pointed out the wasted compute / wasted minutes.
+
+**Rule:** the ready-to-merge label is what triggers CI on this repo. CI must therefore fire against the final post-Phase-3 commit, never against a pre-Phase-3 HEAD that the next push will immediately invalidate. Apply the label LAST in the Phase 3 sequence, AFTER all Phase 3 artefacts (`handoff.md`, `current-focus.md`, `KNOWLEDGE.md`, `tasks/todo.md`) are committed and pushed.
+
+**Required Step 10 order (locked):**
+
+1. Capture `LABEL_TIMESTAMP_PLACEHOLDER` via `date -u`.
+2. Write `tasks/builds/{slug}/handoff.md` Phase 3 section (recording the placeholder timestamp).
+3. Write `tasks/current-focus.md` mission-control + prose for MERGE_READY.
+4. Commit all four files in a single `chore(finalisation-coordinator): Phase 3 complete` commit.
+5. Push to remote. **Wait for push to complete.**
+6. THEN run `gh pr edit {N} --add-label "ready-to-merge"`.
+
+The pre-captured placeholder timestamp is the operator-visible "labelling moment" recorded in the handoff. Drift between the placeholder and the actual `gh` call is at most a few seconds and is acceptable; the alternative (capture timestamp after `gh`, then amend the handoff) requires either an `--amend` (forbidden in this flow) or a second commit (which itself triggers a third CI run).
+
+**Detection heuristic.** If a future `finalisation-coordinator` edit reorders Step 10 such that `gh pr edit ... --add-label "ready-to-merge"` runs before the Phase 3 commit, treat it as a contract violation and surface to the operator before merging the change. The label-after-commit ordering is what makes the auto-CI-watch loop affordable; reverting it doubles every Phase 3's CI cost.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Step 10. Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Correction — four CI-only gates that G1 (lint + typecheck) misses; comply WHILE writing, not after
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation. CI red after `ready-to-merge` label fired surfaced four blocking-gate failures that G1 did not catch. Operator asked: "anything you can add into knowledge or doco to prevent this in the future instead of having to fix it from failing tests".
+
+The G1 gate run inside `builder` only exercises lint + typecheck + targeted vitest. Four static gates run CI-only and routinely catch chunks that G1 cleared. Every one of them is mechanical to satisfy WHILE writing the chunk and 10–30× more expensive to fix retroactively.
+
+**The four gates and their pre-flight rules:**
+
+1. **`verify-test-quality.sh`** — `*.test.ts` MUST live under `__tests__/`. Inline siblings (`server/services/foo.test.ts`) are silently invisible to Vitest's discovery glob. Correct shape: `server/services/__tests__/foo.test.ts` (and the import is `../foo`, not `./foo`). Same rule for `client/src/**/*.test.ts`. PR #276 had 7 violations from chunks that landed tests inline. Reference: `docs/testing-conventions.md § Test discovery`.
+
+2. **`verify-rls-coverage.sh`** — `CREATE POLICY <name> ON <table>` must be on a single line. The gate uses line-oriented grep. Splitting across two lines (`CREATE POLICY <name>\n  ON <table>`) makes the gate fail to match. The body (`USING (...) / WITH CHECK (...)`) can wrap normally. PR #274 + PR #276 both hit this. KNOWLEDGE.md `[2026-05-08]` recorded the PR #274 instance and the rule still got missed in PR #276 — promote it from history to a checklist item every migration writer reads.
+
+3. **`verify-rls-contract-compliance.sh`** — no raw `db` import from `server/db/index.js` outside `server/services/**`. New helpers in `server/lib/*.ts` that need a query either: (a) use `getOrgScopedDb('caller-tag')` from `server/lib/orgScopedDb.ts` (allowed everywhere); (b) move into a `server/services/` file; or (c) deliberately add the path to `ALLOWLIST_DIRS` in `scripts/verify-rls-contract-compliance.sh` (reserved for short bootstrap helpers — `resolveSubaccount.ts`, `resolveAgent.ts` are the precedents).
+
+4. **FK references to `agent_execution_events(id)` need `ON DELETE` clause.** Default `NO ACTION` blocks integration-test cleanup that deletes events for the run. Pointer columns (nullable: "last seen", "current focus") → `ON DELETE SET NULL`. Dependent rows (NOT NULL: "this row was generated from this event") → think about retention before choosing CASCADE vs the default. PR #276's `agent_presence_projections.last_event_id_fkey` was the first integration-test failure; both pointer columns now `SET NULL`.
+
+**Why the rule lives here AND in `builder.md`.** The `builder` agent definition has a "CI-gate pre-flight" subsection in Step 3 — that's the workflow-level reminder. KNOWLEDGE.md is the durable cross-session record so the lesson survives builder agent revisions and so any agent reading project knowledge sees it as a known-tripwire pattern.
+
+**Detection heuristic.** When writing or reviewing a chunk that touches: any new `*.test.ts` (gate 1), any new `migrations/*.sql` (gate 2 + gate 4), any new `server/lib/*.ts` that queries the DB (gate 3) — run the corresponding compliance check by hand before claiming SUCCESS:
+
+- `find <chunk dir> -name '*.test.ts' -not -path '*/__tests__/*' -print` should return zero.
+- `grep -E '^CREATE POLICY[^O]*$' migrations/<new>.sql` should return zero (any line that starts with CREATE POLICY but has no ON before EOL).
+- `grep -l "from '../db/index" server/lib/<new-files>.ts` plus check it's in the gate allowlist.
+- `grep "REFERENCES agent_execution_events" migrations/<new>.sql` should not return entries without an `ON DELETE` clause unless the column is intentionally `NO ACTION`.
+
+**Applies to:** `.claude/agents/builder.md` Step 3 ("CI-gate pre-flight"); `docs/testing-conventions.md § Test discovery` (already names the rule but builder agents missed it). Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Sub-pattern — `verify-pure-helper-convention.sh` requires `.js` extension on relative imports
+
+**Date:** 2026-05-09
+**Source:** Phase 3 finalisation auto-fix iteration 2 on PR #276 (slug: agent-workspace). Iteration 1 fixed test-file location (`./X` → `../X`); iteration 2 caught a follow-on gate failure because the gate's regex requires `.js` on the relative import.
+
+The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test file under `__tests__/` imports something from its parent directory. The grep pattern is `from\s+'(\.\./|\./)[^']+\.js'` — the `.js` extension is required. Without it, a TypeScript-only relative import like `from '../somethingPure'` is invisible to the gate even though TypeScript resolves it correctly.
+
+**Pattern (mandatory shape).** Every relative import in a test file MUST end in `.js` — both the sibling-module import and any deeper relative path (`../../../shared/types/X.js`). This matches the project's TypeScript-ESM `nodenext` resolution mode and the gate's regex.
+
+**Detection heuristic.** Pair this check with the test-file-location check in builder.md Step 3:
+
+- `find <new-test-files> -name '*.test.ts' | xargs grep -E "from '(\.\./|\./)[^']+'$"` should return zero (every relative import should have an extension).
+- If zero, also check `from '(\.\./|\./)[^']+\.ts'` is zero (never `.ts` — always `.js` for ESM resolution).
+
+**Applies to:** `.claude/agents/builder.md` Step 3 "CI-gate pre-flight"; `KNOWLEDGE.md [2026-05-09] Correction — four CI-only gates that G1 misses` (this is sub-rule 1.b — the `.js` extension requirement on relative imports inside `__tests__/`).

@@ -34,6 +34,7 @@ import MetricCard from '../../components/MetricCard';
 import { RunActivityChart } from '../../components/ActivityCharts';
 import { ActivityRow } from './components/ActivityRow';
 import { ActivityDetailModal } from './components/ActivityDetailModal';
+import { HomeActiveAgentsWidget } from '../../components/home/HomeActiveAgentsWidget';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -181,6 +182,8 @@ export default function HomePage({ user }: { user: User }) {
   const [statsState, loadStats]         = useTileState<ActivityStats>();
   // Cost MTD — only fetched for org_admin / system_admin (spec §6)
   const [costState, loadCost]           = useTileState<{ totalCostCents: number }>();
+  // Org subaccount ID — for the HomeActiveAgentsWidget presence stream
+  const [orgSubaccountId, setOrgSubaccountId] = useState<string | null>(null);
 
   // ── Chart section isolated state ──────────────────────────────────────────
   const [chartLoading, setChartLoading]   = useState(true);
@@ -197,6 +200,15 @@ export default function HomePage({ user }: { user: User }) {
 
   // ── Mount: fire all fetches independently ─────────────────────────────────
   useEffect(() => {
+    // Workspace subaccount ID — single canonical fetch from the user profile,
+    // sourced from `orgSubaccountService.getOrgSubaccount` server-side. Avoids
+    // re-fetching all subaccounts and filtering ad-hoc by `isOrgSubaccount`.
+    api.get<{ workspaceSubaccountId: string | null }>('/api/users/me')
+      .then((r) => {
+        if (r.data?.workspaceSubaccountId) setOrgSubaccountId(r.data.workspaceSubaccountId);
+      })
+      .catch(() => { /* non-fatal — widget stays hidden */ });
+
     // Pending approvals / attention counts
     loadAttention(
       api.get<{ data: { counts: AttentionCounts } }>('/api/pulse/attention')
@@ -324,23 +336,27 @@ export default function HomePage({ user }: { user: User }) {
             loading={healthState.loading}
           />
 
-          {/* Active Agents */}
-          <MetricCard
-            label="Active Agents"
-            value={agentsState.loading ? '…' : agentsState.error ? '—' : activeAgents.length}
-            sub={
-              agentsState.loading ? undefined
-              : agentsState.error ? undefined
-              : totalAgents > activeAgents.length
-                ? `${totalAgents - activeAgents.length} inactive`
-                : 'all ready'
-            }
-            to="/agents"
-            icon={IconAgent}
-            iconBg="bg-indigo-50"
-            iconColor="text-indigo-500"
-            loading={agentsState.loading}
-          />
+          {/* Active Agents — live presence widget (Chunk 9) */}
+          {orgSubaccountId ? (
+            <HomeActiveAgentsWidget subaccountId={orgSubaccountId} />
+          ) : (
+            <MetricCard
+              label="Active Agents"
+              value={agentsState.loading ? '…' : agentsState.error ? '—' : activeAgents.length}
+              sub={
+                agentsState.loading ? undefined
+                : agentsState.error ? undefined
+                : totalAgents > activeAgents.length
+                  ? `${totalAgents - activeAgents.length} inactive`
+                  : 'all ready'
+              }
+              to="/agents"
+              icon={IconAgent}
+              iconBg="bg-indigo-50"
+              iconColor="text-indigo-500"
+              loading={agentsState.loading}
+            />
+          )}
 
           {/* Runs 7 days */}
           <MetricCard

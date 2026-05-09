@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<!--
+  Mockup 1 (revised): Home page with Active Agents widget enhanced
+  Agent Workspace, Implementation Brief
+  Faithfully matches prototypes/consolidation-2026-05-06/home.html structure:
+  - Greeting
+  - Row 1: Inbox preview + Active agents (this is the widget being changed)
+  - Row 2: Runs with timeframe pills + Spend & cap
+  - Row 3: Recent activity table + Quick actions
+  Only the Active Agents widget is changing (highlighted). Everything else is
+  the existing prototype, kept here for context so the change is visible.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home: Active Agents widget | Agent Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  .sidebar-pad { padding: 14px 16px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sidebar-item { padding: 8px 16px; color: rgba(255,255,255,0.78); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-500); padding-left: 13px; }
+
+  .topbar { background: white; border-bottom: 1px solid var(--border); padding: 12px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
+  .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
+
+  .page-content { padding: 28px 32px; max-width: 1320px; margin: 0 auto; }
+  .greeting { font-size: 26px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
+  .greeting-sub { font-size: 13.5px; color: var(--slate-500); margin-bottom: 20px; }
+
+  /* Annotation showing what's new */
+  .change-note {
+    background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 18px;
+    font-size: 12.5px; color: #78350f; line-height: 1.5;
+  }
+  .change-note strong { color: #92400e; }
+
+  /* Row layout */
+  .row-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+  /* Card / widget shell */
+  .widget {
+    background: white; border: 1px solid var(--slate-200); border-radius: 12px;
+    display: flex; flex-direction: column; min-height: 280px;
+  }
+  .widget.changing {
+    border-color: var(--indigo-400);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.08);
+    position: relative;
+  }
+  .widget.changing::before {
+    content: 'NEW: enhanced'; position: absolute; top: -10px; right: 12px;
+    background: var(--indigo-600); color: white; font-size: 9px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 8px; border-radius: 8px;
+  }
+  .widget-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .widget-title { font-size: 13px; font-weight: 700; color: var(--slate-900); }
+  .widget-link { font-size: 11.5px; color: var(--indigo-600); font-weight: 600; cursor: pointer; }
+  .widget-link:hover { text-decoration: underline; }
+  .widget-body { padding: 12px 16px; flex: 1; }
+  .widget-body.tight { padding: 0; }
+
+  /* Inbox preview rows */
+  .inbox-item {
+    display: grid; grid-template-columns: 8px 1fr; gap: 10px; padding: 8px 16px; align-items: flex-start;
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .inbox-item:last-child { border-bottom: none; }
+  .inbox-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; }
+  .inbox-dot.amber { background: var(--amber-500); }
+  .inbox-dot.red { background: var(--red-500); }
+  .inbox-title { font-size: 12.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 1px; line-height: 1.3; }
+  .inbox-sub { font-size: 11px; color: var(--slate-500); }
+  .inbox-footer { padding: 10px 16px; border-top: 1px solid var(--slate-100); }
+
+  /* === ACTIVE AGENTS widget (the one changing) === */
+  .agents-stat {
+    padding: 12px 16px 8px; font-size: 12px; color: var(--slate-600);
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .agents-stat strong { color: var(--slate-900); font-weight: 700; }
+  .agents-section-label {
+    font-size: 10px; font-weight: 700; color: var(--slate-400); letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 10px 16px 4px;
+  }
+  .agent-row {
+    display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center;
+    padding: 8px 16px; border-bottom: 1px solid var(--slate-100); cursor: pointer;
+  }
+  .agent-row:hover { background: var(--slate-50); }
+  .agent-row:last-child { border-bottom: none; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .status-dot.active { background: var(--indigo-500); animation: pulse 1.6s ease-in-out infinite; }
+  .status-dot.waiting { background: var(--amber-500); }
+  .status-dot.scheduled { background: var(--slate-300); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+    50% { box-shadow: 0 0 0 5px rgba(99,102,241,0); }
+  }
+  .agent-name { font-size: 13px; font-weight: 600; color: var(--slate-800); margin-bottom: 1px; }
+  .agent-focus { font-size: 11.5px; color: var(--slate-500); line-height: 1.3; }
+  .agent-focus em { font-style: normal; color: var(--slate-700); font-weight: 500; }
+  .agent-elapsed { font-size: 11.5px; font-weight: 600; color: var(--slate-700); font-variant-numeric: tabular-nums; }
+  .agent-elapsed.muted { color: var(--slate-500); font-weight: 500; }
+
+  /* Runs widget timeframe pills + chart */
+  .tf-pills { display: flex; gap: 4px; }
+  .tf-pill {
+    padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600); background: white; cursor: pointer;
+  }
+  .tf-pill.active { background: var(--slate-900); color: white; border-color: var(--slate-900); }
+  .chart-area { padding: 14px 16px; height: 160px; display: flex; align-items: flex-end; gap: 3px; }
+  .chart-bar { flex: 1; background: var(--indigo-200); border-radius: 2px 2px 0 0; min-height: 4px; }
+  .chart-bar.now { background: var(--indigo-500); }
+  .chart-meta {
+    padding: 8px 16px 12px; display: flex; justify-content: space-between; align-items: center;
+    font-size: 11.5px; color: var(--slate-500);
+  }
+  .chart-meta strong { color: var(--slate-900); font-weight: 700; }
+
+  /* Spend widget */
+  .spend-section { padding: 11px 16px; border-bottom: 1px solid var(--slate-100); }
+  .spend-section:last-child { border-bottom: none; }
+  .spend-label { font-size: 10.5px; font-weight: 600; color: var(--slate-500); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 5px; }
+  .spend-metric { font-size: 12.5px; color: var(--slate-700); margin-bottom: 5px; }
+  .spend-metric strong { color: var(--slate-900); font-weight: 700; }
+  .spend-bar-track { height: 6px; background: var(--slate-100); border-radius: 3px; overflow: hidden; }
+  .spend-bar-fill { height: 100%; background: var(--indigo-500); }
+  .spend-warning { font-size: 11px; color: var(--amber-700); margin-top: 5px; }
+
+  /* Recent activity */
+  .act-table { width: 100%; border-collapse: collapse; }
+  .act-table th { text-align: left; padding: 8px 16px; font-size: 10px; font-weight: 600;
+    color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--slate-200); }
+  .act-table td { padding: 8px 16px; font-size: 11.5px; color: var(--slate-700); border-bottom: 1px solid var(--slate-100); }
+  .act-table tr:last-child td { border-bottom: none; }
+  .sub-badge { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; font-weight: 600; background: #eff6ff; color: #1d4ed8; }
+  .type-chip { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; font-weight: 600; background: var(--slate-100); color: var(--slate-600); }
+  .type-chip.fail { background: #fef2f2; color: #dc2626; }
+
+  /* Quick actions */
+  .qa-row {
+    display: flex; gap: 11px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--slate-100); cursor: pointer;
+  }
+  .qa-row:hover { background: var(--slate-50); }
+  .qa-row:last-child { border-bottom: none; }
+  .qa-icon {
+    width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    background: var(--indigo-50); color: var(--indigo-600); font-size: 13px;
+  }
+  .qa-icon.amber { background: var(--amber-50); color: var(--amber-600); }
+  .qa-label { font-size: 12.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 1px; }
+  .qa-sub { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div style="width:28px;height:28px;border-radius:7px;background:var(--indigo-500);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:14px;">S</div>
+        <div style="color:white;font-weight:700;font-size:14px;">Synthetos</div>
+      </div>
+    </div>
+    <div class="sidebar-pad">Work</div>
+    <div class="sidebar-item active" style="color:white;">Home</div>
+    <div class="sidebar-item">Inbox</div>
+    <div class="sidebar-item">Activity</div>
+    <div class="sidebar-item">Recurring tasks</div>
+    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-item">Knowledge</div>
+    <div class="sidebar-item">Connections</div>
+    <div class="sidebar-pad">Agents</div>
+    <div class="sidebar-item">Outreach Agent</div>
+    <div class="sidebar-item">Research Agent</div>
+    <div class="sidebar-item">CRM Hygiene Agent</div>
+  </aside>
+
+  <main style="flex:1;min-width:0;">
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span>Acme Corp</span>
+        <span style="color:var(--slate-300);">/</span>
+        <span class="breadcrumb-current">Home</span>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <div class="greeting">Good morning, Sarah</div>
+      <div class="greeting-sub">2 agents working, 1 waiting on you, 5 scheduled today. 7 items in your inbox.</div>
+
+      <div class="change-note">
+        <strong>What's changing on this page:</strong> only the Active Agents widget. Everything else
+        (Inbox preview, Runs chart with timeframe pills, Spend &amp; cap, Recent activity, Quick actions)
+        is the existing Home prototype, shown for context. The Active Agents widget today is just a number
+        tile in the shipped product; this mockup expands it into a live status list per-agent matching the
+        consolidation prototype that was specced but never built.
+      </div>
+
+      <!-- Row 1: Inbox preview + Active agents (the one changing) -->
+      <div class="row-2col">
+
+        <!-- Inbox preview -->
+        <div class="widget">
+          <div class="widget-head">
+            <span class="widget-title">Inbox <span style="display:inline-flex;align-items:center;justify-content:center;background:var(--amber-500);color:white;border-radius:9px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:6px;">7</span></span>
+            <span class="widget-link">Open all</span>
+          </div>
+          <div class="widget-body tight">
+            <div class="inbox-item">
+              <div class="inbox-dot amber"></div>
+              <div>
+                <div class="inbox-title">Approval needed: "Weekly nurture sequence"</div>
+                <div class="inbox-sub">Email Automation Agent, 32m ago</div>
+              </div>
+            </div>
+            <div class="inbox-item">
+              <div class="inbox-dot amber"></div>
+              <div>
+                <div class="inbox-title">Belief conflict: Acme Corp contact phone</div>
+                <div class="inbox-sub">Research Agent, 14m ago</div>
+              </div>
+            </div>
+            <div class="inbox-item">
+              <div class="inbox-dot red"></div>
+              <div>
+                <div class="inbox-title">Runtime check failed: Send email step</div>
+                <div class="inbox-sub">Outreach Agent · API returned 500 · 18m ago</div>
+              </div>
+            </div>
+            <div class="inbox-item">
+              <div class="inbox-dot red"></div>
+              <div>
+                <div class="inbox-title">Run failed: Morning report, Maple Digital</div>
+                <div class="inbox-sub">Gmail credential expired, 2h ago</div>
+              </div>
+            </div>
+            <div class="inbox-footer"><span class="widget-link">View all 7 unread items</span></div>
+          </div>
+        </div>
+
+        <!-- Active agents (the widget that's changing) -->
+        <div class="widget changing">
+          <div class="widget-head">
+            <span class="widget-title">Active agents</span>
+            <span class="widget-link">All agents</span>
+          </div>
+          <div class="widget-body tight">
+
+            <div class="agents-section-label">Waiting on you</div>
+
+            <div class="agent-row">
+              <div class="status-dot waiting"></div>
+              <div>
+                <div class="agent-name">Outreach Agent</div>
+                <div class="agent-focus">Step 7 of 14: <em>awaiting your approval on draft email to Acme Corp VP Operations</em></div>
+              </div>
+              <div class="agent-elapsed muted">0:42 paused</div>
+            </div>
+
+            <div class="agents-section-label">Working now <span style="font-weight:400;color:var(--slate-400);">· 2 working, 1 paused on system</span></div>
+
+            <div class="agent-row">
+              <div class="status-dot active"></div>
+              <div>
+                <div class="agent-name">Research Agent</div>
+                <div class="agent-focus">Step 3 of 6: <em>summarising recent earnings reports for TerraForm Partners</em></div>
+              </div>
+              <div class="agent-elapsed">0:08</div>
+            </div>
+
+            <div class="agent-row">
+              <div class="status-dot active"></div>
+              <div>
+                <div class="agent-name">CRM Hygiene Agent</div>
+                <div class="agent-focus">Step 12 of 12: <em>writing enrichment results back to CRM (412 records)</em></div>
+              </div>
+              <div class="agent-elapsed">1:14</div>
+            </div>
+
+            <div class="agents-section-label">Scheduled next</div>
+
+            <div class="agent-row">
+              <div class="status-dot scheduled"></div>
+              <div>
+                <div class="agent-name">Reporting Agent</div>
+                <div class="agent-focus">Weekly client digest, runs at 9:00am tomorrow</div>
+              </div>
+              <div class="agent-elapsed muted">in 18h</div>
+            </div>
+
+            <div class="agent-row">
+              <div class="status-dot scheduled"></div>
+              <div>
+                <div class="agent-name">Lead Qualification Agent</div>
+                <div class="agent-focus">Triggers on new lead, last fired 2h ago</div>
+              </div>
+              <div class="agent-elapsed muted">on event</div>
+            </div>
+
+            <div style="padding:8px 16px;border-top:1px solid var(--slate-100);font-size:11.5px;color:var(--indigo-600);font-weight:600;text-align:center;cursor:pointer;">
+              + 12 more scheduled today, view all →
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Row 2: Runs chart + Spend -->
+      <div class="row-2col">
+        <div class="widget">
+          <div class="widget-head">
+            <span class="widget-title">Runs</span>
+            <div class="tf-pills">
+              <button class="tf-pill active">Today</button>
+              <button class="tf-pill">This week</button>
+              <button class="tf-pill">This month</button>
+              <button class="tf-pill">This quarter</button>
+            </div>
+          </div>
+          <div class="chart-area">
+            <div class="chart-bar" style="height:30%;"></div>
+            <div class="chart-bar" style="height:42%;"></div>
+            <div class="chart-bar" style="height:38%;"></div>
+            <div class="chart-bar" style="height:55%;"></div>
+            <div class="chart-bar" style="height:71%;"></div>
+            <div class="chart-bar" style="height:62%;"></div>
+            <div class="chart-bar" style="height:48%;"></div>
+            <div class="chart-bar" style="height:80%;"></div>
+            <div class="chart-bar" style="height:64%;"></div>
+            <div class="chart-bar" style="height:75%;"></div>
+            <div class="chart-bar" style="height:88%;"></div>
+            <div class="chart-bar now" style="height:65%;"></div>
+            <div class="chart-bar" style="height:8%;background:var(--slate-200);"></div>
+            <div class="chart-bar" style="height:8%;background:var(--slate-200);"></div>
+          </div>
+          <div class="chart-meta">
+            <span style="font-size:10.5px;color:var(--slate-400);">12am</span>
+            <span><strong>34 runs</strong> · 32 ok · 2 failed</span>
+            <span style="font-size:10.5px;color:var(--slate-400);">now</span>
+          </div>
+        </div>
+
+        <div class="widget">
+          <div class="widget-head">
+            <span class="widget-title">Spend &amp; cap</span>
+            <span class="widget-link">Details</span>
+          </div>
+          <div class="widget-body tight">
+            <div class="spend-section">
+              <div class="spend-label">Today</div>
+              <div class="spend-metric"><strong>$9.50</strong> of $50 daily cap (19%)</div>
+              <div class="spend-bar-track"><div class="spend-bar-fill" style="width:19%;"></div></div>
+            </div>
+            <div class="spend-section">
+              <div class="spend-label">This month</div>
+              <div class="spend-metric"><strong>$325</strong> of $1,500 monthly cap (22%)</div>
+              <div class="spend-bar-track"><div class="spend-bar-fill" style="width:22%;"></div></div>
+              <div class="spend-warning">⚠ On pace for $1,680 / month, over budget</div>
+            </div>
+            <div style="padding:10px 16px;font-size:11px;color:var(--slate-500);">Scope: Acme Corp</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Recent activity + Quick actions -->
+      <div class="row-2col">
+        <div class="widget">
+          <div class="widget-head">
+            <span class="widget-title">Recent activity</span>
+            <span class="widget-link">View all</span>
+          </div>
+          <div class="widget-body tight">
+            <table class="act-table">
+              <thead>
+                <tr><th>Activity</th><th>Subaccount</th><th>Type</th><th>Time</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Run completed: Outreach Agent</td><td><span class="sub-badge">Acme Corp</span></td><td><span class="type-chip">Agent run</span></td><td style="color:var(--slate-400);">2m ago</td></tr>
+                <tr><td>Memory updated: Acme Voice Standards</td><td><span class="sub-badge">Acme Corp</span></td><td><span class="type-chip">Memory</span></td><td style="color:var(--slate-400);">14m ago</td></tr>
+                <tr><td>Skill enabled: Sentiment analysis</td><td><span class="sub-badge">Acme Corp</span></td><td><span class="type-chip">Skill</span></td><td style="color:var(--slate-400);">28m ago</td></tr>
+                <tr><td>HubSpot sync: 47 contacts pulled</td><td><span class="sub-badge" style="background:#f0fdf4;color:#166534;">TerraForm</span></td><td><span class="type-chip">Integration</span></td><td style="color:var(--slate-400);">42m ago</td></tr>
+                <tr><td>Document uploaded: Sales playbook v3</td><td><span class="sub-badge">Acme Corp</span></td><td><span class="type-chip">Document</span></td><td style="color:var(--slate-400);">1h 5m ago</td></tr>
+                <tr><td>Run failed: CRM Sync Agent</td><td><span class="sub-badge" style="background:#fdf4ff;color:#6b21a8;">Globex</span></td><td><span class="type-chip fail">Failure</span></td><td style="color:var(--slate-400);">2h 11m ago</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="widget">
+          <div class="widget-head"><span class="widget-title">Quick actions</span></div>
+          <div class="widget-body tight">
+            <div class="qa-row">
+              <div class="qa-icon">+</div>
+              <div>
+                <div class="qa-label">New agent</div>
+                <div class="qa-sub">Create and configure an agent</div>
+              </div>
+            </div>
+            <div class="qa-row">
+              <div class="qa-icon">⏰</div>
+              <div>
+                <div class="qa-label">Schedule a task</div>
+                <div class="qa-sub">Set up a recurring agent run</div>
+              </div>
+            </div>
+            <div class="qa-row">
+              <div class="qa-icon">🔗</div>
+              <div>
+                <div class="qa-label">Connect integration</div>
+                <div class="qa-sub">Add a new service connection</div>
+              </div>
+            </div>
+            <div class="qa-row">
+              <div class="qa-icon">📚</div>
+              <div>
+                <div class="qa-label">Add knowledge</div>
+                <div class="qa-sub">Upload docs or author memory blocks</div>
+              </div>
+            </div>
+            <div class="qa-row">
+              <div class="qa-icon amber">📥</div>
+              <div>
+                <div class="qa-label">Review inbox</div>
+                <div class="qa-sub">7 items need your attention</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

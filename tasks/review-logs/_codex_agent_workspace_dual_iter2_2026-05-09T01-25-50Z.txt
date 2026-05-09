@@ -1,0 +1,2117 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e0a57-477a-7ab0-8a78-7488ec99dac5
+--------
+user
+current changes
+  → Inspect git status and diffs
+  • Analyze changed code for bugs
+  • Return prioritized findings JSON
+2026-05-09T01:26:03.409472Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --staged --; git diff --; git ls-files --others --exclude-standard'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --staged --; git diff --; git ls-files --others --exclude-standard' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --staged --; git diff --; git ls-files --others --exclude-standard'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 647ms:
+ M server/db/schema/index.ts
+ M server/routes/agentPresenceStream.ts
+ M server/services/agentPresenceServicePure.test.ts
+ M server/services/agentPresenceServicePure.ts
+?? tasks/review-logs/_codex_agent_workspace_dual_iter1_2026-05-09T01-14-28Z.txt
+?? tasks/review-logs/_codex_agent_workspace_dual_iter2_2026-05-09T01-25-50Z.txt
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/db/schema/index.ts server/routes/agentPresenceStream.ts server/services/agentPresenceServicePure.test.ts server/services/agentPresenceServicePure.ts' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 690ms:
+diff --git a/server/db/schema/index.ts b/server/db/schema/index.ts
+index 6bd7ec82..5cf9c5ae 100644
+--- a/server/db/schema/index.ts
++++ b/server/db/schema/index.ts
+@@ -292,8 +292,8 @@ export * from './scorecardJudgements.js';
+ export * from './benchRuns.js';
+ 
+ // Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
+-export * from './agentObservations';
+-export * from './ieeSessions';
+-export * from './agentPresenceProjections';
+-export * from './agentWorkingTimeRollups';
+-export * from './agentWorkingTimeEventLedger';
++export * from './agentObservations.js';
++export * from './ieeSessions.js';
++export * from './agentPresenceProjections.js';
++export * from './agentWorkingTimeRollups.js';
++export * from './agentWorkingTimeEventLedger.js';
+diff --git a/server/routes/agentPresenceStream.ts b/server/routes/agentPresenceStream.ts
+index fe04856d..dd1d87e1 100644
+--- a/server/routes/agentPresenceStream.ts
++++ b/server/routes/agentPresenceStream.ts
+@@ -161,9 +161,17 @@ router.get(
+   '/api/agent-presence/stream/:agentId',
+   authenticateStreamToken,
+   asyncHandler(async (req, res) => {
+-    // Verify the token's bound scope matches the URL path param
+-    const claimedAgentId = (req.streamTokenScope as { agentId?: string } | undefined)?.agentId;
+-    if (claimedAgentId && claimedAgentId !== req.params.agentId) {
++    // Stream tokens are bound to a specific scope kind + ID. Reject any token
++    // whose scope.kind is not 'agent' or whose agentId does not match the URL
++    // path param. A workspace-scoped token must NOT be usable on an agent
++    // route, even though it would otherwise pass token signature verification.
++    const tokenScope = req.streamTokenScope;
++    if (
++      !tokenScope ||
++      tokenScope.kind !== 'agent' ||
++      !tokenScope.agentId ||
++      tokenScope.agentId !== req.params.agentId
++    ) {
+       throw { statusCode: 403, message: 'Token scope does not match requested agent' };
+     }
+ 
+@@ -181,9 +189,18 @@ router.get(
+   '/api/agent-presence/stream/workspace/:subaccountId',
+   authenticateStreamToken,
+   asyncHandler(async (req, res) => {
+-    // Verify the token's bound scope matches the URL path param
+-    const claimedSubaccountId = (req.streamTokenScope as { subaccountId?: string } | undefined)?.subaccountId;
+-    if (claimedSubaccountId && claimedSubaccountId !== req.params.subaccountId) {
++    // Stream tokens are bound to a specific scope kind + ID. Reject any token
++    // whose scope.kind is not 'workspace' or whose subaccountId does not match
++    // the URL path param. An agent-scoped token must NOT be usable on a
++    // workspace route, even though it would otherwise pass token signature
++    // verification.
++    const tokenScope = req.streamTokenScope;
++    if (
++      !tokenScope ||
++      tokenScope.kind !== 'workspace' ||
++      !tokenScope.subaccountId ||
++      tokenScope.subaccountId !== req.params.subaccountId
++    ) {
+       throw { statusCode: 403, message: 'Token scope does not match requested workspace' };
+     }
+ 
+diff --git a/server/services/agentPresenceServicePure.test.ts b/server/services/agentPresenceServicePure.test.ts
+index 94afb529..dcaf7361 100644
+--- a/server/services/agentPresenceServicePure.test.ts
++++ b/server/services/agentPresenceServicePure.test.ts
+@@ -31,7 +31,7 @@ describe('resolvePresenceFromEvents', () => {
+     const result = resolvePresenceFromEvents(
+       makeInput({
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+           { id: 'e2', eventType: 'step_started', eventTimestamp: '2026-05-08T11:59:01Z', runId: 'run1', sequenceNumber: 2, payload: {} },
+         ],
+       })
+@@ -44,7 +44,7 @@ describe('resolvePresenceFromEvents', () => {
+     const result = resolvePresenceFromEvents(
+       makeInput({
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+           { id: 'e2', eventType: 'hitl_gate_opened', eventTimestamp: '2026-05-08T11:59:01Z', runId: 'run1', sequenceNumber: 2, payload: {} },
+         ],
+       })
+@@ -56,7 +56,7 @@ describe('resolvePresenceFromEvents', () => {
+     const result = resolvePresenceFromEvents(
+       makeInput({
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+           { id: 'e2', eventType: 'external_call_started', eventTimestamp: '2026-05-08T11:59:01Z', runId: 'run1', sequenceNumber: 2, payload: {} },
+         ],
+       })
+@@ -64,38 +64,41 @@ describe('resolvePresenceFromEvents', () => {
+     expect(result.state).toBe('waiting_on_dependency');
+   });
+ 
+-  it('returns failed when run_failed event present', () => {
++  it('returns failed when run.completed has finalStatus !== "completed"', () => {
++    // Run failure is signalled by the canonical run.completed event with a
++    // non-"completed" finalStatus payload field — there is no separate
++    // run.failed event in the production event-type union.
+     const result = resolvePresenceFromEvents(
+       makeInput({
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+-          { id: 'e2', eventType: 'run_failed', eventTimestamp: '2026-05-08T11:59:10Z', runId: 'run1', sequenceNumber: 2, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e2', eventType: 'run.completed', eventTimestamp: '2026-05-08T11:59:10Z', runId: 'run1', sequenceNumber: 2, payload: { finalStatus: 'failed' } },
+         ],
+       })
+     );
+     expect(result.state).toBe('failed');
+   });
+ 
+-  it('returns idle when run is completed', () => {
++  it('returns idle when run.completed has finalStatus === "completed"', () => {
+     const result = resolvePresenceFromEvents(
+       makeInput({
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: '2026-05-08T11:58:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+-          { id: 'e2', eventType: 'run_completed', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 2, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: '2026-05-08T11:58:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e2', eventType: 'run.completed', eventTimestamp: '2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 2, payload: { finalStatus: 'completed' } },
+         ],
+       })
+     );
+     expect(result.state).toBe('idle');
+   });
+ 
+-  it('failed ranks above degraded — terminal event present returns failed even when stream is stale', () => {
++  it('failed ranks above degraded — terminal failure present returns failed even when stream is stale', () => {
+     const staleTimestamp = new Date(Date.now() - 60_000).toISOString();
+     const result = resolvePresenceFromEvents(
+       makeInput({
+         serverNow: new Date().toISOString(),
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: staleTimestamp, runId: 'run1', sequenceNumber: 1, payload: {} },
+-          { id: 'e2', eventType: 'run_failed', eventTimestamp: staleTimestamp, runId: 'run1', sequenceNumber: 2, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: staleTimestamp, runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e2', eventType: 'run.completed', eventTimestamp: staleTimestamp, runId: 'run1', sequenceNumber: 2, payload: { finalStatus: 'failed' } },
+         ],
+       })
+     );
+@@ -110,7 +113,7 @@ describe('resolvePresenceFromEvents', () => {
+       makeInput({
+         serverNow: '2026-05-08T12:00:00Z',
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: staleTimestamp, runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: staleTimestamp, runId: 'run1', sequenceNumber: 1, payload: {} },
+         ],
+       })
+     );
+@@ -123,7 +126,7 @@ describe('resolvePresenceFromEvents', () => {
+     // Two events with identical timestamps — second event has higher ID lexicographically
+     const ts = '2026-05-08T11:59:00Z';
+     const events = [
+-      { id: 'aaa', eventType: 'run_started', eventTimestamp: ts, runId: 'run1', sequenceNumber: 1, payload: {} },
++      { id: 'aaa', eventType: 'run.started', eventTimestamp: ts, runId: 'run1', sequenceNumber: 1, payload: {} },
+       { id: 'bbb', eventType: 'step_started', eventTimestamp: ts, runId: 'run1', sequenceNumber: 2, payload: {} },
+     ];
+     const result = resolvePresenceFromEvents(makeInput({ events }));
+@@ -138,7 +141,7 @@ describe('resolvePresenceFromEvents', () => {
+       makeInput({
+         serverNow: '2026-05-08T12:00:00Z',
+         events: [
+-          { id: 'e1', eventType: 'run_started', eventTimestamp: pastTs, runId: 'run1', sequenceNumber: 1, payload: {} },
++          { id: 'e1', eventType: 'run.started', eventTimestamp: pastTs, runId: 'run1', sequenceNumber: 1, payload: {} },
+         ],
+       })
+     );
+diff --git a/server/services/agentPresenceServicePure.ts b/server/services/agentPresenceServicePure.ts
+index a7cab478..eecfd5d2 100644
+--- a/server/services/agentPresenceServicePure.ts
++++ b/server/services/agentPresenceServicePure.ts
+@@ -52,10 +52,21 @@ export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput
+   const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+   const lastEventTimestamp = lastEvent?.eventTimestamp ?? null;
+ 
+-  // Detect terminal failure
+-  const hasFailed = events.some(e =>
+-    e.eventType === 'run_failed' || e.eventType === 'run_error' || e.eventType === 'run_terminated_with_error'
+-  ) || sessionState?.status === 'failed';
++  // Detect terminal failure.
++  //
++  // The canonical run-lifecycle event is `run.completed` (architecture.md
++  // § Critical events; producer at `agentExecutionService.ts:1652`). There is
++  // no separate `run.failed` event — failure is signalled by the `finalStatus`
++  // field on the `run.completed` payload (`finalStatus !== 'completed'`).
++  // `sessionState.status === 'failed'` is an additional trip-wire from the
++  // IEE session lifecycle (container failure path, spec §6.2).
++  const isFailedRunCompleted = (e: PresenceInput['events'][number]): boolean => {
++    if (e.eventType !== 'run.completed') return false;
++    const payload = e.payload as { finalStatus?: unknown } | null;
++    const finalStatus = payload && typeof payload === 'object' ? payload.finalStatus : undefined;
++    return typeof finalStatus === 'string' && finalStatus !== 'completed';
++  };
++  const hasFailed = events.some(isFailedRunCompleted) || sessionState?.status === 'failed';
+ 
+   if (hasFailed) {
+     return {
+@@ -70,11 +81,13 @@ export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput
+     };
+   }
+ 
+-  // Detect active run (run_started but no run_completed/run_failed)
+-  const runStarted = events.filter(e => e.eventType === 'run_started');
++  // Detect active run (run.started but no run.completed for the same runId —
++  // success and failure both surface as `run.completed`; failure path is
++  // handled by the hasFailed branch above).
++  const runStarted = events.filter(e => e.eventType === 'run.started');
+   const runCompleted = new Set(
+     events
+-      .filter(e => e.eventType === 'run_completed' || e.eventType === 'run_failed')
++      .filter(e => e.eventType === 'run.completed')
+       .map(e => e.runId)
+   );
+   const activeRuns = runStarted.filter(e => e.runId && !runCompleted.has(e.runId));
+@@ -85,10 +98,10 @@ export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput
+   if (activeRunId) {
+     const activeRunEvents = events.filter(e => e.runId === activeRunId);
+     const lastActiveEvent = activeRunEvents.at(-1);
+-    // event_stream_delayed fires only when no activity beyond run_started has been received —
++    // event_stream_delayed fires only when no activity beyond run.started has been received —
+     // steps in flight, HITL gates, and external calls indicate progress even if old
+     const hasActivityBeyondStart = activeRunEvents.some(
+-      e => e.eventType !== 'run_started'
++      e => e.eventType !== 'run.started'
+     );
+     if (!hasActivityBeyondStart && lastActiveEvent) {
+       const msSinceLastEvent = nowMs - new Date(lastActiveEvent.eventTimestamp).getTime();
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/routes/agentPresenceStream.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/agentPresenceServicePure.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/agentPresenceServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/agentPresenceServicePure.ts -TotalCount 220' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 790ms:
+import { AGENT_PRESENCE_STATES, AgentPresenceState, PRESENCE_FRESHNESS_THRESHOLDS_MS } from '../../shared/types/agentPresence';
+
+export interface PresenceInput {
+  /** Most-recent agent_execution_events for this agent, ordered (event_timestamp ASC, event_id ASC) */
+  events: Array<{
+    id: string;
+    eventType: string;
+    eventTimestamp: string;
+    runId: string | null;
+    sequenceNumber: number | null;
+    payload: unknown;
+  }>;
+  sessionState: {
+    status: 'active' | 'idle' | 'torn_down' | 'failed' | null;
+    lastHeartbeatAt: string | null;
+    releasedAt: string | null;
+  } | null;
+  scheduleState: {
+    nextRunAt: string | null;
+    label: string | null;
+  } | null;
+  /** Server wall-clock now (ISO string) */
+  serverNow: string;
+}
+
+export interface PresenceOutput {
+  state: AgentPresenceState;
+  subtitle: string | null;
+  activeRunId: string | null;
+  degradedReason: 'event_stream_delayed' | 'worker_heartbeat_stale' | 'focus_source_unavailable' | null;
+  degradedBaseState: 'idle' | 'running' | 'waiting_on_human' | 'waiting_on_dependency' | 'scheduled' | null;
+  lastEventTimestamp: string | null;
+  nextRunAt: string | null;
+  scheduledLabel: string | null;
+}
+
+/**
+ * Pure resolver for AgentPresenceState.
+ * Resolution order (first match wins):
+ * 1. failed ƒ?" terminal failure event present
+ * 2. degraded ƒ?" any degradation condition true AND no terminal failure
+ * 3. waiting_on_human ƒ?" active HITL gate
+ * 4. running ƒ?" active step in flight
+ * 5. waiting_on_dependency ƒ?" external wait
+ * 6. scheduled ƒ?" next run time known
+ * 7. idle ƒ?" none of above
+ */
+export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput {
+  const { events, sessionState, scheduleState, serverNow } = input;
+  const nowMs = new Date(serverNow).getTime();
+
+  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+  const lastEventTimestamp = lastEvent?.eventTimestamp ?? null;
+
+  // Detect terminal failure.
+  //
+  // The canonical run-lifecycle event is `run.completed` (architecture.md
+  // ¶õ Critical events; producer at `agentExecutionService.ts:1652`). There is
+  // no separate `run.failed` event ƒ?" failure is signalled by the `finalStatus`
+  // field on the `run.completed` payload (`finalStatus !== 'completed'`).
+  // `sessionState.status === 'failed'` is an additional trip-wire from the
+  // IEE session lifecycle (container failure path, spec ¶õ6.2).
+  const isFailedRunCompleted = (e: PresenceInput['events'][number]): boolean => {
+    if (e.eventType !== 'run.completed') return false;
+    const payload = e.payload as { finalStatus?: unknown } | null;
+    const finalStatus = payload && typeof payload === 'object' ? payload.finalStatus : undefined;
+    return typeof finalStatus === 'string' && finalStatus !== 'completed';
+  };
+  const hasFailed = events.some(isFailedRunCompleted) || sessionState?.status === 'failed';
+
+  if (hasFailed) {
+    return {
+      state: 'failed',
+      subtitle: null,
+      activeRunId: lastEvent?.runId ?? null,
+      degradedReason: null,
+      degradedBaseState: null,
+      lastEventTimestamp,
+      nextRunAt: null,
+      scheduledLabel: null,
+    };
+  }
+
+  // Detect active run (run.started but no run.completed for the same runId ƒ?"
+  // success and failure both surface as `run.completed`; failure path is
+  // handled by the hasFailed branch above).
+  const runStarted = events.filter(e => e.eventType === 'run.started');
+  const runCompleted = new Set(
+    events
+      .filter(e => e.eventType === 'run.completed')
+      .map(e => e.runId)
+  );
+  const activeRuns = runStarted.filter(e => e.runId && !runCompleted.has(e.runId));
+  const activeRunId = activeRuns.length > 0 ? activeRuns[activeRuns.length - 1].runId : null;
+
+  // Degradation check
+  let degradedReason: PresenceOutput['degradedReason'] = null;
+  if (activeRunId) {
+    const activeRunEvents = events.filter(e => e.runId === activeRunId);
+    const lastActiveEvent = activeRunEvents.at(-1);
+    // event_stream_delayed fires only when no activity beyond run.started has been received ƒ?"
+    // steps in flight, HITL gates, and external calls indicate progress even if old
+    const hasActivityBeyondStart = activeRunEvents.some(
+      e => e.eventType !== 'run.started'
+    );
+    if (!hasActivityBeyondStart && lastActiveEvent) {
+      const msSinceLastEvent = nowMs - new Date(lastActiveEvent.eventTimestamp).getTime();
+      if (msSinceLastEvent > PRESENCE_FRESHNESS_THRESHOLDS_MS.EVENT_STREAM_DELAYED) {
+        degradedReason = 'event_stream_delayed';
+      }
+    }
+  }
+  if (activeRunId && sessionState?.lastHeartbeatAt) {
+    const msSinceHeartbeat = nowMs - new Date(sessionState.lastHeartbeatAt).getTime();
+    if (msSinceHeartbeat > PRESENCE_FRESHNESS_THRESHOLDS_MS.WORKER_HEARTBEAT_STALE) {
+      degradedReason = 'worker_heartbeat_stale';
+    }
+  }
+
+  if (degradedReason) {
+    // Determine what the base state would be without degradation
+    let degradedBaseState: PresenceOutput['degradedBaseState'] = 'running';
+    const lastRelevantEvent = events.filter(e => e.runId === activeRunId).at(-1);
+    if (lastRelevantEvent) {
+      if (lastRelevantEvent.eventType === 'hitl_gate_opened') degradedBaseState = 'waiting_on_human';
+      else if (lastRelevantEvent.eventType === 'external_call_started' || lastRelevantEvent.eventType === 'sub_agent_delegated') degradedBaseState = 'waiting_on_dependency';
+    }
+    return {
+      state: 'degraded',
+      subtitle: 'Status uncertain',
+      activeRunId,
+      degradedReason,
+      degradedBaseState,
+      lastEventTimestamp,
+      nextRunAt: null,
+      scheduledLabel: null,
+    };
+  }
+
+  // Active run states
+  if (activeRunId) {
+    const activeRunEvents = events.filter(e => e.runId === activeRunId);
+    const lastActiveEvent = activeRunEvents.at(-1);
+    if (lastActiveEvent) {
+      if (lastActiveEvent.eventType === 'hitl_gate_opened') {
+        return { state: 'waiting_on_human', subtitle: null, activeRunId, degradedReason: null, degradedBaseState: null, lastEventTimestamp, nextRunAt: null, scheduledLabel: null };
+      }
+      if (lastActiveEvent.eventType === 'external_call_started' || lastActiveEvent.eventType === 'sub_agent_delegated') {
+        return { state: 'waiting_on_dependency', subtitle: null, activeRunId, degradedReason: null, degradedBaseState: null, lastEventTimestamp, nextRunAt: null, scheduledLabel: null };
+      }
+    }
+    return { state: 'running', subtitle: null, activeRunId, degradedReason: null, degradedBaseState: null, lastEventTimestamp, nextRunAt: null, scheduledLabel: null };
+  }
+
+  // Scheduled
+  if (scheduleState?.nextRunAt) {
+    return {
+      state: 'scheduled',
+      subtitle: null,
+      activeRunId: null,
+      degradedReason: null,
+      degradedBaseState: null,
+      lastEventTimestamp,
+      nextRunAt: scheduleState.nextRunAt,
+      scheduledLabel: scheduleState.label,
+    };
+  }
+
+  // Idle
+  return {
+    state: 'idle',
+    subtitle: null,
+    activeRunId: null,
+    degradedReason: null,
+    degradedBaseState: null,
+    lastEventTimestamp,
+    nextRunAt: null,
+    scheduledLabel: null,
+  };
+}
+
+/** Validates all values in AGENT_PRESENCE_STATES are handled (exhaustiveness check helper) */
+export function assertExhaustivePresenceState(state: AgentPresenceState): never {
+  throw new Error(`Unhandled presence state: ${state}`);
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/routes/agentPresenceStream.ts -TotalCount 260' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1054ms:
+/**
+ * Agent presence SSE stream endpoints.
+ *
+ * POST /api/agent-presence/stream-token  ƒ?" issue a short-lived signed token
+ * GET  /api/agent-presence/stream/:agentId
+ * GET  /api/agent-presence/stream/workspace/:subaccountId
+ *
+ * Agent Workspace Chunk 9 + B3 signed-token auth.
+ */
+
+import { Router } from 'express';
+import { randomUUID } from 'crypto';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticateStreamToken } from '../middleware/authenticateStreamToken.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveAgent } from '../lib/resolveAgent.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { signStreamToken } from '../lib/agentPresenceStreamToken.js';
+import { logger } from '../lib/logger.js';
+import {
+  subscribe,
+  replaySinceLastEventId,
+  type PresenceStreamEvent,
+  type PresenceScope,
+} from '../services/agentPresenceStreamPublisher.js';
+
+const router = Router();
+
+// ƒ"?ƒ"? Shared helpers ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+function writeSSEEvent(res: import('express').Response, event: PresenceStreamEvent): void {
+  res.write(`id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function resolveLastEventId(req: import('express').Request): string | undefined {
+  const headerValue = req.headers['last-event-id'] as string | undefined;
+  const queryValue = req.query.lastEventId as string | undefined;
+
+  if (headerValue && queryValue && headerValue !== queryValue) {
+    logger.debug('presence_stream.last_event_id_conflict', {
+      header: headerValue,
+      queryParam: queryValue,
+    });
+  }
+
+  return headerValue ?? queryValue;
+}
+
+function sseSetup(res: import('express').Response): void {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+}
+
+function attachStream(
+  req: import('express').Request,
+  res: import('express').Response,
+  scope: PresenceScope,
+): void {
+  const lastEventId = resolveLastEventId(req) ?? null;
+  const subscriberId = randomUUID();
+
+  // Replay buffer
+  const replayed = replaySinceLastEventId(scope, lastEventId);
+  for (const event of replayed) {
+    writeSSEEvent(res, event);
+  }
+
+  // Live subscription
+  const { unsubscribe } = subscribe(scope, subscriberId, (event) => {
+    writeSSEEvent(res, event);
+  });
+
+  // Heartbeat every 15 s (spec ¶õ13.3)
+  const heartbeatInterval = setInterval(() => {
+    const heartbeat: PresenceStreamEvent = {
+      agentId: scope.kind === 'agent' ? scope.agentId : '',
+      eventTimestamp: new Date().toISOString(),
+      serverNow: new Date().toISOString(),
+      eventId: randomUUID(),
+      data: null,
+      eventType: 'server_heartbeat',
+    };
+    writeSSEEvent(res, heartbeat);
+  }, 15_000);
+
+  // Cleanup
+  req.on('close', () => {
+    clearInterval(heartbeatInterval);
+    unsubscribe();
+  });
+}
+
+// ƒ"?ƒ"? Endpoint 0: stream-token issuance ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+//
+// Issues a short-lived signed token (120s TTL) bound to the user's org + requested scope.
+// The browser holds the token in memory only (never in localStorage).
+// Client re-fetches this endpoint on token expiry before reconnecting.
+
+router.post(
+  '/api/agent-presence/stream-token',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
+  asyncHandler(async (req, res) => {
+    const { scope: scopeBody } = req.body as {
+      scope?: { kind?: string; agentId?: string; subaccountId?: string };
+    };
+
+    if (!scopeBody || !scopeBody.kind) {
+      res.status(400).json({ error: 'scope.kind required' });
+      return;
+    }
+
+    const orgId = req.orgId!;
+    const userId = req.user!.id;
+
+    if (scopeBody.kind === 'agent') {
+      if (!scopeBody.agentId) {
+        res.status(400).json({ error: 'scope.agentId required for agent scope' });
+        return;
+      }
+      await resolveAgent(scopeBody.agentId, orgId);
+      const { token, expiresAt } = signStreamToken({
+        userId,
+        orgId,
+        scope: { kind: 'agent', agentId: scopeBody.agentId },
+      });
+      res.json({ token, expiresAt });
+      return;
+    }
+
+    if (scopeBody.kind === 'workspace') {
+      if (!scopeBody.subaccountId) {
+        res.status(400).json({ error: 'scope.subaccountId required for workspace scope' });
+        return;
+      }
+      await resolveSubaccount(scopeBody.subaccountId, orgId);
+      const { token, expiresAt } = signStreamToken({
+        userId,
+        orgId,
+        scope: { kind: 'workspace', subaccountId: scopeBody.subaccountId },
+      });
+      res.json({ token, expiresAt });
+      return;
+    }
+
+    res.status(400).json({ error: 'scope.kind must be agent or workspace' });
+  }),
+);
+
+// ƒ"?ƒ"? Endpoint 1: agent-scoped stream ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+//
+// Uses authenticateStreamToken ƒ?" verifies the short-lived ?token= query param,
+// populates req.user / req.orgId / req.streamTokenScope, and strips the token
+// from req.url before loggers see it.
+
+router.get(
+  '/api/agent-presence/stream/:agentId',
+  authenticateStreamToken,
+  asyncHandler(async (req, res) => {
+    // Stream tokens are bound to a specific scope kind + ID. Reject any token
+    // whose scope.kind is not 'agent' or whose agentId does not match the URL
+    // path param. A workspace-scoped token must NOT be usable on an agent
+    // route, even though it would otherwise pass token signature verification.
+    const tokenScope = req.streamTokenScope;
+    if (
+      !tokenScope ||
+      tokenScope.kind !== 'agent' ||
+      !tokenScope.agentId ||
+      tokenScope.agentId !== req.params.agentId
+    ) {
+      throw { statusCode: 403, message: 'Token scope does not match requested agent' };
+    }
+
+    await resolveAgent(req.params.agentId, req.orgId!);
+    // sseSetup and attachStream are synchronous after this point; they do not throw.
+    sseSetup(res);
+    const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId, organisationId: req.orgId! };
+    attachStream(req, res, scope);
+  }),
+);
+
+// ƒ"?ƒ"? Endpoint 2: workspace-scoped stream ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+router.get(
+  '/api/agent-presence/stream/workspace/:subaccountId',
+  authenticateStreamToken,
+  asyncHandler(async (req, res) => {
+    // Stream tokens are bound to a specific scope kind + ID. Reject any token
+    // whose scope.kind is not 'workspace' or whose subaccountId does not match
+    // the URL path param. An agent-scoped token must NOT be usable on a
+    // workspace route, even though it would otherwise pass token signature
+    // verification.
+    const tokenScope = req.streamTokenScope;
+    if (
+      !tokenScope ||
+      tokenScope.kind !== 'workspace' ||
+      !tokenScope.subaccountId ||
+      tokenScope.subaccountId !== req.params.subaccountId
+    ) {
+      throw { statusCode: 403, message: 'Token scope does not match requested workspace' };
+    }
+
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // sseSetup and attachStream are synchronous after this point; they do not throw.
+    sseSetup(res);
+    const scope: PresenceScope = { kind: 'workspace', subaccountId: req.params.subaccountId };
+    attachStream(req, res, scope);
+  }),
+);
+
+export default router;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-09T01:26:38.991053Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server/**/*.ts,shared/**/*.ts -Pattern \"run\\.started|run_started|run\\.completed|run_completed|run_failed|finalStatus\" -CaseSensitive"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server/**/*.ts,shared/**/*.ts -Pattern \"run\\.started|run_started|run\\.completed|run_completed|run_failed|finalStatus\" -CaseSensitive" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server/**/*.ts,shared/**/*.ts -Pattern \"run\\.started|run_started|run\\.completed|run_completed|run_failed|finalStatus\" -CaseSensitive"` rejected: blocked by policy
+2026-05-09T01:26:46.334514Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server,shared -Recurse -Include *.ts | Select-String -Pattern 'run\\.started'"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server,shared -Recurse -Include *.ts | Select-String -Pattern 'run\\.started'" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server,shared -Recurse -Include *.ts | Select-String -Pattern 'run\\.started'"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg \"run\\.started\" server shared" in C:\Files\Projects\automation-v1-2nd
+2026-05-09T01:26:57.212663Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 3.6 seconds
+Output:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg "run\.started" server shared
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+ exited 1 in 3572ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg "run\.started" server shared
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+2026-05-09T01:27:15.382314Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"run\\.started\" -- server shared"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"run\\.started\" -- server shared" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"run\\.started\" -- server shared"` rejected: blocked by policy
+2026-05-09T01:27:18.322333Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n run.started -- server shared'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n run.started -- server shared' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n run.started -- server shared'` rejected: blocked by policy
+2026-05-09T01:27:23.458434Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root in ['server','shared']:
+  for dp,_,fs in os.walk(root):
+    for f in fs:
+      if f.endswith('.ts'):
+        p=os.path.join(dp,f)
+        try:
+          s=open(p,encoding='utf-8').read()
+        except Exception: continue
+        for pat in ['run.started','run_started','run.completed','run_completed','run_failed','finalStatus']:
+          if pat in s:
+            print(p, pat)
+            break
+'@ | python -"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root in ['server','shared']:
+  for dp,_,fs in os.walk(root):
+    for f in fs:
+      if f.endswith('.ts'):
+        p=os.path.join(dp,f)
+        try:
+          s=open(p,encoding='utf-8').read()
+        except Exception: continue
+        for pat in ['run.started','run_started','run.completed','run_completed','run_failed','finalStatus']:
+          if pat in s:
+            print(p, pat)
+            break
+'@ | python -" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root in ['server','shared']:
+  for dp,_,fs in os.walk(root):
+    for f in fs:
+      if f.endswith('.ts'):
+        p=os.path.join(dp,f)
+        try:
+          s=open(p,encoding='utf-8').read()
+        except Exception: continue
+        for pat in ['run.started','run_started','run.completed','run_completed','run_failed','finalStatus']:
+          if pat in s:
+            print(p, pat)
+            break
+'@ | python -"` rejected: blocked by policy
+2026-05-09T01:27:28.684484Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "python -c \"import os; pats=['run.started','run_started','run.completed','run_completed','run_failed','finalStatus'];
+for root in ['server','shared']:
+    
+    for dp,_,fs in os.walk(root):
+        
+        for f in fs:
+            
+            if f.endswith('.ts'):
+                p=os.path.join(dp,f)
+                s=open(p,encoding='utf-8',errors='ignore').read()
+                hit=[pat for pat in pats if pat in s]
+                if hit: print(p, hit[:3])\""` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "python -c \"import os; pats=['run.started','run_started','run.completed','run_completed','run_failed','finalStatus'];
+for root in ['server','shared']:
+    
+    for dp,_,fs in os.walk(root):
+        
+        for f in fs:
+            
+            if f.endswith('.ts'):
+                p=os.path.join(dp,f)
+                s=open(p,encoding='utf-8',errors='ignore').read()
+                hit=[pat for pat in pats if pat in s]
+                if hit: print(p, hit[:3])\"" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "python -c \"import os; pats=['run.started','run_started','run.completed','run_completed','run_failed','finalStatus'];
+for root in ['server','shared']:
+    
+    for dp,_,fs in os.walk(root):
+        
+        for f in fs:
+            
+            if f.endswith('.ts'):
+                p=os.path.join(dp,f)
+                s=open(p,encoding='utf-8',errors='ignore').read()
+                hit=[pat for pat in pats if pat in s]
+                if hit: print(p, hit[:3])\""` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\*.ts' -Pattern 'run.started'" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 885ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-09T01:27:40.228679Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\**\\*.ts','shared\\**\\*.ts' -Pattern 'run.started'"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\**\\*.ts','shared\\**\\*.ts' -Pattern 'run.started'" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\**\\*.ts','shared\\**\\*.ts' -Pattern 'run.started'"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\**\\*.ts' -Pattern 'run.started'" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1262ms:
+
+server\jobs\orchestratorFromTaskJob.ts:256:    // immediately after `run.started` (sequence 2) so the dispatch decision
+server\lib\workflowLogger.ts:10: *   workflowLog.info({ runId, organisationId, eventType: 'run.started' }, 
+'workflow_run_started');
+server\lib\workflowLogger.ts:34:  /** Discriminated event type (e.g. 'run.started', 'gate.opened'). */
+server\services\agentActivityService.ts:87:      startedAt: run.startedAt,
+server\services\agentActivityService.ts:318:        startedAt: run.startedAt,
+server\services\agentExecutionEventServicePure.ts:192:    case 'run.started':
+server\services\agentExecutionEventServicePure.ts:194:        return { ok: false, reason: 'run.started_missing_fields' 
+};
+server\services\agentExecutionService.ts:256:   * event on the dispatched run immediately after `run.started` - i.e.
+server\services\agentExecutionService.ts:445:    // Emit run started event
+server\services\agentExecutionService.ts:446:    emitAgentRunUpdate(run.id, 'agent:run:started', {
+server\services\agentExecutionService.ts:455:    // Awaited so that run.started claims sequence_number=1 before any 
+later
+server\services\agentExecutionService.ts:466:        eventType: 'run.started',
+server\services\agentExecutionService.ts:478:    // `run.started`. The previous shape - job calls tryEmitAgentEvent
+server\services\agentPresenceService.ts:24:  'run.started',
+server\services\agentPresenceServicePure.test.ts:34:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+'2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:47:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+'2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:59:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+'2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:74:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+'2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:86:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+'2026-05-08T11:58:00Z', runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:100:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+staleTimestamp, runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:116:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+staleTimestamp, runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:129:      { id: 'aaa', eventType: 'run.started', eventTimestamp: ts, 
+runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.test.ts:144:          { id: 'e1', eventType: 'run.started', eventTimestamp: 
+pastTs, runId: 'run1', sequenceNumber: 1, payload: {} },
+server\services\agentPresenceServicePure.ts:84:  // Detect active run (run.started but no run.completed for the same 
+runId -
+server\services\agentPresenceServicePure.ts:87:  const runStarted = events.filter(e => e.eventType === 'run.started');
+server\services\agentPresenceServicePure.ts:101:    // event_stream_delayed fires only when no activity beyond 
+run.started has been received -
+server\services\agentPresenceServicePure.ts:104:      e => e.eventType !== 'run.started'
+server\services\agentRunFinalizationService.ts:279:    const startedAt = parent.startedAt ?? ieeRun.startedAt ?? 
+parent.createdAt;
+server\services\agentRunHandoffService.ts:119:    // after the run startedAt is plausibly produced this run. 
+Conservative -
+server\services\agentRunHandoffService.ts:122:    if (touchedTaskIds.length > 0 && run.startedAt) {
+server\services\agentRunHandoffService.ts:135:      const startedAt = run.startedAt;
+server\services\agentTestRunMapperPure.ts:22:    run.completedAt && run.startedAt
+server\services\agentTestRunMapperPure.ts:23:      ? run.completedAt.getTime() - run.startedAt.getTime()
+server\services\agentTestRunMapperPure.ts:27:  const traceUrl = run.startedAt ? `/run-trace/${run.id}` : null;
+server\services\benchRunService.ts:177:    logger.info('bench_run.started', { benchRunId, organisationId: 
+run.organisationId });
+server\services\ieeUsageService.ts:81:  const durationMs = run.startedAt && run.completedAt
+server\services\ieeUsageService.ts:82:    ? Math.max(0, run.completedAt.getTime() - run.startedAt.getTime())
+server\services\scheduledTaskService.ts:916:      const dueAt = (run.startedAt?.getTime() ?? run.createdAt.getTime()) 
++ backoffMs;
+server\services\staleRunCleanupService.ts:59:        const lastActivity = run.lastActivityAt ?? run.startedAt;
+server\services\staleRunCleanupService.ts:67:      return run.startedAt != null && run.startedAt < legacyThreshold;
+server\services\staleRunCleanupService.ts:71:      const durationMs = run.startedAt
+server\services\staleRunCleanupService.ts:72:        ? now.getTime() - run.startedAt.getTime()
+server\services\workflowEngineService.ts:892:          startedAt: run.startedAt,
+server\services\workflowEngineService.ts:996:          run.startedByUserId !== null
+server\services\workflowEngineService.ts:1002:            run.startedByUserId,
+server\services\workflowEngineService.ts:1021:          startedAt: run.startedAt,
+server\services\workflowEngineService.ts:2719:        }, run.startedByUserId ?? undefined);
+server\services\workflowEngineService.ts:2731:            startedByUserId: run.startedByUserId,
+server\services\workflowEngineService.ts:2839:      startedAt: run.startedAt,
+server\services\workflowEngineService.ts:3013:    logger.info('workflow_replay_run_started', {
+server\services\workflowEngineService.ts:3014:      event: 'run.started',
+server\services\workflowEngineService.ts:3124:        startedAt: run.startedAt,
+server\services\workflowEngineService.ts:3559:            startedAt: run.startedAt,
+server\services\workflowEngineService.ts:3745:        startedAt: run.startedAt,
+server\services\workflowRunService.ts:315:    logger.info('workflow_run_started', {
+server\services\workflowRunService.ts:316:      event: 'run.started',
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\**\\*.ts' -Pattern 'run.completed'" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1081ms:
+
+server\config\jobConfig.ts:365:  'iee-run-completed': {
+server\config\jobConfig.ts:370:    deadLetter: 'iee-run-completed__dlq',
+server\jobs\ieeRunCompletedHandler.ts:2: * iee-run-completed event handler - main-app side.
+server\jobs\ieeRunCompletedHandler.ts:4: * The IEE worker emits an 'iee-run-completed' pg-boss event after every
+server\jobs\ieeRunCompletedHandler.ts:25:export const QUEUE = 'iee-run-completed';
+server\jobs\ieeRunCompletedHandler.ts:84:        logger.warn('iee.run_completed.invalid_payload', {
+server\jobs\ieeRunCompletedHandler.ts:107:        logger.warn('iee.run_completed.unknown_iee_run', { ieeRunId, 
+eventKey });
+server\jobs\ieeRunCompletedHandler.ts:114:        logger.error('iee.run_completed.finalise_failed', {
+server\jobs\ieeRunCompletedHandler.ts:124:  logger.info('iee.run_completed.handler_registered', {
+server\jobs\orchestratorFromTaskJob.ts:257:    // lands inside the run's own timeline rather than after run.completed.
+server\routes\portal.ts:599:        ? { id: latestRun.id, completedAt: latestRun.completedAt }
+server\services\agentActivityService.ts:88:      completedAt: run.completedAt,
+server\services\agentActivityService.ts:319:        completedAt: run.completedAt,
+server\services\agentExecutionEventServicePure.ts:344:    case 'run.completed':
+server\services\agentExecutionEventServicePure.ts:352:        return { ok: false, reason: 
+'run.completed_missing_fields' };
+server\services\agentExecutionService.ts:262:   * `executeRun`, which put it after `run.completed` on the timeline.
+server\services\agentExecutionService.ts:293:  // iee-run-completed event handler. Callers that need a terminal result
+server\services\agentExecutionService.ts:294:  // must subscribe to WebSocket `agent:run:completed` or poll the agent
+server\services\agentExecutionService.ts:479:    // AFTER awaiting executeRun - put the event after `run.completed`,
+server\services\agentExecutionService.ts:1257:        // iee_runs and emit an 'iee-run-completed' pg-boss event; the
+server\services\agentExecutionService.ts:1636:        
+logger.warn('agentExecutionService.run_completed_cost_lookup_failed', {
+server\services\agentExecutionService.ts:1642:      // event. Add 1 to count the run.completed event itself, so the
+server\services\agentExecutionService.ts:1652:          eventType: 'run.completed',
+server\services\agentExecutionService.ts:1899:      // Emit run completed event
+server\services\agentExecutionService.ts:1900:      emitAgentRunUpdate(run.id, 'agent:run:completed', {
+server\services\agentOverviewAggregator.ts:124:    'run_completed',
+server\services\agentPresenceService.ts:25:  'run.completed',
+server\services\agentPresenceServicePure.test.ts:67:  it('returns failed when run.completed has finalStatus !== 
+"completed"', () => {
+server\services\agentPresenceServicePure.test.ts:68:    // Run failure is signalled by the canonical run.completed 
+event with a
+server\services\agentPresenceServicePure.test.ts:75:          { id: 'e2', eventType: 'run.completed', eventTimestamp: 
+'2026-05-08T11:59:10Z', runId: 'run1', sequenceNumber: 2, payload: { finalStatus: 'failed' } },
+server\services\agentPresenceServicePure.test.ts:82:  it('returns idle when run.completed has finalStatus === 
+"completed"', () => {
+server\services\agentPresenceServicePure.test.ts:87:          { id: 'e2', eventType: 'run.completed', eventTimestamp: 
+'2026-05-08T11:59:00Z', runId: 'run1', sequenceNumber: 2, payload: { finalStatus: 'completed' } },
+server\services\agentPresenceServicePure.test.ts:101:          { id: 'e2', eventType: 'run.completed', eventTimestamp: 
+staleTimestamp, runId: 'run1', sequenceNumber: 2, payload: { finalStatus: 'failed' } },
+server\services\agentPresenceServicePure.ts:57:  // The canonical run-lifecycle event is `run.completed` 
+(architecture.md
+server\services\agentPresenceServicePure.ts:60:  // field on the `run.completed` payload (`finalStatus !== 
+'completed'`).
+server\services\agentPresenceServicePure.ts:64:    if (e.eventType !== 'run.completed') return false;
+server\services\agentPresenceServicePure.ts:84:  // Detect active run (run.started but no run.completed for the same 
+runId -
+server\services\agentPresenceServicePure.ts:85:  // success and failure both surface as `run.completed`; failure path 
+is
+server\services\agentPresenceServicePure.ts:90:      .filter(e => e.eventType === 'run.completed')
+server\services\agentRunCancelService.ts:12: *     iee_runs is preserved) and enqueues an iee-run-completed event so
+server\services\agentRunCancelService.ts:37:const IEE_RUN_COMPLETED_QUEUE = 'iee-run-completed';
+server\services\agentRunCancelService.ts:128:   * Write iee_runs.status='cancelled' and emit an iee-run-completed 
+event so
+server\services\agentRunCancelService.ts:160:    // Enqueue the iee-run-completed event so finaliseAgentRunFromIeeRun 
+runs.
+server\services\agentRunCancelService.ts:164:      const config = getJobConfig(IEE_RUN_COMPLETED_QUEUE);
+server\services\agentRunCancelService.ts:166:        IEE_RUN_COMPLETED_QUEUE,
+server\services\agentRunFinalizationService.ts:8: *      when the worker publishes 'iee-run-completed' after a terminal
+server\services\agentRunFinalizationService.ts:280:    const completedAt = ieeRun.completedAt ?? new Date();
+server\services\agentRunFinalizationService.ts:392:    emitAgentRunUpdate(ieeRun.agentRunId, 'agent:run:completed', {
+server\services\agentRunFinalizationService.ts:454: * - 'cancelling': the pg-boss iee-run-completed event failed to 
+publish
+server\services\agentRunHandoffServicePure.ts:213:      blocker: 'Run completed with partial results',
+server\services\agentTestRunMapperPure.ts:22:    run.completedAt && run.startedAt
+server\services\agentTestRunMapperPure.ts:23:      ? run.completedAt.getTime() - run.startedAt.getTime()
+server\services\agentWorkingTimeService.ts:186:  // 4. run.completed - increment run-count columns in the event's 
+daily bucket
+server\services\agentWorkingTimeService.ts:187:  if (eventTypeStr === 'run.completed') {
+server\services\agentWorkingTimeServicePure.test.ts:91:      { runId: 'run1', eventType: 'run_completed', 
+eventTimestamp: '2026-05-08T10:00:31.000Z' },
+server\services\agentWorkingTimeServicePure.test.ts:92:      { runId: 'run2', eventType: 'run_completed', 
+eventTimestamp: '2026-05-08T10:01:01.000Z' },
+server\services\agentWorkingTimeServicePure.ts:92:    } else if (event.eventType === 'run_completed') {
+server\services\conversationThreadContextServicePure.ts:72:// ДД pruneCompletedTasks 
+ДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДД
+server\services\conversationThreadContextServicePure.ts:79:export function pruneCompletedTasks(
+server\services\conversationThreadContextServicePure.ts:256:      const pruned = pruneCompletedTasks(combined, 
+TASK_CAP);
+server\services\ieeSessionService.ts:117:  reason: 'run_completed' | 'idle_timeout' | 'orphan_cleanup' | 'failed' | 
+'operator_cancelled',
+server\services\ieeSessionServicePure.test.ts:49:  it('maps run_completed to run_completed', () => {
+server\services\ieeSessionServicePure.test.ts:50:    
+expect(classifyTeardownReason('run_completed')).toBe('run_completed');
+server\services\ieeSessionServicePure.ts:14:  | 'run_completed'
+server\services\ieeSessionServicePure.ts:43:    run_completed: 'run_completed',
+server\services\ieeUsageService.ts:81:  const durationMs = run.startedAt && run.completedAt
+server\services\ieeUsageService.ts:82:    ? Math.max(0, run.completedAt.getTime() - run.startedAt.getTime())
+server\services\scorecardJudgeRunner.ts:16: * Called after `agent:run:completed` to determine which quality checks to 
+grade
+server\services\staleRunCleanupService.ts:96:      // If update returned nothing, run completed between scan and 
+update - skip
+server\services\workflowEngineService.ts:1024:        logger.info('workflow_run_completed', {
+server\services\workflowEngineService.ts:1025:          event: finalStatus === 'completed' ? 'run.completed' : 
+'run.completed_with_errors',
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/agentExecutionService.ts | Select-Object -Skip 1628 -First 50' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 953ms:
+      // just-returned nextEventSeq (number of events emitted so far this
+      // run, which bounds the event count at this terminal).
+      let totalCostCents = 0;
+      try {
+        const { getRunCostCentsFromLedger } = await import('../lib/runCostBreaker.js');
+        totalCostCents = await getRunCostCentsFromLedger(run.id);
+      } catch (err) {
+        logger.warn('agentExecutionService.run_completed_cost_lookup_failed', {
+          runId: run.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+      // nextEventSeq is the highest sequence allocated before the terminal
+      // event. Add 1 to count the run.completed event itself, so the
+      // eventCount in the payload matches the number of rows the client
+      // will see when it fetches /events (including this terminal event).
+      const eventCount = (terminalUpdate[0]?.nextEventSeq ?? 0) + 1;
+      tryEmitAgentEvent({
+        runId: run.id,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        sourceService: 'agentExecutionService',
+        payload: {
+          eventType: 'run.completed',
+          critical: true,
+          finalStatus,
+          totalTokens: loopResult.totalTokens,
+          totalCostCents,
+          totalDurationMs: durationMs,
+          eventCount,
+        },
+      });
+
+      // H3: summaryMissing side-channel - emit only when hasSummary is false so
+      // consumers can correlate without demoting runResultStatus to 'partial'.
+      if (!hasSummary) {
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'run.terminal.summary_missing',
+            critical: false,
+            runResultStatus: derivedRunResultStatus ?? 'partial',
+          },
+        });
+      }
+
+      // Emit retrieval.summary event - spec õ10.4, õ11.4, Chunk 4B.
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/agentPresenceService.ts -TotalCount 240' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 906ms:
+import { eq, and } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { logger } from '../lib/logger.js';
+import { agentPresenceProjections, agentExecutionEvents, agentRuns } from '../db/schema/index.js';
+import { fanOut, fanOutToWorkspace } from './agentPresenceStreamPublisher.js';
+import {
+  resolvePresenceFromEvents,
+  type PresenceInput,
+} from './agentPresenceServicePure.js';
+import type { AgentPresenceState } from '../../shared/types/agentPresence.js';
+import type { AgentExecutionEvent, AgentExecutionEventType } from '../../shared/types/agentExecutionLog.js';
+import type { AgentPresenceProjection } from '../db/schema/agentPresenceProjections.js';
+import type { PrincipalContext } from './principal/types.js';
+
+// ---------------------------------------------------------------------------
+// Activity-feed-visible event types (spec ¶õ7.7)
+// Used to gate the activity_row SSE fanOut below. Defined here because this is
+// where agentId is already resolved (run-to-agent lookup), avoiding a redundant
+// DB round-trip in the appendEvent hot path.
+// ---------------------------------------------------------------------------
+const ACTIVITY_FEED_VISIBLE_TYPES = new Set<AgentExecutionEventType>([
+  'run.started',
+  'run.completed',
+  'run.event_limit_reached',
+  'handoff.decided',
+  'clarification.requested',
+  'llm.completed',
+  'skill.invoked',
+  'skill.completed',
+  'tool.error',
+  'observation_emitted',
+  'retrieval.summary',
+]);
+
+function isActivityFeedVisible(eventType: string): boolean {
+  return ACTIVITY_FEED_VISIBLE_TYPES.has(eventType as AgentExecutionEventType);
+}
+
+// ---------------------------------------------------------------------------
+// In-process monotonic-clock state for degraded-state hysteresis.
+// Key: agentId
+// ---------------------------------------------------------------------------
+interface HysteresisEntry {
+  degradedEnteredHrtime: bigint;
+  oscillationWindowStartHrtime: bigint;
+}
+
+const hysteresisMap = new Map<string, HysteresisEntry>();
+
+// ---------------------------------------------------------------------------
+// Legal presence state transition table (¶õ12.2)
+// ---------------------------------------------------------------------------
+const LEGAL_TRANSITIONS: Record<AgentPresenceState, ReadonlySet<AgentPresenceState>> = {
+  idle: new Set<AgentPresenceState>(['running', 'scheduled', 'failed']),
+  running: new Set<AgentPresenceState>(['waiting_on_human', 'waiting_on_dependency', 'idle', 'failed', 'degraded']),
+  waiting_on_human: new Set<AgentPresenceState>(['running', 'idle', 'failed', 'degraded']),
+  waiting_on_dependency: new Set<AgentPresenceState>(['running', 'idle', 'failed', 'degraded']),
+  scheduled: new Set<AgentPresenceState>(['running', 'idle', 'failed']),
+  degraded: new Set<AgentPresenceState>(['idle', 'running', 'waiting_on_human', 'waiting_on_dependency', 'scheduled', 'failed']),
+  failed: new Set<AgentPresenceState>(['idle']),
+};
+
+function isLegalTransition(from: AgentPresenceState, to: AgentPresenceState): boolean {
+  return LEGAL_TRANSITIONS[from]?.has(to) ?? false;
+}
+
+// ---------------------------------------------------------------------------
+// resolveAgentPresence
+// ---------------------------------------------------------------------------
+
+export async function resolveAgentPresence(
+  agentId: string,
+  ctx: PrincipalContext,
+): Promise<AgentPresenceProjection | null> {
+  const db = getOrgScopedDb('agentPresenceService.resolveAgentPresence');
+  const organisationId = ctx.organisationId;
+
+  const rows = await db
+    .select()
+    .from(agentPresenceProjections)
+    .where(
+      and(
+        eq(agentPresenceProjections.agentId, agentId),
+        eq(agentPresenceProjections.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// applyEventToPresence
+// ---------------------------------------------------------------------------
+
+export async function applyEventToPresence(
+  event: AgentExecutionEvent,
+  ctx: PrincipalContext,
+): Promise<void> {
+  const db = getOrgScopedDb('agentPresenceService.applyEventToPresence');
+  const organisationId = ctx.organisationId;
+
+  // Resolve agentId and subaccountId from the run
+  const runRows = await db
+    .select({ agentId: agentRuns.agentId, subaccountId: agentRuns.subaccountId })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.id, event.runId),
+        eq(agentRuns.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+
+  if (runRows.length === 0) return;
+  const { agentId, subaccountId } = runRows[0];
+
+  // Emit activity_row SSE event for activity-feed-visible event types (spec ¶õ7.7).
+  // Fires regardless of whether the presence projection is actually updated ƒ?"
+  // activity feed reflects what's happening in the run, not just state transitions.
+  if (isActivityFeedVisible(event.eventType)) {
+    const activityEventTs = typeof event.eventTimestamp === 'string'
+      ? event.eventTimestamp
+      : new Date(event.eventTimestamp).toISOString();
+    const activityEvent = {
+      agentId,
+      organisationId,
+      eventTimestamp: activityEventTs,
+      serverNow: new Date().toISOString(),
+      eventId: randomUUID(),
+      eventType: 'activity_row' as const,
+      data: {
+        eventId: event.id,
+        eventType: event.eventType,
+        eventTimestamp: activityEventTs,
+        runId: event.runId,
+        sequenceNumber: event.sequenceNumber,
+      },
+    };
+    fanOut(activityEvent);
+    if (subaccountId) {
+      fanOutToWorkspace(subaccountId, activityEvent);
+    }
+  }
+
+  // Fetch recent execution events for this agent to build PresenceInput.
+  const recentEvents = await db
+    .select({
+      id: agentExecutionEvents.id,
+      eventType: agentExecutionEvents.eventType,
+      eventTimestamp: agentExecutionEvents.eventTimestamp,
+      runId: agentExecutionEvents.runId,
+      sequenceNumber: agentExecutionEvents.sequenceNumber,
+      payload: agentExecutionEvents.payload,
+    })
+    .from(agentExecutionEvents)
+    .where(
+      and(
+        eq(agentExecutionEvents.runId, event.runId),
+        eq(agentExecutionEvents.organisationId, organisationId),
+      ),
+    )
+    .orderBy(agentExecutionEvents.eventTimestamp, agentExecutionEvents.sequenceNumber)
+    .limit(200);
+
+  const presenceInput: PresenceInput = {
+    events: recentEvents.map(row => ({
+      id: row.id,
+      eventType: row.eventType,
+      eventTimestamp: row.eventTimestamp instanceof Date
+        ? row.eventTimestamp.toISOString()
+        : String(row.eventTimestamp),
+      runId: row.runId,
+      sequenceNumber: row.sequenceNumber,
+      payload: row.payload,
+    })),
+    sessionState: null,
+    scheduleState: null,
+    serverNow: new Date().toISOString(),
+  };
+
+  const resolved = resolvePresenceFromEvents(presenceInput);
+  const newState = resolved.state;
+
+  // Hysteresis tracking via monotonic clock (process.hrtime.bigint())
+  const now = process.hrtime.bigint();
+  if (newState === 'degraded') {
+    if (!hysteresisMap.has(agentId)) {
+      hysteresisMap.set(agentId, {
+        degradedEnteredHrtime: now,
+        oscillationWindowStartHrtime: now,
+      });
+    }
+  } else {
+    hysteresisMap.delete(agentId);
+  }
+
+  // Read the current projection row to check the state transition and current focus
+  const existing = await db
+    .select({
+      presenceState: agentPresenceProjections.presenceState,
+      presenceSubtitle: agentPresenceProjections.presenceSubtitle,
+    })
+    .from(agentPresenceProjections)
+    .where(
+      and(
+        eq(agentPresenceProjections.agentId, agentId),
+        eq(agentPresenceProjections.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+
+  const currentState = existing[0]?.presenceState ?? null;
+  const priorSubtitle = existing[0]?.presenceSubtitle ?? null;
+
+  if (currentState !== null && !isLegalTransition(currentState as AgentPresenceState, newState)) {
+    logger.warn('presence.illegal_transition_attempt', {
+      agentId,
+      from: currentState,
+      to: newState,
+      eventType: event.eventType,
+      eventId: event.id,
+    });
+    return;
+  }
+
+  // ¶õ11.1 watermark upsert ƒ?" latest-wins, with last_event_id as tiebreaker.
+  // rowCount = 0 means the WHERE predicate blocked the update (out-of-order event);
+  // SSE fanOut must only fire when the projection was actually written.
+  const upsertResult = await db.execute(sql`
+    INSERT INTO agent_presence_projections (
+      agent_id,
+      organisation_id,
+      subaccount_id,
+      presence_state,
+      presence_subtitle,
+      active_run_id,
+      last_event_id,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/agentPresenceService.ts | Select-Object -Skip 240 -First 180' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 739ms:
+      last_event_run_id,
+      last_event_run_seq,
+      last_event_timestamp,
+      next_run_at,
+      scheduled_label,
+      degraded_reason,
+      degraded_base_state,
+      updated_at
+    ) VALUES (
+      ${agentId}::uuid,
+      ${organisationId}::uuid,
+      ${subaccountId}::uuid,
+      ${newState},
+      ${resolved.subtitle},
+      ${resolved.activeRunId}::uuid,
+      ${event.id}::uuid,
+      ${event.runId}::uuid,
+      ${event.sequenceNumber},
+      ${event.eventTimestamp}::timestamptz,
+      ${resolved.nextRunAt}::timestamptz,
+      ${resolved.scheduledLabel},
+      ${resolved.degradedReason},
+      ${resolved.degradedBaseState},
+      NOW()
+    )
+    ON CONFLICT (agent_id) DO UPDATE SET
+      subaccount_id        = EXCLUDED.subaccount_id,
+      presence_state       = EXCLUDED.presence_state,
+      presence_subtitle    = EXCLUDED.presence_subtitle,
+      active_run_id        = EXCLUDED.active_run_id,
+      last_event_id        = EXCLUDED.last_event_id,
+      last_event_run_id    = EXCLUDED.last_event_run_id,
+      last_event_run_seq   = EXCLUDED.last_event_run_seq,
+      last_event_timestamp = EXCLUDED.last_event_timestamp,
+      next_run_at          = EXCLUDED.next_run_at,
+      scheduled_label      = EXCLUDED.scheduled_label,
+      degraded_reason      = EXCLUDED.degraded_reason,
+      degraded_base_state  = EXCLUDED.degraded_base_state,
+      updated_at           = EXCLUDED.updated_at
+    WHERE
+      EXCLUDED.last_event_timestamp > agent_presence_projections.last_event_timestamp
+      OR (
+        EXCLUDED.last_event_timestamp = agent_presence_projections.last_event_timestamp
+        AND EXCLUDED.last_event_id > agent_presence_projections.last_event_id
+      )
+  `);
+
+  if ((upsertResult as { rowCount?: number }).rowCount !== 1) {
+    // Out-of-order event ƒ?" projection row not updated; do not leak stale state to SSE subscribers.
+    return;
+  }
+
+  const eventTimestamp = typeof event.eventTimestamp === 'string'
+    ? event.eventTimestamp
+    : new Date(event.eventTimestamp).toISOString();
+  const serverNow = new Date().toISOString();
+
+  const sseEvent = {
+    agentId,
+    organisationId,
+    eventTimestamp,
+    serverNow,
+    eventId: event.id,
+    eventType: 'presence_state_changed' as const,
+    data: {
+      agentId,
+      presenceState: newState,
+      degradedBaseState: resolved.degradedBaseState ?? null,
+      nextRunAt: resolved.nextRunAt ?? null,
+      updatedAt: serverNow,
+    },
+  };
+
+  fanOut(sseEvent);
+  if (subaccountId) {
+    fanOutToWorkspace(subaccountId, sseEvent);
+  }
+
+  // Emit current_focus_updated when the subtitle (focus line) changes (spec ¶õ6.7)
+  if (resolved.subtitle !== priorSubtitle) {
+    const focusEvent = {
+      agentId,
+      organisationId,
+      eventTimestamp,
+      serverNow,
+      eventId: event.id,
+      eventType: 'current_focus_updated' as const,
+      data: {
+        agentId,
+        currentFocus: resolved.subtitle,
+      },
+    };
+    fanOut(focusEvent);
+    if (subaccountId) {
+      fanOutToWorkspace(subaccountId, focusEvent);
+    }
+  }
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/db/schema/index.ts | Select-Object -Skip 260 -First 50' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 771ms:
+// BYPASSES RLS - admin_role only; see rlsExclusions.ts for rationale.
+export * from './optimiserSkillPeerMedians';
+
+// GHL Agency OAuth - location token cache (migration 0269)
+export * from './connectorLocationTokens.js';
+
+// Workflows V1 - step gates + drafts (migration 0276)
+export * from './workflowStepGates.js';
+export * from './workflowDrafts.js';
+
+// Pre-Launch Hardening Phase 1 - Postgres-backed OAuth state nonces (migration 0277)
+export * from './oauthStateNonces.js';
+
+// Pre-Launch Hardening Phase 1 - Durable task event log (migration 0279)
+export * from './taskEvents.js';
+
+// Pre-Launch Hardening Phase 2 - Security audit trail (migration 0281)
+export * from './securityAuditEvents.js';
+
+// F3 Baseline Capture - baseline rows + per-metric rows (migrations 0280/0283)
+export * from './subaccountBaselines.js';
+export * from './subaccountBaselineMetrics.js';
+
+// Trust & Verification Layer - runtime check verdicts (migration 0296)
+export * from './runtimeCheckResults.js';
+
+
+// Trust & Verification Layer - Stage 2: scorecards + bench (migrations 0297-0300)
+export * from './scorecards.js';
+export * from './agentScorecardAttachments.js';
+export * from './scorecardJudgements.js';
+export * from './benchRuns.js';
+
+// Agent Workspace - presence projections, observations, sessions, working time (migration 0305)
+export * from './agentObservations.js';
+export * from './ieeSessions.js';
+export * from './agentPresenceProjections.js';
+export * from './agentWorkingTimeRollups.js';
+export * from './agentWorkingTimeEventLedger.js';
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/agentExecutionEventServicePure.ts | Select-Object -Skip 320 -First 50' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 986ms:
+    case 'handoff.decided':
+      if (
+        !isStr(p.targetAgentId) ||
+        !isStr(p.reasonText) ||
+        !isNonNegInt(p.depth) ||
+        !isStr(p.parentRunId)
+      ) {
+        return { ok: false, reason: 'handoff.decided_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'clarification.requested':
+      if (!isStr(p.question) || !isStr(p.awaitingSince)) {
+        return { ok: false, reason: 'clarification.requested_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'run.event_limit_reached':
+      if (!isNonNegInt(p.eventCountAtLimit) || !isNonNegInt(p.cap)) {
+        return { ok: false, reason: 'run.event_limit_reached_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'run.completed':
+      if (
+        !isStr(p.finalStatus) ||
+        !isNonNegInt(p.totalTokens) ||
+        !isInt(p.totalCostCents) ||
+        !isNonNegInt(p.totalDurationMs) ||
+        !isNonNegInt(p.eventCount)
+      ) {
+        return { ok: false, reason: 'run.completed_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'tool.error': {
+      if (!isRecord(p.error)) return { ok: false, reason: 'tool.error_error_not_object' };
+      const e = p.error as Record<string, unknown>;
+      if (!isStr(e.code) || !isStr(e.message) || !isRecord(e.context)) {
+        return { ok: false, reason: 'tool.error_missing_fields' };
+      }
+      return { ok: true };
+    }
+
+    case 'run.terminal.summary_missing':
+      if (!isStr(p.runResultStatus)) return { ok: false, reason: 'run.terminal.summary_missing_missing_fields' };
+      return { ok: true };
+
+    case 'run.terminal.extracted_with_errorMessage':
+      if (!isNonNegInt(p.errorMessageLength)) return { ok: false, reason: 'run.terminal.extracted_with_errorMessage_missing_fields' };
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-09T01:28:26.584166Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'shared\\types\\agentExecutionLog.ts' -Pattern 'run.completed','run.started'"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'shared\\types\\agentExecutionLog.ts' -Pattern 'run.completed','run.started'" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'shared\\types\\agentExecutionLog.ts' -Pattern 'run.completed','run.started'"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'shared\\types\\agentExecutionLog.ts' -Pattern 'run.completed'" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 698ms:
+
+shared\types\agentExecutionLog.ts:100:  | 'run.completed'
+shared\types\agentExecutionLog.ts:253:      eventType: 'run.completed';
+shared\types\agentExecutionLog.ts:361:  'run.completed': true,
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path shared/types/agentExecutionLog.ts | Select-Object -Skip 240 -First 25' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 818ms:
+      eventType: 'clarification.requested';
+      critical: false;
+      question: string;
+      awaitingSince: string;
+    }
+  | {
+      eventType: 'run.event_limit_reached';
+      critical: true;
+      eventCountAtLimit: number;
+      cap: number;
+    }
+  | {
+      eventType: 'run.completed';
+      critical: true;
+      finalStatus: string;
+      totalTokens: number;
+      totalCostCents: number;
+      totalDurationMs: number;
+      eventCount: number;
+    }
+  | {
+      /** Delegation-scope / hierarchy errors emitted by skill handlers (INV-2, INV-3). */
+      eventType: 'tool.error';
+      critical: false;
+      error: {
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/middleware/authenticateStreamToken.ts -TotalCount 220' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 947ms:
+/**
+ * Middleware that verifies a short-lived stream token from ?token= query param.
+ * Populates req.user, req.orgId, and req.streamTokenScope from the token claims.
+ * Strips the token from the URL before any logger sees it.
+ *
+ * Used exclusively on agent presence SSE GET routes.
+ */
+
+import type { Request, Response, NextFunction } from 'express';
+import { verifyStreamToken } from '../lib/agentPresenceStreamToken.js';
+import type { JwtPayload } from './auth.js';
+import type { StreamTokenScope } from '../lib/agentPresenceStreamToken.js';
+
+declare global {
+  // reason: Express module augmentation requires the `namespace` keyword.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** Scope claims from a verified short-lived stream token. */
+      streamTokenScope?: StreamTokenScope;
+    }
+  }
+}
+
+export const authenticateStreamToken = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  const rawToken = req.query.token as string | undefined;
+
+  if (!rawToken) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  // Strip token from query before any downstream logger reads req.url
+  // so that the short-lived credential does not appear in access logs.
+  const urlObj = new URL(req.url, 'http://localhost');
+  urlObj.searchParams.delete('token');
+  req.url = urlObj.pathname + (urlObj.search || '');
+
+  let claims;
+  try {
+    claims = verifyStreamToken(rawToken);
+  } catch {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  // Populate req.user shape expected by downstream guards
+  req.user = {
+    id: claims.userId,
+    organisationId: claims.orgId,
+    role: 'user',
+    email: '',
+  } satisfies JwtPayload;
+
+  req.orgId = claims.orgId;
+  req.streamTokenScope = claims.scope;
+
+  next();
+};
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/lib/agentPresenceStreamToken.ts -TotalCount 220' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1120ms:
+/**
+ * Short-lived signed tokens for agent presence SSE stream connections.
+ *
+ * Tokens are HMAC-SHA256 signed JWTs bound to (userId, orgId, scope, agentId|subaccountId).
+ * Default TTL: 120s. The browser holds tokens in memory only (not localStorage).
+ *
+ * Token endpoint: POST /api/agent-presence/stream-token
+ * SSE endpoints consume them via ?token= query param (stripped before logging).
+ */
+
+import jwt from 'jsonwebtoken';
+import { env } from './env.js';
+
+export interface StreamTokenScope {
+  kind: 'agent' | 'workspace';
+  agentId?: string;
+  subaccountId?: string;
+}
+
+export interface StreamTokenClaims {
+  userId: string;
+  orgId: string;
+  scope: StreamTokenScope;
+  /** jwt iat (issued-at, seconds) */
+  iat?: number;
+  /** jwt exp (expiry, seconds) */
+  exp?: number;
+}
+
+const STREAM_TOKEN_AUDIENCE = 'agent-presence-stream';
+
+/**
+ * Sign a short-lived stream token.
+ * Returns { token, expiresAt } where expiresAt is an ISO string.
+ */
+export function signStreamToken(
+  claims: Omit<StreamTokenClaims, 'iat' | 'exp'>,
+  ttlSeconds = 120,
+): { token: string; expiresAt: string } {
+  const token = jwt.sign(
+    {
+      userId: claims.userId,
+      orgId: claims.orgId,
+      scope: claims.scope,
+    },
+    env.JWT_SECRET,
+    {
+      expiresIn: ttlSeconds,
+      audience: STREAM_TOKEN_AUDIENCE,
+    },
+  );
+
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  return { token, expiresAt };
+}
+
+/**
+ * Verify a stream token.
+ * Returns the decoded claims or throws on invalid/expired token.
+ */
+export function verifyStreamToken(token: string): StreamTokenClaims {
+  const decoded = jwt.verify(token, env.JWT_SECRET, {
+    audience: STREAM_TOKEN_AUDIENCE,
+  }) as StreamTokenClaims;
+  return decoded;
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path tasks/review-logs/_codex_agent_workspace_dual_iter1_2026-05-09T01-14-28Z.txt -TotalCount 40; Get-Content -Path tasks/review-logs/_codex_agent_workspace_dual_iter2_2026-05-09T01-25-50Z.txt -TotalCount 40' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 703ms:
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e0a4c-fb04-7521-ab87-cbb122f3e94a
+--------
+user
+changes against 'main'
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff c5094d992ec6b0f3a3ec152634131cb13836f8d4' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1926ms:
+diff --git a/KNOWLEDGE.md b/KNOWLEDGE.md
+index f3e01409..0f7c66c2 100644
+--- a/KNOWLEDGE.md
++++ b/KNOWLEDGE.md
+@@ -3056,6 +3056,26 @@ When a feature lets operators flag documents as "always available" (loaded on ev
+ 
+ **Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
+ 
++### [2026-05-09] Pattern ƒ?" Single-node SSE topology with reconnect-snapshot recovery
++
++`agentPresenceStreamPublisher.ts` uses an in-process singleton `Map` keyed by scope (no Redis, no message broker). Each scope holds a sorted ring buffer (300 events, canonical order `(eventTimestamp ASC, eventId ASC)`). On reconnect the route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer. The `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; query param is consulted only when the header is absent. Multi-node fan-out is explicitly deferred (spec ¶õ18 Agent Workspace). File: `server/services/agentPresenceStreamPublisher.ts`; routes: `server/routes/agentPresenceStream.ts`.
++
++### [2026-05-09] Pattern ƒ?" Monotonic-clock hysteresis for working time
++
++`agentWorkingTimeService.ts` uses `process.hrtime.bigint()` for elapsed measurement to avoid `Date.now()` wall-clock drift and NTP adjustments. Elapsed accumulates into a per-run bucket in `agent_working_time_buckets`. UTC half-open intervals `[start, end)` prevent double-counting at midnight: runs that cross midnight are split into two buckets inside the pure helper `splitIntervalAcrossBuckets`. The monthly compact job (`workingTimeRollupCompactJob.ts`) keeps per-day rows for 1 year then collapses to monthly resolution. File: `server/services/agentWorkingTimeService.ts` + `agentWorkingTimeServicePure.ts`.
++
++### [2026-05-09] Pattern ƒ?" Bounded-payload pattern reuse applied to SSE (KNOWLEDGE.md 2026-05-08 retrieval pattern applied)
++
++`agentPresenceStreamPublisher.ts` applies the same bounded-observability-payload pattern from `retrievalObservabilityService`: per-event hard cap is 32KB measured via `Buffer.byteLength(JSON.stringify(event.data), 'utf8')`. Over-limit events have their `data` replaced with `{ truncated: true, byteLength }` and `truncated: true` set on the envelope. Truncation is logged at most once per 24h per event-type (in-process Map keyed on event-type name, reset at UTC midnight) to prevent log storms on burst traffic. The 24h suppression key is `(eventType, host)` ƒ?" same pattern as the cache-invalidation log suppression (plan Rev 3 tightening #3).
++
++### [2026-05-09] Pattern ƒ?" Immutability GUC bypass for retention prune
++
++`agentObservationsPruneJob.ts` bypasses the `agent_observations` DB immutability trigger via `set_config('app.allow_observation_mutation', 'retention_prune', true)` issued as the first statement inside the DELETE transaction. The GUC is transaction-scoped only. Every prune cycle calls `recordSecurityEvent` with action `agent.observations.retention_prune` ƒ?" this is the ONLY authorised mutation path for non-pinned rows. GUC + audit-log pairing is the canonical pattern for any table that uses a trigger-based immutability guard but needs a maintenance prune path. Delete batches: 1000 rows ordered `(created_at ASC, id ASC)` with `FOR UPDATE SKIP LOCKED`.
++
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e0a57-477a-7ab0-8a78-7488ec99dac5
+--------
+user
+current changes
+  ƒÅ' Inspect git status and diffs
+  ƒ?½ Analyze changed code for bugs
+  ƒ?½ Return prioritized findings JSON
+2026-05-09T01:26:03.409472Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --staged --; git diff --; git ls-files --others --exclude-standard'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --staged --; git diff --; git ls-files --others --exclude-standard' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --staged --; git diff --; git ls-files --others --exclude-standard'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 647ms:
+ M server/db/schema/index.ts
+ M server/routes/agentPresenceStream.ts
+ M server/services/agentPresenceServicePure.test.ts
+ M server/services/agentPresenceServicePure.ts
+?? tasks/review-logs/_codex_agent_workspace_dual_iter1_2026-05-09T01-14-28Z.txt
+?? tasks/review-logs/_codex_agent_workspace_dual_iter2_2026-05-09T01-25-50Z.txt
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\services\\agentExecutionService.ts' -Pattern 'finalStatus'" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1134ms:
+
+server\services\agentExecutionService.ts:95:  type FinalStatus, type ErrorType,
+server\services\agentExecutionService.ts:1359:          finalStatus: ccResult.timedOut ? 'timeout' : (ccResult.success 
+? 'completed' : 'failed'),
+server\services\agentExecutionService.ts:1453:          const loopFinalStatus = (result.finalStatus ?? 'completed') as 
+string;
+server\services\agentExecutionService.ts:1455:          const traceFinalStatus: FinalStatus =
+server\services\agentExecutionService.ts:1456:            loopFinalStatus === 'timeout' ? 'timeout'
+server\services\agentExecutionService.ts:1457:            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+server\services\agentExecutionService.ts:1458:            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+server\services\agentExecutionService.ts:1459:            : loopFinalStatus === 'failed' ? 'failed'
+server\services\agentExecutionService.ts:1463:            loopFinalStatus === 'timeout' ? 'timeout'
+server\services\agentExecutionService.ts:1464:            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+server\services\agentExecutionService.ts:1465:            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+server\services\agentExecutionService.ts:1466:            : loopFinalStatus === 'failed' ? 'internal_error'
+server\services\agentExecutionService.ts:1471:            fromStatus: 'running', toStatus: traceFinalStatus,
+server\services\agentExecutionService.ts:1476:            finalStatus: traceFinalStatus,
+server\services\agentExecutionService.ts:1496:      let finalStatus = (loopResult.finalStatus ?? 'completed') as
+server\services\agentExecutionService.ts:1499:      if (loopResult.finalStatus === 'blocked_awaiting_integration') {
+server\services\agentExecutionService.ts:1530:      if (finalStatus === 'completed') {
+server\services\agentExecutionService.ts:1546:          finalStatus = 'failed';
+server\services\agentExecutionService.ts:1553:      // it there); `hasError` is inferred from finalStatus; `hasSummary`
+server\services\agentExecutionService.ts:1558:        finalStatus,
+server\services\agentExecutionService.ts:1560:           ignored for all other terminal statuses which return directly 
+*/ finalStatus !== 'completed',
+server\services\agentExecutionService.ts:1580:        to: finalStatus,
+server\services\agentExecutionService.ts:1585:        status: finalStatus,
+server\services\agentExecutionService.ts:1618:          await updateMeaningfulRunTracking(run.id, finalStatus);
+server\services\agentExecutionService.ts:1654:          finalStatus,
+server\services\agentExecutionService.ts:1759:      if (finalStatus === 'failed' || finalStatus === 'timeout' || 
+finalStatus === 'loop_detected') {
+server\services\agentExecutionService.ts:1762:          summary: `Agent run ${finalStatus}: 
+${loopResult.summary?.slice(0, 200) ?? '(no summary)'}`,
+server\services\agentExecutionService.ts:1763:          errorCode: finalStatus,
+server\services\agentExecutionService.ts:1767:          errorDetail: { runId: run.id, finalStatus },
+server\services\agentExecutionService.ts:1793:      if (finalStatus === 'completed' && injectedMemoryEntries.length > 
+0) {
+server\services\agentExecutionService.ts:1822:      if (finalStatus === 'completed') {
+server\services\agentExecutionService.ts:1901:        status: finalStatus, summary: loopResult.summary,
+server\services\agentExecutionService.ts:1920:        runId: run.id, agentId: request.agentId, status: finalStatus,
+server\services\agentExecutionService.ts:1985:              handoffJson: { summary: loopResult.summary, status: 
+finalStatus },
+server\services\agentExecutionService.ts:1996:              { summary: loopResult.summary, status: finalStatus },
+server\services\agentExecutionService.ts:2016:          status: finalStatus,
+server\services\agentExecutionService.ts:2036:        status: finalStatus as AgentRunResult['status'],
+server\services\agentExecutionService.ts:2050:      // terminal update. `finalStatus='failed'` here always maps to
+server\services\agentExecutionService.ts:2474:  finalStatus?: string;
+server\services\agentExecutionService.ts:2506:  let finalStatus: string | undefined;
+server\services\agentExecutionService.ts:2717:        finalStatus = 'cancelled';
+server\services\agentExecutionService.ts:2755:        finalStatus = result.status;
+server\services\agentExecutionService.ts:3018:          finalStatus = result.status;
+server\services\agentExecutionService.ts:3078:          finalStatus = 'failed';
+server\services\agentExecutionService.ts:3151:          finalStatus = 'blocked_awaiting_integration';
+server\services\agentExecutionService.ts:3198:        // DB persist of totals), and (c) finalStatus is recorded as 
+'failed'.
+server\services\agentExecutionService.ts:3218:        finalStatus = 'failed';
+server\services\agentExecutionService.ts:3306:        finalStatus = 'failed';
+server\services\agentExecutionService.ts:3331:            finalStatus = postResult.status;
+server\services\agentExecutionService.ts:3359:            finalStatus = 'failed';
+server\services\agentExecutionService.ts:3493:      finalStatus = finalStatus ?? 'completed';
+server\services\agentExecutionService.ts:3508:    finalStatus,
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path shared/types/agentExecutionLog.ts | Select-Object -Skip 80 -First 80' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 832ms:
+
+// ---------------------------------------------------------------------------
+// Event-type union ƒ?" discriminated by `eventType`, carries `critical` bit
+// ---------------------------------------------------------------------------
+
+export type AgentExecutionEventType =
+  | 'orchestrator.routing_decided'
+  | 'run.started'
+  | 'prompt.assembled'
+  | 'context.source_loaded'
+  | 'memory.retrieved'
+  | 'rule.evaluated'
+  | 'skill.invoked'
+  | 'skill.completed'
+  | 'llm.requested'
+  | 'llm.completed'
+  | 'handoff.decided'
+  | 'clarification.requested'
+  | 'run.event_limit_reached'
+  | 'run.completed'
+  | 'tool.error'
+  | 'run.terminal.summary_missing'
+  | 'run.terminal.extracted_with_errorMessage'
+  | 'runtime_check.completed'
+  | 'correction.captured'
+  | 'retrieval.summary'
+  | 'retrieval.always_available.mode_changed'
+  | 'observation_emitted';
+
+export interface MemoryRetrievedTopEntry {
+  id: string;
+  score: number;
+  excerpt: string;
+}
+
+export interface PromptAssembledLayerTokens {
+  master: number;
+  orgAdditional: number;
+  memoryBlocks: number;
+  skillInstructions: number;
+  taskContext: number;
+}
+
+export type AgentExecutionEventPayload =
+  | {
+      eventType: 'orchestrator.routing_decided';
+      critical: false;
+      taskId: string;
+      chosenAgentId: string;
+      idempotencyKey: string;
+      routingSource: 'rule' | 'llm' | 'fallback';
+    }
+  | {
+      eventType: 'run.started';
+      critical: true;
+      agentId: string;
+      runType: string;
+      triggeredBy: string;
+    }
+  | {
+      eventType: 'prompt.assembled';
+      critical: false;
+      assemblyNumber: number;
+      promptRowId: string;
+      totalTokens: number;
+      layerTokens: PromptAssembledLayerTokens;
+    }
+  | {
+      eventType: 'context.source_loaded';
+      critical: false;
+      sourceId: string;
+      sourceName: string;
+      scope: string;
+      contentType: string;
+      tokenCount: number;
+      includedInPrompt: boolean;
+      exclusionReason?: string;
+    }
+  | {
+      eventType: 'memory.retrieved';
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path 'server\\**\\*.ts' -Pattern 'step_started'" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1420ms:
+
+server\services\agentPresenceServicePure.test.ts:35:          { id: 'e2', eventType: 'step_started', eventTimestamp: 
+'2026-05-08T11:59:01Z', runId: 'run1', sequenceNumber: 2, payload: {} },
+server\services\agentPresenceServicePure.test.ts:130:      { id: 'bbb', eventType: 'step_started', eventTimestamp: ts, 
+runId: 'run1', sequenceNumber: 2, payload: {} },
+server\services\agentWorkingTimeService.ts:119:  // 2. step_started events are tracked only via the ledger - working 
+time is
+server\services\agentWorkingTimeService.ts:121:  if (eventTypeStr === 'step_started') {
+server\services\agentWorkingTimeService.ts:125:  // 3. step_completed - retrieve the matching step_started from the 
+events table
+server\services\agentWorkingTimeService.ts:134:          eq(agentExecutionEvents.eventType, 'step_started'),
+server\services\agentWorkingTimeServicePure.test.ts:77:      { runId: 'run1', eventType: 'step_started', 
+eventTimestamp: '2026-05-08T10:00:00.000Z' },
+server\services\agentWorkingTimeServicePure.test.ts:87:      { runId: 'run1', eventType: 'step_started', 
+eventTimestamp: '2026-05-08T10:00:00.000Z' },
+server\services\agentWorkingTimeServicePure.test.ts:88:      { runId: 'run2', eventType: 'step_started', 
+eventTimestamp: '2026-05-08T10:00:00.000Z' },
+server\services\agentWorkingTimeServicePure.ts:64: * Counts step_started/step_completed pairs; subtracts wait states.
+server\services\agentWorkingTimeServicePure.ts:81:    if (event.eventType === 'step_started') {
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --staged --name-only' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 628ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+  ✓ Inspect git status and diffs
+  ✓ Analyze changed code for bugs
+  → Return prioritized findings JSON
+codex
+I did not identify any discrete correctness issues in the changed code. The scope validation tightening and event-name updates appear consistent with the surrounding token issuance and canonical run event types.
+2026-05-09T01:29:30.284229Z ERROR codex_core::session: failed to record rollout items: thread 019e0a57-4820-7be1-8606-3135f8d6f57b not found
+2026-05-09T01:29:30.373634Z ERROR codex_core::session: failed to record rollout items: thread 019e0a57-477a-7ab0-8a78-7488ec99dac5 not found
+I did not identify any discrete correctness issues in the changed code. The scope validation tightening and event-name updates appear consistent with the surrounding token issuance and canonical run event types.
