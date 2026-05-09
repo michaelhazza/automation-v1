@@ -3540,9 +3540,9 @@ This three-phase pattern prevents duplicate customer-visible replies regardless 
 
 ### Execution model — ingestion
 
-**Poll path:** `server/adapters/teamwork/teamworkSupportIngestAdapter.ts` — incremental cursor-based ingestion of tickets + messages into canonical tables. **Deletion-by-poll precondition:** incremental polls must NEVER set `provider_deleted=true`; only a qualifying full-reconciliation pass (all pages complete, no rate-limit interruption) may tombstone.
+**Poll path:** `server/services/connectorPollingService.ts` (Teamwork support adapter wiring) — incremental cursor-based ingestion of tickets + messages into canonical tables. **Deletion-by-poll precondition:** incremental polls must NEVER set `provider_deleted=true`; only a qualifying full-reconciliation pass (all pages complete, no rate-limit interruption) may tombstone.
 
-**Webhook path:** `server/adapters/teamwork/teamworkSupportWebhookHandler.ts` — real-time event ingestion + back-link writer. Deletion events from webhooks are unconditional (deterministic signal).
+**Webhook path:** `server/services/webhookAdapterService.ts` (support event ingestion block, line 544+) — real-time event ingestion + back-link writer. Deletion events from webhooks are unconditional (deterministic signal).
 
 **Status map:** `server/adapters/teamwork/teamworkSupportStatusMap.ts` — fail-closed: unknown Teamwork statuses map to `'unknown_provider_status'` rather than silently becoming `'open'`.
 
@@ -3662,7 +3662,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
-| Modify canonical Support Desk ingestion (Teamwork) | `server/adapters/teamwork/teamworkSupportIngestAdapter.ts` (poll) + `teamworkSupportWebhookHandler.ts` (webhook) + `teamworkSupportStatusMap.ts` (fail-closed status map) + `teamworkProviderRegistration.ts` (connector config schema) |
+| Modify canonical Support Desk ingestion (Teamwork) | `server/services/connectorPollingService.ts` (poll adapter wiring) + `server/services/webhookAdapterService.ts` (webhook ingestion block) + `server/adapters/teamwork/teamworkSupportStatusMap.ts` (fail-closed status map, inbound + outbound) + `server/adapters/teamworkAdapter.ts` (ticketing adapter contract) |
 | Modify support ticket read path | `server/services/supportTicketService.ts` (`readThreadForAgent` / `readThreadForHumanUi`) + `server/services/supportInboxService.ts` (`listInboxes` / `getInbox` / `classifyHealth`) |
 | Modify support draft lifecycle or dispatch | `server/services/supportDraftDispatchService.ts` (three-phase dispatch: approveDraft / listDraftsForReview / getDraftById / editDraft / rejectDraft / manualResolveDraft) + `server/services/supportDraftDispatchServicePure.ts` (pure helpers: `isValidDraftStatusTransition`, `deriveActionIdempotencyKey`, `planSameRunSupersession`) |
 | Modify support draft reconciliation | `server/jobs/supportDraftReconciliationWorker.ts` (pg-boss worker for `support-draft-reconciliation`) + `server/services/supportDraftReconciliationPure.ts` (pure `decideOutcome`) + `server/lib/supportDispatchBootRecovery.ts` (boot-time stalled-dispatch recovery) |

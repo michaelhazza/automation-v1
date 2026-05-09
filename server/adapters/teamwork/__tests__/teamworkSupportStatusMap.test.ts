@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import type { SupportCanonicalStatus } from '../../integrationAdapter.js';
 import {
   TEAMWORK_SUPPORT_STATUS_MAP,
+  TEAMWORK_OUTBOUND_STATUS_MAP,
   mapTeamworkStatus,
+  mapCanonicalToTeamworkStatus,
 } from '../teamworkSupportStatusMap.js';
 
 describe('TEAMWORK_SUPPORT_STATUS_MAP', () => {
@@ -72,6 +74,67 @@ describe('mapTeamworkStatus', () => {
     const entries = Object.entries(TEAMWORK_SUPPORT_STATUS_MAP) as Array<[string, SupportCanonicalStatus]>;
     for (const [key, expectedValue] of entries) {
       expect(mapTeamworkStatus(key)).toBe(expectedValue);
+    }
+  });
+});
+
+describe('TEAMWORK_OUTBOUND_STATUS_MAP', () => {
+  it('maps open to active', () => {
+    expect(TEAMWORK_OUTBOUND_STATUS_MAP['open']).toBe('active');
+  });
+
+  it('maps pending_internal to on hold', () => {
+    expect(TEAMWORK_OUTBOUND_STATUS_MAP['pending_internal']).toBe('on hold');
+  });
+
+  it('maps waiting_on_customer to waiting on customer', () => {
+    expect(TEAMWORK_OUTBOUND_STATUS_MAP['waiting_on_customer']).toBe('waiting on customer');
+  });
+
+  it('maps resolved to solved', () => {
+    expect(TEAMWORK_OUTBOUND_STATUS_MAP['resolved']).toBe('solved');
+  });
+
+  it('maps closed to closed', () => {
+    expect(TEAMWORK_OUTBOUND_STATUS_MAP['closed']).toBe('closed');
+  });
+});
+
+describe('mapCanonicalToTeamworkStatus', () => {
+  it('maps open to active', () => {
+    expect(mapCanonicalToTeamworkStatus('open')).toBe('active');
+  });
+
+  it('maps pending_internal to on hold', () => {
+    expect(mapCanonicalToTeamworkStatus('pending_internal')).toBe('on hold');
+  });
+
+  it('maps waiting_on_customer to waiting on customer', () => {
+    expect(mapCanonicalToTeamworkStatus('waiting_on_customer')).toBe('waiting on customer');
+  });
+
+  it('maps resolved to solved', () => {
+    expect(mapCanonicalToTeamworkStatus('resolved')).toBe('solved');
+  });
+
+  it('maps closed to closed', () => {
+    expect(mapCanonicalToTeamworkStatus('closed')).toBe('closed');
+  });
+
+  it('throws for unknown_provider_status', () => {
+    expect(() => mapCanonicalToTeamworkStatus('unknown_provider_status')).toThrow(
+      'Cannot dispatch unknown_provider_status to provider',
+    );
+  });
+
+  it('round-trips: outbound -> inbound produces the original canonical for all 5 mappable values', () => {
+    const mappable: Exclude<SupportCanonicalStatus, 'unknown_provider_status'>[] = [
+      'open', 'pending_internal', 'waiting_on_customer', 'resolved', 'closed',
+    ];
+    for (const canonical of mappable) {
+      const providerStr = mapCanonicalToTeamworkStatus(canonical);
+      const roundTripped = mapTeamworkStatus(providerStr);
+      expect(roundTripped).toBe(canonical);
     }
   });
 });

@@ -24,10 +24,11 @@ import type {
   CanonicalTicketMessageData,
   FetchSupportResult,
   FetchOptions,
+  SupportCanonicalStatus,
 } from './integrationAdapter.js';
 import { classifyAdapterError } from './integrationAdapter.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
-import { mapTeamworkStatus } from './teamwork/teamworkSupportStatusMap.js';
+import { mapTeamworkStatus, mapCanonicalToTeamworkStatus } from './teamwork/teamworkSupportStatusMap.js';
 
 const TIMEOUT_MS = 12_000;
 
@@ -232,9 +233,9 @@ export const teamworkAdapter: IntegrationAdapter = {
         await getProviderRateLimiter('teamwork').acquire(connection.id);
 
         const body: Record<string, unknown> = {};
-        if (fields.status) body.status = fields.status;
+        if (fields.status) body.status = mapCanonicalToTeamworkStatus(fields.status as SupportCanonicalStatus);
         if (fields.priority) body.priority = fields.priority;
-        if (fields.assignedTo) body.assignedTo = fields.assignedTo;
+        if (fields.assignedTo !== undefined) body.assignedTo = fields.assignedTo;
         if (fields.subject) body.subject = fields.subject;
         if (fields.tags) body.tags = fields.tags;
 

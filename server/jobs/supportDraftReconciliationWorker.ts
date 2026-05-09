@@ -7,7 +7,7 @@
 // review, or re-enqueue with exponential backoff.
 
 import type PgBoss from 'pg-boss';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { createWorker } from '../lib/createWorker.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
@@ -60,6 +60,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
           proposedVisibility: draft.proposedVisibility,
         },
         latestMessages: messages.map((m) => ({
+          id: m.id,
           direction: m.direction,
           visibility: m.visibility,
           bodyText: m.bodyText,
@@ -73,56 +74,54 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
 
       switch (decision.kind) {
         case 'resolve_sent': {
-          const matchedMessage = messages.find(
-            (m) => m.bodyText === draft.proposedBodyText ||
-              m.bodyText.includes(draft.proposedBodyText) ||
-              draft.proposedBodyText.includes(m.bodyText),
-          );
-
-          if (!matchedMessage) {
-            // decideOutcome contract broken — fall back to surface_manual
-            logger.warn(SUPPORT_LOG_CODES.DRAFT_FAILED, {
-              draftId,
-              organisationId,
-              reason: 'resolve_sent_no_matched_message_id',
-            });
-            await db
-              .update(canonicalTicketDrafts)
-              .set({
-                reconciliationAttemptCount: draft.reconciliationAttemptCount + 1,
-                lastReconciliationAt: now,
-                updatedAt: now,
-              })
-              .where(eq(canonicalTicketDrafts.id, draftId));
-            break;
-          }
-
-          await db
+          const sentRows = await db
             .update(canonicalTicketDrafts)
             .set({
               status: 'sent',
-              sentMessageId: matchedMessage.id,
+              sentMessageId: decision.messageId,
               reconciliationAttemptCount: draft.reconciliationAttemptCount + 1,
               updatedAt: now,
             })
-            .where(eq(canonicalTicketDrafts.id, draftId));
+            .where(
+              and(
+                eq(canonicalTicketDrafts.id, draftId),
+                eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+              ),
+            )
+            .returning({ id: canonicalTicketDrafts.id });
+
+          if (sentRows.length === 0) {
+            logger.debug('support.draft.reconciliation_cas_miss', { draftId, organisationId });
+            break;
+          }
 
           logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, {
             draftId,
             organisationId,
-            sentMessageId: matchedMessage.id,
+            sentMessageId: decision.messageId,
           });
           break;
         }
 
         case 'resolve_failed': {
-          await db
+          const failedRows = await db
             .update(canonicalTicketDrafts)
             .set({
               status: 'failed',
               updatedAt: now,
             })
-            .where(eq(canonicalTicketDrafts.id, draftId));
+            .where(
+              and(
+                eq(canonicalTicketDrafts.id, draftId),
+                eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+              ),
+            )
+            .returning({ id: canonicalTicketDrafts.id });
+
+          if (failedRows.length === 0) {
+            logger.debug('support.draft.reconciliation_cas_miss', { draftId, organisationId });
+            break;
+          }
 
           logger.warn(SUPPORT_LOG_CODES.DRAFT_FAILED, {
             draftId,

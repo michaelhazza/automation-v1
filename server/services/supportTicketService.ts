@@ -15,9 +15,11 @@ import {
   canonicalTickets,
   canonicalTicketMessages,
   canonicalTicketDrafts,
+  canonicalSupportAgents,
   connectorConfigs,
   integrationConnections,
 } from '../db/schema/index.js';
+import { canonicalContacts } from '../db/schema/canonicalEntities.js';
 import type { CanonicalTicket } from '../db/schema/canonicalTickets.js';
 import type { CanonicalTicketMessage } from '../db/schema/canonicalTicketMessages.js';
 import type { CanonicalTicketDraft } from '../db/schema/canonicalTicketDrafts.js';
@@ -26,7 +28,6 @@ import type { SupportCanonicalStatus, TicketUpdateInput } from '../adapters/inte
 import { adapters } from '../adapters/index.js';
 import {
   isValidTicketStatusTransition,
-  applyMessageRedactionFilterForAudience,
   filterDeletedFromAgentReads,
 } from './supportTicketServicePure.js';
 
@@ -68,18 +69,68 @@ async function fetchTicketRow(
   return ticket ?? null;
 }
 
+export type SupportThreadMessage = {
+  id: string;
+  direction: 'inbound' | 'outbound' | 'internal_note';
+  visibility: 'public' | 'internal';
+  body: string;
+  authorName: string | null;
+  createdAtExternal: Date | null;
+  attachments: Array<{
+    externalId: string;
+    filename: string;
+    providerUrl: string | null;
+    mimeType?: string;
+    size?: number;
+  }> | null;
+};
+
 /**
- * Fetch ordered messages for a ticket (oldest-first by external creation time,
- * then by id as a tiebreaker).
+ * Fetch messages with LEFT JOINs on canonical_contacts and canonical_support_agents
+ * to resolve authorName. Returns raw rows; caller applies redaction then shapes.
  */
-async function fetchMessageRows(
+async function fetchMessageRowsWithAuthors(
   ticketId: string,
   organisationId: string,
-): Promise<CanonicalTicketMessage[]> {
-  const db = getOrgScopedDb('supportTicketService.fetchMessageRows');
+): Promise<Array<{
+  id: string;
+  direction: string;
+  visibility: string;
+  bodyText: string;
+  bodyHtml: string | null;
+  attachments: CanonicalTicketMessage['attachments'];
+  redacted: boolean;
+  createdAtExternal: Date;
+  authorContactFirstName: string | null;
+  authorContactLastName: string | null;
+  authorContactEmail: string | null;
+  authorAgentDisplayName: string | null;
+}>> {
+  const db = getOrgScopedDb('supportTicketService.fetchMessageRowsWithAuthors');
   return db
-    .select()
+    .select({
+      id: canonicalTicketMessages.id,
+      direction: canonicalTicketMessages.direction,
+      visibility: canonicalTicketMessages.visibility,
+      bodyText: canonicalTicketMessages.bodyText,
+      bodyHtml: canonicalTicketMessages.bodyHtml,
+      attachments: canonicalTicketMessages.attachments,
+      redacted: canonicalTicketMessages.redacted,
+      createdAtExternal: canonicalTicketMessages.createdAtExternal,
+      authorContactFirstName: canonicalContacts.firstName,
+      authorContactLastName: canonicalContacts.lastName,
+      authorContactEmail: canonicalContacts.email,
+      authorAgentDisplayName: canonicalSupportAgents.displayName,
+    })
     .from(canonicalTicketMessages)
+    .leftJoin(
+      canonicalContacts,
+      eq(canonicalTicketMessages.authorContactId, canonicalContacts.id),
+    )
+    .leftJoin(
+      canonicalSupportAgents,
+      eq(canonicalTicketMessages.authorSupportAgentId, canonicalSupportAgents.id),
+    )
     .where(
       and(
         eq(canonicalTicketMessages.ticketId, ticketId),
@@ -87,6 +138,46 @@ async function fetchMessageRows(
       ),
     )
     .orderBy(canonicalTicketMessages.createdAtExternal, canonicalTicketMessages.id);
+}
+
+function shapeThreadMessage(row: {
+  id: string;
+  direction: string;
+  visibility: string;
+  bodyText: string;
+  bodyHtml: string | null;
+  attachments: CanonicalTicketMessage['attachments'];
+  redacted: boolean;
+  createdAtExternal: Date;
+  authorContactFirstName: string | null;
+  authorContactLastName: string | null;
+  authorContactEmail: string | null;
+  authorAgentDisplayName: string | null;
+}): SupportThreadMessage {
+  let authorName: string | null = null;
+  if (row.authorAgentDisplayName) {
+    authorName = row.authorAgentDisplayName;
+  } else if (row.authorContactFirstName || row.authorContactLastName) {
+    authorName = [row.authorContactFirstName, row.authorContactLastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim() || row.authorContactEmail || null;
+  } else if (row.authorContactEmail) {
+    authorName = row.authorContactEmail;
+  }
+
+  const body = row.redacted ? '[redacted]' : row.bodyText;
+  const attachments = row.redacted ? null : (row.attachments ?? null);
+
+  return {
+    id: row.id,
+    direction: row.direction as SupportThreadMessage['direction'],
+    visibility: row.visibility as SupportThreadMessage['visibility'],
+    body,
+    authorName,
+    createdAtExternal: row.createdAtExternal,
+    attachments,
+  };
 }
 
 /**
@@ -145,17 +236,14 @@ async function fetchConnectionForConnectorConfig(
 export async function readThreadForAgent(
   ticketId: string,
   principalCtx: PrincipalContext,
-): Promise<{ ticket: CanonicalTicket; messages: CanonicalTicketMessage[] }> {
+): Promise<{ ticket: CanonicalTicket; messages: SupportThreadMessage[] }> {
   const ticket = await fetchTicketRow(ticketId, principalCtx.organisationId);
   if (!ticket || ticket.providerDeleted) {
     throw notFoundError('support.ticket.not_found');
   }
 
-  const rawMessages = await fetchMessageRows(ticketId, principalCtx.organisationId);
-  const messages = applyMessageRedactionFilterForAudience(
-    rawMessages,
-    'agent',
-  ) as CanonicalTicketMessage[];
+  const rawRows = await fetchMessageRowsWithAuthors(ticketId, principalCtx.organisationId);
+  const messages = rawRows.map(shapeThreadMessage);
 
   return { ticket, messages };
 }
@@ -171,7 +259,7 @@ export async function readThreadForHumanUi(
   principalCtx: PrincipalContext,
 ): Promise<{
   ticket: CanonicalTicket;
-  messages: CanonicalTicketMessage[];
+  messages: SupportThreadMessage[];
   draftOverlay: CanonicalTicketDraft[];
 }> {
   const ticket = await fetchTicketRow(ticketId, principalCtx.organisationId);
@@ -179,11 +267,8 @@ export async function readThreadForHumanUi(
     throw notFoundError('support.ticket.not_found');
   }
 
-  const rawMessages = await fetchMessageRows(ticketId, principalCtx.organisationId);
-  const messages = applyMessageRedactionFilterForAudience(
-    rawMessages,
-    'human_ui',
-  ) as CanonicalTicketMessage[];
+  const rawRows = await fetchMessageRowsWithAuthors(ticketId, principalCtx.organisationId);
+  const messages = rawRows.map(shapeThreadMessage);
 
   const db = getOrgScopedDb('supportTicketService.readThreadForHumanUi');
   const draftOverlay = await db
@@ -222,6 +307,20 @@ export async function getTicket(
   return ticket;
 }
 
+export type SupportTicketListItem = {
+  id: string;
+  externalId: string;
+  subject: string;
+  status: SupportCanonicalStatus;
+  priority: string | null;
+  customerEmail: string | null;
+  customerName: string | null;
+  inboxId: string;
+  assigneeExternalId: string | null;
+  lastActivityAt: Date | null;
+  openedAt: Date;
+};
+
 /**
  * List open tickets scoped to the org, optionally filtered by inbox and status group.
  *
@@ -232,6 +331,9 @@ export async function getTicket(
  *
  * Filters out provider_deleted=true in all groups except 'quarantined' where
  * providerDeleted is always false by the fail-closed mapping contract.
+ *
+ * Returns a shaped DTO (SupportTicketListItem) with computed lastActivityAt and
+ * resolved assigneeExternalId via LEFT JOIN on canonical_support_agents.
  */
 export async function listOpenTickets(
   filter: {
@@ -239,7 +341,7 @@ export async function listOpenTickets(
     statusGroup?: 'needs_attention' | 'all_open' | 'quarantined';
   },
   principalCtx: PrincipalContext,
-): Promise<CanonicalTicket[]> {
+): Promise<SupportTicketListItem[]> {
   const db = getOrgScopedDb('supportTicketService.listOpenTickets');
 
   const statusGroup = filter.statusGroup ?? 'all_open';
@@ -267,13 +369,53 @@ export async function listOpenTickets(
   }
 
   const rows = await db
-    .select()
+    .select({
+      id: canonicalTickets.id,
+      externalId: canonicalTickets.externalId,
+      subject: canonicalTickets.subject,
+      status: canonicalTickets.status,
+      priority: canonicalTickets.priority,
+      customerEmail: canonicalTickets.customerEmail,
+      customerName: canonicalTickets.customerName,
+      inboxId: canonicalTickets.inboxId,
+      openedAt: canonicalTickets.openedAt,
+      lastCustomerMessageAt: canonicalTickets.lastCustomerMessageAt,
+      lastAgentMessageAt: canonicalTickets.lastAgentMessageAt,
+      providerDeleted: canonicalTickets.providerDeleted,
+      assigneeExternalId: canonicalSupportAgents.externalId,
+    })
     .from(canonicalTickets)
+    .leftJoin(
+      canonicalSupportAgents,
+      eq(canonicalTickets.assigneeAgentId, canonicalSupportAgents.id),
+    )
     .where(and(...conditions))
     .orderBy(canonicalTickets.openedAt);
 
-  // Apply agent-read filter as a belt-and-suspenders guard
-  return filterDeletedFromAgentReads(rows);
+  // Apply belt-and-suspenders tombstone filter then shape the DTO
+  const filtered = filterDeletedFromAgentReads(rows);
+  return filtered.map((r) => {
+      const lastActivityAt =
+        r.lastCustomerMessageAt && r.lastAgentMessageAt
+          ? r.lastCustomerMessageAt > r.lastAgentMessageAt
+            ? r.lastCustomerMessageAt
+            : r.lastAgentMessageAt
+          : r.lastCustomerMessageAt ?? r.lastAgentMessageAt ?? r.openedAt;
+
+      return {
+      id: r.id,
+      externalId: r.externalId,
+      subject: r.subject,
+      status: r.status as SupportCanonicalStatus,
+      priority: r.priority,
+      customerEmail: r.customerEmail,
+      customerName: r.customerName,
+      inboxId: r.inboxId,
+      assigneeExternalId: r.assigneeExternalId ?? null,
+      lastActivityAt,
+      openedAt: r.openedAt,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +470,7 @@ export async function applyAssignmentChange(
   );
 
   const fields: TicketUpdateInput = {
-    assignedTo: assigneeAgentExternalId ?? undefined,
+    assignedTo: assigneeAgentExternalId,
   };
   await adapter.ticketing!.updateTicket(connection, ticket.externalId, fields);
 }

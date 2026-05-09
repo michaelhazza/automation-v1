@@ -109,7 +109,7 @@ export interface TicketUpdateInput {
   subject?: string;
   status?: string;
   priority?: string;
-  assignedTo?: string;
+  assignedTo?: string | null;
   tags?: string[];
 }
 

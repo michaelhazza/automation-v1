@@ -3,9 +3,20 @@ import api from '../../lib/api';
 import SyncHealthPill from '../../components/support/SyncHealthPill';
 
 interface SupportInboxAgentConfig {
-  mode: 'disabled' | 'draft_only' | 'auto_send';
-  collisionDetectionEnabled?: boolean;
-  draftExpiryHours?: number;
+  version: 1;
+  mode: 'autonomous' | 'assisted' | 'disabled';
+  collisionWindow: {
+    minMinutesSinceHumanActivity: number;
+    respectHumanAssignee: boolean;
+  };
+  draftExpiry: {
+    awaitingReviewHours: number;
+    draftHours: number;
+  };
+  optIns: {
+    autonomousReplyOnWaitingOnCustomer: boolean;
+    postResolutionFollowUp: boolean;
+  };
 }
 
 interface Inbox {
@@ -20,46 +31,74 @@ interface Inbox {
 
 const MODE_OPTIONS: { value: SupportInboxAgentConfig['mode']; label: string; description: string }[] = [
   { value: 'disabled', label: 'Disabled', description: 'Agent does not process this inbox' },
-  { value: 'draft_only', label: 'Draft only', description: 'Agent creates drafts for human review before sending' },
-  { value: 'auto_send', label: 'Auto send', description: 'Agent sends replies automatically (with collision detection)' },
+  { value: 'assisted', label: 'Assisted', description: 'Agent creates drafts for human review before sending' },
+  { value: 'autonomous', label: 'Autonomous', description: 'Agent sends replies automatically with collision detection' },
 ];
 
+const DEFAULT_CONFIG: SupportInboxAgentConfig = {
+  version: 1,
+  mode: 'disabled',
+  collisionWindow: {
+    minMinutesSinceHumanActivity: 30,
+    respectHumanAssignee: true,
+  },
+  draftExpiry: {
+    awaitingReviewHours: 24,
+    draftHours: 72,
+  },
+  optIns: {
+    autonomousReplyOnWaitingOnCustomer: false,
+    postResolutionFollowUp: false,
+  },
+};
+
 function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
-  const config = inbox.agentConfig ?? { mode: 'disabled' as const };
-  const [mode, setMode] = useState<SupportInboxAgentConfig['mode']>(config.mode);
-  const [collisionDetection, setCollisionDetection] = useState(config.collisionDetectionEnabled ?? true);
-  const [draftExpiryHours, setDraftExpiryHours] = useState(config.draftExpiryHours ?? 72);
+  const base = inbox.agentConfig ?? DEFAULT_CONFIG;
+  const [mode, setMode] = useState<SupportInboxAgentConfig['mode']>(base.mode);
+  const [minMinutesSinceHumanActivity, setMinMinutes] = useState(
+    base.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+  );
+  const [respectHumanAssignee, setRespectHumanAssignee] = useState(
+    base.collisionWindow?.respectHumanAssignee ?? true,
+  );
+  const [awaitingReviewHours, setAwaitingReviewHours] = useState(
+    base.draftExpiry?.awaitingReviewHours ?? 24,
+  );
+  const [draftHours, setDraftHours] = useState(
+    base.draftExpiry?.draftHours ?? 72,
+  );
+  const [autonomousReplyOnWaiting, setAutonomousReplyOnWaiting] = useState(
+    base.optIns?.autonomousReplyOnWaitingOnCustomer ?? false,
+  );
+  const [postResolutionFollowUp, setPostResolutionFollowUp] = useState(
+    base.optIns?.postResolutionFollowUp ?? false,
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
 
-  const handleModeChange = (val: SupportInboxAgentConfig['mode']) => {
-    setMode(val);
-    setIsDirty(true);
-  };
-
-  const handleCollisionChange = (val: boolean) => {
-    setCollisionDetection(val);
-    setIsDirty(true);
-  };
-
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = Number(e.target.value);
-    if (!Number.isFinite(v) || v < 1) return;
-    setDraftExpiryHours(v);
-    setIsDirty(true);
-  };
+  const markDirty = () => setIsDirty(true);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.patch(`/api/support/inboxes/${inbox.id}`, {
-        agentConfig: {
-          mode,
-          collisionDetectionEnabled: collisionDetection,
-          draftExpiryHours,
+      const agentConfig: SupportInboxAgentConfig = {
+        version: 1,
+        mode,
+        collisionWindow: {
+          minMinutesSinceHumanActivity,
+          respectHumanAssignee,
         },
-      });
+        draftExpiry: {
+          awaitingReviewHours,
+          draftHours,
+        },
+        optIns: {
+          autonomousReplyOnWaitingOnCustomer: autonomousReplyOnWaiting,
+          postResolutionFollowUp,
+        },
+      };
+      await api.patch(`/api/support/inboxes/${inbox.id}`, { agentConfig });
       setSaved(true);
       setIsDirty(false);
       setTimeout(() => setSaved(false), 2000);
@@ -89,6 +128,7 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
         )}
       </div>
 
+      {/* Mode */}
       <div className="mb-4">
         <label className="block text-xs font-medium text-slate-700 mb-2">Agent mode</label>
         <div className="space-y-2">
@@ -99,7 +139,7 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
                 name={`mode-${inbox.id}`}
                 value={opt.value}
                 checked={mode === opt.value}
-                onChange={() => handleModeChange(opt.value)}
+                onChange={() => { setMode(opt.value); markDirty(); }}
                 className="mt-0.5"
               />
               <div>
@@ -113,28 +153,92 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
 
       {mode !== 'disabled' && (
         <>
-          <div className="mb-4">
+          {/* Collision window */}
+          <div className="mb-4 border-t border-slate-100 pt-4">
+            <p className="text-xs font-medium text-slate-700 mb-2">Collision window</p>
+            <div className="mb-2">
+              <label className="block text-xs text-slate-600 mb-1">
+                Min. minutes since human activity
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1440}
+                value={minMinutesSinceHumanActivity}
+                onChange={e => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v >= 0) { setMinMinutes(v); markDirty(); }
+                }}
+                className="w-28 px-2.5 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                checked={collisionDetection}
-                onChange={e => handleCollisionChange(e.target.checked)}
+                checked={respectHumanAssignee}
+                onChange={e => { setRespectHumanAssignee(e.target.checked); markDirty(); }}
               />
-              <span className="text-sm text-slate-700">Enable collision detection</span>
+              <span className="text-sm text-slate-700">Respect human assignee</span>
             </label>
-            <p className="text-xs text-slate-400 mt-1 ml-5">Pauses sending if a human agent replies simultaneously</p>
+            <p className="text-xs text-slate-400 mt-1 ml-5">Pauses sending when a human agent is assigned</p>
           </div>
 
-          <div className="mb-4">
-            <label className="block text-xs font-medium text-slate-700 mb-1">Draft expiry (hours)</label>
-            <input
-              type="number"
-              min={1}
-              max={720}
-              value={draftExpiryHours}
-              onChange={handleExpiryChange}
-              className="w-32 px-2.5 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
+          {/* Draft expiry */}
+          <div className="mb-4 border-t border-slate-100 pt-4">
+            <p className="text-xs font-medium text-slate-700 mb-2">Draft expiry</p>
+            <div className="mb-2">
+              <label className="block text-xs text-slate-600 mb-1">
+                Awaiting review expiry (hours)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={720}
+                value={awaitingReviewHours}
+                onChange={e => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v >= 1) { setAwaitingReviewHours(v); markDirty(); }
+                }}
+                className="w-28 px-2.5 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">
+                Draft expiry (hours)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={720}
+                value={draftHours}
+                onChange={e => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v >= 1) { setDraftHours(v); markDirty(); }
+                }}
+                className="w-28 px-2.5 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+
+          {/* Opt-ins */}
+          <div className="mb-4 border-t border-slate-100 pt-4">
+            <p className="text-xs font-medium text-slate-700 mb-2">Opt-ins</p>
+            <label className="flex items-center gap-2 cursor-pointer mb-2">
+              <input
+                type="checkbox"
+                checked={autonomousReplyOnWaiting}
+                onChange={e => { setAutonomousReplyOnWaiting(e.target.checked); markDirty(); }}
+              />
+              <span className="text-sm text-slate-700">Reply autonomously when waiting on customer</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={postResolutionFollowUp}
+                onChange={e => { setPostResolutionFollowUp(e.target.checked); markDirty(); }}
+              />
+              <span className="text-sm text-slate-700">Post-resolution follow-up</span>
+            </label>
           </div>
         </>
       )}

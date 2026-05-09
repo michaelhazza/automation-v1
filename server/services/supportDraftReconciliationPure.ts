@@ -5,14 +5,12 @@
 // The reconciliation worker (C11) and the webhook back-link routine (C9)
 // both import from this module.
 
-import type { CanonicalTicketMessageData } from '../adapters/integrationAdapter.js';
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type ReconciliationDecision =
-  | { kind: 'resolve_sent';   messageData: CanonicalTicketMessageData }
+  | { kind: 'resolve_sent';   messageId: string }
   | { kind: 'resolve_failed'; reason: string }
   | { kind: 'retry_after_ms'; ms: number }
   | { kind: 'surface_manual'; reason: string };
@@ -39,6 +37,7 @@ export function decideOutcome(input: {
     proposedVisibility: string;
   };
   latestMessages: Array<{
+    id: string;
     direction: string;
     visibility: string;
     bodyText: string;
@@ -69,11 +68,9 @@ export function decideOutcome(input: {
   );
 
   if (match) {
-    // Cast to CanonicalTicketMessageData — callers provide the full shape;
-    // the pure function just forwards the matched object as messageData.
     return {
       kind: 'resolve_sent',
-      messageData: match as unknown as CanonicalTicketMessageData,
+      messageId: match.id,
     };
   }
 

@@ -26,12 +26,14 @@ function makeDraft(overrides: Partial<{
 }
 
 function makeMessage(overrides: Partial<{
+  id: string;
   direction: string;
   visibility: string;
   bodyText: string;
   createdAtExternal: Date;
 }> = {}) {
   return {
+    id: 'msg-1',
     direction: 'outbound',
     visibility: 'public',
     bodyText: 'Thank you for contacting us.',
@@ -67,15 +69,15 @@ describe('decideOutcome', () => {
   });
 
   it('returns resolve_sent when a message body exactly matches the draft proposed body', () => {
-    const msg = makeMessage({ bodyText: 'Thank you for contacting us.' });
+    const msg = makeMessage({ id: 'msg-exact', bodyText: 'Thank you for contacting us.' });
     const result = decideOutcome({
       draft: makeDraft({ proposedBodyText: 'Thank you for contacting us.' }),
       latestMessages: [msg],
       attemptCount: 0,
     });
     expect(result.kind).toBe('resolve_sent');
-    const resolved = result as { kind: 'resolve_sent'; messageData: typeof msg };
-    expect(resolved.messageData.bodyText).toBe('Thank you for contacting us.');
+    const resolved = result as { kind: 'resolve_sent'; messageId: string };
+    expect(resolved.messageId).toBe('msg-exact');
   });
 
   it('returns resolve_sent when the draft body is a substring of the message body', () => {
