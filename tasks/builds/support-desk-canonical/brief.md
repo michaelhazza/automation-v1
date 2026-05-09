@@ -1,15 +1,15 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** LOCKED v4.1 — incorporates four rounds of review feedback. Spec-ready pending the eight decisions in §9.
+**Status:** DRAFT v5 — adds Teamwork Desk as the first validating implementation in scope. Spec-ready pending the decisions in §10.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
-**Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, and the entities required. No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
+**Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, the entities required, and the scope of the first validating provider integration (Teamwork Desk). No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
 
 ---
 
 ## Decision Statement
 
-We are building a canonical Support Desk runtime layer so agentic support workflows can reason, act, evaluate, and improve against one provider-neutral ticket model, while Teamwork Desk, Zendesk, Freshdesk, and future providers remain adapter implementations underneath. This is part of the agent runtime substrate, not just integration plumbing.
+We are building a canonical Support Desk runtime layer so agentic support workflows can reason, act, evaluate, and improve against one provider-neutral ticket model, while Teamwork Desk, Zendesk, Freshdesk, and future providers remain adapter implementations underneath. **Teamwork Desk is the first validating implementation and ships in the same body of work as the canonical layer**; we do not ship a canonical layer with no provider feeding it. This is part of the agent runtime substrate, not just integration plumbing.
 
 ---
 
@@ -22,10 +22,11 @@ We are building a canonical Support Desk runtime layer so agentic support workfl
 5. Design Invariants
 6. Proposed Canonical Entities (For Stress-Testing)
 7. Adapter Surface (What Each Provider Must Implement)
-8. Skills the Canonical Layer Unlocks
-9. Open Decisions Before Spec
-10. Recommendation
-11. Out of Scope (Explicit)
+8. Teamwork Desk: First Validating Implementation
+9. Skills the Canonical Layer Unlocks
+10. Open Decisions Before Spec
+11. Recommendation
+12. Out of Scope (Explicit)
 
 ---
 
@@ -288,7 +289,55 @@ Once entities are agreed, the per-provider adapter contract is roughly:
 
 Teamwork already covers the acting and webhook side. We need to add the ingestion methods, the attachment resolver, and the status map.
 
-## 8. Skills the Canonical Layer Unlocks
+## 8. Teamwork Desk: First Validating Implementation
+
+Teamwork Desk is the first provider adapter shipped against this canonical layer, and ships in the same body of work. We do not ship a canonical layer with no data flowing in.
+
+### 8.1 Why Teamwork first
+
+- It is the helpdesk we use internally, so dogfooding is immediate.
+- A partial adapter already exists (`server/adapters/teamworkAdapter.ts`) with ticketing actions and webhook normalisation; we are extending, not greenfielding.
+- Teamwork exposes a public REST API with documented webhook events and signature verification, which is enough surface area to validate the canonical contract against.
+- Foundry already pulls Teamwork tickets for training data, so runtime-training alignment per §5.1 is most testable here.
+
+### 8.2 Existing coverage in `teamworkAdapter.ts`
+
+From the codebase audit:
+
+- `IntegrationAdapter.ticketing`: `createTicket`, `updateTicket`, `addReply`, `getTicket` are implemented.
+- `IntegrationAdapter.webhook`: `verifySignature` and `normaliseEvent` are implemented for `ticket.created`, `ticket.updated`, `ticket.reopened`.
+- The provider type `'teamwork'` is registered in both the `providerType` and `connectorType` enums.
+
+### 8.3 Gaps to close in this body of work
+
+- **`IntegrationAdapter.ingestion`** is not yet implemented for Teamwork. Required: `listInboxes`, `listSupportAgents`, `fetchTickets` (incremental since `last_synced_at`), `fetchTicketMessages` (incremental).
+- **Attachment resolver** (`resolveAttachment`) per §6.2; Teamwork attachment URLs are auth-scoped and short-lived, which is precisely why the canonical layer requires a resolver method rather than a stored URL.
+- **Status map** from Teamwork's status vocabulary into the canonical five (§6.1). Anything not in the map must produce `unknown_provider_status` per §7, never silent fallback to `open`.
+- **Webhook event coverage extension** to the additional events the canonical layer needs: at minimum `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed`. Existing events are kept.
+- **Action idempotency key plumbing** per §5.7. Whether Teamwork supports a native idempotency header on send, or we maintain a local action-attempt ledger keyed by the idempotency key, is a spec decision (§10).
+- **Three-phase dispatch wiring** per §5.8 — the existing adapter's `addReply` becomes the phase-3 call inside the new dispatch flow, not a direct skill entry point.
+- **Polling integration**. The connector polling service (`server/services/connectorPollingService.ts`) already handles scheduling, sync phase tracking, and ingestion stats; Teamwork's `ingestion` methods plug into it once implemented. No new polling infrastructure is needed.
+
+### 8.4 Teamwork-specific decisions before spec
+
+These are not abstract canonical-layer decisions; they are concrete questions about which Teamwork surface we build against. They are listed in §10 alongside the canonical-layer decisions.
+
+- API version (Teamwork has multiple public API versions; the spec must lock which one(s) we build against).
+- Authentication model (OAuth flow vs. API key) and which credential type we accept on the connector config.
+- Webhook event subscription scope and signature scheme — confirm the v1 event set covers the canonical events the agent needs.
+- Provider status vocabulary inventory and its mapping into the canonical five statuses.
+- Pagination and rate-limit handling for incremental polls.
+- Attachment auth model and short-lived URL lifecycle (drives the `resolveAttachment` implementation).
+
+### 8.5 Out of scope for the Teamwork v1 implementation
+
+- Teamwork-specific custom-field promotion to canonical columns (stays in `external_metadata`).
+- Time tracking, billable-hours, or productivity reports.
+- Teamwork projects, milestones, and tasks (different product surface than Desk).
+- Native Teamwork CRM integration (separate canonical CRM, already covered by other adapters).
+- Bulk historical backfill beyond what the polling service already supports via `syncPhase = backfill`. If Foundry's backfill window is longer than what the connector polling service handles, Foundry remains the historical loader.
+
+## 9. Skills the Canonical Layer Unlocks
 
 Tying back to the use case. With the canonical layer in place, the Support Agent gets these as composable skills with no per-provider code:
 
@@ -302,36 +351,49 @@ Tying back to the use case. With the canonical layer in place, the Support Agent
 
 The CRM Query Planner can extend its registry to include these without re-engineering; it already routes between canonical and live executors.
 
-## 9. Open Decisions Before Spec
+## 10. Open Decisions Before Spec
 
-The brief is not approved until we have a position on each of these. Each one materially affects the spec.
+The brief is not approved until we have a position on each of these. Each one materially affects the spec. Decisions split into canonical-layer (1–8) and Teamwork-specific (9–14).
+
+### Canonical-layer decisions
 
 1. **Foundry alignment — which schema version is the reference?** We commit to alignment in §5.1; we still need to name the specific Foundry schema version the spec must reconcile against, and ratify which fields will diverge with documented justification.
 2. **Contact resolution policy.** Recommendation: deterministic email match only in v1. Do not auto-create `canonical_contacts` from support tickets — it will pollute CRM with one-off requesters. Unmatched tickets carry raw customer fields (§6.1) and remain queryable as "unmatched". A dedicated reconciliation queue UI is **out of scope for v1**; the canonical primitives are in place so it can be added later without schema change. Confirm.
-3. **Conflict policy specifics.** Stated direction: provider wins on read, adapter writes are auditable, conflicts surface in observability rather than auto-resolving. Confirm and define what "surfaces in observability" means concretely (metric? log? UI?).
+3. **Conflict policy specifics.** Stated direction: provider wins on read, adapter writes are auditable, conflicts surface in observability rather than auto-resolving. Confirm and define what "surfaces in observability" means concretely (metric? log? UI?). Note: §5.10 already locks structured-log emission with stable codes; this decision is about UI/alerting on top.
 4. **Outbound message finality.** §5.2 invariant says provider-confirmed only. Confirm we are willing to hold pending outbound messages out of agent-visible thread reads until confirmed (acceptable trade for correctness).
 5. **Attachments.** §6.2 policy: provider URL plus adapter-resolved fresh URL on demand, no mirroring in v1. Confirm.
 6. **Volume and partitioning.** Expected tickets-per-org-per-day at steady state? Drives polling cadence, webhook reliance, and whether `canonical_ticket_messages` needs partitioning. Needed before sizing.
 7. **`canonical_conversations` boundary.** §6.1 states tickets do not flow through `canonical_conversations` in v1. Confirm (the alternative — every ticket also writing a conversation row — is rejected here as overloading the abstraction).
 8. **Inbox as the unit of agent configuration.** Confirm `canonical_inboxes` is the right granularity for Support Agent configuration (autonomous vs. assisted, model selection, prompt overrides), not the connector-config level above it.
 
-## 10. Recommendation
+### Teamwork-specific decisions
 
-Approve the canonical approach. Approve the **five** entities as the v1 surface:
+9. **Teamwork API version.** Teamwork exposes more than one public API version. The spec must lock which version (or versions) the adapter targets, weighted by feature coverage (incremental ticket fetch, webhook event richness), longevity (deprecation roadmap), and what the existing adapter currently calls. Recommend: pick the version Foundry already uses unless there is a concrete reason not to; minimises drift between the historical loader and the runtime adapter.
+10. **Teamwork authentication model.** OAuth vs. API key. OAuth is the better long-term posture for customers connecting their own Teamwork instances; API key is simpler for our own internal connection. Recommend supporting OAuth for tenant-installed connections from day one and accepting API key only for our own internal seed connection if it materially shortens the path. Confirm.
+11. **Teamwork webhook event scope.** Confirm the Teamwork webhook event catalogue covers (or can be extended to cover) the canonical events the agent needs: `ticket.created`, `ticket.updated`, `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed`. If any are missing, the polling path must compensate per §5.3. Decision: which events do we subscribe to in v1, and which canonical events fall back to poll-only.
+12. **Teamwork status vocabulary mapping.** Enumerate Teamwork's own status values and define the explicit mapping into the canonical five (`open`, `pending_internal`, `waiting_on_customer`, `resolved`, `closed`). Anything unmapped becomes `unknown_provider_status` per §7. The map itself goes into the spec, not the brief, but the decision to enumerate it before spec sign-off is a brief-level requirement.
+13. **Teamwork action idempotency mechanism.** Does Teamwork support a native idempotency header on writes, or does the adapter maintain a local action-attempt ledger keyed by the §5.7 idempotency key? Decide before spec; affects the failure-recovery code path in §5.8 phase 3.
+14. **Teamwork attachment auth model.** Confirm Teamwork attachment URLs are auth-scoped and short-lived (audit indicates yes) and define the `resolveAttachment` strategy: short-lived signed URL, streamed bytes through our backend, or both. Drives privacy posture and bandwidth cost.
+
+## 11. Recommendation
+
+Approve the canonical approach plus Teamwork Desk as the first validating implementation, shipped together in one body of work. Approve the **five** canonical entities as the v1 surface:
 
 1. `canonical_tickets`
 2. `canonical_ticket_messages`
 3. `canonical_inboxes`
 4. `canonical_support_agents`
-5. `canonical_ticket_drafts` (added in v2 of the brief; necessary for assisted mode)
+5. `canonical_ticket_drafts`
 
 Approve the ten design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions, three-phase dispatch sequencing, denormalised tenant isolation, structured observability with stable codes) as non-negotiable constraints for the spec.
 
+Approve the Teamwork v1 scope in §8: extend the existing adapter with ingestion methods, attachment resolver, status map, idempotency-key plumbing, and three-phase dispatch wiring. No new polling infrastructure.
+
 Park CSAT, KB articles, custom fields, multi-thread per ticket, and attachment mirroring for later.
 
-Resolve the eight decisions in §9, then go to spec. The spec should be drafted via `spec-coordinator` against this brief, with Foundry's existing ticket schema as a required reference input.
+Resolve the fourteen decisions in §10 (eight canonical, six Teamwork-specific), then go to spec. The spec should be drafted via `spec-coordinator` against this brief, with Foundry's existing ticket schema and the existing `teamworkAdapter.ts` source as required reference inputs.
 
-## 11. Out of Scope (Explicit)
+## 12. Out of Scope (Explicit)
 
 - Foundry data pipeline changes; that lives in Foundry, not here.
 - Knowledge base or help-centre integration; separate brief.
