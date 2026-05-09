@@ -4,6 +4,8 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { agentWorkingTimeEventLedger, agentWorkingTimeRollups, agentRuns, agentExecutionEvents } from '../db/schema/index.js';
 import { splitIntervalAcrossBuckets } from './agentWorkingTimeServicePure.js';
+import { fanOut } from './agentPresenceStreamPublisher.js';
+import { randomUUID } from 'node:crypto';
 import type { AgentExecutionEvent } from '../../shared/types/agentExecutionLog.js';
 import type { AgentWorkingTimeRollup } from '../db/schema/agentWorkingTimeRollups.js';
 import type { PrincipalContext } from './principal/types.js';
@@ -14,6 +16,59 @@ function msToUtcDateString(ms: number): string {
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function todayUtcDateString(): string {
+  return msToUtcDateString(Date.now());
+}
+
+async function emitWorkingTimeBucketUpdated(
+  agentId: string,
+  organisationId: string,
+  bucketDate: string,
+  eventTimestamp: string,
+): Promise<void> {
+  // Only emit SSE for the active bucket (spec §13.7)
+  if (bucketDate !== todayUtcDateString()) return;
+
+  const db = getOrgScopedDb('agentWorkingTimeService.emitWorkingTimeBucketUpdated');
+  const rows = await db
+    .select({
+      workingTimeSeconds: agentWorkingTimeRollups.workingTimeSeconds,
+      totalRunCount: agentWorkingTimeRollups.totalRunCount,
+      successfulRuns: agentWorkingTimeRollups.successfulRuns,
+      failedRuns: agentWorkingTimeRollups.failedRuns,
+      partialRuns: agentWorkingTimeRollups.partialRuns,
+    })
+    .from(agentWorkingTimeRollups)
+    .where(
+      and(
+        eq(agentWorkingTimeRollups.organisationId, organisationId),
+        eq(agentWorkingTimeRollups.agentId, agentId),
+        eq(agentWorkingTimeRollups.bucketDate, bucketDate),
+      ),
+    )
+    .limit(1);
+
+  if (rows.length === 0) return;
+  const row = rows[0];
+
+  fanOut({
+    agentId,
+    organisationId,
+    eventTimestamp,
+    serverNow: new Date().toISOString(),
+    eventId: randomUUID(),
+    eventType: 'working_time_bucket_updated',
+    data: {
+      bucketDate,
+      workingTimeSeconds: row.workingTimeSeconds,
+      totalRunCount: row.totalRunCount,
+      successfulRuns: row.successfulRuns,
+      failedRuns: row.failedRuns,
+      partialRuns: row.partialRuns,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +149,10 @@ export async function applyEvent(
 
     const contributions = splitIntervalAcrossBuckets(startMs, endMs);
 
+    const eventTs = typeof event.eventTimestamp === 'string'
+      ? event.eventTimestamp
+      : new Date(event.eventTimestamp).toISOString();
+
     for (const { bucketDate, contributionMs } of contributions) {
       const contributionSeconds = Math.floor(contributionMs / 1000);
       if (contributionSeconds <= 0) continue;
@@ -116,6 +175,10 @@ export async function applyEvent(
           working_time_seconds = agent_working_time_rollups.working_time_seconds + EXCLUDED.working_time_seconds,
           updated_at           = EXCLUDED.updated_at
       `);
+
+      void emitWorkingTimeBucketUpdated(agentId, organisationId, bucketDate, eventTs).catch(() => {
+        // fire-and-forget; SSE emission failure does not affect working-time persistence
+      });
     }
     return;
   }
@@ -125,6 +188,9 @@ export async function applyEvent(
     const payload = event.payload as { finalStatus: string };
     const isSuccess = payload.finalStatus === 'completed';
     const bucketDate = msToUtcDateString(new Date(event.eventTimestamp).getTime());
+    const eventTs = typeof event.eventTimestamp === 'string'
+      ? event.eventTimestamp
+      : new Date(event.eventTimestamp).toISOString();
 
     await db.execute(sql`
       INSERT INTO agent_working_time_rollups (
@@ -154,6 +220,10 @@ export async function applyEvent(
         total_run_count = agent_working_time_rollups.total_run_count + EXCLUDED.total_run_count,
         updated_at      = EXCLUDED.updated_at
     `);
+
+    void emitWorkingTimeBucketUpdated(agentId, organisationId, bucketDate, eventTs).catch(() => {
+      // fire-and-forget; SSE emission failure does not affect working-time persistence
+    });
     return;
   }
 }

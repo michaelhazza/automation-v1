@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
@@ -7,6 +7,7 @@ import {
   validateObservationBody,
   SUPERSESSION_DEPTH_LIMIT,
 } from './agentObservationServicePure.js';
+import { fanOut } from './agentPresenceStreamPublisher.js';
 import type { ObservationType, ObservationSourceKind } from '../../shared/types/agentObservations.js';
 import type { AgentObservation } from '../db/schema/agentObservations.js';
 import type { PrincipalContext } from './principal/types.js';
@@ -102,7 +103,29 @@ export async function append(
       })
       .returning();
 
-    return inserted[0];
+    const row = inserted[0];
+
+    // Emit observation_appended SSE event (spec §6.7 / §13.7 <10s freshness)
+    fanOut({
+      agentId: input.agentId,
+      organisationId,
+      eventTimestamp: row.createdAt instanceof Date
+        ? row.createdAt.toISOString()
+        : String(row.createdAt),
+      serverNow: new Date().toISOString(),
+      eventId: randomUUID(),
+      eventType: 'observation_appended',
+      data: {
+        observationId: row.id,
+        observationType: row.observationType,
+        summary: input.body.slice(0, 240),
+        createdAt: row.createdAt instanceof Date
+          ? row.createdAt.toISOString()
+          : String(row.createdAt),
+      },
+    });
+
+    return row;
   } catch (err: unknown) {
     // 5. 23505 unique_violation on idempotency_key → 200: return existing row
     if (

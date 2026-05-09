@@ -160,26 +160,19 @@ router.post(
 router.get(
   '/api/agent-presence/stream/:agentId',
   authenticateStreamToken,
-  async (req: import('express').Request, res: import('express').Response) => {
-    try {
-      // Verify the token's bound scope matches the URL path param
-      const claimedAgentId = (req.streamTokenScope as { agentId?: string } | undefined)?.agentId;
-      if (claimedAgentId && claimedAgentId !== req.params.agentId) {
-        res.status(403).json({ error: 'Token scope does not match requested agent' });
-        return;
-      }
-
-      await resolveAgent(req.params.agentId, req.orgId!);
-      sseSetup(res);
-      const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId, organisationId: req.orgId! };
-      attachStream(req, res, scope);
-    } catch (err) {
-      const status = (err as { statusCode?: number }).statusCode;
-      if (status === 404) { res.status(404).json({ error: 'Agent not found' }); return; }
-      logger.error('presence_stream.agent.error', { error: err });
-      res.status(500).end();
+  asyncHandler(async (req, res) => {
+    // Verify the token's bound scope matches the URL path param
+    const claimedAgentId = (req.streamTokenScope as { agentId?: string } | undefined)?.agentId;
+    if (claimedAgentId && claimedAgentId !== req.params.agentId) {
+      throw { statusCode: 403, message: 'Token scope does not match requested agent' };
     }
-  },
+
+    await resolveAgent(req.params.agentId, req.orgId!);
+    // sseSetup and attachStream are synchronous after this point; they do not throw.
+    sseSetup(res);
+    const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId, organisationId: req.orgId! };
+    attachStream(req, res, scope);
+  }),
 );
 
 // ── Endpoint 2: workspace-scoped stream ──────────────────────────────────────
@@ -187,26 +180,19 @@ router.get(
 router.get(
   '/api/agent-presence/stream/workspace/:subaccountId',
   authenticateStreamToken,
-  async (req: import('express').Request, res: import('express').Response) => {
-    try {
-      // Verify the token's bound scope matches the URL path param
-      const claimedSubaccountId = (req.streamTokenScope as { subaccountId?: string } | undefined)?.subaccountId;
-      if (claimedSubaccountId && claimedSubaccountId !== req.params.subaccountId) {
-        res.status(403).json({ error: 'Token scope does not match requested workspace' });
-        return;
-      }
-
-      await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      sseSetup(res);
-      const scope: PresenceScope = { kind: 'workspace', subaccountId: req.params.subaccountId };
-      attachStream(req, res, scope);
-    } catch (err) {
-      const status = (err as { statusCode?: number }).statusCode;
-      if (status === 404) { res.status(404).json({ error: 'Workspace not found' }); return; }
-      logger.error('presence_stream.workspace.error', { error: err });
-      res.status(500).end();
+  asyncHandler(async (req, res) => {
+    // Verify the token's bound scope matches the URL path param
+    const claimedSubaccountId = (req.streamTokenScope as { subaccountId?: string } | undefined)?.subaccountId;
+    if (claimedSubaccountId && claimedSubaccountId !== req.params.subaccountId) {
+      throw { statusCode: 403, message: 'Token scope does not match requested workspace' };
     }
-  },
+
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // sseSetup and attachStream are synchronous after this point; they do not throw.
+    sseSetup(res);
+    const scope: PresenceScope = { kind: 'workspace', subaccountId: req.params.subaccountId };
+    attachStream(req, res, scope);
+  }),
 );
 
 export default router;

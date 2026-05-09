@@ -186,6 +186,46 @@ export async function appendEvent(input: AppendEventInput): Promise<void> {
         });
       });
 
+      // Run-step observation hook (spec §847) — fires when the persisted event
+      // payload carries a typed observation. No producer populates this today;
+      // the hook is wired now so future producers can emit without a second PR.
+      const stepPayload = persisted.event.payload as { observation?: { type: string; body: string; metadata?: Record<string, unknown> } };
+      if (stepPayload?.observation) {
+        const obs = stepPayload.observation;
+        void (async () => {
+          try {
+            const { append } = await import('./agentObservationService.js');
+            const runRows = await (getOrgScopedDb('agentExecutionEventService.run_step_obs'))
+              .select({ agentId: agentRuns.agentId })
+              .from(agentRuns)
+              .where(eq(agentRuns.id, persisted.event.runId))
+              .limit(1);
+            if (runRows.length === 0) return;
+            await append(
+              {
+                agentId: runRows[0].agentId,
+                eventId: persisted.event.id,
+                observationType: obs.type as import('../../shared/types/agentObservations.js').ObservationType,
+                body: obs.body,
+                metadata: {
+                  source_kind: 'run_step' as const,
+                  source_id: persisted.event.id,
+                  summarised_from_step_seq: persisted.event.sequenceNumber,
+                  ...(obs.metadata ?? {}),
+                },
+              },
+              embodimentCtx,
+            );
+          } catch (err: unknown) {
+            logger.warn('agentExecutionEventService.run_step_observation_failed', {
+              runId: persisted.event.runId,
+              eventId: persisted.event.id,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })();
+      }
+
       return;
     } catch (err) {
       lastErr = err;

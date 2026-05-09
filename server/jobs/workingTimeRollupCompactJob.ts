@@ -86,7 +86,9 @@ export async function runWorkingTimeRollupCompact(): Promise<WorkingTimeRollupCo
                       substring(bucket_date::text, 1, 7) AS month,
                       SUM(working_time_seconds) AS wts,
                       SUM(total_run_count) AS trc,
-                      SUM(successful_runs) AS sr
+                      SUM(successful_runs) AS sr,
+                      SUM(failed_runs) AS fr,
+                      SUM(partial_runs) AS pr
                     FROM agent_working_time_rollups
                     WHERE organisation_id = ${org.id}::uuid
                       AND bucket_date < (CURRENT_DATE - INTERVAL '1 year')::date
@@ -98,13 +100,15 @@ export async function runWorkingTimeRollupCompact(): Promise<WorkingTimeRollupCo
                       AND bucket_date < (CURRENT_DATE - INTERVAL '1 year')::date
                     RETURNING bucket_date
                   )
-                  INSERT INTO agent_working_time_rollups (organisation_id, agent_id, bucket_date, working_time_seconds, total_run_count, successful_runs)
-                  SELECT organisation_id, agent_id, (month || '-01')::date, wts, trc, sr
+                  INSERT INTO agent_working_time_rollups (organisation_id, agent_id, bucket_date, working_time_seconds, total_run_count, successful_runs, failed_runs, partial_runs)
+                  SELECT organisation_id, agent_id, (month || '-01')::date, wts, trc, sr, fr, pr
                   FROM monthly_agg
                   ON CONFLICT (organisation_id, agent_id, bucket_date) DO UPDATE
                     SET working_time_seconds = agent_working_time_rollups.working_time_seconds + EXCLUDED.working_time_seconds,
                         total_run_count = agent_working_time_rollups.total_run_count + EXCLUDED.total_run_count,
-                        successful_runs = agent_working_time_rollups.successful_runs + EXCLUDED.successful_runs`,
+                        successful_runs = agent_working_time_rollups.successful_runs + EXCLUDED.successful_runs,
+                        failed_runs = agent_working_time_rollups.failed_runs + EXCLUDED.failed_runs,
+                        partial_runs = agent_working_time_rollups.partial_runs + EXCLUDED.partial_runs`,
             );
           },
         );

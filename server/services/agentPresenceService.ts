@@ -1,5 +1,6 @@
 import { eq, and } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { agentPresenceProjections, agentExecutionEvents, agentRuns } from '../db/schema/index.js';
@@ -9,9 +10,33 @@ import {
   type PresenceInput,
 } from './agentPresenceServicePure.js';
 import type { AgentPresenceState } from '../../shared/types/agentPresence.js';
-import type { AgentExecutionEvent } from '../../shared/types/agentExecutionLog.js';
+import type { AgentExecutionEvent, AgentExecutionEventType } from '../../shared/types/agentExecutionLog.js';
 import type { AgentPresenceProjection } from '../db/schema/agentPresenceProjections.js';
 import type { PrincipalContext } from './principal/types.js';
+
+// ---------------------------------------------------------------------------
+// Activity-feed-visible event types (spec §7.7)
+// Used to gate the activity_row SSE fanOut below. Defined here because this is
+// where agentId is already resolved (run-to-agent lookup), avoiding a redundant
+// DB round-trip in the appendEvent hot path.
+// ---------------------------------------------------------------------------
+const ACTIVITY_FEED_VISIBLE_TYPES = new Set<AgentExecutionEventType>([
+  'run.started',
+  'run.completed',
+  'run.event_limit_reached',
+  'handoff.decided',
+  'clarification.requested',
+  'llm.completed',
+  'skill.invoked',
+  'skill.completed',
+  'tool.error',
+  'observation_emitted',
+  'retrieval.summary',
+]);
+
+function isActivityFeedVisible(eventType: string): boolean {
+  return ACTIVITY_FEED_VISIBLE_TYPES.has(eventType as AgentExecutionEventType);
+}
 
 // ---------------------------------------------------------------------------
 // In-process monotonic-clock state for degraded-state hysteresis.
@@ -92,6 +117,34 @@ export async function applyEventToPresence(
   if (runRows.length === 0) return;
   const { agentId, subaccountId } = runRows[0];
 
+  // Emit activity_row SSE event for activity-feed-visible event types (spec §7.7).
+  // Fires regardless of whether the presence projection is actually updated —
+  // activity feed reflects what's happening in the run, not just state transitions.
+  if (isActivityFeedVisible(event.eventType)) {
+    const activityEventTs = typeof event.eventTimestamp === 'string'
+      ? event.eventTimestamp
+      : new Date(event.eventTimestamp).toISOString();
+    const activityEvent = {
+      agentId,
+      organisationId,
+      eventTimestamp: activityEventTs,
+      serverNow: new Date().toISOString(),
+      eventId: randomUUID(),
+      eventType: 'activity_row' as const,
+      data: {
+        eventId: event.id,
+        eventType: event.eventType,
+        eventTimestamp: activityEventTs,
+        runId: event.runId,
+        sequenceNumber: event.sequenceNumber,
+      },
+    };
+    fanOut(activityEvent);
+    if (subaccountId) {
+      fanOutToWorkspace(subaccountId, activityEvent);
+    }
+  }
+
   // Fetch recent execution events for this agent to build PresenceInput.
   const recentEvents = await db
     .select({
@@ -144,10 +197,11 @@ export async function applyEventToPresence(
     hysteresisMap.delete(agentId);
   }
 
-  // Read the current projection row to check the state transition
+  // Read the current projection row to check the state transition and current focus
   const existing = await db
     .select({
       presenceState: agentPresenceProjections.presenceState,
+      presenceSubtitle: agentPresenceProjections.presenceSubtitle,
     })
     .from(agentPresenceProjections)
     .where(
@@ -159,6 +213,7 @@ export async function applyEventToPresence(
     .limit(1);
 
   const currentState = existing[0]?.presenceState ?? null;
+  const priorSubtitle = existing[0]?.presenceSubtitle ?? null;
 
   if (currentState !== null && !isLegalTransition(currentState as AgentPresenceState, newState)) {
     logger.warn('presence.illegal_transition_attempt', {
@@ -235,13 +290,16 @@ export async function applyEventToPresence(
     return;
   }
 
+  const eventTimestamp = typeof event.eventTimestamp === 'string'
+    ? event.eventTimestamp
+    : new Date(event.eventTimestamp).toISOString();
+  const serverNow = new Date().toISOString();
+
   const sseEvent = {
     agentId,
     organisationId,
-    eventTimestamp: typeof event.eventTimestamp === 'string'
-      ? event.eventTimestamp
-      : new Date(event.eventTimestamp).toISOString(),
-    serverNow: new Date().toISOString(),
+    eventTimestamp,
+    serverNow,
     eventId: event.id,
     eventType: 'presence_state_changed' as const,
     data: {
@@ -249,12 +307,32 @@ export async function applyEventToPresence(
       presenceState: newState,
       degradedBaseState: resolved.degradedBaseState ?? null,
       nextRunAt: resolved.nextRunAt ?? null,
-      updatedAt: new Date().toISOString(),
+      updatedAt: serverNow,
     },
   };
 
   fanOut(sseEvent);
   if (subaccountId) {
     fanOutToWorkspace(subaccountId, sseEvent);
+  }
+
+  // Emit current_focus_updated when the subtitle (focus line) changes (spec §6.7)
+  if (resolved.subtitle !== priorSubtitle) {
+    const focusEvent = {
+      agentId,
+      organisationId,
+      eventTimestamp,
+      serverNow,
+      eventId: event.id,
+      eventType: 'current_focus_updated' as const,
+      data: {
+        agentId,
+        currentFocus: resolved.subtitle,
+      },
+    };
+    fanOut(focusEvent);
+    if (subaccountId) {
+      fanOutToWorkspace(subaccountId, focusEvent);
+    }
   }
 }

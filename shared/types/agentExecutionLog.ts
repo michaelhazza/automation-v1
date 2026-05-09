@@ -9,6 +9,18 @@ import type { EventOrigin } from './workflowStepGate.js';
 export type { EventOrigin };
 
 import type { RetrievalResult } from './retrieval.js';
+import type { ObservationType } from './agentObservations.js';
+
+/**
+ * Typed-observation payload embedded in run-step terminal events (spec §847).
+ * Optional field on `skill.completed` and `llm.completed` payloads.
+ * No producer populates this today; the hook fires only when present.
+ */
+export interface RunStepObservation {
+  type: ObservationType;
+  body: string;
+  metadata?: Record<string, unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Source-service tag
@@ -186,6 +198,8 @@ export type AgentExecutionEventPayload =
       // Idempotency flag from automations.idempotent. When false, the UI must
       // confirm before retry (since the side effect may have already occurred).
       idempotent?: boolean;
+      /** Run-step typed observation (spec §847). No producer populates this today; hook fires when present. */
+      observation?: RunStepObservation;
     }
   | {
       eventType: 'llm.requested';
@@ -208,6 +222,8 @@ export type AgentExecutionEventPayload =
       durationMs: number;
       payloadInsertStatus: 'ok' | 'failed';
       payloadRowId: string | null;
+      /** Run-step typed observation (spec §847). No producer populates this today; hook fires when present. */
+      observation?: RunStepObservation;
     }
   | {
       eventType: 'handoff.decided';
