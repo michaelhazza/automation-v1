@@ -3,7 +3,7 @@
 //
 // All DB access uses getOrgScopedDb(). Pure helpers live in supportDraftDispatchServicePure.ts.
 
-import { eq, and, inArray, sql, notInArray } from 'drizzle-orm';
+import { eq, and, inArray, or, sql, notInArray } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   canonicalTickets,
@@ -132,7 +132,7 @@ export async function proposeReply(
 export async function approveDraft(
   draftId: string,
   principalCtx: PrincipalContext,
-  options?: { reviewNotes?: string },
+  options?: { reviewNotes?: string; overrideCollision?: boolean },
 ): Promise<{ status: string; messageId?: string }> {
   const db = getOrgScopedDb('supportDraftDispatchService.approveDraft');
 
@@ -348,7 +348,10 @@ export async function listDraftsForReview(
   const db = getOrgScopedDb('supportDraftDispatchService.listDraftsForReview');
   const conditions = [
     eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
-    inArray(canonicalTicketDrafts.status, ['awaiting_review', 'needs_reconciliation']),
+    or(
+      inArray(canonicalTicketDrafts.status, ['awaiting_review', 'needs_reconciliation']),
+      sql`${canonicalTicketDrafts.status} = 'dispatching' AND ${canonicalTicketDrafts.dispatchingStartedAt} < NOW() - INTERVAL '30 seconds'`,
+    ),
   ];
   if (filter.ticketId) {
     conditions.push(eq(canonicalTicketDrafts.ticketId, filter.ticketId));
@@ -474,6 +477,8 @@ export async function manualResolveDraft(
     }
     const boss = await getPgBoss();
     await boss.send('support-draft-reconciliation', { organisationId: principalCtx.organisationId, draftId }, getJobConfig('support-draft-reconciliation'));
+  } else {
+    throw Object.assign(new Error('support.draft.invalid_action'), { statusCode: 422, message: 'support.draft.invalid_action' });
   }
 
   void options; // notes param reserved for future audit log integration

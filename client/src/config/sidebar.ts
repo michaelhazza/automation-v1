@@ -469,7 +469,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   }
 
   // ── support group — Support Desk canonical substrate (C13) ─────────────
-  if (hasOrgContext) {
+  if (hasOrgContext && (hasOrgPerm('support.draft.approve') || hasOrgPerm('support.draft.reject') || hasOrgPerm('support.inbox.configure'))) {
     items.push({ group: 'support', kind: 'section-header', key: 'support-header', label: 'Support Desk' });
     items.push({ group: 'support', kind: 'link', key: 'support-tickets', label: 'Tickets', to: staticRoute('/support/tickets'), iconKey: 'inbox' });
     items.push({ group: 'support', kind: 'link', key: 'support-drafts', label: 'Draft Review', to: staticRoute('/support/drafts'), iconKey: 'tasks' });

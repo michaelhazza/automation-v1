@@ -40,7 +40,7 @@ router.post('/drafts/:id/approve', authenticate, requireOrgPermission('support.d
     res.status(403).json({ message: 'support.draft.override_collision permission required' });
     return;
   }
-  const result = await approveDraft(req.params.id, makePrincipal(req), { reviewNotes });
+  const result = await approveDraft(req.params.id, makePrincipal(req), { reviewNotes, overrideCollision });
   res.json(result);
 }));
 
@@ -51,7 +51,10 @@ router.post('/drafts/:id/reject', authenticate, requireOrgPermission('support.dr
 }));
 
 router.post('/drafts/:id/edit', authenticate, requireOrgPermission('support.draft.approve'), asyncHandler(async (req, res) => {
-  const { proposedBodyText } = req.body as { proposedBodyText: string };
+  const { proposedBodyText } = req.body;
+  if (!proposedBodyText?.trim()) {
+    return res.status(422).json({ message: 'proposedBodyText is required' });
+  }
   const draft = await editDraft(req.params.id, proposedBodyText, makePrincipal(req));
   res.json({ draft });
 }));

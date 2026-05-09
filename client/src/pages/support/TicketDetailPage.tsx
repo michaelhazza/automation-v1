@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import StatusPill from '../../components/support/StatusPill';
@@ -6,7 +6,6 @@ import PriorityPill from '../../components/support/PriorityPill';
 import ThreadMessage from '../../components/support/ThreadMessage';
 import DraftOverlayMessage from '../../components/support/DraftOverlayMessage';
 import QuarantineBanner from '../../components/support/QuarantineBanner';
-import CollisionCallout from '../../components/support/CollisionCallout';
 
 interface Ticket {
   id: string;
@@ -16,6 +15,7 @@ interface Ticket {
   priority: string | null;
   assigneeExternalId: string | null;
   inboxId: string;
+  contactId?: string | null;
 }
 
 interface Message {
@@ -38,7 +38,7 @@ interface DraftOverlay {
 interface ThreadData {
   ticket: Ticket;
   messages: Message[];
-  draftOverlay: DraftOverlay | null;
+  draftOverlay: DraftOverlay[];
 }
 
 export default function TicketDetailPage() {
@@ -46,9 +46,9 @@ export default function TicketDetailPage() {
   const [data, setData] = useState<ThreadData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [hasOverrideCollisionPerm, setHasOverrideCollisionPerm] = useState(false);
 
-  const load = () => {
+  const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
@@ -56,31 +56,21 @@ export default function TicketDetailPage() {
       .then(({ data: d }) => setData(d))
       .catch(() => setError('Failed to load ticket.'))
       .finally(() => setLoading(false));
-  };
+  }, [id]);
 
-  useEffect(load, [id]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const handleApprove = async (overrideCollision = false) => {
-    if (!data?.draftOverlay) return;
-    setActionLoading(true);
-    try {
-      await api.post(`/api/support/drafts/${data.draftOverlay.id}/approve`, { overrideCollision });
-      load();
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!data?.draftOverlay) return;
-    setActionLoading(true);
-    try {
-      await api.post(`/api/support/drafts/${data.draftOverlay.id}/reject`, { reason: 'Rejected from ticket view' });
-      load();
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  useEffect(() => {
+    api.get<{ permissions: string[] }>('/api/my-permissions')
+      .then(({ data }) => {
+        setHasOverrideCollisionPerm(data.permissions?.includes('support.draft.override_collision') ?? false);
+      })
+      .catch(() => {
+        // permissions fetch failure is non-fatal; default to no override perm
+      });
+  }, []);
 
   if (loading) {
     return (
@@ -95,8 +85,10 @@ export default function TicketDetailPage() {
   }
 
   const { ticket, messages, draftOverlay } = data;
+  const drafts = Array.isArray(draftOverlay) ? draftOverlay : (draftOverlay ? [draftOverlay] : []);
   const isQuarantined = ticket.status === 'unknown_provider_status';
-  const hasCollision = draftOverlay?.preflightFailureReason === 'human_collision_blocked';
+
+  void hasOverrideCollisionPerm; // available for future use if inline action bar is re-introduced
 
   return (
     <div className="flex flex-col h-full">
@@ -129,44 +121,28 @@ export default function TicketDetailPage() {
               createdAt={msg.createdAtExternal}
             />
           ))}
-          {draftOverlay && (
+          {drafts.map(draft => (
             <DraftOverlayMessage
-              status={draftOverlay.status}
-              proposedBodyText={draftOverlay.proposedBodyText}
-              createdAt={draftOverlay.createdAt}
+              key={draft.id}
+              status={draft.status}
+              proposedBodyText={draft.proposedBodyText}
+              createdAt={draft.createdAt}
             />
-          )}
+          ))}
         </div>
 
-        {/* Action bar */}
-        {draftOverlay && ['draft', 'awaiting_review'].includes(draftOverlay.status) && (
-          <div className="w-72 border-l border-slate-200 bg-white p-4 flex flex-col gap-3">
-            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Draft Review</p>
-            {hasCollision && (
-              <CollisionCallout
-                message="A human agent may have already replied to this ticket."
-                onOverride={() => handleApprove(true)}
-                overriding={actionLoading}
-              />
-            )}
-            {!hasCollision && (
-              <button
-                onClick={() => handleApprove()}
-                disabled={actionLoading || isQuarantined}
-                className="w-full px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-              >
-                Approve and Send
-              </button>
-            )}
-            <button
-              onClick={handleReject}
-              disabled={actionLoading}
-              className="w-full px-4 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 transition-colors"
-            >
-              Reject
-            </button>
-          </div>
-        )}
+        {/* Right rail — customer identity */}
+        <div className="w-56 flex-shrink-0 border-l border-slate-200 bg-white overflow-y-auto p-4">
+          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-3">Customer</p>
+          {ticket.contactId ? (
+            <p className="text-xs text-slate-600">Contact: {ticket.contactId}</p>
+          ) : (
+            <p className="text-xs text-slate-400">Customer not in CRM</p>
+          )}
+
+          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide mt-5 mb-2">Recent tickets</p>
+          <p className="text-xs text-slate-400">–</p>
+        </div>
       </div>
     </div>
   );
