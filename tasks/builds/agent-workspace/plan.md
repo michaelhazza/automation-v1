@@ -67,11 +67,11 @@ This plan decomposes the spec into ordered build chunks. Every chunk respects th
 3. File inventory cross-reference
 4. Executor notes
 5. Chunk plan (14 chunks)
-   - Chunk 1: Migration 0295 + Drizzle schemas + RLS manifest
+   - Chunk 1: Migration 0305 + Drizzle schemas + RLS manifest
    - Chunk 2: Pure helper modules + their unit tests
    - Chunk 3: Tenant-aware service layer
    - Chunk 4: Event emitter extension + observation-emit hook
-   - Chunk 5: Migration 0296 + Overview aggregator + Overview routes
+   - Chunk 5: Migration 0306 + Overview aggregator + Overview routes
    - Chunk 6: AgentEditPage Overview tab shell + identity + presence hero + hooks
    - Chunk 7: Overview cards batch A
    - Chunk 8: Overview cards batch B + Working Time chart
@@ -146,7 +146,7 @@ These are the invariants from `tasks/builds/agent-workspace/handoff.md` that the
 | **(Rev 2) Phase 1 `knowledge.files.*` lifecycle events missing on main** | Confirmed via grep — no emission on main. Chunk 5's `agentOverviewAggregator` ships subscribers that no-op gracefully when zero events arrive (logs `overview.cache_invalidation_subscriber_inactive` at INFO once per boot per event-name) and degrade to TTL-only freshness. Spec §17 Q11 unchanged. |
 | Single-node SSE topology constrains horizontal scaling | Locked in §13.1.1; multi-node broker is explicitly deferred. The `agent_presence_projections` table IS the cross-node consistency layer (read on reconnect). |
 | Worst-case Overview payload (50-runs, 200-pinned, 30-knowledge) blows 150KB budget | Chunk 5 includes the worst-case profiling task (Open Question 6); if budget violated, builder hardens lazy-load delegations before declaring chunk done. |
-| **(Rev 2) Migration 0295/0296 collision with concurrent work on main** | Branch-sync verified at S1 entry: latest main migration is 0294 (PR #274), so 0295/0296 are free. Re-verify at S2 in Phase 3 if main has advanced; rename to next-available number per `DEVELOPMENT_GUIDELINES.md §6.2` if collision detected. |
+| **(Rev 2) Migration 0295/0296 collision with concurrent work on main** | Branch-sync verified at S1 entry: latest main migration is 0294 (PR #274), so 0295/0296 are free. Re-verify at S2 in Phase 3 if main has advanced; rename to next-available number per `DEVELOPMENT_GUIDELINES.md §6.2` if collision detected. **Rev 4 update (2026-05-09):** S2 detected collision with PR #275 (`trust-verification-layer`, 0295–0304). Branch migrations renamed to **0305 / 0306** per the existing playbook. All references updated. |
 | `agent_execution_events.sequence_number` is per-run not global, but projection writer crosses runs | §11.1 acceptance predicate uses per-run sequence + cross-run timestamp tuple. Pure helper test (Chunk 2) covers the concurrent-run collision case. |
 
 ## 2. Model-collapse check
@@ -202,17 +202,19 @@ Per the build slug's pre-production posture (`docs/spec-context.md`), no live da
 
 Dependencies are forward-only. Each chunk lists its prerequisites.
 
-### Chunk 1 — Migration 0295 + Drizzle schemas + RLS manifest
+### Chunk 1 — Migration 0305 + Drizzle schemas + RLS manifest
 
 **spec_sections:** §5 Phase 1 (subset), §6.1, §6.2, §6.3, §6.4, §6.5, §8
 
-**Scope.** Land migration `0295_agent_workspace_presence_and_sessions.sql` (and its `.down.sql`) creating five new tables (`agent_observations`, `iee_sessions`, `agent_presence_projections`, `agent_working_time_rollups`, `agent_working_time_event_ledger`) plus column-additions to `iee_artifacts`. Land Drizzle schema files for each new table and the modified `iee_artifacts`. Append all five new tables to `RLS_PROTECTED_TABLES`. Add the new permission key `ORG_PERMISSIONS.AGENTS_OBSERVATIONS_PIN` to `server/lib/permissions.ts`. NO services in this chunk; NO logic.
+**Scope.** Land migration `0305_agent_workspace_presence_and_sessions.sql` (and its `.down.sql`) creating five new tables (`agent_observations`, `iee_sessions`, `agent_presence_projections`, `agent_working_time_rollups`, `agent_working_time_event_ledger`) plus column-additions to `iee_artifacts`. Land Drizzle schema files for each new table and the modified `iee_artifacts`. Append all five new tables to `RLS_PROTECTED_TABLES`. Add the new permission key `ORG_PERMISSIONS.AGENTS_OBSERVATIONS_PIN` to `server/lib/permissions.ts`. NO services in this chunk; NO logic.
 
 **Rev 2 — migration number.** Spec §5 says "0288"; PR #274 occupies 0288–0294. This chunk uses **0295**. Builders use the plan's filename; spec text remains LOCKED at 0288.
 
+**Rev 4 (S2 collision) — migration number.** PR #275 (`trust-verification-layer`) merged on `main` 2026-05-09 occupying 0295–0304. Branch's 0295 was renamed to **0305**. All bullets, references, and code (rlsProtectedTables.ts, schema/index.ts, architecture.md) updated to 0305. Filename in working tree: `migrations/0305_agent_workspace_presence_and_sessions.sql`.
+
 **Files to create or modify:**
-- `migrations/0295_agent_workspace_presence_and_sessions.sql` (N) — exact DDL per spec §6.1, §6.2, §6.3, §6.4, §6.5; includes the `agent_observations_immutability_guard` PL/pgSQL trigger; includes RLS policies for all five new tables (canonical org-isolation policy, FORCE RLS).
-- `migrations/0295_agent_workspace_presence_and_sessions.down.sql` (N) — DROP in reverse order; DROP TRIGGER + FUNCTION; remove `iee_artifacts` columns.
+- `migrations/0305_agent_workspace_presence_and_sessions.sql` (N) — exact DDL per spec §6.1, §6.2, §6.3, §6.4, §6.5; includes the `agent_observations_immutability_guard` PL/pgSQL trigger; includes RLS policies for all five new tables (canonical org-isolation policy, FORCE RLS).
+- `migrations/0305_agent_workspace_presence_and_sessions.down.sql` (N) — DROP in reverse order; DROP TRIGGER + FUNCTION; remove `iee_artifacts` columns.
 - `server/db/schema/agentObservations.ts` (N) — Drizzle table; imports from `drizzle-orm` and `shared/types/agentObservations.ts` (the type file is created in Chunk 2; for now this chunk uses string literals matching the CHECK constraint).
 - `server/db/schema/ieeSessions.ts` (N)
 - `server/db/schema/agentPresenceProjections.ts` (N)
@@ -221,7 +223,7 @@ Dependencies are forward-only. Each chunk lists its prerequisites.
 - `server/db/schema/ieeArtifacts.ts` (M) — add `agentRunId`, `producingEventId`, `producedVersionId` columns.
 - `server/db/schema/index.ts` (M) — export new schemas.
 - `server/lib/permissions.ts` (M) — add `AGENTS_OBSERVATIONS_PIN: 'org.agents.observations.pin'` to `ORG_PERMISSIONS`.
-- `server/config/rlsProtectedTables.ts` (M) — append five entries with `policyMigration` pointing at `0295`.
+- `server/config/rlsProtectedTables.ts` (M) — append five entries with `policyMigration` pointing at `0305`.
 
 **Contracts.** Schema CHECK constraints lock the closed enums (`observation_type`, `presence_state`, `degraded_reason`, `degraded_base_state`, session `status`, session `release_reason`); the immutability trigger enforces append-only at the DB layer. Drizzle column types: `text` for closed-enum columns (validated app-side against the literal-tuple types added in Chunk 2); `jsonb` for `metadata` and `summary`; `bigint` for `working_time_seconds`; `timestamp with time zone` consistently.
 
@@ -433,15 +435,17 @@ npm run typecheck
 
 ---
 
-### Chunk 5 — Migration 0296 + Overview aggregator + Overview routes
+### Chunk 5 — Migration 0306 + Overview aggregator + Overview routes
 
 **spec_sections:** §5 Phase 2 (subset), §6.6, §7.4, §9 (execution model), §9.1 (cache invalidation triggers)
 
-**Scope.** Land migration `0296_agent_default_landing_tab.sql` (adds `users.default_agent_tab`). Land `agentOverviewAggregator` service that composes the §7.4 initial-payload contract from existing tables, honouring the ≤150KB compressed budget. Land all the new GET endpoints on `server/routes/agents.ts` (or a new `server/routes/agentOverview.ts` if `agents.ts` is over the 200-line ceiling — builder decides at write time). Wire the §9.1 files-snapshot cache invalidation triggers to the existing `agent_execution_events` channel; trigger detection logic lives in `agentOverviewAggregator`; subscribers wire at server bootstrap.
+**Scope.** Land migration `0306_agent_default_landing_tab.sql` (adds `users.default_agent_tab`). Land `agentOverviewAggregator` service that composes the §7.4 initial-payload contract from existing tables, honouring the ≤150KB compressed budget. Land all the new GET endpoints on `server/routes/agents.ts` (or a new `server/routes/agentOverview.ts` if `agents.ts` is over the 200-line ceiling — builder decides at write time). Wire the §9.1 files-snapshot cache invalidation triggers to the existing `agent_execution_events` channel; trigger detection logic lives in `agentOverviewAggregator`; subscribers wire at server bootstrap.
 
 **Rev 3 — payload budget measurement contract.** The ≤150KB budget is **measured as the gzip-compressed UTF-8 HTTP response body under production Express compression settings (default `compression()` middleware, gzip, level 6)**. NOT raw `JSON.stringify` byte length, NOT brotli, NOT pre-compression. The Open Question 6 profiling task in this chunk MUST report the gzipped on-wire byte count for the worst-case fixture; the raw JSON byte count is informational only. If the production middleware is later swapped to brotli, the budget recomputes against brotli output — but until then, gzip is the contract.
 
 **Rev 2 — migration number.** Spec §5 says "0289"; this chunk uses **0296** (next free after PR #274's 0294).
+
+**Rev 4 (S2 collision) — migration number.** PR #275 occupied 0295–0304 on main 2026-05-09. Branch's 0296 renamed to **0306**. Filename in working tree: `migrations/0306_agent_default_landing_tab.sql`.
 
 **Rev 2 — Phase 1 coordination on cache invalidation.** Per §15.1 the Files snapshot subscribes to `knowledge.files.{promoted,deleted,archived,restored,metadata_changed,access_changed,merged}` events on `agent_execution_events`. **None of these are emitted on main as of `b1c4d14d`.** The Overview aggregator MUST ship the subscriber wiring in this chunk regardless — it logs `overview.cache_invalidation_subscriber_inactive` at INFO once per boot per event-name when zero events arrive in the first 5 minutes after boot, and degrades to TTL-only freshness (60s per spec §13.7). When Phase 1 follow-up emits any of these events, the subscribers activate without code change. This is the contract for §15.1 conditional triggers — the subscriber is shipped; emission is Phase 1's deferred work.
 
@@ -450,8 +454,8 @@ npm run typecheck
 **Rev 2 — Knowledge In Use composition.** The `KnowledgeInUseCard` data shape in §7.4 is already pre-defined to consume `retrieval.summary` events from `agent_execution_events` (PR #274). This chunk's `agentOverviewAggregator.getKnowledgeInUse(agentId, ctx)` query reads the most-recent `retrieval.summary` event for a recent run via `agent_execution_events.event_type = 'retrieval.summary'` and returns the truncated bounded payload directly. No new ranking; no new emission; uses PR #274's pure helpers `retrievalObservabilityServicePure` only as **read-side reference** for understanding the bounded payload shape. If no recent run has emitted `retrieval.summary`, the card returns `{ entries: [], asOf: null, phase1_pending: false }` — empty is a valid state, not a degraded one.
 
 **Files to create or modify:**
-- `migrations/0296_agent_default_landing_tab.sql` (N) — `ALTER TABLE users ADD COLUMN default_agent_tab text NOT NULL DEFAULT 'overview' CHECK (default_agent_tab IN ('overview','configure','behaviour','personality','skills','scorecards','data-sources','schedule','budget','runs'))`. No backfill needed (`DEFAULT` covers existing rows).
-- `migrations/0296_agent_default_landing_tab.down.sql` (N)
+- `migrations/0306_agent_default_landing_tab.sql` (N) — `ALTER TABLE users ADD COLUMN default_agent_tab text NOT NULL DEFAULT 'overview' CHECK (default_agent_tab IN ('overview','configure','behaviour','personality','skills','scorecards','data-sources','schedule','budget','runs'))`. No backfill needed (`DEFAULT` covers existing rows).
+- `migrations/0306_agent_default_landing_tab.down.sql` (N)
 - `server/db/schema/users.ts` (M) — add `defaultAgentTab` column.
 - `server/services/agentOverviewAggregator.ts` (N) — `buildOverviewPayload(agentId, ctx) → OverviewPayload`; lazy-load delegations live in separate methods (`getObservations`, `getFilesSnapshot`, `getActivityFeed`, `getKnowledgeInUse`, etc.); files-snapshot cache invalidation hooks subscribed at boot per §9.1.
 - `server/routes/agents.ts` (M) or `server/routes/agentOverview.ts` (N) — new endpoints (each gated by `requirePermission(ORG_PERMISSIONS.AGENTS_VIEW)`):

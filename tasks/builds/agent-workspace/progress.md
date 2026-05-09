@@ -88,11 +88,11 @@ Audit found **7 mechanical gaps** across 6 of the 8 surfaces. All fixed. Surface
 
 | Chunk | Title | Commit | Status |
 |---|---|---|---|
-| 1 | Migration 0295 + Drizzle schemas + RLS manifest | `fbcca141` | done |
+| 1 | Migration 0305 + Drizzle schemas + RLS manifest (renumbered from 0295 post-S2 collision with PR #275) | `fbcca141` | done |
 | 2 | Pure helper modules + their unit tests | `fbcca141` | done |
 | 3 | Tenant-aware service layer (presence, observation, working time, session-skeleton) | `fbcca141` | done |
 | 4 | Event emitter extension + observation-emit hook (+ chunk4 quality `ac6e821a`) | `fbcca141` / `ac6e821a` | done |
-| 5 | Migration 0296 + Overview aggregator + Overview routes | `d6df3ef8` | done |
+| 5 | Migration 0306 + Overview aggregator + Overview routes (renumbered from 0296 post-S2 collision with PR #275) | `d6df3ef8` | done |
 | 6 | AgentEditPage Overview tab shell + identity card + presence hero + hooks | `be6f3e47` | done |
 | 7 | Overview cards batch A (recent observations, knowledge in use, files snapshot) | `94b821d7` | done |
 | 8 | Overview cards batch B (active goals, tools, connections, schedule, working time chart, activity feed, first-run, hook) | `8570f914` / `a30e29c9` | done |

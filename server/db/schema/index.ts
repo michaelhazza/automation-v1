@@ -281,7 +281,7 @@ export * from './securityAuditEvents.js';
 export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
 
-// Agent Workspace — presence projections, observations, sessions, working time (migration 0295)
+// Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
 export * from './agentObservations';
 export * from './ieeSessions';
 export * from './agentPresenceProjections';

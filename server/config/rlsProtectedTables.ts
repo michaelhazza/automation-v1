@@ -1081,35 +1081,35 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0294_document_promotion_audit.sql',
     rationale: 'Idempotency anchor for file→reference-document promotion. Contains file IDs and document IDs — cross-tenant leak would expose knowledge base content topology.',
   },
-  // 0295 — Agent Workspace: presence projections, observations, sessions, working time
+  // 0305 — Agent Workspace: presence projections, observations, sessions, working time
   {
     tableName: 'agent_observations',
     schemaFile: 'agentObservations.ts',
-    policyMigration: '0295_agent_workspace_presence_and_sessions.sql',
+    policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'Typed observation rows per agent run — may contain analysis outputs, decisions, and flagged behaviors. Cross-tenant leak exposes agent reasoning and operational intelligence.',
   },
   {
     tableName: 'iee_sessions',
     schemaFile: 'ieeSessions.ts',
-    policyMigration: '0295_agent_workspace_presence_and_sessions.sql',
+    policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'IEE session lifecycle rows — reveal container usage patterns, run durations, and failure modes per org.',
   },
   {
     tableName: 'agent_presence_projections',
     schemaFile: 'agentPresenceProjections.ts',
-    policyMigration: '0295_agent_workspace_presence_and_sessions.sql',
+    policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'Current presence state per agent — reveals whether agents are running, waiting, or failed. Cross-tenant leak exposes operational status.',
   },
   {
     tableName: 'agent_working_time_rollups',
     schemaFile: 'agentWorkingTimeRollups.ts',
-    policyMigration: '0295_agent_workspace_presence_and_sessions.sql',
+    policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'Per-day per-agent working time rollups — directly feeds billing and invoice data. Cross-tenant leak exposes financial and operational metrics.',
   },
   {
     tableName: 'agent_working_time_event_ledger',
     schemaFile: 'agentWorkingTimeEventLedger.ts',
-    policyMigration: '0295_agent_workspace_presence_and_sessions.sql',
+    policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'Idempotency ledger for working-time event folding — reveals which execution events have been billed. Cross-tenant leak exposes financial audit trail.',
   },
 ];

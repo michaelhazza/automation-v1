@@ -3894,12 +3894,12 @@ Service: `server/services/agentWorkingTimeService.ts` (tenant-aware) + `server/s
 
 - Uses `process.hrtime.bigint()` for monotonic elapsed measurement — NOT `Date.now()`, which is subject to wall-clock drift and NTP adjustments.
 - Intervals are UTC half-open `[start, end)` so midnight crossings are handled by splitting into two buckets rather than spanning the boundary. Double-counting at midnight is prevented by the half-open semantics.
-- Per-run bucket row in `agent_working_time_buckets` (migration 0295).
+- Per-run bucket row in `agent_working_time_buckets` (migration 0305).
 - Monthly compact job (`server/jobs/workingTimeRollupCompactJob.ts`): keeps per-day rows for 1 year, then collapses to monthly resolution.
 
 ### IEE session lifecycle
 
-Service: `server/services/ieeSessionService.ts` (tenant-aware) + `server/services/ieeSessionServicePure.ts` (pure helpers). Manages `iee_sessions` rows (migration 0295) — distinct from the legacy `ieeRuns` table in the IEE section above.
+Service: `server/services/ieeSessionService.ts` (tenant-aware) + `server/services/ieeSessionServicePure.ts` (pure helpers). Manages `iee_sessions` rows (migration 0305) — distinct from the legacy `ieeRuns` table in the IEE section above.
 
 Three lifecycle methods:
 
