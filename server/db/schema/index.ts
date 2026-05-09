@@ -297,3 +297,7 @@ export * from './ieeSessions.js';
 export * from './agentPresenceProjections.js';
 export * from './agentWorkingTimeRollups.js';
 export * from './agentWorkingTimeEventLedger.js';
+
+// Support Desk canonical tables — inboxes + support agents (migrations 0307, 0308)
+export * from './canonicalInboxes.js';
+export * from './canonicalSupportAgents.js';
