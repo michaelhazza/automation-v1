@@ -3592,3 +3592,9 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Spec section: §6.7 retention policy row "Working Time aggregates".
   - Gap: SQL bug, runtime failure.
   - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
+
+## Deferred spec decisions — synthetos-foundation-refactor
+
+Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These are AUTO-DECIDED items the human can address at leisure; the spec is mechanically tight without them.
+
+- [ ] **R-G — Add a "why-not-reuse `policyEngineService`" rationale paragraph in §4.5.5.** The new `policyEnvelopeResolver` does aggregation-at-run-start, while `policyEngineService` does per-action evaluation. The two have genuinely different responsibilities and the spec's existing prose implies it, but the spec-authoring-checklist §1 expects the rationale to be stated explicitly. Decision: **accept** — add a one-paragraph "Why a new resolver instead of extending `policyEngineService`" in §4.5.5 explaining the aggregation-vs-evaluation split. Low priority; not load-bearing.
