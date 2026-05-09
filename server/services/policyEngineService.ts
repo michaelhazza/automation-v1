@@ -1,3 +1,5 @@
+// Policy Engine is one component of the Policy Envelope (policyEnvelopeSnapshot). See docs/synthetos-nomenclature.md
+
 import { eq, and, asc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { policyRules } from '../db/schema/index.js';

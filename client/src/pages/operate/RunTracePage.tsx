@@ -1,3 +1,4 @@
+// Run Trace UI — consumes GET /api/agent-runs/:runId/trace (added in synthetos-foundation-refactor). See docs/synthetos-nomenclature.md
 // client/src/pages/operate/RunTracePage.tsx
 //
 // ============================================================

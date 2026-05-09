@@ -231,6 +231,8 @@ If either invariant changes, search for `resolveAgentSubaccountId` and `workspac
 <a id="orchestrator-capability-aware-routing"></a>
 ## Orchestrator Capability-Aware Routing
 
+> See [SynthetOS Nomenclature](docs/synthetos-nomenclature.md) for the brief v1.2 ↔ code name mapping.
+
 System-managed agent that classifies inbound tasks into one of four deterministic routes. Full spec at [`docs/orchestrator-capability-routing-spec.md`](./docs/orchestrator-capability-routing-spec.md). Implemented in migrations 0156 (schema), 0157 (agent seed), 0158 (hardening), 0159 (revert forever-unique index).
 
 ### Four routing paths
@@ -1565,6 +1567,8 @@ Runs per tool call, in order:
 
 <a id="policy-engine"></a>
 ## Policy Engine
+
+> See [SynthetOS Nomenclature](docs/synthetos-nomenclature.md) for the brief v1.2 ↔ code name mapping (Policy Engine, Policy Envelope, Risk Tier).
 
 `policyRules` table defines constraints on agent behaviour. `policyEngineService` evaluates rules during execution — can restrict actions, require escalation, or block execution. Evaluated before skill execution in the processor pipeline. Sprint 3 adds `confidence_threshold` and `guidance_text` columns (migration 0085) enabling decision-time guidance — the middleware injects guidance when a rule matches but confidence is above the threshold.
 
@@ -3023,6 +3027,8 @@ Extends the existing multi-tenant Slack webhook to dispatch inbound messages to 
 
 <a id="iee-integrated-execution-environment"></a>
 ## IEE — Integrated Execution Environment
+
+> See [SynthetOS Nomenclature](docs/synthetos-nomenclature.md) for the brief v1.2 ↔ code name mapping.
 
 IEE is a deterministic, multi-tenant execution context for **stateful agentic loops** over a browser or a dev workspace. Where the skill system is request/response, IEE is **iterative**: the LLM observes environment state, decides on an action, executes it, observes the result, and loops until `done`, `failed`, the step limit, or the wall-clock timeout. Costs are attributed per run for billing.
 

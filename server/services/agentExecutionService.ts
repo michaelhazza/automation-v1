@@ -1,4 +1,6 @@
-﻿import { createHash } from 'crypto';
+﻿// executionMode in code = 'Execution Environment' in the v1.2 product brief. controllerStyle in code = 'Controller' in the v1.2 product brief. See docs/synthetos-nomenclature.md
+
+import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count, inArray } from 'drizzle-orm';
 import { isActive } from '../lib/queryHelpers.js';
 import { recordIncident } from './incidentIngestor.js';

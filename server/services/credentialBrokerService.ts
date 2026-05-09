@@ -1,4 +1,4 @@
-// Credential Broker and Identity Boundary primitive.
+// Credential Broker and Identity Boundary primitive per v1.2 brief. See docs/synthetos-nomenclature.md
 // 'operator_session' is Phase-3 forward-compatible — do NOT add the literal yet
 
 import { and, desc, eq, gte } from 'drizzle-orm';

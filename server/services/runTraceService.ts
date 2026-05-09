@@ -5,6 +5,8 @@
 // NOTE: routing_outcomes is excluded from the UNION because it has no run_id
 // column (no FK to agent_runs). routing_path_chosen events are therefore not
 // emitted in Phase 1. This is a known schema gap; tracked for Phase 3.
+//
+// Run Trace virtual view across nine ledger tables. Canonical ledger consolidation is Phase 3+. See docs/synthetos-nomenclature.md
 
 import { sql, and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
