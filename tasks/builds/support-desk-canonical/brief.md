@@ -1,6 +1,6 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** LOCKED v5.2 — locks adapter-only scope (native Synthetos ticketing deferred per §12). Spec-ready pending the fourteen decisions in §10.
+**Status:** LOCKED v5.3 — locks adapter-only scope (native Synthetos ticketing deferred per §12) and locks brief-level defaults for the fourteen decisions in §10. Spec-ready.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
 **Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, the entities required, and the scope of the first validating provider integration (Teamwork Desk). No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
@@ -24,7 +24,7 @@ We are building a canonical Support Desk runtime layer so agentic support workfl
 7. Adapter Surface (What Each Provider Must Implement)
 8. Teamwork Desk: First Validating Implementation
 9. Skills the Canonical Layer Unlocks
-10. Open Decisions Before Spec
+10. Decision Defaults (Locked at Brief Level)
 11. Recommendation
 12. Out of Scope (Explicit)
 
@@ -115,7 +115,15 @@ The runtime ticket shape and the Foundry ticket shape must remain intentionally 
 
 ### 5.2 Provider is the source of truth for sent messages
 
-`canonical_ticket_messages` is the **provider-confirmed message ledger**: rows only exist there once the provider has accepted the message. In-flight outbound intent lives in `canonical_ticket_drafts` (§6.5) with its own state machine; it does not enter the message stream while still pending. If the adapter returns a provider message ID synchronously on send, the confirmed message may be inserted immediately as part of the same transaction that marks the draft `sent`. Otherwise, the message is inserted by webhook or poll reconciliation when the provider's record arrives. Duplicate provider events (sync response plus webhook for the same send) collapse on `(connector_config_id, external_id)`. The agent-visible thread read is always the confirmed ledger only — drafts are surfaced through a separate skill.
+`canonical_ticket_messages` is the **provider-confirmed message ledger**: rows only exist there once the provider has accepted the message. In-flight outbound intent lives in `canonical_ticket_drafts` (§6.5) with its own state machine; it does not enter the message stream while still pending. If the adapter returns a provider message ID synchronously on send, the confirmed message may be inserted immediately as part of the same transaction that marks the draft `sent`. Otherwise, the message is inserted by webhook or poll reconciliation when the provider's record arrives. Duplicate provider events (sync response plus webhook for the same send) collapse on `(connector_config_id, external_id)`.
+
+**Three audience tiers consume the message stream and must be distinguished:**
+
+- **Agent prompt and thread reads.** Confirmed `canonical_ticket_messages` only. `dispatching` drafts must never enter the agent's input. This is the contract for `support.read_thread` and any prompt assembly path.
+- **Human ticket UI.** May overlay `canonical_ticket_drafts` rows in `dispatching` (or `needs_reconciliation`, §6.5) state for operator visibility. Overlaid drafts must be labelled as pending and visually distinct from confirmed messages; they are not part of the canonical thread.
+- **Audit and replay.** May show both confirmed messages and draft state for forensic and eval use, with explicit labelling of pending vs. provider-confirmed.
+
+The spec must enforce this separation at the read-API boundary (the agent thread skill) so a builder cannot accidentally include `dispatching` drafts in agent context.
 
 ### 5.3 Webhook and poll are convergent and idempotent
 
@@ -124,6 +132,8 @@ Webhook ingestion and polling ingestion are two delivery paths into the same can
 ### 5.4 Collision avoidance with humans
 
 The Support Agent must not send, close, or reassign a ticket when recent human activity or provider-side assignment indicates a human is actively handling it, unless explicitly configured to do so for that inbox. The canonical model carries the primitives the agent needs to make this call (see §6.1: `last_human_activity_at`, `bot_claimed_at`); the policy itself lives in the Support Agent spec, not here.
+
+**Manual override is a human-only action.** A platform user with appropriate permission may override a collision block to send a draft from the human review UI. Override requires an authenticated platform user, must write an audit event recording the override (who, when, draft ID, the original collision warning), and the original collision warning must remain visible in the audit trail. Override is **never** available to autonomous agent execution — it is a UX path that escalates a blocked draft to a human, not an agent-policy bypass. The spec must implement override on the human review surface only.
 
 ### 5.5 Read-only by default, write only through adapters
 
@@ -146,6 +156,8 @@ Approving a draft and sending it is a three-phase operation, in order:
 3. **Adapter call** — the adapter is invoked with the idempotency key. The provider's accepted response, or a subsequent webhook/poll, reconciles the confirmed message into `canonical_ticket_messages` and transitions the draft to `sent`.
 
 A process crash between phases 2 and 3, or after the adapter call but before local confirmation, must resume by re-issuing the same idempotency key, not by creating a second send. This is the single most dangerous path in the system; the invariant is non-negotiable.
+
+**`dispatching` does not silently expire into a terminal state.** If the adapter call times out, returns a network error, or returns an ambiguous response (provider may or may not have accepted), the draft transitions to `needs_reconciliation` (§6.5) — never directly to `failed` or `expired`. Reconciliation must check provider state (via `getTicket`, message-list refresh, or the next webhook) before transitioning to `sent`, marking `failed`, or surfacing for manual review. Timeout means "we do not know whether the provider accepted it"; it does not mean "safe to forget". User-facing labels may say "failed after N hours" if helpful, but the underlying state machine routes through reconciliation first.
 
 ### 5.9 Tenant isolation is denormalised, not joined
 
@@ -171,6 +183,18 @@ This list is the floor, not the ceiling. The spec defines the channel (log sink,
 ### 5.11 Provider adapters validate the canonical layer; they do not define it
 
 Provider-specific concepts must remain in `external_metadata` unless they are required by a provider-neutral Support Agent skill or shared by at least one follow-on provider. The canonical model is shaped by the agent's needs and by what generalises across helpdesks, not by what is convenient for the first provider. This invariant exists because Teamwork is shipping in the same body of work as the canonical layer (§8) and there is a real risk of the schema accidentally becoming Teamwork-shaped. Promoting a Teamwork field into a canonical column requires evidence either of a portable agent skill that needs it, or of at least one other helpdesk surfacing the same concept. Without that evidence, the field stays in JSON.
+
+### 5.12 Operational state has a defined UI surface
+
+Sync health, partial poll failure, rate limiting, unmapped webhook events, and reconciliation backlogs are not log-only concerns. The §5.10 codes are the structured signal; the spec must also define where each operational anomaly surfaces in the UI, scoped to existing screens rather than a new dashboard:
+
+- **Connection setup and success screen.** Sync status — `running`, `degraded`, `failed` — with last-successful-sync timestamp. This is where an operator first sees something is wrong with a freshly connected provider.
+- **Tickets list.** Small connection-health indicator (pill or banner) when the underlying sync is degraded; absent when healthy. Does not block the list; does communicate that the list may be stale.
+- **Inbox configuration.** Provider connection status alongside each inbox row, so an inbox-specific issue is visible where the operator configures policy.
+- **Draft review queue.** A `needs_reconciliation` draft is surfaced explicitly in the review queue with reconciliation status, not silently retried in the background.
+- **Logs and ops surfaces only.** Full structured-log codes from §5.10 and provider-specific error detail. End operators do not see raw codes; on-call and engineering do.
+
+The bar is not "build a status dashboard". The bar is "the operator notices a degraded provider before tickets pile up, and a reconciling draft before it becomes a duplicate send". A v1 surface that meets that bar is sufficient.
 
 ## 6. Proposed Canonical Entities (For Stress-Testing)
 
@@ -204,6 +228,15 @@ Fields the agent needs to reason about:
 | `unknown_provider_status` | **No (quarantined)** | **No** | Provider returned a status the adapter has not mapped. Fail-closed: ticket is excluded from all agent queues and actions until the mapping is resolved. |
 
 The split between `resolved` and `closed` matters: `resolved` is an outcome ("we answered it"), `closed` is a lifecycle terminus ("the ticket is no longer in active circulation"). Mapping each provider's status vocabulary into the first five canonical values is part of the adapter contract; `unknown_provider_status` is the quarantine bucket for anything else (see §7).
+
+**UI filter semantics for the ticket list.** The canonical statuses split visibility from autonomous-eligibility (column three of the table above). UI filters that aggregate statuses must respect that split. A filter named "Actionable" that combines `open` and `pending_internal` is misleading because `pending_internal` is visible but not eligible for autonomous reply. Locked conventions for v1:
+
+- Either name the combined filter "Needs attention" and treat it as a human-attention queue spanning `open` + `pending_internal`.
+- Or keep an "Actionable" filter scoped to `open` only and present `pending_internal` as a distinct filter alongside it.
+- Do not mix the two semantics behind one label.
+- Quarantined (`unknown_provider_status`) tickets are always a distinct filter, never folded into actionable counts.
+
+Locking this at brief level prevents prototypes and the spec from inventing inconsistent labels for the same underlying state.
 
 **Relationship to `canonical_conversations`.** `canonical_tickets` is the source of truth for support workflows. Tickets do not flow through `canonical_conversations`. The generic conversations table remains for non-ticket messaging channels (SMS, chat, phone). A future unified-activity-feed concern may link the two; v1 does not. This avoids overloading `canonical_conversations` with ticket semantics.
 
@@ -263,13 +296,16 @@ The home for agent-generated replies that are not yet sent. Required because the
 - `proposed_actions` JSONB: optional companion state changes the agent intends to apply alongside the reply (e.g., `{ status: "waiting_on_customer", tags_add: ["billing"] }`).
 - `created_by_agent_run_id`: FK to the agent run that produced the draft (provenance for evals).
 - `model_version`, `prompt_version` (provenance for replay and regression testing).
-- `status`: `draft` | `awaiting_review` | `dispatching` | `sent` | `rejected` | `failed` | `expired` | `superseded`. There is intentionally no durable `approved` resting state — approval is the trigger for the §5.8 three-phase dispatch and transitions immediately into `dispatching`. The `dispatching` state covers the window between adapter call and provider confirmation; this is where pending outbound intent lives, **not** in `canonical_ticket_messages`.
+- `status`: `draft` | `awaiting_review` | `dispatching` | `needs_reconciliation` | `sent` | `rejected` | `failed` | `expired` | `superseded`. There is intentionally no durable `approved` resting state — approval is the trigger for the §5.8 three-phase dispatch and transitions immediately into `dispatching`. The `dispatching` state covers the window between adapter call and provider confirmation; this is where pending outbound intent lives, **not** in `canonical_ticket_messages`.
 - `action_idempotency_key`: stable key per §5.7, set when the draft is approved and reused on every retry.
 - `reviewer_user_id`, `reviewed_at`, `review_notes` (set on approval or rejection).
 - `sent_message_id`: FK to `canonical_ticket_messages` once the provider confirms. Null until then.
-- `expires_at`: drafts auto-expire so stale suggestions do not sit in the queue forever.
+- `expires_at`: applies to queue states (`draft`, `awaiting_review`) so stale suggestions do not sit in the queue forever. **Does not apply to `dispatching` or `needs_reconciliation`** — those states have provider-side ambiguity and must reconcile, not silently expire.
+- `reconciliation_attempt_count`, `last_reconciliation_at`: bookkeeping for the `needs_reconciliation` path.
 
-Autonomous-mode flow: agent writes a `draft` row, passes approval policy automatically, then transitions to `dispatching` (per §5.8) while the adapter calls the provider; on confirmation the row moves to `sent` and a `canonical_ticket_messages` row is reconciled in with `source_draft_id` pointing back. Assisted-mode flow: agent writes `awaiting_review`; human approval triggers the same three-phase dispatch path. Either way, the audit trail and idempotency key flow are identical.
+**`needs_reconciliation` semantics.** Reached from `dispatching` when the adapter call times out, returns a network error, or returns an ambiguous response — i.e. when we do not know whether the provider accepted the message. Per §5.8, reconciliation must check provider state (via `getTicket`, message-list refresh, or the next webhook) before transitioning to `sent` (provider did accept), `failed` (provider rejected), or surfacing for manual review (still ambiguous after retry budget). A draft never moves directly from `dispatching` to `failed` or `expired`. This closes the silent-loss path on writes that may already have reached the provider.
+
+Autonomous-mode flow: agent writes a `draft` row, passes approval policy automatically, then transitions to `dispatching` (per §5.8) while the adapter calls the provider; on confirmation the row moves to `sent` and a `canonical_ticket_messages` row is reconciled in with `source_draft_id` pointing back. On adapter timeout or ambiguous response the row moves to `needs_reconciliation`, the reconciler checks provider state, and resolves to `sent`, `failed`, or a manual-review surface (per §5.12). Assisted-mode flow: agent writes `awaiting_review`; human approval triggers the same three-phase dispatch path. Either way, the audit trail and idempotency key flow are identical.
 
 ### 6.6 What we explicitly do NOT canonicalise (yet)
 
@@ -348,7 +384,7 @@ Concrete end-state for the Teamwork part of this body of work. The spec inherits
 - The attachment resolver returns a usable URL or stream for at least one real Teamwork attachment.
 - An unmapped Teamwork status is quarantined as `unknown_provider_status` and excluded from agent-actionable queues per §6.1 and §7.
 - The action idempotency retry path is tested: a simulated post-dispatch failure resumes via the same key without producing a duplicate customer-visible reply.
-- The seven base observability codes plus the three provider codes from §5.10 fire correctly in their respective conditions.
+- All reserved observability codes from §5.10 fire correctly in their respective conditions.
 
 This is "minimum viable provider" — production-correct on the paths it covers, not feature-complete with every Teamwork capability mirrored.
 
@@ -366,6 +402,12 @@ The spec must produce a capability matrix for the Teamwork adapter, even though 
 | Status change webhook | yes / no | poll ticket header on cadence |
 | Internal note distinct from public reply | yes / no | adapter declines `addInternalNote` |
 
+**Acceptance is binary and testable. The matrix is a contract, not a documentation aid:**
+
+- Every `yes` cell must name the specific Teamwork API endpoint (or webhook event) the adapter relies on.
+- Every `no` cell must name the explicit fallback path (which canonical operation it routes through) and, where polling-based, the polling cadence.
+- Every named fallback must have at least one test or fixture in the implementation that exercises it. A fallback with no test is treated as a `no` with no fallback, which is a spec gap.
+
 Adapters declare their row in the matrix; the canonical layer relies on the declared "fallback when absent" path for any cell that is `no`. Zendesk and Freshdesk are out of scope for this body of work but inherit this contract.
 
 ### 8.7 Out of scope for the Teamwork v1 implementation
@@ -381,7 +423,7 @@ Adapters declare their row in the matrix; the canonical layer relies on the decl
 Tying back to the use case. With the canonical layer in place, the Support Agent gets these as composable skills with no per-provider code:
 
 - `support.list_open_tickets(inbox_id, since)` — reads `canonical_tickets`.
-- `support.read_thread(ticket_id)` — joins `canonical_tickets` with `canonical_ticket_messages` (excludes `pending` outbound messages from the agent's view).
+- `support.read_thread(ticket_id)` — joins `canonical_tickets` with `canonical_ticket_messages`. Reads provider-confirmed messages only, per §5.2; `dispatching` and `needs_reconciliation` drafts are never included in the agent's thread view (they are surfaced via separate skills and the human UI overlay).
 - `support.propose_reply(ticket_id, draft)` — writes a `canonical_ticket_drafts` row. In autonomous mode, the same skill auto-approves and dispatches. In assisted mode it stops at `awaiting_review`.
 - `support.approve_draft(draft_id)` — human or auto-approval; triggers the adapter send via the action idempotency key (§5.7); on provider confirmation, the confirmed message is mirrored or reconciled into `canonical_ticket_messages` and the draft is linked back via `source_draft_id`. The skill never writes to `canonical_ticket_messages` directly — that path is reserved for ingestion (§5.5).
 - `support.add_internal_note(ticket_id, note)` — same draft-then-send path, `visibility=internal`.
@@ -390,29 +432,35 @@ Tying back to the use case. With the canonical layer in place, the Support Agent
 
 The CRM Query Planner can extend its registry to include these without re-engineering; it already routes between canonical and live executors.
 
-## 10. Open Decisions Before Spec
+## 10. Decision Defaults (Locked at Brief Level)
 
-The brief is not approved until we have a position on each of these. Each one materially affects the spec. Decisions split into canonical-layer (1–8) and Teamwork-specific (9–14).
+Each decision below has a locked brief-level default. The spec inherits these defaults; deviation requires an explicit, written rationale in the spec. Decisions split into canonical-layer (1–8) and Teamwork-specific (9–14). The "Spec action" column tells the spec what concrete artefact must exist as a result of the default.
 
 ### Canonical-layer decisions
 
-1. **Foundry alignment — which schema version is the reference?** We commit to alignment in §5.1; we still need to name the specific Foundry schema version the spec must reconcile against, and ratify which fields will diverge with documented justification.
-2. **Contact resolution policy.** Recommendation: deterministic email match only in v1. Do not auto-create `canonical_contacts` from support tickets — it will pollute CRM with one-off requesters. Unmatched tickets carry raw customer fields (§6.1) and remain queryable as "unmatched". A dedicated reconciliation queue UI is **out of scope for v1**; the canonical primitives are in place so it can be added later without schema change. Confirm.
-3. **Conflict policy specifics.** Stated direction: provider wins on read, adapter writes are auditable, conflicts surface in observability rather than auto-resolving. Confirm and define what "surfaces in observability" means concretely (metric? log? UI?). Note: §5.10 already locks structured-log emission with stable codes; this decision is about UI/alerting on top.
-4. **Outbound message finality.** §5.2 invariant says provider-confirmed only. Confirm we are willing to hold pending outbound messages out of agent-visible thread reads until confirmed (acceptable trade for correctness).
-5. **Attachments.** §6.2 policy: provider URL plus adapter-resolved fresh URL on demand, no mirroring in v1. Confirm.
-6. **Volume and partitioning.** Expected tickets-per-org-per-day at steady state? Drives polling cadence, webhook reliance, and whether `canonical_ticket_messages` needs partitioning. Needed before sizing.
-7. **`canonical_conversations` boundary.** §6.1 states tickets do not flow through `canonical_conversations` in v1. Confirm (the alternative — every ticket also writing a conversation row — is rejected here as overloading the abstraction).
-8. **Inbox as the unit of agent configuration.** Confirm `canonical_inboxes` is the right granularity for Support Agent configuration (autonomous vs. assisted, model selection, prompt overrides), not the connector-config level above it.
+| # | Decision | Brief default | Spec action |
+|---|---|---|---|
+| 1 | Foundry alignment — reference schema | Spec reconciles against the current Foundry ticket schema; field-level divergences must be enumerated and justified per §5.1 | Spec lists every field present in one and not the other with a documented reason |
+| 2 | Contact resolution policy | Deterministic email match only in v1. Never auto-create `canonical_contacts` from support tickets. Unmatched tickets carry raw customer fields (§6.1) and remain queryable as "unmatched". Reconciliation queue UI deferred | Implement as v1 invariant; no contact-creation code path from support ingestion |
+| 3 | Conflict policy and surfacing | Provider wins on read; adapter writes are auditable; conflicts emit §5.10 structured logs; UI/alert surfacing starts with the operational-state UI in §5.12 | Spec lists which §5.10 codes promote to user-visible alerts vs. logs only |
+| 4 | Outbound message finality | `canonical_ticket_messages` holds provider-confirmed only per §5.2. Pending outbound lives in `canonical_ticket_drafts` (§6.5). Drafts are overlaid into the human UI but never into agent thread reads | Implement as hard boundary at the agent thread skill |
+| 5 | Attachments | Provider URL plus adapter `resolveAttachment` resolver on demand. No mirroring to our object storage in v1 | Implement adapter resolver; no mirror-storage layer added |
+| 6 | Volume and partitioning | Sized for low-thousands tickets per org per day at steady state. `canonical_ticket_messages` not partitioned in v1; revisit at scale | Spec confirms sizing assumption against any known customer; escalates if expected volume exceeds the assumption |
+| 7 | `canonical_conversations` boundary | Tickets do **not** flow through `canonical_conversations` in v1. A future unified-activity-feed concern may link the two | Implement as hard boundary; no dual-write |
+| 8 | Inbox as unit of agent configuration | `canonical_inboxes.agent_config` is the policy unit (mode, collision window, model and prompt overrides). Not connector-config above it | Implement on inbox row; no connector-level agent config |
 
 ### Teamwork-specific decisions
 
-9. **Teamwork API version.** Teamwork exposes more than one public API version. The spec must lock which version (or versions) the adapter targets, weighted by feature coverage (incremental ticket fetch, webhook event richness), longevity (deprecation roadmap), and what the existing adapter currently calls. Recommend: pick the version Foundry already uses unless there is a concrete reason not to; minimises drift between the historical loader and the runtime adapter.
-10. **Teamwork authentication model.** OAuth vs. API key. OAuth is the better long-term posture for customers connecting their own Teamwork instances; API key is simpler for our own internal connection. Recommend supporting OAuth for tenant-installed connections from day one and accepting API key only for our own internal seed connection if it materially shortens the path. Confirm.
-11. **Teamwork webhook event scope.** Confirm the Teamwork webhook event catalogue covers (or can be extended to cover) the canonical events the agent needs: `ticket.created`, `ticket.updated`, `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed`. If any are missing, the polling path must compensate per §5.3. Decision: which events do we subscribe to in v1, and which canonical events fall back to poll-only.
-12. **Teamwork status vocabulary mapping.** Enumerate Teamwork's own status values and define the explicit mapping into the canonical five (`open`, `pending_internal`, `waiting_on_customer`, `resolved`, `closed`). Anything unmapped becomes `unknown_provider_status` per §7. The map itself goes into the spec, not the brief, but the decision to enumerate it before spec sign-off is a brief-level requirement.
-13. **Teamwork action idempotency mechanism.** Does Teamwork support a native idempotency header on writes, or does the adapter maintain a local action-attempt ledger keyed by the §5.7 idempotency key? Decide before spec; affects the failure-recovery code path in §5.8 phase 3.
-14. **Teamwork attachment auth model.** Confirm Teamwork attachment URLs are auth-scoped and short-lived (audit indicates yes) and define the `resolveAttachment` strategy: short-lived signed URL, streamed bytes through our backend, or both. Drives privacy posture and bandwidth cost.
+| # | Decision | Brief default | Spec action |
+|---|---|---|---|
+| 9 | Teamwork API version | Match the API version Foundry already uses, unless there is a concrete reason not to (drift-minimisation per §8.1) | Spec names the version after confirming Foundry's choice; documents any divergence |
+| 10 | Teamwork authentication model | OAuth for tenant-installed connections from day one. API key accepted only for our own internal seed connection if it materially shortens the path; otherwise OAuth-only | Spec implements OAuth pathway; either includes API-key path for the internal seed or explicitly defers it |
+| 11 | Teamwork webhook event scope | Subscribe to `ticket.created`, `ticket.updated`, `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed` where Teamwork supports them. Missing events fall back to poll per §5.3 and the §8.6 capability matrix | Spec enumerates the actual subscribed event set against Teamwork's catalogue and names the polling fallback for each gap |
+| 12 | Teamwork status vocabulary mapping | Enumerate Teamwork's status values and map them into the canonical five. Unmapped → `unknown_provider_status` (§7) | Spec must include the complete mapping table as an artefact; the spec cannot be approved until the inventory is complete |
+| 13 | Teamwork action idempotency mechanism | Use Teamwork's native idempotency header where supported; otherwise a local action-attempt ledger keyed by the §5.7 idempotency key | Spec confirms which path applies after auditing the Teamwork API surface; both paths must satisfy §5.7 |
+| 14 | Teamwork attachment auth model | Teamwork attachment URLs are auth-scoped and short-lived (audit indicates yes). `resolveAttachment` returns a fresh signed URL or streams bytes through our backend, selected per privacy posture | Spec selects URL-based vs. stream-based after confirming the auth model and bandwidth cost trade |
+
+The above defaults are locked. The spec must implement them or explain in writing why it diverges; reviewers should reject silent divergence at `chatgpt-plan-review` and `spec-conformance`.
 
 ## 11. Recommendation
 
@@ -424,13 +472,13 @@ Approve the canonical approach plus Teamwork Desk as the first validating implem
 4. `canonical_support_agents`
 5. `canonical_ticket_drafts`
 
-Approve the eleven design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions, three-phase dispatch sequencing, denormalised tenant isolation, structured observability with stable codes, provider-neutral canonical model) as non-negotiable constraints for the spec.
+Approve the twelve design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance with human-only override, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions, three-phase dispatch with reconciliation, denormalised tenant isolation, structured observability with stable codes, provider-neutral canonical model, operational-state UI surfacing) as non-negotiable constraints for the spec.
 
-Approve the Teamwork v1 scope in §8: extend the existing adapter with ingestion methods, attachment resolver, status map, idempotency-key plumbing, and three-phase dispatch wiring. No new polling infrastructure. Acceptance bar in §8.5 is the end-state; the capability matrix in §8.6 is a required spec deliverable.
+Approve the Teamwork v1 scope in §8: extend the existing adapter with ingestion methods, attachment resolver, status map, idempotency-key plumbing, and three-phase dispatch wiring. No new polling infrastructure. Acceptance bar in §8.5 is the end-state; the capability matrix in §8.6 is a required spec deliverable, with binary/testable acceptance per §8.6.
 
 Park CSAT, KB articles, custom fields, multi-thread per ticket, and attachment mirroring for later.
 
-Resolve the fourteen decisions in §10 (eight canonical, six Teamwork-specific), then go to spec. The spec should be drafted via `spec-coordinator` against this brief, with Foundry's existing ticket schema and the existing `teamworkAdapter.ts` source as required reference inputs.
+The fourteen decisions in §10 are locked at brief level with defaults. The spec inherits those defaults; any divergence must be documented in writing and reviewed. The spec should be drafted via `spec-coordinator` against this brief, with Foundry's existing ticket schema and the existing `teamworkAdapter.ts` source as required reference inputs.
 
 ## 12. Out of Scope (Explicit)
 
