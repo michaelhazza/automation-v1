@@ -151,3 +151,100 @@ Verdict: do not merge yet. Fix the six blockers first.
 Per the operator's explicit instruction, this is a triage-only pass. No edits applied; no commits made. Round 2 will fire once the operator answers the three asks above and approves the batch direction for F1/F2/F4/N1/N3.
 
 ---
+
+## Round 2 — 2026-05-10 (operator approved all 8 fixes; one-commit close)
+
+Operator decisions on the three NEEDS_OPERATOR asks:
+- **F3:** REMOVE the sentinel value 7 and revert migration to `BETWEEN 0 AND 6`. Remove "Never require approval" UI option.
+- **F5:** DROP `routing_path_chosen` from Phase 1 union. Roadmap to Phase 3 alongside canonical ledger consolidation. Update spec/architecture accordingly.
+- **F6:** ALIGN CSV TO RUBRIC. Client messaging that lands → Tier 6. Paid-ads spend mutations → Tier 5. Material spend changes → Tier 6. External API reads → Tier 2. Keep `defaultGateLevel='review'` so existing-org behaviour holds (INV-8). Audit ALL rows.
+
+Operator also approved the technical batch (F1, F2, F4, N1, N3) for application in the SAME Round 2 commit.
+
+### Recommendations and Decisions (round 2 — applied)
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — `controller_style_allowed` enum drift | technical | implement | implement (auto-applied per operator approval batch) | high | Rename `'operator_allowed'` → `'native_and_operator'` across migration, schema, Zod, services, route types, ExecutionTab, SubaccountAgentEditPage, governance test, controllerStyleResolverPure test; architecture.md updated. |
+| F2 — controllerStyle source strings drift | technical | implement | implement | high | Locked vocabulary now `'override' \| 'execution_mode_default' \| 'subaccount_constraint'` in `controllerStyleResolver.ts`, agentExecutionLog union, and tests. |
+| F3 — `require_approval_at_tier` 0..7 sentinel | user-facing | NEEDS_OPERATOR (recommend REMOVE) | implement (operator: REMOVE) | high | Migration CHECK reverted to `BETWEEN 0 AND 6`; Zod max=6; "Never require approval" UI option removed; tests inverted. |
+| F4 — environment rejection 403 vs 422 | technical | implement | implement | high | `ExecutionModeNotAllowedForAgentError.statusCode = 422` to match spec line 636. architecture.md updated. |
+| F5 — Run Trace excludes `routing_outcomes` | user-facing | NEEDS_OPERATOR (recommend DROP) | implement (operator: DROP) | high | `routing_path_chosen` removed from `RunTraceEventType` union (now 14 members); mapper case removed; spec/plan/architecture/nomenclature updated; Phase 3 deferral documented. |
+| F6 — Risk Tier under-classification | user-facing | NEEDS_OPERATOR (recommend ALIGN) | implement (operator: ALIGN) | high | 24 registry rows re-tiered per architect-style audit (appendix). CSV regenerated. INV-8 preserved: `defaultGateLevel` unchanged; only `riskTier` rises. |
+| N1 — nomenclature glossary errors | technical | implement | implement | medium | Native = "deterministic, structured, short-lived"; Operator = "adaptive, autonomous, long-running"; Risk Tier values now numeric 0..6 with rubric. |
+| N2 — architecture ledger-count wording | technical | defer (follow-up of F5) | implement (folded into F5 commit) | low | Resolved with F5: spec/plan/architecture say "seven Phase 1 source tables (routing_outcomes deferred to Phase 3)". |
+| N3 — Run Trace payload shape test pin | technical | implement | implement | low | New `runTraceService.test.ts` test "returned events expose payload fields at the top level (flat shape)" pins the contract that RunTracePage / RunTraceEventRenderer rely on. Spec §4.4.4 wire-shape note added. |
+
+### Implemented (auto-applied technical batch + user-approved user-facing)
+
+- [auto] F1, F2, F4, N1, N2, N3 — technical batch (operator approved as one round).
+- [user] F3, F5, F6 — user-facing items with operator's REMOVE / DROP / ALIGN decisions.
+
+### Files touched
+
+Migrations / schema / services / routes:
+- `migrations/0307_subaccount_agents_governance.sql`
+- `server/db/schema/subaccountAgents.ts`
+- `server/schemas/subaccountAgents.ts`
+- `server/services/policyEnvelopeResolver.ts`
+- `server/services/controllerStyleResolver.ts`
+- `server/services/runTraceService.ts`
+- `server/routes/subaccountAgents.ts`
+- `server/services/subaccountAgentService.ts`
+- `server/config/actionRegistry.ts` (24 rows)
+
+Shared types:
+- `shared/types/agentExecutionLog.ts`
+- `shared/types/runTraceEvent.ts`
+
+Client UI:
+- `client/src/components/agent-config/ExecutionTab.tsx`
+- `client/src/pages/SubaccountAgentEditPage.tsx`
+- `client/src/components/agent-config/GovernanceTab.tsx`
+
+Tests:
+- `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts`
+- `server/services/__tests__/controllerStyleResolverPure.test.ts`
+- `server/services/__tests__/runTraceService.test.ts`
+- `shared/types/__tests__/runTraceEvent.test.ts`
+
+Docs / spec / plan / artifacts:
+- `architecture.md`
+- `docs/synthetos-nomenclature.md`
+- `tasks/builds/synthetos-foundation-refactor/spec.md`
+- `tasks/builds/synthetos-foundation-refactor/plan.md`
+- `tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv`
+- `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md`
+- `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md` (this file)
+
+### Gates
+
+- `npm run typecheck`: PASS (clean).
+- `npm run lint`: PASS (0 errors; 886 pre-existing warnings, none new).
+- `npx vitest run server/services/__tests__/runTraceService.test.ts`: 19/19 PASS.
+- `npx vitest run server/services/__tests__/controllerStyleResolverPure.test.ts shared/types/__tests__/runTraceEvent.test.ts server/db/schema/__tests__/subaccountAgentsGovernance.test.ts`: 62/62 PASS.
+- `npx vitest run server/config/__tests__/actionRegistry.test.ts`: 1106/1106 PASS.
+
+### F6 per-row tier audit (architect-style sign-off)
+
+Operator instruction: audit ALL rows against the spec rubric, not only the cited examples. Capture per-row reasoning. Architect sign-off mandatory.
+
+Full per-row table is in the build-folder mirror: `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` § Appendix A. Summary:
+
+- 7 client-messaging actions raised to Tier 6 (`send_email`, `crm.send_email`, `crm.send_sms`, `publish_post`, `deliver_report`, `trigger_account_intervention`, `config_send_workflow_email_digest`).
+- 1 customer-delivery action raised to Tier 6 (`config_deliver_workflow_output` — keeps `defaultGateLevel='auto'` per preserved_existing).
+- 1 CRM-automation trigger raised to Tier 6 (`crm.fire_automation` — fires sequence that lands as messaging).
+- 3 paid-ads state-change actions raised to Tier 5 (`update_bid`, `update_copy`, `pause_campaign`).
+- 1 paid-ads spend-change action raised to Tier 6 (`increase_budget`).
+- 1 financial-record mutation raised to Tier 6 (`update_financial_record`).
+- 5 funds-transfer actions raised to Tier 6 (`pay_invoice`, `purchase_resource`, `subscribe_to_service`, `top_up_balance`, `issue_refund`).
+- 8 external-API-read actions raised from Tier 0 to Tier 2 (`read_inbox`, `fetch_url`, `scrape_url`, `scrape_structured`, `analyze_endpoint`, `web_search`, `read_analytics`, `read_campaigns`).
+- All other ~85 rows VERIFIED unchanged against rubric.
+
+INV-8 invariant preserved: `defaultGateLevel` was not changed for any row. Existing-org behaviour is unchanged because gate evaluation runs `defaultGateLevel` first via the preserved_existing path. The `require_approval_at_tier` upgrade fires only when `riskTier >= require_approval_at_tier` AND the resolved gate is `auto`; no existing org has `require_approval_at_tier <= 6` configured AND an auto-gated row in the raised set.
+
+### Commit
+
+`chore(chatgpt-pr-review): synthetos-foundation-refactor round 2 — close 8 findings (F1-F6, N1, N3)` — see git history for hash + push status.
+
+---

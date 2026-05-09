@@ -48,7 +48,7 @@ interface LinkDetail {
   catchUpPolicy: 'skip_missed' | 'enqueue_missed_with_cap';
   catchUpCap: number;
   maxConcurrentRuns: number;
-  controllerStyleAllowed: 'native_only' | 'operator_allowed';
+  controllerStyleAllowed: 'native_only' | 'native_and_operator';
   allowedEnvironments: string[];
   maxRiskTier: number;
   requireApprovalAtTier: number;
@@ -146,7 +146,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
   const [customInstructions, setCustomInstructions] = useState('');
   const [budget, setBudget] = useState({ tokenBudgetPerRun: 30000, maxToolCallsPerRun: 20, timeoutSeconds: 300, maxCostPerRunCents: '' as string | number });
   const [scheduling, setScheduling] = useState({ scheduleCron: '', scheduleEnabled: false, scheduleTimezone: 'UTC', concurrencyPolicy: 'skip_if_active' as LinkDetail['concurrencyPolicy'], catchUpPolicy: 'skip_missed' as LinkDetail['catchUpPolicy'], catchUpCap: 3, maxConcurrentRuns: 1 });
-  const [execution, setExecution] = useState<{ controllerStyleAllowed: 'native_only' | 'operator_allowed'; allowedEnvironments: AllowedEnvironment[] }>({ controllerStyleAllowed: 'native_only', allowedEnvironments: ['api_tool', 'headless', 'browser'] });
+  const [execution, setExecution] = useState<{ controllerStyleAllowed: 'native_only' | 'native_and_operator'; allowedEnvironments: AllowedEnvironment[] }>({ controllerStyleAllowed: 'native_only', allowedEnvironments: ['api_tool', 'headless', 'browser'] });
   const [governance, setGovernance] = useState({ maxRiskTier: 3, requireApprovalAtTier: 4 });
 
   // Save state per section

@@ -1,12 +1,12 @@
-// Run Trace Service — unified read across eight source ledger tables.
+// Run Trace Service — unified read across seven source ledger tables.
 // Returns events for a given run with cursor pagination, late-event marking,
 // and a summary + policy envelope snapshot (spec §4.4.1–§4.4.14).
 //
 // NOTE: routing_outcomes is excluded from the UNION because it has no run_id
-// column (no FK to agent_runs). routing_path_chosen events are therefore not
-// emitted in Phase 1. This is a known schema gap; tracked for Phase 3.
-//
-// Run Trace virtual view across nine ledger tables. Canonical ledger consolidation is Phase 3+. See docs/synthetos-nomenclature.md
+// column (no FK to agent_runs). The `routing_path_chosen` event is therefore
+// deferred to Phase 3 alongside canonical ledger consolidation, when
+// routing_outcomes gains a run linkage. The 14-member event union (spec
+// §4.4.4) reflects this Phase 1 scope. See docs/synthetos-nomenclature.md.
 
 import { sql, and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
@@ -482,13 +482,6 @@ async function query(q: RunTraceQuery, orgId: string): Promise<RunTraceResult> {
           eventType: 'policy_envelope_resolved' as const,
           schemaVersion: (p['schemaVersion'] as number) ?? 1,
           sourceCounts: (p['sourceCounts'] as Record<string, number>) ?? {},
-        };
-      case 'routing_path_chosen':
-        return {
-          ...base,
-          eventType: 'routing_path_chosen' as const,
-          routingSource: (p['routingSource'] as string) ?? '',
-          chosenAgentId: (p['chosenAgentId'] as string | null) ?? null,
         };
       case 'tool_proposed':
         return {

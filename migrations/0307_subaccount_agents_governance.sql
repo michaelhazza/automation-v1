@@ -6,9 +6,9 @@
 
 ALTER TABLE subaccount_agents
   ADD COLUMN controller_style_allowed text NOT NULL DEFAULT 'native_only'
-    CHECK (controller_style_allowed IN ('native_only', 'operator_allowed')),
+    CHECK (controller_style_allowed IN ('native_only', 'native_and_operator')),
   ADD COLUMN allowed_environments text[] NOT NULL DEFAULT ARRAY['api_tool', 'headless', 'browser'],
   ADD COLUMN max_risk_tier integer NOT NULL DEFAULT 3
     CHECK (max_risk_tier BETWEEN 0 AND 6),
   ADD COLUMN require_approval_at_tier integer NOT NULL DEFAULT 4
-    CHECK (require_approval_at_tier BETWEEN 0 AND 7);
+    CHECK (require_approval_at_tier BETWEEN 0 AND 6);

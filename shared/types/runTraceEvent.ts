@@ -5,13 +5,18 @@ import type { ControllerStyle } from './controllerStyle.js';
 import type { GateLevel, RiskTier } from './riskTier.js';
 
 // ---------------------------------------------------------------------------
-// RunTraceEventType union (15 members per spec §4.4.4)
+// RunTraceEventType union (14 members — spec §4.4.4 Phase 1).
+//
+// `routing_path_chosen` was originally specified for Phase 1 sourced from
+// `routing_outcomes`, but `routing_outcomes` lacks a `run_id`/`agent_run_id`
+// column so the join is impossible without a schema change. The event is
+// deferred to Phase 3 alongside canonical ledger consolidation when
+// `routing_outcomes` gains a run linkage. See architecture.md § Run Trace.
 // ---------------------------------------------------------------------------
 
 export type RunTraceEventType =
   | 'controller_style_decided'
   | 'policy_envelope_resolved'
-  | 'routing_path_chosen'
   | 'tool_proposed'
   | 'tool_security_decision'
   | 'tool_call'
@@ -55,11 +60,6 @@ export type RunTraceEvent =
       eventType: 'policy_envelope_resolved';
       schemaVersion: number;
       sourceCounts: Record<string, number>;
-    })
-  | (RunTraceEventBase & {
-      eventType: 'routing_path_chosen';
-      routingSource: string;
-      chosenAgentId: string | null;
     })
   | (RunTraceEventBase & {
       eventType: 'tool_proposed';

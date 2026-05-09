@@ -68,9 +68,14 @@ describe('updateLinkBody Zod schema — allowedEnvironments closure (spec §3.6)
 
   it('accepts valid controllerStyleAllowed values', () => {
     const native = updateLinkBody.safeParse({ controllerStyleAllowed: 'native_only' });
-    const operator = updateLinkBody.safeParse({ controllerStyleAllowed: 'operator_allowed' });
+    const operator = updateLinkBody.safeParse({ controllerStyleAllowed: 'native_and_operator' });
     expect(native.success).toBe(true);
     expect(operator.success).toBe(true);
+  });
+
+  it('rejects the legacy operator_allowed literal (renamed to native_and_operator)', () => {
+    const result = updateLinkBody.safeParse({ controllerStyleAllowed: 'operator_allowed' });
+    expect(result.success).toBe(false);
   });
 
   it('rejects an invalid controllerStyleAllowed value', () => {
@@ -90,12 +95,19 @@ describe('updateLinkBody Zod schema — allowedEnvironments closure (spec §3.6)
     expect(result.success).toBe(false);
   });
 
-  it('accepts requireApprovalAtTier = 7 (never require)', () => {
-    const result = updateLinkBody.safeParse({ requireApprovalAtTier: 7 });
-    expect(result.success).toBe(true);
+  it('accepts requireApprovalAtTier in range 0–6', () => {
+    const zero = updateLinkBody.safeParse({ requireApprovalAtTier: 0 });
+    const six = updateLinkBody.safeParse({ requireApprovalAtTier: 6 });
+    expect(zero.success).toBe(true);
+    expect(six.success).toBe(true);
   });
 
-  it('rejects requireApprovalAtTier above 7', () => {
+  it('rejects requireApprovalAtTier = 7 (sentinel removed; spec §5.2.9 locks 0–6)', () => {
+    const result = updateLinkBody.safeParse({ requireApprovalAtTier: 7 });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects requireApprovalAtTier above 6', () => {
     const result = updateLinkBody.safeParse({ requireApprovalAtTier: 8 });
     expect(result.success).toBe(false);
   });

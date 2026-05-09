@@ -123,7 +123,7 @@ This spec **extends and consolidates** the above. It does **not** rebuild any of
 | 1. `controllerStyle` | New schema column, new TS type, new dispatch logic | None |
 | 2. Risk Tier sweep | New TS type, new field on action def, new derivation function, new CI gate | Maps to existing `actions.gateLevel` |
 | 3. `CredentialBrokerService` | None | Facade over existing `connectionTokenService` and `integrationConnectionService` |
-| 4. Run Trace API | New endpoint, new service, new shared type | Joins the nine existing decision-ledger source tables (§4.4.1) |
+| 4. Run Trace API | New endpoint, new service, new shared type | Joins the Phase 1 decision-ledger source tables (seven joined; routing_outcomes deferred to Phase 3) (§4.4.1) |
 | 5. Policy Envelope snapshot | New JSONB column on `agent_runs`, new type, new resolver function | Aggregates existing constraint sources |
 | 6. Naming pass | New glossary doc, file-level awareness comments | Documents existing names |
 
@@ -141,7 +141,7 @@ Schema impact: **two new columns on `agent_runs`** (`controller_style`, `policy_
 
 **G3. Expose credential infrastructure as a single named facade.** `CredentialBrokerService` becomes the only documented entry point for credential issuance, revocation, audit, and runtime injection. Existing call sites migrate; new callers must use the facade.
 
-**G4. Provide a server-side Run Trace API contract.** `GET /api/agent-runs/:runId/trace` returns a unified, ordered, paginated, filterable event stream by joining the existing nine decision-ledger source tables (Section 4.4.1). The existing `RunTracePage.tsx` is updated to consume the endpoint.
+**G4. Provide a server-side Run Trace API contract.** `GET /api/agent-runs/:runId/trace` returns a unified, ordered, paginated, filterable event stream by joining the existing decision-ledger source tables (Phase 1 unifies seven; routing_outcomes deferred to Phase 3) (Section 4.4.1). The existing `RunTracePage.tsx` is updated to consume the endpoint.
 
 **G5. Capture a Policy Envelope snapshot per run.** At run creation, the resolved constraint set (allowed controllers, environments, integrations, tools; budgets; approval requirements; credential availability; HITL rules) is computed and persisted on `agent_runs.policy_envelope_snapshot`. The snapshot is read-only after run start and surfaced in Run Trace.
 
@@ -161,7 +161,7 @@ The following are explicitly **not** delivered by this spec:
 
 **NG3. Operator Session Identity (`auth_type: 'operator_session'`).** ChatGPT OAuth as a session-based model identity is Phase 3. The credential broker facade in Section 4.3 is forward-compatible with this auth_type but does not implement it.
 
-**NG4. Canonical Run Trace event ledger.** Phase 3+ consolidation. The Phase 1 contract is a virtual view across the nine existing decision-ledger source tables (§4.4.1). A canonical `run_trace_events` table is deferred until either scale or audit forces it.
+**NG4. Canonical Run Trace event ledger.** Phase 3+ consolidation. The Phase 1 contract is a virtual view across the Phase 1 decision-ledger source tables (seven joined; routing_outcomes deferred to Phase 3) (§4.4.1). A canonical `run_trace_events` table is deferred until either scale or audit forces it.
 
 **NG5. Per-task containers, Firecracker, Kubernetes orchestration.** The diagram shows these as future-state IEE infrastructure; the codebase ships Docker Compose. Phase 3+ work.
 
@@ -924,7 +924,7 @@ Rollout: the facade ships alongside its first migrated call site. Subsequent mig
 
 #### 4.4.1 Current state
 
-Decision audit lives across nine tables today (the canonical Run Trace source set):
+Decision audit lives across nine ledger tables today (seven joined into the Phase 1 Run Trace UNION; `routing_outcomes` deferred to Phase 3 alongside canonical ledger consolidation; `agent_runs` contributes only the synthesised `run_terminated` event):
 
 - `agent_execution_events` — per-run event log with `eventType`, `sequenceNumber`, ordered by run.
 - `routing_outcomes` — Orchestrator path A/B/C/D classification + outcome.
@@ -942,7 +942,7 @@ There is **no server-side endpoint that returns a unified, ordered, queryable Ru
 
 #### 4.4.2 Target state
 
-A `GET /api/agent-runs/:runId/trace` endpoint that returns a unified, ordered, paginated, filterable event stream by joining the nine decision-ledger source tables listed in Section 4.4.1 on the server. The endpoint is a **virtual view** per v1.2 brief Section 12.1; no new tables are introduced. The contract is forward-compatible with the Phase 3+ canonical ledger consolidation (v1.2 brief Section 12.2).
+A `GET /api/agent-runs/:runId/trace` endpoint that returns a unified, ordered, paginated, filterable event stream by joining the decision-ledger source tables (Phase 1 unifies seven; routing_outcomes deferred to Phase 3) listed in Section 4.4.1 on the server. The endpoint is a **virtual view** per v1.2 brief Section 12.1; no new tables are introduced. The contract is forward-compatible with the Phase 3+ canonical ledger consolidation (v1.2 brief Section 12.2).
 
 #### 4.4.3 Endpoint contract
 
@@ -986,10 +986,14 @@ Permissions: same as GET /api/agent-runs/:runId; org-scoped via RLS.
 ```ts
 // shared/types/runTraceEvent.ts (new file)
 
+// Phase 1 union: 14 members. `routing_path_chosen` was originally specified
+// here sourced from `routing_outcomes`, but `routing_outcomes` lacks a
+// `run_id`/`agent_run_id` column so the join is impossible without a schema
+// change. The event is deferred to Phase 3 alongside canonical ledger
+// consolidation, when `routing_outcomes` gains a run linkage.
 export type RunTraceEventType =
   | 'controller_style_decided'         // from agent_execution_events
   | 'policy_envelope_resolved'         // from agent_execution_events (new event type, Section 4.5)
-  | 'routing_path_chosen'              // from routing_outcomes
   | 'tool_proposed'                    // from actions
   | 'tool_security_decision'           // from tool_call_security_events
   | 'tool_call'                        // from agent_execution_events
@@ -1015,11 +1019,13 @@ export interface RunTraceEventBase {
 }
 
 export type RunTraceEvent =
-  | RunTraceEventBase & { eventType: 'controller_style_decided'; payload: { controllerStyle: ControllerStyle; source: 'override' | 'execution_mode_default' | 'subaccount_constraint' } }
-  | RunTraceEventBase & { eventType: 'tool_security_decision'; payload: { toolSlug: string; decision: 'allow' | 'deny' | 'review'; riskTier: RiskTier; gateLevel: GateLevel; gateLevelSource: 'tier_default' | 'preserved_existing' | 'policy_override' | 'subaccount_constraint' } }
+  | RunTraceEventBase & { eventType: 'controller_style_decided'; controllerStyle: ControllerStyle; source: 'override' | 'execution_mode_default' | 'subaccount_constraint' }
+  | RunTraceEventBase & { eventType: 'tool_security_decision'; toolSlug: string; decision: 'allow' | 'deny' | 'review'; riskTier: RiskTier; gateLevel: GateLevel; gateLevelSource: 'tier_default' | 'preserved_existing' | 'policy_override' | 'subaccount_constraint' }
   // ... full discriminated union for each event type
   ;
 ```
+
+**Wire shape note.** Per-event fields live at the top level of the discriminated-union member (sibling of `RunTraceEventBase`), NOT nested under a `payload` key. The implementation chose flatten consistently across the type, the SQL projection, and the UI consumer (`RunTraceEventRenderer.tsx`). The `runTraceService.test.ts` shape pin asserts this contract — see §N3 reconciliation. Earlier drafts of this section sketched a `payload: { ... }` envelope; that draft has been retired.
 
 The discriminated union shape is the consumer contract. New event types may be added; existing event type payloads are append-only (no breaking changes).
 
@@ -1033,7 +1039,7 @@ Phase 1 is a read-only virtual view and does not enforce post-terminal write pro
 
 #### 4.4.5 Server-side query strategy
 
-Single query with `UNION ALL` across the nine source tables (Section 4.4.1), projected to the common `RunTraceEvent` shape, ordered by `(timestamp, COALESCE(sequence_number, 0), source_table, source_id)` tiebreaker, paginated by cursor. The cursor encodes the same four-tuple, and the SQL predicate compares the same four-tuple, so pagination is stable across requests even when timestamps tie.
+Single query with `UNION ALL` across seven Phase 1 source tables (`agent_execution_events`, `delegation_outcomes`, `tool_call_security_events`, `review_audit_records`, `actions`, `llm_requests`, `iee_steps`) plus a synthesised `run_terminated` event from `agent_runs`. `routing_outcomes` is excluded because the table has no `run_id`/`agent_run_id` column; reintroducing `routing_path_chosen` is a Phase 3 task once that linkage exists. Projected to the common `RunTraceEvent` shape, ordered by `(timestamp, COALESCE(sequence_number, 0), source_table, source_id)` tiebreaker, paginated by cursor. The cursor encodes the same four-tuple, and the SQL predicate compares the same four-tuple, so pagination is stable across requests even when timestamps tie.
 
 ```sql
 -- sketch only; production query lives in runTraceService.ts
@@ -1053,19 +1059,10 @@ WITH events AS (
   FROM agent_execution_events
   WHERE run_id = $1 AND event_type = 'controller_style_decided'
 
-  UNION ALL
-
-  SELECT
-    'routing_path_chosen' AS event_type,
-    agent_run_id AS run_id,
-    organisation_id,
-    created_at AS timestamp,
-    NULL AS sequence_number,
-    'routing_outcomes' AS source_table,
-    id::text AS source_id,
-    jsonb_build_object('pathTaken', path_taken, 'outcome', outcome, 'reason', decision_reason) AS payload
-  FROM routing_outcomes
-  WHERE agent_run_id = $1
+  -- routing_outcomes intentionally NOT joined — the table has no run_id /
+  -- agent_run_id column. Reintroducing `routing_path_chosen` requires either
+  -- adding that column or joining via decision_record → task → run; both are
+  -- Phase 3 work. See architecture.md § Run Trace.
 
   -- ... unions for delegation_outcomes, tool_call_security_events, reviewAuditRecords,
   -- actions, llm_requests, iee_steps, agent_runs (each with its PK as source_id).
@@ -1194,7 +1191,7 @@ No database migration. The endpoint reads existing tables. The client switch fro
 #### 4.4.12 Tests
 
 - Pure: type discrimination tests, cursor encoding / decoding tests (per §7.2 canonical inventory).
-- Integration: seed a run with events across the nine source tables (§4.4.1); query with various filters and pagination; assert result shape and ordering.
+- Integration: seed a run with events across the seven Phase 1 source tables (routing_outcomes deferred to Phase 3) (§4.4.1); query with various filters and pagination; assert result shape and ordering.
 - Regression: existing RunTracePage rendering tests pass with the new endpoint.
 - Performance: synthetic performance tests are not authored as part of this spec (per §7.5, `performance_baselines: defer_until_production`); the alerting threshold above is the runtime signal.
 
@@ -1517,7 +1514,7 @@ code name(s), and a meaning.
 | Risk Tier | (new in Phase 1 foundation) | The capability risk classification (0 to 6) per v1.2 brief Section 11. |
 | Policy Engine | `policy_rules` plus `policyEngineService` | The runtime enforcement of declared policy rules; one component of the broader Policy Envelope. |
 | Policy Envelope | (new in Phase 1 foundation) | The resolved constraint set captured per run; aggregates Policy Engine, budgets, credentials, environments, etc. |
-| Run Trace | Phase 1 virtual view across the nine source tables enumerated in §4.4.1; `RunTracePage.tsx` UI surface | The governed execution observability layer: ordered, queryable, decision-aware event stream per run. |
+| Run Trace | Phase 1 virtual view across the seven Phase 1 source tables (routing_outcomes deferred to Phase 3) enumerated in §4.4.1; `RunTracePage.tsx` UI surface | The governed execution observability layer: ordered, queryable, decision-aware event stream per run. |
 | Credential Broker and Identity Boundary | `CredentialBrokerService` facade over `connectionTokenService` plus `integrationConnectionService` | The named primitive for credential issuance, injection, audit, revocation, and tenant isolation. |
 | Capability Matching | `list_platform_capabilities`, `check_capability_gap`, `list_connections`, `request_feature` skills | The Router's mechanism for resolving available capabilities at routing time. |
 | Agent Capability Map | `subaccountAgents.capabilityMap` (JSONB) | Per-agent snapshot of resolved integrations, read capabilities, write capabilities, skills, primitives. |
@@ -1995,7 +1992,7 @@ Project default per `docs/spec-context.md` is **static gates primary, pure-funct
 This spec follows the project default with **two named integration-test exceptions**, both permitted by framing because they cover hot-path concerns that pure-function tests cannot reach:
 
 1. `policyEnvelopeResolver` aggregation across multiple constraint sources (multi-table read).
-2. `runTraceService` UNION across nine source tables with cursor pagination (multi-table query correctness).
+2. `runTraceService` UNION across seven Phase 1 source tables (routing_outcomes deferred to Phase 3) with cursor pagination (multi-table query correctness).
 
 In addition, this spec adds **one new CI static gate** (`verify-risk-tier-assigned.sh`) and **pure-function unit tests** for every new derivation, resolver, formatter, and discriminated-union type. No new frontend, E2E, API contract, performance, or composition tests are added.
 
@@ -2202,7 +2199,7 @@ Per spec-authoring-checklist §7, every deferred concern in this spec is enumera
 - **Per-task sandbox isolation primitive (NG1).** Phase 2. Today's `iee_dev` mode collapses sandbox-style execution and terminal/repo execution; splitting them requires a sandbox isolation primitive (Docker-per-task, gVisor, Firecracker, or hosted execution provider). Reason: design and infra investment outside Phase 1 scope.
 - **ExecutionBackend adapter contract (NG2).** Phase 3 prerequisite per `docs/openclaw-strategic-analysis.md`. Reason: sequenced after foundation primitives stabilise.
 - **Operator Session Identity / `auth_type: 'operator_session'` (NG3).** Phase 3 (ChatGPT OAuth as a session-based model identity). Reason: depends on Phase-3 ExecutionBackend work; the credential broker facade in §4.3 is forward-compatible.
-- **Canonical Run Trace event ledger (NG4).** Phase 3+. The Phase 1 contract is a virtual view across the nine source tables (§4.4.1). A canonical `run_trace_events` table is deferred until either scale or audit forces it; the API contract is forward-compatible with the canonical ledger.
+- **Canonical Run Trace event ledger (NG4).** Phase 3+. The Phase 1 contract is a virtual view across the seven Phase 1 source tables (routing_outcomes deferred to Phase 3) (§4.4.1). A canonical `run_trace_events` table is deferred until either scale or audit forces it; the API contract is forward-compatible with the canonical ledger.
 - **Per-task containers, Firecracker, Kubernetes orchestration (NG5).** Phase 3+. The diagram shows these as future-state IEE infrastructure; the codebase ships Docker Compose.
 - **42 Macro Task Full MVP and Support Inbox showcase MVP (NG6).** Downstream Phase 1 specs (Spec B and Spec C); this spec only ships the foundation refactor and minimum UI.
 - **Service-wide renames (NG7).** The naming pass produces a glossary and awareness comments only. Renaming `orchestratorFromTaskJob` to `routerFromTaskJob` (or similar) is explicitly deferred.

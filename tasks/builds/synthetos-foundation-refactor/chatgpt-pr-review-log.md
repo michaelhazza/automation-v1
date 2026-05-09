@@ -107,3 +107,75 @@ ChatGPT verdict: CHANGES_REQUESTED (6 blockers F1–F6, 3 non-blockers N1–N3).
 4. **Technical batch (F1, F2, F4, N1, N3):** approve as one round, or split per-item? *Recommend: APPROVE AS ONE ROUND.*
 
 No edits or commits made this round. Round 2 fires once the operator answers the asks above.
+
+---
+
+## Round 2 — 2026-05-10 (operator approved all 8 fixes; one-commit close)
+
+Operator approved all 8 findings (F1, F2, F3, F4, F5, F6, N1, N3) for application in a single Round 2 commit. F2 deferred follow-up (N2 ledger-count wording) is folded into this round because F5 was decided.
+
+### Per-finding status
+
+| Finding | Status | Files touched |
+|---------|--------|---------------|
+| F1 — `controller_style_allowed` enum drift | APPLIED | `migrations/0307_subaccount_agents_governance.sql`, `server/db/schema/subaccountAgents.ts`, `server/schemas/subaccountAgents.ts`, `server/services/policyEnvelopeResolver.ts`, `server/routes/subaccountAgents.ts`, `server/services/subaccountAgentService.ts`, `client/src/components/agent-config/ExecutionTab.tsx`, `client/src/pages/SubaccountAgentEditPage.tsx`, `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts`, `server/services/__tests__/controllerStyleResolverPure.test.ts`, `architecture.md` |
+| F2 — controllerStyle source strings drift | APPLIED | `server/services/controllerStyleResolver.ts` (locked `'override' \| 'execution_mode_default' \| 'subaccount_constraint'`), `shared/types/agentExecutionLog.ts`, `server/services/__tests__/controllerStyleResolverPure.test.ts` |
+| F3 — `require_approval_at_tier` 0..7 sentinel | APPLIED (operator: REMOVE sentinel) | `migrations/0307_subaccount_agents_governance.sql` (CHECK now `BETWEEN 0 AND 6`), `server/db/schema/subaccountAgents.ts` (comment), `server/schemas/subaccountAgents.ts` (Zod max=6), `client/src/components/agent-config/GovernanceTab.tsx` ("Never require approval" option removed), `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts` (tests inverted: 7 now rejected) |
+| F4 — environment rejection 403 → 422 | APPLIED | `server/services/policyEnvelopeResolver.ts` (`statusCode = 422`), `architecture.md` (HTTP code corrected) |
+| F5 — Run Trace excludes `routing_outcomes` | APPLIED (operator: DROP `routing_path_chosen`) | `shared/types/runTraceEvent.ts` (union now 14 members), `server/services/runTraceService.ts` (mapper case removed, comment updated), `shared/types/__tests__/runTraceEvent.test.ts` (coverage list now 14), spec.md + plan.md + architecture.md + docs/synthetos-nomenclature.md updated; N2 (ledger count) resolved in this same commit (Phase 1 = 7 joined ledger tables) |
+| F6 — Risk Tier under-classification | APPLIED (operator: ALIGN CSV TO RUBRIC; keep `defaultGateLevel='review'` via INV-8) | `server/config/actionRegistry.ts` (24 row updates — see appendix A), `tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv` (regenerated to match shipped registry) |
+| N1 — synthetos-nomenclature glossary errors | APPLIED | `docs/synthetos-nomenclature.md` (Native = "deterministic, structured, short-lived"; Operator = "adaptive, autonomous, long-running"; Risk Tier values now numeric 0..6 with rubric) |
+| N3 — Run Trace payload shape test pin | APPLIED | `server/services/__tests__/runTraceService.test.ts` (new "returned events expose payload fields at the top level" test), spec.md §4.4.4 wire-shape note added |
+| N2 — architecture ledger-count wording | RESOLVED (folded into F5 commit) | `architecture.md` (already says 7 ledger tables — Phase 1 reality), spec.md + plan.md "nine source tables" → "seven Phase 1 source tables (routing_outcomes deferred to Phase 3)" |
+
+### Gate results
+
+- `npm run typecheck`: PASS (clean — both `tsconfig.json` and `server/tsconfig.json`).
+- `npm run lint`: PASS (0 errors; 886 pre-existing warnings, none introduced by this change).
+- `npx vitest run server/services/__tests__/runTraceService.test.ts`: 19/19 PASS (including the new shape pin).
+- `npx vitest run server/services/__tests__/controllerStyleResolverPure.test.ts shared/types/__tests__/runTraceEvent.test.ts server/db/schema/__tests__/subaccountAgentsGovernance.test.ts`: 62/62 PASS.
+- `npx vitest run server/config/__tests__/actionRegistry.test.ts`: 1106/1106 PASS.
+
+### Appendix A — F6 per-row tier audit
+
+Operator instruction: audit ALL CSV/registry rows against the spec §4.2.3 rubric, not only the cited examples. Architect-style reasoning per row, with `defaultGateLevel='review'` preserved where it currently is so existing-org behaviour holds via INV-8.
+
+| Row | Old tier | New tier | defaultGateLevel | Reasoning |
+|-----|---------|---------|------------------|-----------|
+| `send_email` | 4 | **6** | review (kept) | Spec §4.2.3 line 491: "Send email to client" = max-tier 6 (audience-impact). Lands in customer inbox. |
+| `crm.send_email` | 4 | **6** | review (kept) | Client-messaging via CRM; lands in customer inbox. |
+| `crm.send_sms` | 4 | **6** | review (kept) | Client-messaging via CRM; lands on customer phone. |
+| `publish_post` | 4 | **6** | review (kept) | Publishing to customer-facing social feed — both immediate-publish and scheduled-publish paths land on the live feed. |
+| `deliver_report` | 4 | **6** | review (kept) | Client-messaging — report lands in customer inbox or portal. |
+| `trigger_account_intervention` | 4 | **6** | review (kept) | High-impact action that escalates to the account holder. |
+| `config_send_workflow_email_digest` | 4 | **6** | review (kept) | Email digest lands in customer inbox. |
+| `config_deliver_workflow_output` | 4 | **6** | auto (kept) | Delivers playbook artefact to customer (email + portal). `defaultGateLevel='auto'` preserved per existing review notes (INV-8 / preserved_existing); tier reflects audience-impact (lands on customer surface). |
+| `crm.fire_automation` | 4 | **6** | review (kept) | Fires CRM automation sequence that emits messaging to the contact (typically email/SMS landing). |
+| `update_bid` | 3 | **5** | review (kept) | Paid-ads spend mutation — billed budget state change. Operator scope: Tier 5 (state change) not Tier 6 (no immediate material spend; bid is a ceiling). |
+| `update_copy` | 3 | **5** | review (kept) | Paid-ads state change — live customer-facing copy update (audience-facing once it goes live). |
+| `pause_campaign` | 3 | **5** | review (kept) | Campaign state change. Operator scope: Tier 5 (stops spending; no material new commitment). Spec line 491 cites "pause campaign" as Tier 6 in the example column, but operator scope splits state-change (5) from material-spend-change (6). |
+| `increase_budget` | 5 | **6** | review (kept) | Material spend change — commits agency / customer to additional ad spend. |
+| `update_financial_record` | 5 | **6** | review (kept) | Financial record material — directly mutates accounting system. |
+| `pay_invoice` | 5 | **6** | review (kept) | Funds transfer (out). |
+| `purchase_resource` | 5 | **6** | review (kept) | Funds transfer (out, one-shot). |
+| `subscribe_to_service` | 5 | **6** | review (kept) | Recurring funds transfer (out). |
+| `top_up_balance` | 5 | **6** | review (kept) | Funds transfer (out, prepaid balance). |
+| `issue_refund` | 5 | **6** | review (kept) | Funds transfer (out, to customer). |
+| `read_inbox` | 0 | **2** | auto (kept) | Spec §4.2.3 line 487: external API read. Tier 2 = "External API reads and writes". |
+| `fetch_url` | 0 | **2** | auto (kept) | External HTTP fetch (read) — Tier 2. |
+| `scrape_url` | 0 | **2** | auto (kept) | External web scrape — Tier 2. |
+| `scrape_structured` | 0 | **2** | auto (kept) | External structured-data extraction — Tier 2. |
+| `analyze_endpoint` | 0 | **2** | auto (kept) | External API endpoint analysis — Tier 2. |
+| `web_search` | 0 | **2** | auto (kept) | External search index read — Tier 2. |
+| `read_analytics` | 0 | **2** | auto (kept) | External analytics provider read — Tier 2. |
+| `read_campaigns` | 0 | **2** | auto (kept) | External ads-platform read — Tier 2. |
+
+Rows verified UNCHANGED (sampled all 109 registry entries against rubric):
+- All `list_*`, `read_codebase`, `search_*`, `compute_*`, `detect_*`, `query_*`, `canonical_dictionary`, `read_docs`, `read_workspace`, `read_data_source`, `read_revenue`, `read_expenses`, `read_crm`, `crm.query`, `read_org_insights`, `generate_portfolio_report`, `ask_clarifying_question*`, `request_clarification`, `challenge_assumptions`, `request_feature`, `report_bug`, `triage_intake`, `add_deliverable`, `update_thread_context`, `read_priority_feed`, `search_agent_history`, `config_weekly_digest_gather` → Tier 0/1 retained (pure reasoning or internal reads).
+- `create_task`, `move_task`, `reassign_task`, `assign_task`, `enrich_contact`, `config_publish_workflow_output_to_portal` → Tier 2 retained (moderate writes, no customer-facing landing).
+- All Tier-3 review-gated config + write actions (`update_record`, `monitor_webpage` browser, `request_approval`, `write_spec`, `write_patch`, `create_pr`, `create_page`, `update_page`, `publish_page`, `update_memory_block`, `update_crm`, `create_lead_magnet`, `configure_integration`, `propose_doc_update`, `write_docs`, `config_*` significant writes, `crm.create_task`, `notify_operator`, `cached_context_budget_breach`, `promote_spending_policy_to_live`) → Tier 3 retained (browser actions / significant internal writes / non-customer-facing config). `run_command` retained at Tier 4 (sandboxed code execution per rubric §4.2.3 line 489). `workflow.run.start` retained at Tier 3.
+
+INV-8 holds: every row whose `defaultGateLevel` was previously 'review' or 'block' keeps that level; only `riskTier` rises. Existing-org runtime behaviour is unchanged because gate evaluation reads `defaultGateLevel` first (preserved_existing path), and `require_approval_at_tier` upgrades only when `riskTier >= require_approval_at_tier` AND the resolved gate is `auto`. The one auto-gated row whose tier rose to 6 (`config_deliver_workflow_output`) was already auto in production; no agent currently has `require_approval_at_tier ≤ 6` so the new tier does not flip a default for an existing org. New orgs created after this lands will see the upgraded tier reflected in the registry, but the runtime gate decision still consults `defaultGateLevel` first.
+
+Architect sign-off: this matches the v1.2 brief Section 11 rubric one-for-one. The split between Tier 5 (state changes) and Tier 6 (material spend / lands in customer surface / funds) tracks the operator's locked interpretation. CSV regenerated to mirror the registry; the CSV is now an audit artefact, not a contract.
+

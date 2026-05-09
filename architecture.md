@@ -3986,7 +3986,7 @@ Six foundation primitives shipped with PR #277 (build slug `synthetos-foundation
 
 - `agent_runs.controller_style` (text, NOT NULL, DEFAULT `'native'`, CHECK in `('native','operator')`). Partial index `agent_runs_controller_style_idx ON agent_runs(controller_style) WHERE controller_style = 'operator'`. Migration `0308`.
 - `agent_runs.policy_envelope_snapshot` (jsonb, nullable). Migration `0309`. Immutable after run start (INV-9). State-based UPDATE-WHERE-NULL persist pattern in `policyEnvelopeResolver.persist`.
-- `subaccount_agents` four governance columns: `controller_style_allowed` (text, default `'native_only'`, CHECK in `('native_only','operator_allowed')`), `allowed_environments` (text[], default `['api_tool','headless','browser']`, app-layer Zod-closed enum over `'api_tool'|'headless'|'browser'|'terminal_repo'`), `max_risk_tier` (int 0-6, default 3), `require_approval_at_tier` (int 0-7, default 4 — sentinel 7 = "never require"). Migration `0307`.
+- `subaccount_agents` four governance columns: `controller_style_allowed` (text, default `'native_only'`, CHECK in `('native_only','native_and_operator')`), `allowed_environments` (text[], default `['api_tool','headless','browser']`, app-layer Zod-closed enum over `'api_tool'|'headless'|'browser'|'terminal_repo'`), `max_risk_tier` (int 0-6, default 3), `require_approval_at_tier` (int 0-6, default 4). Migration `0307`.
 
 ### New shared types
 
@@ -3994,7 +3994,7 @@ Six foundation primitives shipped with PR #277 (build slug `synthetos-foundation
 - `shared/types/riskTier.ts` — `RiskTier = 0..6`, `GateLevel = 'auto' | 'review' | 'block'`, `deriveGateLevel()` pure derivation function with sources `'policy_override' | 'preserved_existing' | 'tier_default'`.
 - `shared/types/executionEnvironment.ts` — closed enum `'api_tool' | 'headless' | 'browser' | 'terminal_repo'`, `executionModeToEnvironment(mode)` exhaustive mapping.
 - `shared/types/policyEnvelope.ts` — `PolicyEnvelopeSnapshot` (schemaVersion 1) — captures resolved constraints at run start.
-- `shared/types/runTraceEvent.ts` — 15-member `RunTraceEventType` union, base64 cursor codec for run-trace pagination.
+- `shared/types/runTraceEvent.ts` — 14-member `RunTraceEventType` union (Phase 1; `routing_path_chosen` deferred to Phase 3 alongside canonical ledger consolidation, when `routing_outcomes` gains a run linkage), base64 cursor codec for run-trace pagination.
 
 ### New services
 
@@ -4002,7 +4002,7 @@ Six foundation primitives shipped with PR #277 (build slug `synthetos-foundation
 |---|---|---|
 | `controllerStyleResolver` | `server/services/controllerStyleResolver.ts` | Pure `deriveControllerStyle(executionMode, allowList, override?)` returning `{ style, source }`. Throws `ControllerStyleNotAllowedForAgentError` (HTTP 422) on explicit-override-rejected path; downgrades to `'native'` with source `'subaccount_constraint'` on derivation-conflict path. |
 | `credentialBrokerService` | `server/services/credentialBrokerService.ts` | Facade over `connectionTokenService` + `integrationConnectionService`. Methods: `issueCredential`, `injectIntoEnvironment`, `revoke` (subaccount-scoped, returns boolean), `audit`, `resolveAvailableCredentials`. Strict-branched on `subaccountId === null` for org-level vs subaccount-scoped revokes. |
-| `policyEnvelopeResolver` | `server/services/policyEnvelopeResolver.ts` + `policyEnvelopeResolverPure.ts` | Aggregates 6 sources at run start (subaccount governance, spending policies, active policy rules, available credentials, capability map, controller limits), persists v1 snapshot via state-based UPDATE-WHERE-NULL with first-resolver-wins re-read. Throws `PolicyEnvelopePersistFailedError` only if both UPDATE and re-read fail. Throws `ExecutionModeNotAllowedForAgentError` (HTTP 403, errorCode `execution_mode_not_allowed_for_agent`) when the resolved envelope's `allowedEnvironments` does not include the run's mapped environment. |
+| `policyEnvelopeResolver` | `server/services/policyEnvelopeResolver.ts` + `policyEnvelopeResolverPure.ts` | Aggregates 6 sources at run start (subaccount governance, spending policies, active policy rules, available credentials, capability map, controller limits), persists v1 snapshot via state-based UPDATE-WHERE-NULL with first-resolver-wins re-read. Throws `PolicyEnvelopePersistFailedError` only if both UPDATE and re-read fail. Throws `ExecutionModeNotAllowedForAgentError` (HTTP 422, errorCode `execution_mode_not_allowed_for_agent`) when the resolved envelope's `allowedEnvironments` does not include the run's mapped environment. |
 | `runTraceService` | `server/services/runTraceService.ts` | Unified read across 7 ledger tables (agent_execution_events, delegation_outcomes, tool_call_security_events, review_audit_records, actions, llm_requests, iee_steps) plus a synthesised `run_terminated` event from `agent_runs.status`. Cursor pagination with all five filters (cursor / eventTypes / sinceTimestamp / untilTimestamp / toolSlug) pushed into SQL. `routing_outcomes` excluded from UNION (no `run_id` column). Errors propagate via `logger.error('foundation.run_trace.query_failed')` then rethrow. |
 
 ### New routes

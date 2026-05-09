@@ -8,14 +8,14 @@
 
 | Brief v1.2 product name | Code name (field / type / file) | Notes |
 |---|---|---|
-| Controller | `controllerStyle` (field), `ControllerStyle` (TypeScript type) | `shared/types/controllerStyle.ts`. Values: `'native'` (autonomous, no approval loop) and `'operator'` (approval-gated). Replaces the informal "execution style" terminology. |
+| Controller | `controllerStyle` (field), `ControllerStyle` (TypeScript type) | `shared/types/controllerStyle.ts`. Values: `'native'` (deterministic, structured, short-lived; spec §272) and `'operator'` (adaptive, autonomous, long-running; spec §272). Approval gating is orthogonal — it is governed by `require_approval_at_tier`, not by controller style. Replaces the informal "execution style" terminology. |
 | Execution Environment | `executionMode` (field on `agentRuns`) | Existing code field. Values reflect the agent's execution context (standard loop, IEE browser, IEE dev). See `server/services/agentExecutionService.ts`. |
 | Router and Execution Planner | Capability-Aware Orchestrator | Code entry point: `server/jobs/orchestratorFromTaskJob.ts`. Architecture section: [Orchestrator Capability-Aware Routing](../architecture.md#orchestrator-capability-aware-routing). |
 | IEE Integrated Execution Environment | IEE | Code files: `worker/src/handlers/browserTask.ts`, `worker/src/handlers/devTask.ts`. Service: `ieeExecutionService`. Architecture section: [IEE — Integrated Execution Environment](../architecture.md#iee-integrated-execution-environment). |
 | Policy Envelope | `policyEnvelopeSnapshot` (field), `PolicyEnvelopeSnapshot` (TypeScript type) | `shared/types/policyEnvelope.ts`. The snapshot is captured at run start and embedded in every Run Trace response. See `server/services/policyEnvelopeResolver.ts`. |
-| Run Trace | `runTraceService` (service), `GET /api/agent-runs/:runId/trace` (endpoint) | `server/services/runTraceService.ts`. Virtual read across eight ledger tables with cursor pagination. UI: `client/src/pages/operate/RunTracePage.tsx`. |
+| Run Trace | `runTraceService` (service), `GET /api/agent-runs/:runId/trace` (endpoint) | `server/services/runTraceService.ts`. Virtual read across seven ledger tables (Phase 1; `routing_outcomes` deferred to Phase 3 alongside canonical ledger consolidation) with cursor pagination. UI: `client/src/pages/operate/RunTracePage.tsx`. |
 | Credential Broker | `credentialBrokerService` (service) | `server/services/credentialBrokerService.ts`. Identity Boundary primitive; facade over `integrationConnectionService` and `connectionTokenService`. |
-| Risk Tier | `riskTier` (field on `ActionDefinition` and `PolicyDecision`) | `shared/types/riskTier.ts`. Values: `'low'`, `'medium'`, `'high'`, `'critical'`. Drives gate-level derivation via `deriveGateLevel()`. |
+| Risk Tier | `riskTier` (field on `ActionDefinition` and `PolicyDecision`) | `shared/types/riskTier.ts`. Values: numeric `0..6` (closed range). Spec §4.2.3 rubric: 0 = pure reasoning, 1 = internal reads, 2 = external API reads/writes, 3 = browser/web extraction, 4 = sandboxed code execution, 5 = terminal/repo/filesystem, 6 = client messaging that lands / funds / deploy / material spend. Drives gate-level derivation via `deriveGateLevel()`. |
 
 ---
 

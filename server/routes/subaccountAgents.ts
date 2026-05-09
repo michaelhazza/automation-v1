@@ -130,7 +130,7 @@ router.patch(
       timeoutSeconds?: number;
       maxCostPerRunCents?: number | null;
       maxLlmCallsPerRun?: number | null;
-      controllerStyleAllowed?: 'native_only' | 'operator_allowed';
+      controllerStyleAllowed?: 'native_only' | 'native_and_operator';
       allowedEnvironments?: ('api_tool' | 'headless' | 'browser' | 'terminal_repo')[];
       maxRiskTier?: number;
       requireApprovalAtTier?: number;

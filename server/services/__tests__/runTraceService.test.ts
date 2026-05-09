@@ -459,6 +459,78 @@ describe('runTraceService', () => {
     expect(result.controllerStyle).toBe('operator');
   });
 
+  // ── Wire shape pin ────────────────────────────────────────────────────────
+  //
+  // RunTracePage.tsx + RunTraceEventRenderer.tsx consume the discriminated
+  // union with payload fields flattened at the top level of each event member
+  // (e.g. `event.controllerStyle`, `event.failureReason`, `event.decidedBy`).
+  // This test pins the contract: changing to a nested `payload: { ... }`
+  // shape would silently break the UI consumer. Spec §4.4.4 (wire shape note).
+
+  it('returned events expose payload fields at the top level (flat shape)', async () => {
+    const { runTraceService } = await importService();
+
+    const completedAt = new Date('2026-01-01T12:00:00.000Z');
+    mockRunSelect(makeRunRow({
+      status: 'completed',
+      controllerStyle: 'operator',
+      completedAt,
+    }));
+    mockExecute.mockResolvedValue([
+      makeUnionRow({
+        event_type: 'controller_style_decided',
+        source_table: 'agent_execution_events',
+        source_id: 'csd-1',
+        ts: '2026-01-01T11:00:00.000Z',
+        payload: { controllerStyle: 'operator', source: 'override' },
+      }),
+      makeUnionRow({
+        event_type: 'review_decided',
+        source_table: 'review_audit_records',
+        source_id: 'rad-1',
+        ts: '2026-01-01T11:01:00.000Z',
+        payload: {
+          toolSlug: 'send_email',
+          decision: 'auto',
+          decidedBy: 'user-42',
+          requestedBy: 'user-42',
+        },
+      }),
+    ]);
+
+    const result = await runTraceService.query({ runId: RUN_ID }, ORG_ID);
+
+    const csd = result.events.find((e) => e.eventType === 'controller_style_decided');
+    expect(csd).toBeDefined();
+    if (csd && csd.eventType === 'controller_style_decided') {
+      // Top-level fields the UI consumer reads — NOT nested under .payload
+      expect(csd.controllerStyle).toBe('operator');
+      expect(csd.source).toBe('override');
+    }
+    // Confirm there is no `payload` key on the returned event (TS-safe access
+    // via Record indexing — a future regression to nested shape would surface
+    // here as a failing assertion or a TS error on the lookup).
+    expect((csd as unknown as Record<string, unknown>).payload).toBeUndefined();
+
+    const rd = result.events.find((e) => e.eventType === 'review_decided');
+    expect(rd).toBeDefined();
+    if (rd && rd.eventType === 'review_decided') {
+      expect(rd.toolSlug).toBe('send_email');
+      expect(rd.decidedBy).toBe('user-42');
+      expect(rd.decision).toBe('auto');
+    }
+
+    const term = result.events.find((e) => e.eventType === 'run_terminated');
+    expect(term).toBeDefined();
+    if (term && term.eventType === 'run_terminated') {
+      // Top-level `failureReason` and `totalDurationMs` are part of the
+      // RunTracePage consumer contract.
+      expect(term.failureReason).toBeNull();
+      expect(typeof term.totalDurationMs).toBe('number');
+      expect(term.finalStatus).toBe('completed');
+    }
+  });
+
   // ── eventType filter ──────────────────────────────────────────────────────
 
   it('filters events by eventTypes when specified', async () => {

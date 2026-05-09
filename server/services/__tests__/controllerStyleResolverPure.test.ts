@@ -7,34 +7,39 @@ import {
 // ── 5 execution modes under test ───────────────────────────────────────────
 // operator modes: iee_browser, iee_dev → default 'operator'
 // native modes:   api, headless, claude-code → default 'native'
+//
+// Source vocabulary is locked (spec §4.4.4 line 1018):
+//   { 'override' | 'execution_mode_default' | 'subaccount_constraint' }
+// controllerStyleAllowed values are locked (spec §3.5):
+//   { 'native_only' | 'native_and_operator' }
 
-describe('deriveControllerStyle — no override, operator_allowed', () => {
+describe('deriveControllerStyle — no override, native_and_operator', () => {
   test('api → native (execution_mode_default)', () => {
-    const r = deriveControllerStyle('api', 'operator_allowed');
+    const r = deriveControllerStyle('api', 'native_and_operator');
     expect(r.controllerStyle).toBe('native');
     expect(r.source).toBe('execution_mode_default');
   });
 
   test('headless → native (execution_mode_default)', () => {
-    const r = deriveControllerStyle('headless', 'operator_allowed');
+    const r = deriveControllerStyle('headless', 'native_and_operator');
     expect(r.controllerStyle).toBe('native');
     expect(r.source).toBe('execution_mode_default');
   });
 
   test('claude-code → native (execution_mode_default)', () => {
-    const r = deriveControllerStyle('claude-code', 'operator_allowed');
+    const r = deriveControllerStyle('claude-code', 'native_and_operator');
     expect(r.controllerStyle).toBe('native');
     expect(r.source).toBe('execution_mode_default');
   });
 
   test('iee_browser → operator (execution_mode_default)', () => {
-    const r = deriveControllerStyle('iee_browser', 'operator_allowed');
+    const r = deriveControllerStyle('iee_browser', 'native_and_operator');
     expect(r.controllerStyle).toBe('operator');
     expect(r.source).toBe('execution_mode_default');
   });
 
   test('iee_dev → operator (execution_mode_default)', () => {
-    const r = deriveControllerStyle('iee_dev', 'operator_allowed');
+    const r = deriveControllerStyle('iee_dev', 'native_and_operator');
     expect(r.controllerStyle).toBe('operator');
     expect(r.source).toBe('execution_mode_default');
   });
@@ -59,70 +64,70 @@ describe('deriveControllerStyle — no override, native_only', () => {
     expect(r.source).toBe('execution_mode_default');
   });
 
-  test('iee_browser + native_only → downgraded to native (subaccount_constraint_downgrade)', () => {
+  test('iee_browser + native_only → downgraded to native (subaccount_constraint)', () => {
     const r = deriveControllerStyle('iee_browser', 'native_only');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('subaccount_constraint_downgrade');
+    expect(r.source).toBe('subaccount_constraint');
   });
 
-  test('iee_dev + native_only → downgraded to native (subaccount_constraint_downgrade)', () => {
+  test('iee_dev + native_only → downgraded to native (subaccount_constraint)', () => {
     const r = deriveControllerStyle('iee_dev', 'native_only');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('subaccount_constraint_downgrade');
+    expect(r.source).toBe('subaccount_constraint');
   });
 });
 
-describe('deriveControllerStyle — override native, operator_allowed', () => {
-  test('api + override native → native (explicit_override)', () => {
-    const r = deriveControllerStyle('api', 'operator_allowed', 'native');
+describe('deriveControllerStyle — override native, native_and_operator', () => {
+  test('api + override native → native (override)', () => {
+    const r = deriveControllerStyle('api', 'native_and_operator', 'native');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 
-  test('iee_browser + override native → native (explicit_override)', () => {
-    const r = deriveControllerStyle('iee_browser', 'operator_allowed', 'native');
+  test('iee_browser + override native → native (override)', () => {
+    const r = deriveControllerStyle('iee_browser', 'native_and_operator', 'native');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 
-  test('iee_dev + override native → native (explicit_override)', () => {
-    const r = deriveControllerStyle('iee_dev', 'operator_allowed', 'native');
+  test('iee_dev + override native → native (override)', () => {
+    const r = deriveControllerStyle('iee_dev', 'native_and_operator', 'native');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 });
 
 describe('deriveControllerStyle — override native, native_only', () => {
-  test('api + override native + native_only → native (explicit_override)', () => {
+  test('api + override native + native_only → native (override)', () => {
     const r = deriveControllerStyle('api', 'native_only', 'native');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 
-  test('iee_browser + override native + native_only → native (explicit_override)', () => {
+  test('iee_browser + override native + native_only → native (override)', () => {
     const r = deriveControllerStyle('iee_browser', 'native_only', 'native');
     expect(r.controllerStyle).toBe('native');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 });
 
-describe('deriveControllerStyle — override operator, operator_allowed', () => {
-  test('api + override operator → operator (explicit_override)', () => {
-    const r = deriveControllerStyle('api', 'operator_allowed', 'operator');
+describe('deriveControllerStyle — override operator, native_and_operator', () => {
+  test('api + override operator → operator (override)', () => {
+    const r = deriveControllerStyle('api', 'native_and_operator', 'operator');
     expect(r.controllerStyle).toBe('operator');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 
-  test('headless + override operator → operator (explicit_override)', () => {
-    const r = deriveControllerStyle('headless', 'operator_allowed', 'operator');
+  test('headless + override operator → operator (override)', () => {
+    const r = deriveControllerStyle('headless', 'native_and_operator', 'operator');
     expect(r.controllerStyle).toBe('operator');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 
-  test('iee_browser + override operator + operator_allowed → operator (explicit_override)', () => {
-    const r = deriveControllerStyle('iee_browser', 'operator_allowed', 'operator');
+  test('iee_browser + override operator + native_and_operator → operator (override)', () => {
+    const r = deriveControllerStyle('iee_browser', 'native_and_operator', 'operator');
     expect(r.controllerStyle).toBe('operator');
-    expect(r.source).toBe('explicit_override');
+    expect(r.source).toBe('override');
   });
 });
 

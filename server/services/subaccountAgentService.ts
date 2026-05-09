@@ -328,7 +328,7 @@ export const subaccountAgentService = {
     // Governance (spec §5.2.9). The Agent Config Governance tab posts these
     // four fields; updateLink must persist them so the new tab can actually
     // configure the link.
-    controllerStyleAllowed?: 'native_only' | 'operator_allowed';
+    controllerStyleAllowed?: 'native_only' | 'native_and_operator';
     allowedEnvironments?: ('api_tool' | 'headless' | 'browser' | 'terminal_repo')[];
     maxRiskTier?: number;
     requireApprovalAtTier?: number;

@@ -17,7 +17,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export type AllowedEnvironment = 'api_tool' | 'headless' | 'browser' | 'terminal_repo';
 
 export interface ExecutionTabProps {
-  controllerStyleAllowed: 'native_only' | 'operator_allowed';
+  controllerStyleAllowed: 'native_only' | 'native_and_operator';
   allowedEnvironments: AllowedEnvironment[];
   isSystemAgent: boolean;
   scheduling: {
@@ -31,7 +31,7 @@ export interface ExecutionTabProps {
   };
   saving: boolean;
   saved: boolean;
-  onControllerStyleChange: (value: 'native_only' | 'operator_allowed') => void;
+  onControllerStyleChange: (value: 'native_only' | 'native_and_operator') => void;
   onAllowedEnvironmentsChange: (value: AllowedEnvironment[]) => void;
   onSchedulingChange: (value: ExecutionTabProps['scheduling']) => void;
   onSave: () => void;
@@ -75,8 +75,8 @@ export default function ExecutionTab({
           <input
             type="checkbox"
             id="operatorModeEnabled"
-            checked={controllerStyleAllowed === 'operator_allowed'}
-            onChange={e => onControllerStyleChange(e.target.checked ? 'operator_allowed' : 'native_only')}
+            checked={controllerStyleAllowed === 'native_and_operator'}
+            onChange={e => onControllerStyleChange(e.target.checked ? 'native_and_operator' : 'native_only')}
             className="w-4 h-4 rounded mt-0.5"
           />
           <div>

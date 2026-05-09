@@ -277,20 +277,6 @@ describe('runTraceEvent', () => {
       }
     });
 
-    it('narrows to routing_path_chosen payload', () => {
-      const event: RunTraceEvent = {
-        ...base(),
-        eventType: 'routing_path_chosen',
-        routingSource: 'rule',
-        chosenAgentId: 'agent-1',
-      };
-      if (event.eventType === 'routing_path_chosen') {
-        expect(event.routingSource).toBe('rule');
-      } else {
-        throw new Error('Narrowing failed');
-      }
-    });
-
     it('narrows to tool_proposed payload', () => {
       const event: RunTraceEvent = {
         ...base(),
@@ -323,11 +309,10 @@ describe('runTraceEvent', () => {
   });
 
   describe('RunTraceEventType union coverage', () => {
-    it('includes all 15 event types', () => {
+    it('includes all 14 Phase 1 event types (routing_path_chosen deferred to Phase 3)', () => {
       const expected: RunTraceEventType[] = [
         'controller_style_decided',
         'policy_envelope_resolved',
-        'routing_path_chosen',
         'tool_proposed',
         'tool_security_decision',
         'tool_call',
@@ -341,7 +326,7 @@ describe('runTraceEvent', () => {
         'run_started',
         'run_terminated',
       ];
-      expect(expected).toHaveLength(15);
+      expect(expected).toHaveLength(14);
 
       // Verify each is a valid string (compile-time shape is what matters here)
       for (const t of expected) {

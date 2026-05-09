@@ -9,10 +9,12 @@ export class ControllerStyleNotAllowedForAgentError extends Error {
   }
 }
 
+// Locked vocabulary — spec §4.4.4 line 1018, architecture.md § Run Trace event
+// stable set. Adding a value requires a spec amendment.
 export type ControllerStyleSource =
-  | 'explicit_override'
+  | 'override'
   | 'execution_mode_default'
-  | 'subaccount_constraint_downgrade';
+  | 'subaccount_constraint';
 
 export interface DeriveControllerStyleResult {
   controllerStyle: ControllerStyle;
@@ -29,7 +31,8 @@ export interface DeriveControllerStyleResult {
  * 2. executionMode default — operator execution modes map to 'operator';
  *    everything else maps to 'native'.
  * 3. Subaccount-constraint downgrade — if controllerStyleAllowed='native_only'
- *    and derived style would be 'operator', downgrade to 'native'.
+ *    and derived style would be 'operator', downgrade to 'native' with source
+ *    'subaccount_constraint'.
  */
 export function deriveControllerStyle(
   executionMode: string,
@@ -42,7 +45,7 @@ export function deriveControllerStyle(
     }
     return {
       controllerStyle: override === 'operator' ? 'operator' : 'native',
-      source: 'explicit_override',
+      source: 'override',
     };
   }
 
@@ -50,7 +53,7 @@ export function deriveControllerStyle(
     executionMode === 'iee_browser' || executionMode === 'iee_dev' ? 'operator' : 'native';
 
   if (modeDefault === 'operator' && controllerStyleAllowed === 'native_only') {
-    return { controllerStyle: 'native', source: 'subaccount_constraint_downgrade' };
+    return { controllerStyle: 'native', source: 'subaccount_constraint' };
   }
 
   return { controllerStyle: modeDefault, source: 'execution_mode_default' };

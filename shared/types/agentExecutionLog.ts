@@ -344,7 +344,7 @@ export type AgentExecutionEventPayload =
       runId: string;
       executionMode: string;
       controllerStyle: 'native' | 'operator';
-      source: 'explicit_override' | 'execution_mode_default' | 'subaccount_constraint_downgrade';
+      source: 'override' | 'execution_mode_default' | 'subaccount_constraint';
     }
   | {
       /** Foundation refactor spec §3.5 — policy envelope resolved at run creation (INV-19). */

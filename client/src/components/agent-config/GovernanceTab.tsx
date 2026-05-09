@@ -71,7 +71,6 @@ export default function GovernanceTab({
               {[0, 1, 2, 3, 4, 5, 6].map(tier => (
                 <option key={tier} value={tier}>Tier {tier} and above</option>
               ))}
-              <option value={7}>Never require approval</option>
             </select>
             <div className="text-[11px] text-slate-400 mt-1">
               Actions at or above this tier will pause for human approval before executing.

@@ -53,8 +53,9 @@ export class PolicyEnvelopePersistFailedError extends Error {
 // allowedEnvironments does not include the environment derived from the
 // run's executionMode. Spec §4.2.8 requires this gate before tool/IEE
 // dispatch (the envelope captures the constraint; this error enforces it).
+// Spec §4.2.8 line 636: HTTP 422 with code execution_mode_not_allowed_for_agent.
 export class ExecutionModeNotAllowedForAgentError extends Error {
-  readonly statusCode = 403;
+  readonly statusCode = 422;
   readonly errorCode = 'execution_mode_not_allowed_for_agent';
 
   constructor(executionMode: string, environment: string) {
@@ -95,7 +96,7 @@ export async function resolvePolicyEnvelope(
 
   // Derive allowed controllers from governance column
   const allowedControllers: ControllerStyle[] =
-    controllerStyleAllowed === 'operator_allowed' ? ['native', 'operator'] : ['native'];
+    controllerStyleAllowed === 'native_and_operator' ? ['native', 'operator'] : ['native'];
 
   // Source 2: org/subaccount spending policies
   const spendingRows = await db
