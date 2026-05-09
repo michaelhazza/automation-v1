@@ -6,6 +6,7 @@ import { systemSkillService } from '../services/systemSkillService.js';
 import { agentService } from '../services/agentService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
+import { suggestRuntimeCheck } from '../services/skillRuntimeCheckSuggestionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
 import { rateLimitKeys } from '../lib/rateLimitKeys.js';
@@ -126,12 +127,12 @@ router.patch(
 // ─── Create custom skill (org-level) ─────────────────────────────────────────
 
 router.post('/api/skills', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res) => {
-  const { name, slug, description, definition, instructions } = req.body;
+  const { name, slug, description, definition, instructions, verify, verifyNullJustification, reversible, blastRadius } = req.body;
   if (!name || !slug || !definition) {
     res.status(400).json({ error: 'name, slug, and definition are required' });
     return;
   }
-  const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions });
+  const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions, verify, verifyNullJustification, reversible, blastRadius });
   res.status(201).json(skill);
 }));
 
@@ -148,6 +149,23 @@ router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSI
   await skillService.deleteSkill(req.params.id, req.orgId!);
   res.json({ message: 'Skill deleted' });
 }));
+
+// ─── Suggest runtime check for a skill ───────────────────────────────────────
+
+router.post(
+  '/api/skills/:id/suggest-runtime-check',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { description, apiSpec } = req.body as { description?: unknown; apiSpec?: unknown };
+    const suggestion = await suggestRuntimeCheck({
+      description: typeof description === 'string' ? description : '',
+      apiSpec: typeof apiSpec === 'string' ? apiSpec : undefined,
+      organisationId: req.orgId!,
+    });
+    res.json(suggestion);
+  }),
+);
 
 // ── Feature 2 — org-scoped skill test run ────────────────────────────────────
 // Resolves the org subaccount and its first active agent link, then executes a

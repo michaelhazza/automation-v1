@@ -544,6 +544,8 @@ export interface ListEntriesQuery {
   limit: number;
   sortKey: 'createdAt' | 'updatedAt' | 'confidence' | 'sourceAgent' | 'kind' | 'status';
   sortDir: 'asc' | 'desc';
+  /** Source provenance filter — spec §13.4. */
+  source?: 'all' | 'corrections' | 'manual' | 'auto';
 }
 
 export interface KnowledgeEntryRow {
@@ -557,6 +559,8 @@ export interface KnowledgeEntryRow {
   autoUpdateDisabled: boolean;
   lastEditedBy: { kind: 'auto' | 'manual'; userId: string | null; at: string } | null;
   etag: string;
+  capturedVia: string;
+  capturedAt: string;
 }
 
 export interface ListEntriesResult {
@@ -618,7 +622,9 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
         mb.subaccount_id::text AS subaccount_id,
         sa.name AS subaccount_name,
         mb.last_edited_by_agent_id::text AS last_edited_agent_id,
-        mb.source_run_id::text AS source_run_id
+        mb.source_run_id::text AS source_run_id,
+        mb.captured_via,
+        mb.created_at AS captured_at
       FROM memory_blocks mb
       LEFT JOIN subaccounts sa ON sa.id = mb.subaccount_id AND sa.deleted_at IS NULL
       WHERE mb.organisation_id = ${query.organisationId}::uuid
@@ -634,6 +640,13 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
           : sql``}
         ${query.q
           ? sql`AND mb.content ILIKE ${'%' + query.q + '%'}`
+          : sql``}
+        ${query.source === 'corrections'
+          ? sql`AND mb.captured_via = 'operator_correction'`
+          : query.source === 'manual'
+          ? sql`AND mb.captured_via = 'manual_edit'`
+          : query.source === 'auto'
+          ? sql`AND mb.captured_via = 'auto_synthesised'`
           : sql``}
     ),
     ordered AS (
@@ -662,6 +675,8 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
       subaccount_id: string | null; subaccount_name: string | null;
       last_edited_agent_id: string | null;
       source_run_id: string | null;
+      captured_via: string | null;
+      captured_at: string;
     }> | null;
     status_options: Array<{ value: string; label: string; count: number }> | null;
   };
@@ -695,6 +710,8 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
     autoUpdateDisabled: r.auto_update_disabled,
     lastEditedBy: null,
     etag: r.updated_at,
+    capturedVia: r.captured_via ?? 'manual_edit',
+    capturedAt: r.captured_at,
   }));
 
   const rawStatusOpts = raw.status_options ?? [];

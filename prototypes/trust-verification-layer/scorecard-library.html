@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Scorecard Library (Round 2, new screen)
+
+  This file renders the Scorecards tab inside Govern / Quality.
+  Visual shell matches govern-quality.html (same tabs, same header),
+  with Scorecards tab active.
+
+  Columns: Scorecard name | Source pill | Quality checks count |
+           Attach count (clickable) | Share with sub-accounts toggle |
+           Actions menu (View, Duplicate, Edit, Delete)
+
+  Share toggle: visible on System and Organisation rows, absent on subaccount rows.
+  Org-scope note if any system scorecards are hidden.
+
+  Primary action: Create scorecard (top right).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scorecard Library | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Page tabs (same as govern-quality) ── */
+  .page-tabs {
+    display: flex; gap: 0; border-bottom: 2px solid var(--slate-200);
+    margin-bottom: 24px;
+  }
+  .page-tab-btn {
+    padding: 10px 20px; font-size: 14px; font-weight: 500;
+    color: var(--slate-500); background: transparent;
+    border: none; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    cursor: pointer; transition: all 0.12s; white-space: nowrap;
+  }
+  .page-tab-btn:hover { color: var(--slate-800); }
+  .page-tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); font-weight: 700; }
+
+  /* ── Filter chips ── */
+  .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .filter-chip {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600);
+    background: white; cursor: pointer; transition: all 0.12s;
+  }
+  .filter-chip:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+  .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  /* ── Toolbar ── */
+  .page-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .page-toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .search-input {
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--slate-200);
+    font-size: 13px; color: var(--slate-700); outline: none; width: 200px;
+  }
+  .search-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
+
+  /* ── Source pill — 2 values: Platform / Custom ── */
+  .source-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em;
+    border-radius: 4px; padding: 2px 8px; white-space: nowrap; text-transform: uppercase;
+    position: relative; cursor: default;
+  }
+  .source-platform { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .source-custom   { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+
+  /* Tooltip on Custom pill showing actual scope */
+  .source-pill[data-scope-tip]::after {
+    content: attr(data-scope-tip);
+    position: absolute; bottom: calc(100% + 5px); left: 0;
+    background: var(--slate-800); color: white;
+    font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0;
+    padding: 5px 9px; border-radius: 6px; white-space: nowrap;
+    z-index: 50; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .source-pill[data-scope-tip]:hover::after { opacity: 1; }
+
+  /* ── Empty state ── */
+  .empty-state {
+    padding: 56px 24px; text-align: center;
+  }
+  .empty-state-icon {
+    width: 48px; height: 48px; background: var(--slate-100); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+  }
+  .empty-state h3 { font-size: 15px; font-weight: 700; color: var(--slate-700); margin-bottom: 8px; }
+  .empty-state p { font-size: 13px; color: var(--slate-500); max-width: 380px; margin: 0 auto 20px; line-height: 1.5; }
+
+  /* ── Library table ── */
+  .library-table { width: 100%; border-collapse: collapse; }
+  .library-table thead tr { background: var(--slate-50); border-bottom: 2px solid var(--slate-200); }
+  .library-table th {
+    text-align: left; padding: 10px 14px;
+    font-size: 10.5px; font-weight: 700; color: var(--slate-400);
+    text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
+    cursor: pointer; user-select: none;
+  }
+  .library-table th:hover { color: var(--slate-700); }
+  .library-table tbody tr { border-bottom: 1px solid var(--slate-100); transition: background 0.1s; }
+  .library-table tbody tr:last-child { border-bottom: none; }
+  .library-table tbody tr:hover { background: var(--slate-50); }
+  .library-table td { padding: 13px 14px; font-size: 13px; color: var(--slate-700); vertical-align: middle; }
+
+  /* ── Toggle switch ── */
+  .toggle-input { display: none; }
+  .toggle-track {
+    width: 32px; height: 18px; border-radius: 9px;
+    background: var(--slate-200); cursor: pointer;
+    position: relative; transition: background 0.15s; display: inline-block;
+  }
+  .toggle-input:checked + .toggle-track { background: var(--indigo-600); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; border-radius: 50%; background: white;
+    transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-input:checked + .toggle-track::after { left: 16px; }
+  .toggle-wrap { display: flex; align-items: center; gap: 6px; }
+
+  /* ── Actions menu ── */
+  .actions-menu-wrap { position: relative; }
+  .actions-btn {
+    background: none; border: 1px solid var(--slate-200); border-radius: 6px;
+    padding: 4px 10px; font-size: 12px; color: var(--slate-500); cursor: pointer;
+    white-space: nowrap;
+  }
+  .actions-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+  .actions-dropdown {
+    position: absolute; right: 0; top: calc(100% + 4px);
+    background: white; border: 1px solid var(--slate-200); border-radius: 9px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1); z-index: 50; min-width: 140px;
+    padding: 4px; display: none;
+  }
+  .actions-menu-wrap:hover .actions-dropdown { display: block; }
+  .actions-dropdown-item {
+    display: block; width: 100%; text-align: left; padding: 7px 12px;
+    font-size: 12.5px; color: var(--slate-700); border: none; background: none;
+    cursor: pointer; border-radius: 5px;
+  }
+  .actions-dropdown-item:hover { background: var(--slate-100); }
+  .actions-dropdown-item.danger { color: var(--red-600); }
+  .actions-dropdown-item.danger:hover { background: var(--red-50); }
+
+  /* ── Used-by pill ── */
+  .used-by-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; color: var(--indigo-600); font-weight: 500; cursor: pointer;
+    text-decoration: none; white-space: nowrap;
+  }
+  .used-by-link:hover { text-decoration: underline; }
+
+  /* ── Info note ── */
+  .info-note {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 8px;
+    padding: 8px 14px; font-size: 12px; color: var(--slate-600); margin-bottom: 14px;
+  }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--slate-900); color: white;
+    font-size: 12.5px; font-weight: 500;
+    padding: 10px 16px; border-radius: 8px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25); z-index: 9999;
+    animation: toastIn 0.2s ease; max-width: 360px;
+  }
+  .toast.hidden { display: none; }
+  @keyframes toastIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+  /* ── Used-by modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.4);
+    z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box { background: white; border-radius: 14px; width: 420px; max-width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,0.18); overflow: hidden; }
+  .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--slate-200); display: flex; align-items: center; justify-content: space-between; }
+  .modal-title { font-size: 15px; font-weight: 700; color: var(--slate-800); }
+  .modal-close { width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--slate-200); background: white; cursor: pointer; font-size: 18px; color: var(--slate-400); display: flex; align-items: center; justify-content: center; }
+  .modal-close:hover { background: var(--slate-100); }
+  .modal-body { padding: 16px 20px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'govern-quality.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Govern</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Quality</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">Back to prototypes</a>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+          <div>
+            <h1>Quality</h1>
+            <p>Scorecard library and agent quality monitoring.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page tabs (Scorecards tab active) -->
+      <div class="page-tabs">
+        <button class="page-tab-btn" onclick="window.location='govern-quality.html'">Agents</button>
+        <button class="page-tab-btn active">Scorecards</button>
+        <button class="page-tab-btn" onclick="window.location='govern-quality.html#bench-history'">Bench history</button>
+      </div>
+
+      <!-- Info note: if any system scorecards are hidden by org -->
+      <div class="info-note" id="hidden-note" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Some platform scorecards are hidden by your organisation. Contact your org admin if you need access.
+      </div>
+
+      <!-- Toolbar -->
+      <div class="page-toolbar">
+        <div class="filter-chips">
+          <button class="filter-chip active" onclick="filterLibrary('all',this)">All</button>
+          <button class="filter-chip" onclick="filterLibrary('platform',this)">Platform</button>
+          <button class="filter-chip" onclick="filterLibrary('custom',this)">Custom</button>
+        </div>
+        <input class="search-input" type="text" placeholder="Search scorecards..." oninput="searchLibrary(this.value)">
+        <div class="page-toolbar-right">
+          <a href="scorecard-create.html" class="btn btn-primary">Create scorecard</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <table class="library-table" id="library-table">
+          <thead>
+            <tr>
+              <th>Scorecard name</th>
+              <th>Source</th>
+              <th>Quality checks</th>
+              <th>Used by agents</th>
+              <th>Share with sub-accounts</th>
+              <th style="width:100px;"></th>
+            </tr>
+          </thead>
+          <!-- Empty state row — shown when Custom filter has no results -->
+          <tbody id="empty-tbody" style="display:none;">
+            <tr>
+              <td colspan="6" style="padding:0;">
+                <div class="empty-state">
+                  <div class="empty-state-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--slate-400)" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+                  </div>
+                  <h3>No custom scorecards yet</h3>
+                  <p>Duplicate a Platform scorecard to start from a template, or create one from scratch.</p>
+                  <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button class="btn btn-secondary" onclick="filterLibrary('platform',document.querySelector('[onclick*=platform]'))">Browse Platform scorecards</button>
+                    <a href="scorecard-create.html" class="btn btn-primary">Create scorecard</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+          <tbody id="library-rows">
+
+            <!-- Platform rows -->
+            <tr data-scope="platform" data-name="Hallucination check">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Hallucination check</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Factual grounding and source citation</div>
+              </td>
+              <td><span class="source-pill source-platform">Platform</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">2 checks</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('Hallucination check', ['Outreach Agent','Content Agent','CRM Enrichment Agent','Scheduling Agent','Inbox Triage Agent','Reporting Agent','Research Agent']);return false;">
+                  7 agents
+                </a>
+              </td>
+              <td>
+                <div class="toggle-wrap">
+                  <input type="checkbox" id="tog-sys-1" class="toggle-input" checked onchange="toggleShare(this,'Hallucination check')">
+                  <label for="tog-sys-1" class="toggle-track"></label>
+                </div>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item" onclick="viewScorecard('Hallucination check')">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('Hallucination check')">Duplicate</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <tr data-scope="platform" data-name="External action safety">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">External action safety</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Blast radius and reversibility checks</div>
+              </td>
+              <td><span class="source-pill source-platform">Platform</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">3 checks</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('External action safety', ['Outreach Agent','Content Agent','Scheduling Agent']);return false;">3 agents</a>
+              </td>
+              <td>
+                <div class="toggle-wrap">
+                  <input type="checkbox" id="tog-sys-2" class="toggle-input" checked onchange="toggleShare(this,'External action safety')">
+                  <label for="tog-sys-2" class="toggle-track"></label>
+                </div>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item" onclick="viewScorecard('External action safety')">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('External action safety')">Duplicate</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Custom rows (org and subaccount) -->
+            <tr data-scope="custom" data-name="Outreach tone and voice">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Outreach tone and voice</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Tone match, hook strength, length discipline</div>
+              </td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This organisation">Custom</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">3 checks</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('Outreach tone and voice', ['Outreach Agent','Content Agent','Research Agent','Prospecting Agent']);return false;">4 agents</a>
+              </td>
+              <td>
+                <div class="toggle-wrap">
+                  <input type="checkbox" id="tog-org-1" class="toggle-input" checked onchange="toggleShare(this,'Outreach tone and voice')">
+                  <label for="tog-org-1" class="toggle-track"></label>
+                </div>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item" onclick="viewScorecard('Outreach tone and voice')">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('Outreach tone and voice')">Duplicate</button>
+                    <button class="actions-dropdown-item" onclick="editScorecard('Outreach tone and voice')">Edit</button>
+                    <button class="actions-dropdown-item danger" onclick="deleteScorecard('Outreach tone and voice')">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <tr data-scope="custom" data-name="Content quality v1">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Content quality v1</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Readability, structure, SEO signals</div>
+              </td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This organisation">Custom</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">4 checks</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('Content quality v1', ['Content Agent','Blog Agent','Newsletter Agent']);return false;">3 agents</a>
+              </td>
+              <td>
+                <div class="toggle-wrap">
+                  <input type="checkbox" id="tog-org-2" class="toggle-input" checked onchange="toggleShare(this,'Content quality v1')">
+                  <label for="tog-org-2" class="toggle-track"></label>
+                </div>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('Content quality v1')">Duplicate</button>
+                    <button class="actions-dropdown-item" onclick="editScorecard('Content quality v1')">Edit</button>
+                    <button class="actions-dropdown-item danger">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <tr data-scope="custom" data-name="Data quality v1">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Data quality v1</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Completeness, accuracy, format compliance</div>
+              </td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This organisation">Custom</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">4 checks</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('Data quality v1', ['CRM Enrichment Agent','Research Agent']);return false;">2 agents</a>
+              </td>
+              <td>
+                <div class="toggle-wrap">
+                  <input type="checkbox" id="tog-org-3" class="toggle-input" onchange="toggleShare(this,'Data quality v1')">
+                  <label for="tog-org-3" class="toggle-track"></label>
+                </div>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('Data quality v1')">Duplicate</button>
+                    <button class="actions-dropdown-item">Edit</button>
+                    <button class="actions-dropdown-item danger">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Custom rows (subaccount-created, no Share toggle) -->
+            <tr data-scope="custom" data-name="Outbound conversion v2">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Outbound conversion v2</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Call to action, personalisation</div>
+              </td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This subaccount">Custom</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">2 checks</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('Outbound conversion v2', ['Outreach Agent']);return false;">1 agent</a>
+              </td>
+              <td>
+                <span style="font-size:11.5px;color:var(--slate-400);">Subaccount only</span>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('Outbound conversion v2')">Duplicate</button>
+                    <button class="actions-dropdown-item">Edit</button>
+                    <button class="actions-dropdown-item danger">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <tr data-scope="custom" data-name="Response brevity">
+              <td>
+                <div style="font-size:13px;font-weight:600;color:var(--slate-800);">Response brevity</div>
+                <div style="font-size:11.5px;color:var(--slate-400);margin-top:2px;">Length discipline for support responses</div>
+              </td>
+              <td><span class="source-pill source-custom" data-scope-tip="Created at: This subaccount">Custom</span></td>
+              <td style="font-size:12.5px;color:var(--slate-600);">1 check</td>
+              <td>
+                <a href="#" class="used-by-link" onclick="showUsedBy('Response brevity', ['Support Agent']);return false;">1 agent</a>
+              </td>
+              <td>
+                <span style="font-size:11.5px;color:var(--slate-400);">Subaccount only</span>
+              </td>
+              <td>
+                <div class="actions-menu-wrap">
+                  <button class="actions-btn">Actions</button>
+                  <div class="actions-dropdown">
+                    <button class="actions-dropdown-item">View</button>
+                    <button class="actions-dropdown-item" onclick="duplicateScorecard('Response brevity')">Duplicate</button>
+                    <button class="actions-dropdown-item">Edit</button>
+                    <button class="actions-dropdown-item danger">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Used-by modal -->
+<div class="modal-overlay" id="used-by-modal" onclick="handleModalBg(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <span class="modal-title" id="used-by-title">Used by agents</span>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="used-by-body" style="padding-bottom:20px;"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="toast-text">Saved.</span>
+</div>
+
+<script>
+function filterLibrary(scope, btn) {
+  document.querySelectorAll('.filter-chips .filter-chip').forEach(function(c) { c.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  var visibleCount = 0;
+  document.querySelectorAll('#library-rows tr').forEach(function(row) {
+    var show = scope === 'all' || row.dataset.scope === scope;
+    row.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
+  });
+  // Show empty state if Custom filter and no rows
+  var emptyTbody = document.getElementById('empty-tbody');
+  emptyTbody.style.display = (scope === 'custom' && visibleCount === 0) ? '' : 'none';
+}
+
+function searchLibrary(q) {
+  var lq = q.toLowerCase();
+  document.querySelectorAll('#library-rows tr').forEach(function(row) {
+    var name = (row.dataset.name || '').toLowerCase();
+    row.style.display = name.includes(lq) ? '' : 'none';
+  });
+}
+
+function toggleShare(checkbox, name) {
+  var state = checkbox.checked ? 'visible to sub-accounts' : 'hidden from sub-accounts';
+  showToast('"' + name + '" is now ' + state + '.');
+}
+
+function viewScorecard(name) {
+  showToast('Viewing "' + name + '" (prototype: see scorecard-create.html for form layout)');
+}
+
+function duplicateScorecard(name) {
+  window.location = 'scorecard-create.html?duplicate=' + encodeURIComponent(name);
+}
+
+function editScorecard(name) {
+  window.location = 'scorecard-create.html?edit=' + encodeURIComponent(name);
+}
+
+function deleteScorecard(name) {
+  if (confirm('Delete "' + name + '"? This cannot be undone. Agents that have it attached will lose scoring for that scorecard.')) {
+    showToast('"' + name + '" deleted.');
+  }
+}
+
+function showUsedBy(name, agents) {
+  document.getElementById('used-by-title').textContent = '"' + name + '" is used by ' + agents.length + ' agent' + (agents.length !== 1 ? 's' : '');
+  var body = '<ul style="list-style:none;display:flex;flex-direction:column;gap:6px;">';
+  agents.forEach(function(a) {
+    body += '<li style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate-800);">';
+    body += '<span style="width:28px;height:28px;border-radius:7px;background:var(--indigo-100);border:1px solid var(--indigo-200);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--indigo-600);flex-shrink:0;">' + a.substring(0,2).toUpperCase() + '</span>';
+    body += a + '</li>';
+  });
+  body += '</ul>';
+  document.getElementById('used-by-body').innerHTML = body;
+  document.getElementById('used-by-modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('used-by-modal').classList.remove('open');
+}
+
+function handleModalBg(e) {
+  if (e.target === document.getElementById('used-by-modal')) closeModal();
+}
+
+function showToast(msg) {
+  document.getElementById('toast-text').textContent = msg;
+  var t = document.getElementById('toast');
+  t.classList.remove('hidden');
+  setTimeout(function() { t.classList.add('hidden'); }, 3500);
+}
+</script>
+</body>
+</html>

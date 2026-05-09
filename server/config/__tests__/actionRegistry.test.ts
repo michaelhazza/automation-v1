@@ -65,6 +65,20 @@ for (const [slug, def] of entries) {
     expect(validStrategies.includes(def.retryPolicy.strategy), `retryPolicy.strategy='${def.retryPolicy.strategy}' not in ${JSON.stringify(validStrategies)}`).toBeTruthy();
   });
 
+  // Trust & Verification Layer §6.1 + §11.4 — every entry must satisfy the
+  // CI gate's coverage rule: either `verify` is set (RuntimeCheckKind | null)
+  // OR `verifyNullJustification` is a non-empty string.
+  test(`${slug}: has runtime-check coverage (verify or verifyNullJustification)`, () => {
+    const hasVerifyField = def.verify !== undefined;
+    const hasJustification =
+      typeof def.verifyNullJustification === 'string' &&
+      def.verifyNullJustification.length > 0;
+    expect(
+      hasVerifyField || hasJustification,
+      `${slug} missing both \`verify\` and \`verifyNullJustification\` — fails the verify-runtime-check-coverage gate.`,
+    ).toBeTruthy();
+  });
+
   // If scopeRequirements is present, verify the named fields exist on the schema.
   if (def.scopeRequirements) {
     const fieldsToCheck: string[] = [

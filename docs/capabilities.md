@@ -427,6 +427,18 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 - **Quality safeguards** — Memory quality scores are managed by the platform, not individual agents — preventing any single run from corrupting the knowledge base
 - Automated memory decay (90 days), nightly deduplication, and multi-scope context cascading so agents always have the right context at the right level
 
+### Trust & Verification Layer
+
+Three-stage quality framework that makes agent output verifiable, correctable, and continuously improving — without requiring model changes or prompt re-engineering.
+
+- **Skill verification** — Before any agent output leaves the platform, a set of named quality checks evaluates it against configurable criteria. Every check produces a pass, fail, or inconclusive verdict with the exact text that was evaluated, so operators can see precisely why a check fired.
+- **Scorecards** — Groups of quality checks packaged as a reusable scorecard. Attach a scorecard to any agent and every skill output the agent produces is automatically evaluated against it. System-managed scorecards apply platform-wide; org-managed scorecards apply across all client workspaces; workspace-managed scorecards apply to a single client.
+- **Sampling controls** — Scorecards run on a configurable fraction of outputs (every run, every fourth run, etc.) so quality gates fit any volume without inflating costs. Mandatory checks always run; sampled checks apply the configured rate.
+- **Bench evaluation** — Run any scorecard against a curated set of test inputs to measure quality before and after a change. Results are retained per run so operators can compare quality across model upgrades, prompt edits, or rule changes.
+- **Operator correction** — When an operator corrects an agent output in the Run-trace timeline, the corrected version is captured as a memory block with full provenance: the original output, the corrected version, the skill that produced it, and the source run. Corrections feed directly into the agent's knowledge base.
+- **Pattern detection** — A nightly sweep clusters similar corrections using embedding similarity. When three or more corrections align on the same skill, a pattern-inferred memory block is promoted for human review and a tightening recommendation is surfaced in the Govern page.
+- **Provenance-filtered Knowledge page** — The Knowledge page shows a source filter so operators can isolate correction-sourced entries from manually authored entries and auto-synthesised entries. Every row shows its provenance pill and links back to the source run.
+
 ### Workspace Health & Diagnostics
 
 Automated configuration auditing that detects drift, misconfigurations, and operational issues.

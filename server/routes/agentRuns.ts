@@ -9,8 +9,8 @@ import { resumeFromIntegrationConnect } from '../services/agentResumeService.js'
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
-import { agentRuns, agentRunSnapshots } from '../db/schema/index.js';
-import { eq, and, gte, sql, inArray, count } from 'drizzle-orm';
+import { agentRuns, agentRunSnapshots, agentExecutionEvents } from '../db/schema/index.js';
+import { eq, and, gte, sql, inArray, count, asc, or } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 import { mapAgentRunToTestResult } from '../services/agentTestRunMapperPure.js';
@@ -237,9 +237,46 @@ router.get(
       iteration?: number;
     }>;
 
+    // Trust & Verification Layer §9 cross-entity guard — look up canonical
+    // agent_execution_events.id per tool-call so the Run-trace UI can pass a
+    // real eventId to the corrections route. The toolCallsLog blob in the
+    // snapshot does not carry event UUIDs; we match by (skillSlug, ordinal-
+    // within-slug). The agent loop does NOT emit skill.invoked / skill.completed
+    // for every tool call — those are emitted by special paths only — so
+    // tool calls that don't have matching events resolve to eventId: null
+    // and the UI hides the Correct affordance.
+    const eventRows = await db
+      .select({
+        id: agentExecutionEvents.id,
+        eventType: agentExecutionEvents.eventType,
+        payload: agentExecutionEvents.payload,
+      })
+      .from(agentExecutionEvents)
+      .where(
+        and(
+          eq(agentExecutionEvents.runId, runId),
+          or(
+            eq(agentExecutionEvents.eventType, 'skill.invoked'),
+            eq(agentExecutionEvents.eventType, 'skill.completed'),
+          ),
+        ),
+      )
+      .orderBy(asc(agentExecutionEvents.sequenceNumber));
+
+    // Narrow payload's runtime shape to the field linkToolCallsToEventIds reads.
+    const eventRowsForLink = eventRows.map((r) => ({
+      id: r.id,
+      eventType: r.eventType,
+      payload:
+        typeof r.payload === 'object' && r.payload !== null && 'skillSlug' in r.payload
+          ? { skillSlug: String((r.payload as { skillSlug: unknown }).skillSlug) }
+          : null,
+    }));
+
     const role: string = req.user?.role ?? 'user';
-    const { projectForRole } = await import('../services/agentRunMessageServicePure.js');
-    const projected = projectForRole(toolCallsLog, role);
+    const { projectForRole, linkToolCallsToEventIds } = await import('../services/agentRunMessageServicePure.js');
+    const eventIdsByPosition = linkToolCallsToEventIds(toolCallsLog, eventRowsForLink);
+    const projected = projectForRole(toolCallsLog, role, eventIdsByPosition);
 
     // Cache-Control: private, no-store — role-aware masking projection — must not
     // be shared-cacheable across roles or users; prevents future infra (CDN, edge

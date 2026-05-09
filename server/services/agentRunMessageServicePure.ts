@@ -111,6 +111,16 @@ export interface RunTraceToolCallProjection {
   outputTruncated?: true;
   durationMs: number;
   iteration: number;
+  /**
+   * Canonical `agent_execution_events.id` for this tool call, or null when no
+   * matching event row exists (e.g. legacy runs that pre-date the event log,
+   * or tool-call entries written by the failure-path `fail_run` branch that
+   * does not always emit a `skill.completed` event). The Run-trace UI's
+   * Correct affordance MUST pass this id (when non-null) to the corrections
+   * route — the corrections route rejects runs that lack a real eventId
+   * (Trust & Verification Layer spec §9 cross-entity guard).
+   */
+  eventId: string | null;
 }
 
 /** Maximum characters for truncated tool result output (workspace_user tier). */
@@ -177,6 +187,7 @@ export function projectMessageForRole(
       ...(outputTruncated ? { outputTruncated: true as const } : {}),
       durationMs,
       iteration,
+      eventId: null,
     };
   }
 
@@ -187,12 +198,19 @@ export function projectMessageForRole(
     output: rawOutput,
     durationMs,
     iteration,
+    eventId: null,
   };
 }
 
 /**
  * Project an ordered array of tool-call log entries for a given user role.
  * Returns a new array; does not mutate the input.
+ *
+ * `eventIdsByPosition` (optional): the canonical `agent_execution_events.id`
+ * to attach to each tool-call entry by position. Pass the array of event IDs
+ * obtained from {@link linkToolCallsToEventIds}. When omitted or undefined,
+ * every projected entry's `eventId` is `null` (legacy callers that have not
+ * been wired up to the cross-entity guard yet).
  */
 export function projectForRole(
   entries: ReadonlyArray<{
@@ -204,8 +222,90 @@ export function projectForRole(
     iteration?: number;
   }>,
   role: string,
+  eventIdsByPosition?: ReadonlyArray<string | null>,
 ): RunTraceToolCallProjection[] {
-  return entries.map((entry) => projectMessageForRole(entry, role));
+  return entries.map((entry, idx) => {
+    const projected = projectMessageForRole(entry, role);
+    const eventId = eventIdsByPosition?.[idx] ?? null;
+    return { ...projected, eventId };
+  });
+}
+
+/**
+ * Match each tool-call log entry to its canonical
+ * `agent_execution_events.id` by `(skillSlug, ordinal-within-slug)`.
+ *
+ * Trust & Verification Layer spec §9 cross-entity guard. The toolCallsLog
+ * blob in `agent_run_snapshots` does not carry event UUIDs; the run-trace
+ * endpoint looks them up at read time and passes them through.
+ *
+ * Matching strategy: the agent loop does NOT emit `skill.invoked` /
+ * `skill.completed` events for every tool call — those events come from
+ * special paths (CRM planner, charge router, etc.). Position-matching across
+ * the whole stream would mis-attach an event from a different skill. Instead,
+ * we group events by their declared `skillSlug` and position-match within
+ * each group: the Nth toolCall whose `tool === foo` is paired with the Nth
+ * `skill.completed` event whose `skillSlug === foo` (falling back to the Nth
+ * `skill.invoked` event for the same skill when `skill.completed` is absent).
+ *
+ * Returns an array the same length as `toolCalls`. Entries that have no
+ * matching event resolve to `null` (legacy runs, ordinary tool calls that
+ * never emit a skill event, fail_run-truncated logs). The Run-trace UI hides
+ * the Correct affordance when `eventId === null` so the corrections route
+ * (which rejects null/placeholder eventIds) never sees junk input.
+ *
+ * Pure: no DB, no I/O. Tested at
+ * server/services/__tests__/agentRunMessageServicePure.test.ts.
+ */
+export function linkToolCallsToEventIds(
+  toolCalls: ReadonlyArray<{ tool?: string; name?: string }>,
+  events: ReadonlyArray<{
+    id: string;
+    eventType: string;
+    payload?: { skillSlug?: string } | null;
+  }>,
+): Array<string | null> {
+  // Pre-bucket events by skillSlug, preserving sequence order. We rely on the
+  // caller to pass events ordered by `sequence_number` ASC.
+  const completedBySlug = new Map<string, string[]>();
+  const invokedBySlug = new Map<string, string[]>();
+  for (const e of events) {
+    const slug = e.payload?.skillSlug;
+    if (!slug) continue;
+    const target =
+      e.eventType === 'skill.completed' ? completedBySlug
+      : e.eventType === 'skill.invoked' ? invokedBySlug
+      : null;
+    if (!target) continue;
+    const arr = target.get(slug);
+    if (arr) arr.push(e.id);
+    else target.set(slug, [e.id]);
+  }
+
+  // Track ordinal per slug as we walk toolCalls in order.
+  const slugCursor = new Map<string, number>();
+  const result: Array<string | null> = [];
+  for (const tc of toolCalls) {
+    const slug = tc.tool ?? tc.name;
+    if (!slug) {
+      result.push(null);
+      continue;
+    }
+    const cursor = slugCursor.get(slug) ?? 0;
+    slugCursor.set(slug, cursor + 1);
+    const completed = completedBySlug.get(slug);
+    if (completed && cursor < completed.length) {
+      result.push(completed[cursor]!);
+      continue;
+    }
+    const invoked = invokedBySlug.get(slug);
+    if (invoked && cursor < invoked.length) {
+      result.push(invoked[cursor]!);
+      continue;
+    }
+    result.push(null);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
