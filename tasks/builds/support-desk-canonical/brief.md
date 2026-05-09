@@ -1,9 +1,15 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** DRAFT — for stress-testing before we go to spec.
+**Status:** DRAFT v2 — incorporates first round of review feedback. For final stress-test before spec.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
-**Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, and the entities required. No SQL, no signatures, no chunk plan yet — that comes after this is signed off.
+**Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, and the entities required. No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
+
+---
+
+## Decision Statement
+
+We are building a canonical Support Desk runtime layer so agentic support workflows can reason, act, evaluate, and improve against one provider-neutral ticket model, while Teamwork Desk, Zendesk, Freshdesk, and future providers remain adapter implementations underneath. This is part of the agent runtime substrate, not just integration plumbing.
 
 ---
 
@@ -13,12 +19,13 @@
 2. Why Build a Support Desk Integration At All
 3. Why Canonical (Not Per-Provider)
 4. What We Already Have (Don't Re-Build)
-5. Proposed Canonical Entities (For Stress-Testing)
-6. Adapter Surface (What Each Provider Must Implement)
-7. Skills the Canonical Layer Unlocks
-8. Open Questions for Stress-Test
-9. Recommendation
-10. Out of Scope (Explicit)
+5. Design Invariants
+6. Proposed Canonical Entities (For Stress-Testing)
+7. Adapter Surface (What Each Provider Must Implement)
+8. Skills the Canonical Layer Unlocks
+9. Open Decisions Before Spec
+10. Recommendation
+11. Out of Scope (Explicit)
 
 ---
 
@@ -97,42 +104,88 @@ The audit found significant existing infrastructure. The brief should *extend*, 
 
 So the work is: add the missing canonical entities, extend the existing adapter, and wire ingestion. We are not starting from zero.
 
-## 5. Proposed Canonical Entities (For Stress-Testing)
+## 5. Design Invariants
+
+These are non-negotiable properties of the canonical layer. They constrain the spec and the implementation. Every change to the layer must preserve them.
+
+### 5.1 Training-runtime alignment with Foundry
+
+The runtime ticket shape and the Foundry ticket shape must remain intentionally aligned. Any divergence must be explicit, versioned, and justified in writing. The single biggest risk to an agentic system is a model trained against one shape and then served a different shape at runtime; we will not run that risk by accident. Practically: when the spec is drafted, the Foundry schema is a required reference input, and any field that exists in one and not the other gets a documented reason.
+
+### 5.2 Provider is the source of truth for sent messages
+
+The platform may create an optimistic pending outbound record at send time, but the canonical sent message is only final once confirmed by the provider's API response or a corresponding webhook. Until confirmation, the record carries a `pending` state and is excluded from agent-facing thread reads. Duplicate provider events (response + webhook for the same send) collapse on `(connector_config_id, external_id)`. This prevents double messages, phantom messages, and replay weirdness.
+
+### 5.3 Webhook and poll are convergent and idempotent
+
+Webhook ingestion and polling ingestion are two delivery paths into the same canonical state. They must be convergent and idempotent. The same provider ticket or message must resolve to the same canonical row regardless of which path arrives first. Dedupe key for tickets is `(connector_config_id, external_id)`; for messages it is `(connector_config_id, ticket_external_id, external_id)`. Re-ingesting the same provider event must be a no-op or a deterministic update, never a duplicate insert.
+
+### 5.4 Collision avoidance with humans
+
+The Support Agent must not send, close, or reassign a ticket when recent human activity or provider-side assignment indicates a human is actively handling it, unless explicitly configured to do so for that inbox. The canonical model carries the primitives the agent needs to make this call (see §6.1: `last_human_activity_at`, `bot_claimed_at`); the policy itself lives in the Support Agent spec, not here.
+
+### 5.5 Read-only by default, write only through adapters
+
+Canonical tables are written by two paths only: the connector polling/webhook ingestion path, and confirmed-action mirror writes from the adapter call path. No skill, agent, or service writes directly into `canonical_tickets` or `canonical_ticket_messages` to express user intent. User intent (drafts, pending sends) lives in its own table (`canonical_ticket_drafts`, see §6.5) and only crosses into the canonical message stream once the adapter confirms the provider accepted it.
+
+### 5.6 Provider cursors live in the polling infrastructure, not on canonical rows
+
+Incremental sync cursors and sync phase state live in the existing connector polling infrastructure (`connector_configs`, `integration_ingestion_stats`), not on the canonical ticket rows. The only sync-related field on a canonical row is `last_synced_at`. This prevents fragile per-table cursor logic and keeps sync state in one place.
+
+## 6. Proposed Canonical Entities (For Stress-Testing)
 
 This is the data model proposal at concept level: names and intent, not column lists.
 
-### 5.1 `canonical_tickets` (new)
+### 6.1 `canonical_tickets` (new)
 
 The unit of work. One row per support request.
 
 Fields the agent needs to reason about:
 
 - **Identity:** `external_id` (provider's ticket ID), `connector_config_id`, `organisation_id`, `subaccount_id`.
-- **Ownership and customer side:** link to `canonical_contacts` (via email match or provider customer ID), and optionally to `canonical_accounts` (the contact's company).
-- **Lifecycle:** `status` (open, pending, waiting_on_customer, closed, resolved), `priority` (low, medium, high, urgent), `opened_at`, `first_response_at`, `last_customer_message_at`, `last_agent_message_at`, `closed_at`, `resolution_at`.
+- **Customer identity (resilient):** `customer_email`, `customer_name`, `customer_external_id` (provider's customer/contact ID), and `canonical_contact_id` (nullable FK to `canonical_contacts`). The first three are always populated from the provider; the FK is populated only when a deterministic email match resolves. Tickets are never blocked by an unmatched contact. Optionally link to `canonical_accounts` via the contact's company once matched.
+- **Lifecycle:** `status` (see canonical status model below), `priority` (low, medium, high, urgent), `opened_at`, `first_response_at`, `last_customer_message_at`, `last_agent_message_at`, `closed_at`, `resolution_at`.
 - **Routing:** `inbox_id` (FK to `canonical_inboxes`), `assignee_agent_id` (FK to `canonical_support_agents`, nullable).
+- **Collision-avoidance primitives:** `last_human_activity_at` (most recent message or status change attributed to a human helpdesk agent), `last_bot_activity_at` (most recent action attributed to our Support Agent), `bot_claimed_at` (set when our agent has claimed the ticket and not yet released). The Support Agent reads these before acting; the policy that consumes them lives in the agent spec, not here.
 - **Classification:** `subject`, `tags[]`, `category` (optional, normalised), `source_channel` (email, chat, form, api).
 - **SLA tracking:** `sla_due_at` (nullable), `sla_breached` (bool), `sla_policy_external_id` (provider SLA reference, nullable).
 - **Provider catchall:** `external_metadata` JSONB for provider-specific fields we choose not to canonicalise.
 - **Sync metadata:** `last_synced_at`, `source_connection_id`.
 
-### 5.2 `canonical_ticket_messages` (new)
+**Canonical status model.** Deliberately small. Provider-specific statuses live in `external_metadata`.
 
-The conversation inside a ticket. One row per message.
+| Canonical status | Meaning |
+|---|---|
+| `open` | Active, agent attention required, no party currently waiting. |
+| `pending_internal` | Waiting on internal action (engineering, finance, another team). Customer is not blocked. |
+| `waiting_on_customer` | Reply has gone out, awaiting customer response. |
+| `resolved` | Support outcome completed. The ticket can be reopened by a customer reply. |
+| `closed` | Terminal/archive state. Not expected to receive normal agent action; reopening is an explicit operation. |
 
-- `ticket_id` FK, `external_id`, `organisation_id` (denormalised for RLS).
+The split between `resolved` and `closed` matters: `resolved` is an outcome ("we answered it"), `closed` is a lifecycle terminus ("the ticket is no longer in active circulation"). Mapping each provider's status vocabulary into these five is part of the adapter contract.
+
+**Relationship to `canonical_conversations`.** `canonical_tickets` is the source of truth for support workflows. Tickets do not flow through `canonical_conversations`. The generic conversations table remains for non-ticket messaging channels (SMS, chat, phone). A future unified-activity-feed concern may link the two; v1 does not. This avoids overloading `canonical_conversations` with ticket semantics.
+
+### 6.2 `canonical_ticket_messages` (new)
+
+The conversation inside a ticket. One row per message. Finality semantics per §5.2: outbound messages are `pending` until the provider confirms.
+
+- `ticket_id` FK, `external_id` (nullable while `pending`), `organisation_id` (denormalised for RLS).
 - `direction`: `inbound` (from customer), `outbound` (from agent or bot), `internal_note`.
 - `author_type`: `customer`, `agent`, `bot`, `system`.
 - `author_id`: nullable FK to `canonical_contacts` (for customer) or `canonical_support_agents` (for agent or bot).
 - `body_text` and `body_html` (we keep both; the agent reads text, audit and replay use html).
-- `attachments` (JSONB array of `{filename, url, mime_type, size}`).
+- `attachments` (JSONB array of `{filename, provider_url, mime_type, size}`; see attachment policy below).
 - `visibility`: `public` (visible to customer), `internal` (team-only note).
-- `created_at_external` (provider's authoritative timestamp).
+- `delivery_state`: `pending` (sent to provider, not yet confirmed), `confirmed` (provider acknowledged or webhook arrived), `failed` (provider rejected). Inbound and webhook-sourced messages skip `pending` and arrive `confirmed`.
+- `created_at_external` (provider's authoritative timestamp; null while `pending`).
 - `external_metadata` JSONB.
 
 This split (ticket plus messages) matters. Treating a ticket as a single record with a `messages` JSON column would fight against everything: indexing, partial sync, attachment handling, and per-message agent provenance.
 
-### 5.3 `canonical_inboxes` (new)
+**Attachment policy (v1).** Store provider attachment metadata and the provider's URL. Do not mirror files into our own object storage in v1. Where provider URLs are short-lived or auth-scoped (Teamwork attachment URLs require auth), the adapter must expose an attachment resolver method (`resolveAttachment(messageId, attachmentId)`) that fetches a fresh URL or stream on demand. Persistently stale URLs in canonical rows are not acceptable. Promotion to mirrored object storage is a v2 concern, gated on a concrete need.
+
+### 6.3 `canonical_inboxes` (new)
 
 A queue or mailbox in the helpdesk. Tickets belong to inboxes; agents belong to inboxes.
 
@@ -143,7 +196,7 @@ A queue or mailbox in the helpdesk. Tickets belong to inboxes; agents belong to 
 
 The Support Agent is configured per inbox: "this agent operates on the Billing inbox in autonomous mode and on the Sales inbox in draft-only mode." Without an inbox dimension, that scoping has nowhere to live.
 
-### 5.4 `canonical_support_agents` (new)
+### 6.4 `canonical_support_agents` (new)
 
 Human (or bot) operators on the helpdesk side. Distinct from our platform users.
 
@@ -155,7 +208,25 @@ Human (or bot) operators on the helpdesk side. Distinct from our platform users.
 
 This is the helpdesk's user table, mirrored. Do not conflate with our platform `users`; they are different identity domains. Optionally we add a join row mapping `canonical_support_agents.id` to our `users.id` when the human is also a platform user, but that is later.
 
-### 5.5 What we explicitly do NOT canonicalise (yet)
+### 6.5 `canonical_ticket_drafts` (new)
+
+The home for agent-generated replies that are not yet sent. Required because the use case includes assisted mode (human-in-the-loop review). Without this entity, drafts have nowhere durable to live and the spec would be forced to invent it.
+
+- `id`, `organisation_id`, `subaccount_id`.
+- `ticket_id` FK to `canonical_tickets`.
+- `proposed_body_text`, `proposed_body_html`.
+- `proposed_visibility`: `public` (customer reply) or `internal` (note).
+- `proposed_actions` JSONB: optional companion state changes the agent intends to apply alongside the reply (e.g., `{ status: "waiting_on_customer", tags_add: ["billing"] }`).
+- `created_by_agent_run_id`: FK to the agent run that produced the draft (provenance for evals).
+- `model_version`, `prompt_version` (provenance for replay and regression testing).
+- `status`: `draft` | `awaiting_review` | `approved` | `rejected` | `sent` | `expired` | `superseded`.
+- `reviewer_user_id`, `reviewed_at`, `review_notes` (set on approval or rejection).
+- `sent_message_id`: FK to `canonical_ticket_messages` once approved and confirmed by the provider. Null until then.
+- `expires_at`: drafts auto-expire so stale suggestions do not sit in the queue forever.
+
+Autonomous-mode flow: agent writes a `draft` row, immediately transitions it to `approved`, adapter sends, on confirmation row moves to `sent` and `sent_message_id` is set. Assisted-mode flow: agent writes `awaiting_review`, a human approves or rejects, then the same approved-to-sent path runs. Either way, the audit trail is identical.
+
+### 6.6 What we explicitly do NOT canonicalise (yet)
 
 Holding the line on scope:
 
@@ -164,52 +235,66 @@ Holding the line on scope:
 - **Custom fields per customer.** Push into `external_metadata` JSONB. Do not promote to first-class columns until a skill demands it.
 - **Time tracking, billing, productivity reports.** Helpdesk has these; the agent does not reason about them.
 - **Provider-specific constructs** (Teamwork projects, Zendesk groups, Freshdesk solutions). External_metadata.
+- **Multi-thread per ticket.** v1 is one thread per ticket. Side conversations and merged tickets are deferred until Foundry's schema confirms the need.
 
 Every column we promote into the canonical shape is a maintenance liability across N adapters. Default to "no" until a concrete agent skill requires it.
 
-## 6. Adapter Surface (What Each Provider Must Implement)
+## 7. Adapter Surface (What Each Provider Must Implement)
 
 Once entities are agreed, the per-provider adapter contract is roughly:
 
 - **Ingestion (pull, scheduled):** `listInboxes`, `listSupportAgents`, `fetchTickets` (incremental, since `last_synced_at`), `fetchTicketMessages` (incremental).
 - **Acting (push, on-demand):** `createTicket`, `addReply` (public), `addInternalNote`, `updateTicket` (status, priority, tags, assignee), `getTicket`. Mostly already typed in `IntegrationAdapter.ticketing`.
-- **Webhook (push, event-driven):** Verify provider signature; normalise `ticket.created`, `ticket.updated`, `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed` into canonical events.
+- **Attachment resolution (on-demand):** `resolveAttachment(messageId, attachmentId)` returns a fresh provider URL or stream when a stored URL has expired (see §6.2 attachment policy).
+- **Webhook (push, event-driven):** Verify provider signature; normalise `ticket.created`, `ticket.updated`, `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed` into canonical events. Webhook handlers must be idempotent per §5.3.
+- **Status mapping:** Adapter declares the mapping from provider status vocabulary into the canonical five (`open`, `pending_internal`, `waiting_on_customer`, `resolved`, `closed`). Unmapped values fall to `open` plus a warning, not a crash.
 
-Teamwork already covers the acting and webhook side. We need to add the ingestion methods.
+Teamwork already covers the acting and webhook side. We need to add the ingestion methods, the attachment resolver, and the status map.
 
-## 7. Skills the Canonical Layer Unlocks
+## 8. Skills the Canonical Layer Unlocks
 
 Tying back to the use case. With the canonical layer in place, the Support Agent gets these as composable skills with no per-provider code:
 
 - `support.list_open_tickets(inbox_id, since)` — reads `canonical_tickets`.
-- `support.read_thread(ticket_id)` — joins `canonical_tickets` with `canonical_ticket_messages`.
-- `support.draft_reply(ticket_id, draft_text)` — writes a `direction=outbound, visibility=public, author_type=bot` message via the adapter to the provider, mirrors into canonical on webhook.
-- `support.add_internal_note(ticket_id, note)` — same path, `visibility=internal`.
+- `support.read_thread(ticket_id)` — joins `canonical_tickets` with `canonical_ticket_messages` (excludes `pending` outbound messages from the agent's view).
+- `support.propose_reply(ticket_id, draft)` — writes a `canonical_ticket_drafts` row. In autonomous mode, the same skill auto-approves and dispatches. In assisted mode it stops at `awaiting_review`.
+- `support.approve_draft(draft_id)` — human or auto-approval; triggers adapter send; on confirmation, writes the `canonical_ticket_messages` row and links it back to the draft.
+- `support.add_internal_note(ticket_id, note)` — same draft-then-send path, `visibility=internal`.
 - `support.set_status(ticket_id, status)`, `support.assign(ticket_id, agent_id)`, `support.tag(ticket_id, tags)`.
 - `support.find_customer_history(contact_id)` — joins `canonical_contacts` with `canonical_tickets` and `canonical_revenue`. This is the killer query: support agent context-loading from one customer record across CRM and support history.
 
 The CRM Query Planner can extend its registry to include these without re-engineering; it already routes between canonical and live executors.
 
-## 8. Open Questions for Stress-Test
+## 9. Open Decisions Before Spec
 
-These are the assumptions I am least sure about. The brief should not be approved until we have a position on each.
+The brief is not approved until we have a position on each of these. Each one materially affects the spec.
 
-1. **Do we need a `canonical_ticket_thread` between ticket and messages?** Some helpdesks (and Foundry's existing model) support multiple threads per ticket (merged tickets, side conversations). v1 says no: one thread per ticket, model the rest as messages. Confirm Foundry agrees.
-2. **How do we resolve customer identity?** Inbound email matched against an existing `canonical_contact` by email is the obvious play. But what if the contact does not exist in the CRM? Do we auto-create a stub `canonical_contact` from the support ticket, or leave the ticket dangling with `customer_email` only and reconcile later?
-3. **Bidirectional sync conflict policy.** If a human agent and our bot edit the same ticket within the polling window, who wins? Suggest: provider always wins on read, last-writer-wins on write, surface conflicts in observability rather than auto-resolving.
-4. **Volume sizing.** How many tickets per day are we expecting at steady state across all customers? Drives polling cadence, webhook reliance, and whether `canonical_ticket_messages` needs partitioning. We should size before we build.
-5. **Foundry alignment.** Foundry already has a ticket schema for training data. Should we adopt Foundry's shape verbatim, or treat them as cousins? Strong vote for verbatim where possible; drift between training data and runtime data is the worst kind of bug in an agentic system.
-6. **Autonomous-vs-assisted gating.** Does the agent get to send replies without a human, or does v1 only draft? This is a product decision that affects the data model only mildly (we may need a `draft_reply` table or a `pending_review` status), but it affects the workflow significantly.
-7. **Multi-inbox per organisation.** Customers will have multiple inboxes per Teamwork instance. Confirm `canonical_inboxes` is the right granularity for Support Agent configuration, not a higher level (like "Teamwork Desk account").
-8. **Attachments.** We store URLs in messages; do we mirror attachment files into our own object store, or hot-link to provider URLs? Hot-link is cheaper and simpler; provider URLs may expire or change auth model. Decision needed.
+1. **Foundry alignment — which schema version is the reference?** We commit to alignment in §5.1; we still need to name the specific Foundry schema version the spec must reconcile against, and ratify which fields will diverge with documented justification.
+2. **Contact resolution policy.** Recommendation: deterministic email match only in v1. Do not auto-create `canonical_contacts` from support tickets — it will pollute CRM with one-off requesters. Unmatched tickets carry raw customer fields (§6.1) and surface in a reconciliation queue. Confirm.
+3. **Conflict policy specifics.** Stated direction: provider wins on read, adapter writes are auditable, conflicts surface in observability rather than auto-resolving. Confirm and define what "surfaces in observability" means concretely (metric? log? UI?).
+4. **Outbound message finality.** §5.2 invariant says provider-confirmed only. Confirm we are willing to hold pending outbound messages out of agent-visible thread reads until confirmed (acceptable trade for correctness).
+5. **Attachments.** §6.2 policy: provider URL plus adapter-resolved fresh URL on demand, no mirroring in v1. Confirm.
+6. **Volume and partitioning.** Expected tickets-per-org-per-day at steady state? Drives polling cadence, webhook reliance, and whether `canonical_ticket_messages` needs partitioning. Needed before sizing.
+7. **`canonical_conversations` boundary.** §6.1 states tickets do not flow through `canonical_conversations` in v1. Confirm (the alternative — every ticket also writing a conversation row — is rejected here as overloading the abstraction).
+8. **Inbox as the unit of agent configuration.** Confirm `canonical_inboxes` is the right granularity for Support Agent configuration (autonomous vs. assisted, model selection, prompt overrides), not the connector-config level above it.
 
-## 9. Recommendation
+## 10. Recommendation
 
-Approve the canonical approach. Approve the four entities (`canonical_tickets`, `canonical_ticket_messages`, `canonical_inboxes`, `canonical_support_agents`) as the v1 surface. Park CSAT, KB articles, custom fields, and threading-beyond-one-thread for later.
+Approve the canonical approach. Approve the **five** entities as the v1 surface:
 
-Resolve the eight open questions above, then go to spec. The spec should be drafted via `spec-coordinator` against this brief, with Foundry's existing ticket schema as a reference input so we get drift-free training-to-runtime alignment from day one.
+1. `canonical_tickets`
+2. `canonical_ticket_messages`
+3. `canonical_inboxes`
+4. `canonical_support_agents`
+5. `canonical_ticket_drafts` (added in v2 of the brief; necessary for assisted mode)
 
-## 10. Out of Scope (Explicit)
+Approve the six design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra) as non-negotiable constraints for the spec.
+
+Park CSAT, KB articles, custom fields, multi-thread per ticket, and attachment mirroring for later.
+
+Resolve the eight decisions in §9, then go to spec. The spec should be drafted via `spec-coordinator` against this brief, with Foundry's existing ticket schema as a required reference input.
+
+## 11. Out of Scope (Explicit)
 
 - Foundry data pipeline changes; that lives in Foundry, not here.
 - Knowledge base or help-centre integration; separate brief.
