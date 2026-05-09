@@ -86,6 +86,7 @@ import {
 } from '../config/limits.js';
 import { CONTROLLER_LIMITS } from '../config/controllerLimits.js';
 import { deriveControllerStyle } from './controllerStyleResolver.js';
+import { resolvePolicyEnvelope, persist as persistPolicyEnvelope } from './policyEnvelopeResolver.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
 // orgAgentConfigService import removed — deprecated post-migration 0106
 import { organisations } from '../db/schema/index.js';
@@ -667,6 +668,83 @@ export const agentExecutionService = {
         }).where(eq(agentRuns.id, run.id));
       } catch {
         // DEC not configured for this subaccount — skip snapshot (non-dev agents)
+      }
+
+      // ── 2d. Resolve and persist policy envelope (INV-19) ─────────────────
+      // Must complete before any tool call, LLM call, or IEE dispatch.
+      // On failure: run is transitioned to 'failed' and execution is aborted.
+      try {
+        const policyEnvelopeCtx = {
+          runId: run.id,
+          agentId: request.agentId,
+          subaccountAgentId: request.subaccountAgentId!,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId!,
+          controllerStyle: run.controllerStyle,
+          executionMode: request.executionMode ?? 'api',
+          tokenBudget,
+          maxToolCalls,
+        };
+        const snapshot = await resolvePolicyEnvelope(policyEnvelopeCtx);
+        await persistPolicyEnvelope(run.id, snapshot);
+
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'foundation.policy_envelope.resolved',
+            critical: false,
+            runId: run.id,
+            schemaVersion: 1,
+            sourceCounts: {
+              activePolicyRuleIds: snapshot.activePolicyRuleIds.length,
+              availableCredentialIds: snapshot.availableCredentialIds.length,
+              allowedSkillSlugs: snapshot.allowedSkillSlugs.length,
+            },
+          },
+          linkedEntity: { type: 'agent', id: request.agentId },
+        });
+      } catch (envelopeErr) {
+        const durationMs = Date.now() - startTime;
+        tryEmitAgentEvent({
+          runId: run.id,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          sourceService: 'agentExecutionService',
+          payload: {
+            eventType: 'foundation.policy_envelope.resolution_failed',
+            critical: false,
+            runId: run.id,
+            error: envelopeErr instanceof Error ? envelopeErr.message : String(envelopeErr),
+          },
+          linkedEntity: { type: 'agent', id: request.agentId },
+        });
+
+        await db.update(agentRuns).set({
+          status: 'failed',
+          errorMessage: envelopeErr instanceof Error ? envelopeErr.message : 'Policy envelope resolution failed',
+          errorDetail: {
+            type: 'policy_envelope_resolution_failed',
+            failureReason: 'policy_envelope_resolution_failed',
+          },
+          completedAt: new Date(),
+          durationMs,
+          updatedAt: new Date(),
+        }).where(eq(agentRuns.id, run.id));
+
+        return {
+          runId: run.id,
+          status: 'failed',
+          summary: null,
+          totalToolCalls: 0,
+          totalTokens: 0,
+          durationMs,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+        };
       }
 
       // ── 3. Load run context data (cascading scopes + task attachments + instructions) ──

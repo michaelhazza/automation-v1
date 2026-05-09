@@ -106,7 +106,9 @@ export type AgentExecutionEventType =
   | 'retrieval.summary'
   | 'retrieval.always_available.mode_changed'
   | 'observation_emitted'
-  | 'foundation.controller_style.derived';
+  | 'foundation.controller_style.derived'
+  | 'foundation.policy_envelope.resolved'
+  | 'foundation.policy_envelope.resolution_failed';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -342,6 +344,25 @@ export type AgentExecutionEventPayload =
       executionMode: string;
       controllerStyle: 'native' | 'operator';
       source: 'explicit_override' | 'execution_mode_default' | 'subaccount_constraint_downgrade';
+    }
+  | {
+      /** Foundation refactor spec §3.5 — policy envelope resolved at run creation (INV-19). */
+      eventType: 'foundation.policy_envelope.resolved';
+      critical: false;
+      runId: string;
+      schemaVersion: 1;
+      sourceCounts: {
+        activePolicyRuleIds: number;
+        availableCredentialIds: number;
+        allowedSkillSlugs: number;
+      };
+    }
+  | {
+      /** Foundation refactor spec §3.5 — policy envelope resolution failed at run creation (INV-19). */
+      eventType: 'foundation.policy_envelope.resolution_failed';
+      critical: false;
+      runId: string;
+      error: string;
     };
 
 // ---------------------------------------------------------------------------
@@ -378,6 +399,8 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'retrieval.always_available.mode_changed': false,
   'observation_emitted': false,
   'foundation.controller_style.derived': false,
+  'foundation.policy_envelope.resolved': false,
+  'foundation.policy_envelope.resolution_failed': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

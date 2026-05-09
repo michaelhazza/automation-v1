@@ -442,6 +442,18 @@ export function validateEventPayload(
       }
       return { ok: true };
 
+    case 'foundation.policy_envelope.resolved':
+      if (!isStr(p.runId)) {
+        return { ok: false, reason: 'foundation.policy_envelope.resolved_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'foundation.policy_envelope.resolution_failed':
+      if (!isStr(p.runId) || !isStr(p.error)) {
+        return { ok: false, reason: 'foundation.policy_envelope.resolution_failed_missing_fields' };
+      }
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.
