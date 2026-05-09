@@ -3602,3 +3602,19 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
 Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These are AUTO-DECIDED items the human can address at leisure; the spec is mechanically tight without them.
 
 - [ ] **R-G — Add a "why-not-reuse `policyEngineService`" rationale paragraph in §4.5.5.** The new `policyEnvelopeResolver` does aggregation-at-run-start, while `policyEngineService` does per-action evaluation. The two have genuinely different responsibilities and the spec's existing prose implies it, but the spec-authoring-checklist §1 expects the rationale to be stated explicitly. Decision: **accept** — add a one-paragraph "Why a new resolver instead of extending `policyEngineService`" in §4.5.5 explaining the aggregation-vs-evaluation split. Low priority; not load-bearing.
+
+## Deferred from spec-conformance review — synthetos-foundation-refactor (2026-05-09)
+
+**Captured:** 2026-05-09T12:45:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-synthetos-foundation-refactor-2026-05-09T12-45-00Z.md`
+**Spec:** `tasks/builds/synthetos-foundation-refactor/spec.md`
+
+- [ ] **SCD-1 — `ControllerLimits` interface uses different field names than spec §4.1.5**
+  - Spec section: §4.1.5 (Shared TypeScript types)
+  - Gap: spec specifies `defaultMaxToolCalls` / `approvalDefaultMin`; implementation ships `maxToolCallsPerRun` / `approvalDefault`. Semantic intent identical; identifiers differ.
+  - Suggested approach: either rename the interface fields in `shared/types/controllerStyle.ts` and propagate through `server/config/controllerLimits.ts` and consumers, OR update spec §4.1.5 to canonicalise the shipped names. Cross-cutting but mechanical once direction is set.
+
+- [ ] **SCD-2 — `controller_style_allowed` enum value `'operator_allowed'` diverges from spec `'native_and_operator'`**
+  - Spec section: §3.6 (State machine closure), §4.1.6 (Default derivation rule), §5.2.9 (Subaccount governance schema)
+  - Gap: spec specifies closed enum `'native_only' | 'native_and_operator'`; implementation ships `'native_only' | 'operator_allowed'` consistently across migration 0307, Drizzle schema, Zod validator, tests, and 2 UI components. The DB CHECK constraint already encodes `'operator_allowed'`, so a follow-up migration would be needed to switch.
+  - Suggested approach: operator decision — rename code to spec (write a follow-up migration to broaden CHECK + UPDATE existing rows + rename Drizzle/Zod/UI), OR update the spec text in §3.6, §4.1.6, §5.2.9, §6 (and inline references) to canonicalise `'operator_allowed'`. Recommend the latter given the migration is already shipped and `'operator_allowed'` is arguably more readable in the agent-allow-list context.
