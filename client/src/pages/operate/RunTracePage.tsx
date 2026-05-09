@@ -30,7 +30,13 @@ import { parseEmbeddedFlag } from '../../lib/runTraceEmbeddedPure';
 import { WorkspaceBadge } from '../../components/WorkspaceBadge';
 import { PageShell } from '../../components/PageShell';
 import type { RunDetail } from '../../components/runs/RunTraceView';
+import CorrectDialog from '../../components/correction/CorrectDialog';
+import type { RunTraceToolCallEvent } from './components/RunTraceEventRenderer';
 import { RunTraceEventRenderer } from './components/RunTraceEventRenderer';
+import type { RuntimeCheckResult } from '../../../../shared/types/runtimeCheck';
+import { fetchRunRuntimeChecks } from '../../lib/api/runtimeChecks';
+import { RuntimeCheckSummaryStrip } from '../../components/runtimeCheck/RuntimeCheckSummaryStrip';
+import { collapseToOperatorBadge } from '../../lib/runtimeCheckBadgePure';
 
 // ── IEE progress polling (ported from RunTraceViewerPage) ─────────────────────
 
@@ -49,7 +55,7 @@ const POLL_MAX_DURATION_MS = 15 * 60 * 1_000; // 15 minutes
 
 // ── RunTracePage ──────────────────────────────────────────────────────────────
 
-export default function RunTracePage({ user: _user }: { user: User }) {
+export default function RunTracePage({ user }: { user: User }) {
   const { id: runId } = useParams<{ id: string }>();
   const location = useLocation();
 
@@ -60,6 +66,9 @@ export default function RunTracePage({ user: _user }: { user: User }) {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [runtimeChecks, setRuntimeChecks] = useState<RuntimeCheckResult[]>([]);
+  const [rcFetchState, setRcFetchState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [correctingEvent, setCorrectingEvent] = useState<RunTraceToolCallEvent | null>(null);
 
   const [chainRuns, setChainRuns] = useState<Array<{
     id: string; agentName: string; isSubAgent: boolean; runSource: string;
@@ -92,6 +101,14 @@ export default function RunTracePage({ user: _user }: { user: User }) {
     api.get(`/api/agent-runs/${runId}/chain`)
       .then(({ data }) => setChainRuns(data.runs ?? []))
       .catch(() => setChainRuns([]));
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId) return;
+    setRcFetchState('loading');
+    fetchRunRuntimeChecks(runId)
+      .then((results) => { setRuntimeChecks(results); setRcFetchState('ok'); })
+      .catch(() => { setRcFetchState('error'); });
   }, [runId]);
 
   // ── WebSocket room subscription (ported from RunTraceViewerPage) ─────────────
@@ -299,6 +316,47 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       </div>
     ) : null;
 
+  // ── Runtime check summary counts ────────────────────────────────────────────
+
+  let rcPassCount = 0;
+  let rcFailCount = 0;
+  let rcPendingCount = 0;
+  for (const rc of runtimeChecks) {
+    const badge = collapseToOperatorBadge(rc.state);
+    if (badge === 'pass') rcPassCount++;
+    else if (badge === 'fail') rcFailCount++;
+    else rcPendingCount++;
+  }
+
+  // org_admin and system_admin always hold org.review.view / subaccount.review.view.
+  const canViewInbox = user.role === 'org_admin' || user.role === 'system_admin';
+
+  // Correct affordance: org_admin / system_admin can always correct; subaccount users
+  // require the subaccount.corrections.create permission (enforced server-side).
+  // In embedded mode: suppress to avoid recursion issues.
+  const canCorrect = !embedded && (
+    user.role === 'org_admin' || user.role === 'system_admin' || user.role === 'user'
+  );
+
+  // Empty-state footer: fetch completed, zero results, but run has tool-call steps
+  // (i.e. skills exist but verify is null). Distinguish from still-loading or errored.
+  const rcEmptyFooter =
+    rcFetchState === 'ok' &&
+    runtimeChecks.length === 0 ? (
+      <p className="text-[11px] text-slate-400 text-center mt-2 mb-3">
+        Runtime checks not configured for these skills.
+      </p>
+    ) : null;
+
+  // Error footer: fetch failed — the badges have already rendered as ghost shapes
+  // via RunTraceEventRenderer receiving an empty array.
+  const rcErrorFooter =
+    rcFetchState === 'error' ? (
+      <p className="text-[11px] text-amber-600 text-center mt-2 mb-3">
+        Could not load runtime check results.
+      </p>
+    ) : null;
+
   // ── Embedded mode: full-viewport container without PageShell chrome ─────────
 
   if (embedded) {
@@ -309,7 +367,9 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       >
         {ieePanel}
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
-        <RunTraceEventRenderer runId={run.id} embedded={true} />
+        <RunTraceEventRenderer runId={run.id} embedded={true} runtimeChecks={runtimeChecks} />
+        {rcEmptyFooter}
+        {rcErrorFooter}
       </div>
     );
   }
@@ -321,9 +381,44 @@ export default function RunTracePage({ user: _user }: { user: User }) {
       <div className="animate-[fadeIn_0.2s_ease-out_both]">
         {chainInfo}
         {ieePanel}
+        <RuntimeCheckSummaryStrip
+          passCount={rcPassCount}
+          failCount={rcFailCount}
+          pendingCount={rcPendingCount}
+          runId={run.id}
+          canViewInbox={canViewInbox}
+        />
+        {rcEmptyFooter}
+        {rcErrorFooter}
         {/* C5b: RunTraceEventRenderer with role-aware masking (spec §4.8) */}
-        <RunTraceEventRenderer runId={run.id} embedded={false} />
+        <RunTraceEventRenderer
+          runId={run.id}
+          embedded={false}
+          runtimeChecks={runtimeChecks}
+          canCorrect={canCorrect}
+          onCorrect={setCorrectingEvent}
+        />
       </div>
+
+      {/* Correct dialog — mounts when the user clicks Correct on a step.
+          eventId is the canonical agent_execution_events.id from the
+          trace-events response (spec §9 cross-entity guard). The Correct
+          affordance is hidden when eventId is null, so the dialog only
+          mounts with a real eventId — non-null is guaranteed here. */}
+      {correctingEvent && correctingEvent.eventId && (
+        <CorrectDialog
+          runId={run.id}
+          eventId={correctingEvent.eventId}
+          skillSlug={correctingEvent.toolName}
+          originalOutput={
+            typeof correctingEvent.output === 'string'
+              ? correctingEvent.output
+              : ''
+          }
+          onClose={() => setCorrectingEvent(null)}
+          onSaved={() => setCorrectingEvent(null)}
+        />
+      )}
     </PageShell>
   );
 }

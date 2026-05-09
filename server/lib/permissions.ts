@@ -104,6 +104,10 @@ export const ORG_PERMISSIONS = {
   DOCUMENT_BUNDLES_READ:          'document_bundles.read',
   DOCUMENT_BUNDLES_WRITE:         'document_bundles.write',
   DOCUMENT_BUNDLES_ATTACH:        'document_bundles.attach',
+  // ── Trust & Verification Layer — scorecards (migration 0297) ─────────────
+  SCORECARDS_VIEW:       'org.scorecards.view',
+  SCORECARDS_MANAGE:     'org.scorecards.manage',
+  SCORECARDS_BENCH_RUN:  'org.scorecards.bench_run',
   // ── Agent Workspace — presence stream (Chunk 9) ──────────────────────────
   AGENTS_PRESENCE_STREAM_SUBSCRIBE: 'org.agents.presence.stream.subscribe',
 } as const;
@@ -177,6 +181,10 @@ export const SUBACCOUNT_PERMISSIONS = {
   AGENTS_VIEW_MAILBOX: 'subaccount.agents.view_mailbox',
   AGENTS_VIEW_CALENDAR: 'subaccount.agents.view_calendar',
   AGENTS_VIEW_ACTIVITY: 'subaccount.agents.view_activity',
+  // ── Trust & Verification Layer — subaccount scorecards (migration 0297) ──
+  SCORECARDS_VIEW:      'subaccount.scorecards.view',
+  SCORECARDS_MANAGE:    'subaccount.scorecards.manage',
+  CORRECTIONS_CREATE:   'subaccount.corrections.create',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -338,6 +346,13 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_MAILBOX,        description: "View an agent's mailbox",                                   groupName: 'subaccount.agents' },
   { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_CALENDAR,       description: "View an agent's calendar",                                  groupName: 'subaccount.agents' },
   { key: SUBACCOUNT_PERMISSIONS.AGENTS_VIEW_ACTIVITY,       description: "View an agent's activity feed",                             groupName: 'subaccount.agents' },
+  // org.scorecards + subaccount.scorecards + subaccount.corrections (Trust & Verification Layer; migration 0297)
+  { key: ORG_PERMISSIONS.SCORECARDS_VIEW,      description: 'List org, system, and subaccount-visible scorecards',                    groupName: 'org.scorecards' },
+  { key: ORG_PERMISSIONS.SCORECARDS_MANAGE,    description: 'Create, edit, and delete org-scope scorecards; set mandatory slugs',     groupName: 'org.scorecards' },
+  { key: ORG_PERMISSIONS.SCORECARDS_BENCH_RUN, description: 'Trigger a model bench run for agent or skill evaluation',               groupName: 'org.scorecards' },
+  { key: SUBACCOUNT_PERMISSIONS.SCORECARDS_VIEW,    description: 'List subaccount-visible scorecards',                               groupName: 'subaccount.scorecards' },
+  { key: SUBACCOUNT_PERMISSIONS.SCORECARDS_MANAGE,  description: 'Create, edit, and delete subaccount-scope scorecards; attach/detach suggested scorecards', groupName: 'subaccount.scorecards' },
+  { key: SUBACCOUNT_PERMISSIONS.CORRECTIONS_CREATE, description: 'Use the Correct action on Run-trace to submit a correction',       groupName: 'subaccount.corrections' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

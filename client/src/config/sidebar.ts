@@ -435,6 +435,16 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'settings',
       });
     }
+    if (hasOrgPerm('org.scorecards.view') || isSystemAdmin) {
+      items.push({
+        group: 'organisation',
+        kind: 'link',
+        key: 'quality',
+        label: 'Quality',
+        to: staticRoute('/quality'),
+        iconKey: 'skills',
+      });
+    }
     if (hasOrgPerm('org.spend.admin') || hasOrgPerm('spend_approver')) {
       items.push({
         group: 'organisation',

@@ -106,7 +106,8 @@ import type { ThreadContextReadModel } from '../../shared/types/conversationThre
 import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServicePure.js';
 import { spendingBudgets } from '../db/schema/spendingBudgets.js';
 import { spendingPolicies } from '../db/schema/spendingPolicies.js';
-import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
+import { SPEND_ACTION_ALLOWED_SLUGS, getActionDefinition } from '../config/actionRegistry.js';
+import { evaluate as evaluateRuntimeCheck } from './runtimeCheckService.js';
 import type { ServicePrincipal } from './principal/types.js';
 
 // ---------------------------------------------------------------------------
@@ -3237,6 +3238,74 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           if (r._updated_task) tasksUpdated++;
           if (r._created_deliverable) deliverablesCreated++;
         }
+      }
+
+      // Runtime check hook — inline, bounded by 250ms timeout, never throws.
+      // Evaluates post-action state, persists the result, and pauses the run
+      // when blastRadius === 'external' and state is fail or inconclusive
+      // (spec §11.2: "External — Always pause. Existing approval gate handles
+      // the operator confirmation.").
+      let runtimeCheckPauseNeeded = false;
+      try {
+        const actionDef = getActionDefinition(toolCall.name);
+        if (actionDef !== undefined) {
+          const checkBlastRadius = actionDef.blastRadius ?? 'self';
+          const rcResult = await evaluateRuntimeCheck({
+            runId,
+            eventId: null,
+            sequenceNumber: totalToolCalls,
+            skillSlug: toolCall.name,
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            checkKind: actionDef.verify ?? null,
+            toolResult: result,
+            blastRadius: checkBlastRadius,
+            reversible: actionDef.reversible ?? false,
+          });
+          if (
+            checkBlastRadius === 'external' &&
+            (rcResult.state === 'fail' || rcResult.state === 'inconclusive')
+          ) {
+            runtimeCheckPauseNeeded = true;
+          }
+          // Forced scorecard grading on non-self failure — fire-and-forget,
+          // never throws into the agent loop (spec §12.3).
+          // Gate avoids a DB round-trip for self-scoped actions.
+          if (rcResult.state === 'fail' && checkBlastRadius !== 'self') {
+            void import('./scorecardJudgeRunner.js')
+              .then(({ scheduleForcedGrade }) =>
+                scheduleForcedGrade({
+                  runId,
+                  agentId: request.agentId,
+                  organisationId: request.organisationId,
+                  triggerSource: 'forced_runtime_check_fail',
+                  blastRadius: checkBlastRadius as 'tenant' | 'external',
+                  runtimeCheckState: rcResult.state,
+                })
+              )
+              .catch((err: unknown) => {
+                logger.warn('forced_grade_dispatch_failed', {
+                  runId, agentId: request.agentId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
+        }
+      } catch (rcHookErr) {
+        // Never throw into the agent loop. Log so unexpected failures
+        // (programming error, persistence error, action-definition lookup
+        // failure) are observable instead of silently dropped.
+        logger.warn('runtime_check_hook_error', {
+          runId,
+          skillSlug: toolCall.name,
+          error: rcHookErr instanceof Error ? rcHookErr.message : String(rcHookErr),
+        });
+      }
+
+      if (runtimeCheckPauseNeeded) {
+        finalStatus = 'failed';
+        emitLoopTermination('error', { iteration, totalToolCalls, reason: 'runtime_check_gate' });
+        break outerLoop;
       }
 
       const toolDurationMs = Date.now() - toolStart;

@@ -4,6 +4,8 @@
 
 // ── Knowledge ──────────────────────────────────────────────────────────────
 
+export type KnowledgeSourceFilter = 'all' | 'corrections' | 'manual' | 'auto';
+
 export interface KnowledgeListQuery {
   scope?: 'workspace' | 'org';
   /** Required when scope='workspace' — the active subaccount/workspace id. */
@@ -17,6 +19,8 @@ export interface KnowledgeListQuery {
   limit?: number;
   sortKey?: 'createdAt' | 'updatedAt' | 'confidence' | 'sourceAgent' | 'kind' | 'status';
   sortDir?: 'asc' | 'desc';
+  /** Source provenance filter — spec §13.4. */
+  source?: KnowledgeSourceFilter;
 }
 
 export interface KnowledgeEntry {
@@ -31,6 +35,10 @@ export interface KnowledgeEntry {
   lastEditedBy: { kind: 'auto' | 'manual'; userId: string | null; at: string } | null;
   /** Opaque ETag for override concurrency check. */
   etag: string;
+  /** How this block was captured — used for Source column and filter chips (spec §13.4). */
+  capturedVia: string;
+  /** ISO-8601 timestamp of original capture — surfaced in provenance drawer (spec §13.5). */
+  capturedAt: string;
 }
 
 export interface KnowledgeListResponse {

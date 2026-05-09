@@ -243,6 +243,10 @@ export const skillService = {
     description?: string;
     definition: object;
     instructions?: string;
+    verify?: object | null;
+    verifyNullJustification?: string | null;
+    reversible?: boolean;
+    blastRadius?: 'self' | 'tenant' | 'external';
   }, userId?: string) {
     const skill = await db.transaction(async (tx) => {
       // Cross-table slug guard when creating a built-in (org=null) skill
@@ -263,6 +267,10 @@ export const skillService = {
           skillType: 'custom',
           definition: data.definition,
           instructions: data.instructions ?? null,
+          verify: data.verify ?? null,
+          verifyNullJustification: data.verifyNullJustification ?? null,
+          reversible: data.reversible ?? false,
+          blastRadius: data.blastRadius ?? 'self',
           createdAt: new Date(),
           updatedAt: new Date(),
         })
@@ -302,6 +310,10 @@ export const skillService = {
     instructions: string;
     isActive: boolean;
     visibility: SkillVisibility;
+    verify: object | null;
+    verifyNullJustification: string | null;
+    reversible: boolean;
+    blastRadius: 'self' | 'tenant' | 'external';
   }>, userId?: string) {
     if (data.visibility !== undefined) {
       if (!isSkillVisibility(data.visibility)) {
@@ -341,6 +353,10 @@ export const skillService = {
       if (data.instructions !== undefined) update.instructions = data.instructions;
       if (data.isActive !== undefined) update.isActive = data.isActive;
       if (data.visibility !== undefined) update.visibility = data.visibility;
+      if (data.verify !== undefined) update.verify = data.verify;
+      if (data.verifyNullJustification !== undefined) update.verifyNullJustification = data.verifyNullJustification;
+      if (data.reversible !== undefined) update.reversible = data.reversible;
+      if (data.blastRadius !== undefined) update.blastRadius = data.blastRadius;
 
       const [row] = await tx.update(skills).set(update).where(and(
         eq(skills.id, id),

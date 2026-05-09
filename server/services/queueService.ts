@@ -1453,6 +1453,71 @@ export const queueService = {
         }
       });
 
+      // Trust & Verification Layer — scorecard judge workers (spec §12.3)
+      await (boss as any).work('scorecard:judge', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { scorecardJudgeJobHandler } = await import('../jobs/scorecardJudgeJob.js');
+          await withTimeout(scorecardJudgeJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'scorecard:judge', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      await (boss as any).work('scorecard:judge:forced', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { scorecardJudgeJobHandler } = await import('../jobs/scorecardJudgeJob.js');
+          await withTimeout(scorecardJudgeJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'scorecard:judge:forced', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — bench execute worker (spec §12.4)
+      await (boss as any).work('bench:execute', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { benchExecuteJobHandler } = await import('../jobs/benchExecuteJob.js');
+          await withTimeout(benchExecuteJobHandler(job).then(() => undefined), 300_000); // 5 min
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'bench:execute', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — bench regression replay worker (spec §12.4)
+      await (boss as any).work('bench:regression-replay', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { benchRegressionReplayJobHandler } = await import('../jobs/benchRegressionReplayJob.js');
+          await withTimeout(benchRegressionReplayJobHandler(job).then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'bench:regression-replay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — correction pattern detector (daily sweep, spec §13.3)
+      await (boss as any).work('correction:pattern-detect', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runCorrectionPatternDetector } = await import('../jobs/correctionPatternDetectorJob.js');
+          await withTimeout(runCorrectionPatternDetector().then(() => undefined), 300_000); // 5 min max
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'correction:pattern-detect', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('correction:pattern-detect', '0 5 * * *', {}); // 5am daily
+
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

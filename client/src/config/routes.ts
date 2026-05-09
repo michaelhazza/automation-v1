@@ -15,6 +15,9 @@ export const APP_ROUTE_PATTERNS = [
   '/knowledge',
   '/spending',
   '/connections',
+  '/quality',
+  '/quality/scorecards/create',
+  '/quality/bench',
   // Workspace-context routes
   '/automations',
   '/workflows',

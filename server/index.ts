@@ -201,6 +201,13 @@ import clientErrorsRouter from './routes/clientErrors.js';
 import baselinesRouter from './routes/baselines.js';
 // Consolidation Build C3 — recurring tasks aggregator
 import recurringTasksRouter from './routes/recurringTasks.js';
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach + bench
+import scorecardsRouter from './routes/scorecards.js';
+import agentScorecardsRouter from './routes/agentScorecards.js';
+import benchRunsRouter from './routes/benchRuns.js';
+import governQualityRouter from './routes/governQuality.js';
+// Trust & Verification Layer Stage 3 — operator corrections
+import correctionsRouter from './routes/corrections.js';
 // Agent Workspace — presence SSE stream (Chunk 9)
 import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
 
@@ -450,6 +457,12 @@ app.use(clientErrorsRouter);
 app.use(baselinesRouter);
 // Consolidation Build C3 — recurring tasks aggregator
 app.use(recurringTasksRouter);
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach + bench
+app.use(scorecardsRouter);
+app.use(agentScorecardsRouter);
+app.use(benchRunsRouter);
+app.use(governQualityRouter);
+app.use(correctionsRouter);
 // Agent Workspace — presence SSE stream (Chunk 9)
 app.use(agentPresenceStreamRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *

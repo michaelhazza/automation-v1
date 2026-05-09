@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Run Trace (extended)
+  Based on: prototypes/consolidation-2026-05-06/run-trace.html
+
+  Trust additions in this file (Round 1):
+    1. Verify badge per step — inline indicator showing pass / fail / inconclusive / not-applicable.
+       Hover reveals the verify reason. Failed state uses red palette from _shared.css.
+    2. "Correct" action on LLM-generated step outputs — appears in hover menu on rows with
+       LLM output (llm_call, tool_result). Opens a modal: original output (read-only),
+       edited output (textarea), optional reason (one-line), Save / Cancel.
+       After save, a small "captured as auto-memory" toast appears with a link to Knowledge.
+
+  Round 5 additions:
+    3. "About this correction" metadata block inside the Correct modal — three labelled rows:
+       Scope, Persistence, Confidence. Read-only panel with grey background so it reads as
+       system metadata, not editable content. Placed after the Reason field, before the footer.
+       Addresses reviewer feedback: "captured as auto-memory" alone is too vague; operators
+       need to see scope, persistence, and confidence before confirming.
+
+  Design decisions:
+    - Verify badge placed between event label and content, with a small gap. Stays inline,
+      zero extra vertical space on non-hovered rows.
+    - Correct button only appears in hover overlay; not permanently visible (avoids clutter).
+    - Modal uses the .modal-overlay / .modal-card primitives from _shared.css.
+    - Toast is a fixed bottom-right chip, auto-dismiss 4s.
+    - Correction metadata block uses light grey background with subtle border to distinguish
+      from editable content. Row-level separators (thin border-bottom) without heavy borders.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Trace | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .run-layout {
+    display: flex;
+    height: calc(100vh - 52px);
+    overflow: hidden;
+  }
+
+  /* Chain sidebar */
+  .chain-sidebar {
+    width: 220px; flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: white;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .chain-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--slate-400); flex-shrink: 0;
+  }
+  .chain-run {
+    padding: 9px 14px; border-bottom: 1px solid var(--slate-100);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .chain-run:hover { background: var(--slate-50); }
+  .chain-run.active { background: var(--indigo-50); border-left: 2px solid var(--indigo-500); }
+  .chain-run-name { font-size: 12.5px; font-weight: 500; color: var(--slate-800); margin-bottom: 2px; }
+  .chain-run-meta { font-size: 11px; color: var(--slate-400); display: flex; align-items: center; gap: 5px; }
+
+  /* Main run area */
+  .run-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .run-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: white;
+    display: flex; align-items: center; gap: 12px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .run-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+  .run-meta-items { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: 1; }
+  .run-meta-item { font-size: 12px; color: var(--slate-500); }
+
+  .live-indicator {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
+    color: var(--emerald-600); background: var(--emerald-50);
+    border: 1px solid #a7f3d0; border-radius: 20px; padding: 3px 9px;
+  }
+  .live-dot {
+    width: 6px; height: 6px; background: var(--emerald-500);
+    border-radius: 50%; animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  /* Trace timeline */
+  .trace-scroll { flex: 1; overflow-y: auto; padding: 0; }
+
+  .event-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 7px 16px; border-bottom: 1px solid var(--slate-100);
+    cursor: pointer; transition: background 0.1s;
+    font-size: 12.5px;
+    position: relative;
+  }
+  .event-row:hover { background: var(--slate-50); }
+  .event-row.selected { background: var(--indigo-50); }
+  .event-seq { font-family: monospace; font-size: 11px; color: var(--slate-400); width: 32px; flex-shrink: 0; padding-top: 2px; }
+  .event-type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .event-body { flex: 1; min-width: 0; }
+  .event-label-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; flex-wrap: wrap; }
+  .event-type-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .event-content { color: var(--slate-700); line-height: 1.4; }
+  .event-time { font-size: 11px; color: var(--slate-400); flex-shrink: 0; padding-top: 2px; }
+
+  /* ── Verify badge ───────────────────────────────────────────────── */
+  /*
+    Three states:
+      pass    — green checkmark
+      fail    — red X
+      pending — grey clock (covers async-not-yet-resolved AND inconclusive)
+    Skills with no verify check get NO badge at all.
+  */
+  .verify-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 600;
+    border-radius: 4px; padding: 1px 5px;
+    white-space: nowrap; flex-shrink: 0;
+    cursor: default;
+    position: relative;
+  }
+  .verify-pass        { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .verify-fail        { background: var(--red-50);     color: var(--red-600);     border: 1px solid #fecaca; }
+  .verify-pending     { background: var(--slate-100);  color: var(--slate-500);   border: 1px solid var(--slate-200); }
+
+  /* Verify tooltip on hover */
+  .verify-badge::after {
+    content: attr(data-reason);
+    position: absolute;
+    bottom: calc(100% + 5px);
+    left: 0;
+    background: var(--slate-800);
+    color: white;
+    font-size: 11px; font-weight: 400; line-height: 1.4;
+    padding: 5px 9px;
+    border-radius: 6px;
+    white-space: pre-wrap; max-width: 240px; width: max-content;
+    z-index: 50; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .verify-badge:hover::after { opacity: 1; }
+
+  /* ── Correct hover button ───────────────────────────────────────── */
+  .event-hover-actions {
+    position: absolute; right: 60px; top: 6px;
+    display: none; align-items: center; gap: 4px;
+    z-index: 10;
+  }
+  .event-row:hover .event-hover-actions { display: flex; }
+  .correct-btn {
+    padding: 2px 9px; border-radius: 5px;
+    font-size: 11px; font-weight: 600;
+    border: 1px solid var(--indigo-200);
+    background: white; color: var(--indigo-600);
+    cursor: pointer; transition: all 0.1s;
+    white-space: nowrap;
+  }
+  .correct-btn:hover { background: var(--indigo-50); border-color: var(--indigo-400); }
+
+  /* Event type colours */
+  .etype-llm_call     { color: var(--indigo-500); }
+  .etype-tool_call    { color: var(--sky-500); }
+  .etype-tool_result  { color: var(--emerald-500); }
+  .etype-error        { color: var(--red-500); }
+  .etype-run_start    { color: var(--slate-400); }
+  .etype-run_complete { color: var(--emerald-600); }
+  .etype-delegation   { color: var(--violet-500); }
+
+  .dot-llm     { background: var(--indigo-500); }
+  .dot-tool    { background: var(--sky-500); }
+  .dot-result  { background: var(--emerald-500); }
+  .dot-error   { background: var(--red-500); }
+  .dot-meta    { background: var(--slate-300); }
+  .dot-deleg   { background: var(--violet-500); }
+
+  /* Event detail panel */
+  .event-detail {
+    width: 540px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: white; display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .event-detail-header {
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50);
+  }
+  .event-detail-title { font-size: 12.5px; font-weight: 700; color: var(--slate-800); }
+  .event-detail-sub { font-size: 11px; color: var(--slate-400); margin-top: 2px; }
+  .event-detail-body { padding: 14px; flex: 1; }
+  .detail-field { margin-bottom: 14px; }
+  .detail-field-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 4px; }
+  .detail-field-value { font-size: 12.5px; color: var(--slate-700); line-height: 1.5; }
+  .detail-field-pre {
+    font-size: 11px; font-family: monospace; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 6px; padding: 10px; max-height: 160px;
+    overflow-y: auto; white-space: pre-wrap; line-height: 1.5;
+  }
+  .detail-field-pre.expandable { max-height: 80px; }
+  .expand-link {
+    font-size: 11px; color: var(--indigo-600); font-weight: 600;
+    cursor: pointer; text-decoration: none; margin-top: 3px; display: block;
+  }
+  .expand-link:hover { text-decoration: underline; }
+  .detail-footer {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--slate-50);
+  }
+  .raw-json-link {
+    font-size: 11.5px; color: var(--indigo-600); font-weight: 600;
+    text-decoration: none; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .raw-json-link:hover { text-decoration: underline; }
+  .detail-placeholder {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; padding: 32px 20px; text-align: center;
+    color: var(--slate-400);
+  }
+
+  /* State toggle */
+  .state-toggle { display: flex; gap: 8px; margin-bottom: 0; }
+  .state-toggle-btn {
+    padding: 4px 12px; border-radius: 20px;
+    font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200);
+    background: white; color: var(--slate-600);
+    cursor: pointer; transition: all 0.12s;
+  }
+  .state-toggle-btn.selected {
+    border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700);
+  }
+
+  /* ── Correct modal ──────────────────────────────────────────────── */
+  .correct-modal-card { max-width: 560px; }
+  .original-output-block {
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 8px; padding: 10px 12px;
+    font-size: 12.5px; color: var(--slate-600); line-height: 1.55;
+    max-height: 140px; overflow-y: auto;
+    font-family: inherit;
+    margin-bottom: 0;
+  }
+  .modal-section-label {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 6px;
+  }
+  .modal-section { margin-bottom: 16px; }
+  .char-hint { font-size: 11px; color: var(--slate-400); margin-top: 3px; }
+
+  /* ── Correction metadata block ─────────────────────────────────── */
+  .correction-meta {
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 0;
+  }
+  .correction-meta-heading {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 8px;
+  }
+  .correction-meta-row {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 12px; line-height: 1.5;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .correction-meta-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .correction-meta-key {
+    font-weight: 600; color: var(--slate-600);
+    min-width: 90px; flex-shrink: 0;
+  }
+  .correction-meta-val { color: var(--slate-700); }
+
+  /* ── Toast ──────────────────────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--slate-900); color: white;
+    font-size: 12.5px; font-weight: 500;
+    padding: 10px 16px; border-radius: 8px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    z-index: 9999;
+    animation: toastIn 0.2s ease;
+    max-width: 320px;
+  }
+  .toast.hidden { display: none; }
+  .toast-link { color: #a5b4fc; font-weight: 600; text-decoration: underline; cursor: pointer; }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Verify summary bar ─────────────────────────────────────────── */
+  .verify-summary-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 16px; background: var(--slate-50);
+    border-bottom: 1px solid var(--slate-100);
+    font-size: 11.5px; color: var(--slate-500);
+    flex-wrap: wrap;
+  }
+  .verify-summary-label { font-weight: 600; color: var(--slate-600); }
+  .vsb-item { display: flex; align-items: center; gap: 4px; }
+
+  /* Raw JSON modal (from original run-trace) */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9000;
+  }
+  .modal-box {
+    background: white; border-radius: 10px; width: 600px; max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .modal-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .modal-head-title { font-size: 13px; font-weight: 700; color: var(--slate-800); }
+  .modal-close-sm {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: var(--slate-100); color: var(--slate-600);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 300; line-height: 1;
+  }
+  .modal-close-sm:hover { background: var(--slate-200); }
+  .modal-json {
+    font-size: 11.5px; font-family: monospace; color: var(--slate-700);
+    background: var(--slate-50); border: 1px solid var(--slate-200);
+    border-radius: 6px; padding: 12px; white-space: pre; line-height: 1.6;
+    overflow-x: auto;
+  }
+</style>
+</head>
+<body style="overflow:hidden;">
+<div class="app-shell" style="height:100vh;overflow:hidden;">
+
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>
+    (function() {
+      var p = new URLSearchParams(window.location.search);
+      if (p.get('embedded') !== '1') {
+        renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'run-trace.html');
+      }
+    })();
+  </script>
+
+  <div class="main" style="overflow:hidden;">
+    <div class="topbar" id="run-trace-topbar">
+      <div class="topbar-breadcrumb">
+        <span>Agents</span>
+        <span style="color:#cbd5e1">/</span>
+        <span>Outreach Agent</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Run details</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="state-toggle" style="margin-right:8px;">
+        <button class="state-toggle-btn selected" onclick="setMode('live',this)">Live run</button>
+        <button class="state-toggle-btn" onclick="setMode('historical',this)">Historical</button>
+      </div>
+      <a href="index.html" class="btn btn-sm btn-secondary">Back to prototypes</a>
+    </div>
+
+    <div class="run-layout">
+
+      <!-- Chain sidebar -->
+      <div class="chain-sidebar">
+        <div class="chain-header">Run chain</div>
+        <div class="chain-run active">
+          <div class="chain-run-name">Outreach Agent</div>
+          <div class="chain-run-meta">
+            <span class="status-dot dot-blue dot-pulse"></span>
+            <span>running</span>
+            <span style="margin-left:auto;">+5m 32s</span>
+          </div>
+        </div>
+        <div class="chain-run" style="padding-left:24px;border-left:2px solid var(--slate-100);">
+          <div class="chain-run-name" style="font-size:12px;">CRM sub-agent</div>
+          <div class="chain-run-meta" style="font-size:10.5px;">
+            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
+            <span>completed</span>
+            <span style="margin-left:auto;">+1m 12s</span>
+          </div>
+        </div>
+        <div style="padding:6px 14px;font-size:10.5px;color:var(--slate-400);">Parent run</div>
+        <div class="chain-run">
+          <div class="chain-run-name">CRM Orchestrator</div>
+          <div class="chain-run-meta">
+            <span class="status-dot dot-green" style="width:6px;height:6px;"></span>
+            <span>completed</span>
+            <span style="margin-left:auto;">Apr 28</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main run area -->
+      <div class="run-main">
+
+        <!-- Run header -->
+        <div class="run-header">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <div class="run-title">Outreach Agent: Run #4827</div>
+              <div class="live-indicator" id="live-badge">
+                <div class="live-dot"></div>
+                Live
+              </div>
+              <div id="hist-badge" style="display:none;" class="badge badge-green">Completed</div>
+            </div>
+            <div class="run-meta-items">
+              <span class="run-meta-item">Started: May 6 2026, 2:14:32 PM &middot; 5 minutes ago</span>
+            </div>
+            <div class="run-meta-items" style="margin-top:2px;">
+              <span class="run-meta-item" id="duration-label">Duration: 5 min 32 sec</span>
+              <span class="run-meta-item" style="color:var(--slate-300);">|</span>
+              <span class="run-meta-item">Status: <span id="status-text" style="font-weight:600;color:var(--indigo-600);">Running</span></span>
+              <span class="run-meta-item" style="color:var(--slate-300);">|</span>
+              <span class="run-meta-item" id="event-count-label">47 events</span>
+            </div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <div class="tabs" style="border-bottom:none;margin-bottom:0;">
+              <button class="tab-btn active" onclick="switchRunTab('trace',this)" style="padding:5px 12px;font-size:12.5px;">Trace</button>
+              <button class="tab-btn" onclick="switchRunTab('graph',this)" style="padding:5px 12px;font-size:12.5px;">Delegation graph</button>
+            </div>
+            <button class="btn btn-sm btn-danger" id="cancel-btn">Cancel run</button>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;overflow:hidden;" id="run-content">
+          <!-- Trace tab -->
+          <div id="tab-trace" style="display:flex;flex:1;overflow:hidden;flex-direction:column;">
+
+            <!-- Verify summary bar — 3 states only: Pass / Fail / Pending -->
+            <div class="verify-summary-bar">
+              <span class="verify-summary-label">Runtime checks:</span>
+              <span class="vsb-item">
+                <span style="width:7px;height:7px;border-radius:50%;background:var(--emerald-500);display:inline-block;"></span>
+                5 passed
+              </span>
+              <span class="vsb-item">
+                <span style="width:7px;height:7px;border-radius:50%;background:var(--red-500);display:inline-block;"></span>
+                1 failed
+              </span>
+              <span class="vsb-item">
+                <span style="width:7px;height:7px;border-radius:50%;background:var(--slate-400);display:inline-block;"></span>
+                1 pending
+              </span>
+            </div>
+
+            <div style="display:flex;flex:1;overflow:hidden;">
+              <div class="trace-scroll" id="event-list">
+
+                <!-- Event 1: RUN_START — no verify badge (lifecycle event, no skill check) -->
+                <div class="event-row" onclick="selectEvent(1)">
+                  <div class="event-seq">1</div>
+                  <div class="event-type-dot dot-meta"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-run_start">run_start</span>
+                      <!-- No verify badge: lifecycle events have no verify check -->
+                    </div>
+                    <div class="event-content">Run initiated. Input: "Draft follow-up email to Sarah Chen at Acme Corp..."</div>
+                  </div>
+                  <div class="event-time">+0s</div>
+                </div>
+
+                <!-- Event 2: LLM_CALL — verify pass, has Correct -->
+                <div class="event-row" onclick="selectEvent(2)">
+                  <div class="event-seq">2</div>
+                  <div class="event-type-dot dot-llm"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-llm_call">llm_call</span>
+                      <span class="verify-badge verify-pass" data-reason="Planning output verified: 3 required actions identified, all valid skill names.">Pass</span>
+                    </div>
+                    <div class="event-content">Planning step: identified 3 required actions, retrieve memory, draft email, confirm send.</div>
+                  </div>
+                  <div class="event-hover-actions">
+                    <button class="correct-btn" onclick="openCorrectModal(2, event)">Correct</button>
+                  </div>
+                  <div class="event-time">+3s</div>
+                </div>
+
+                <!-- Event 3: TOOL_CALL — verify pass -->
+                <div class="event-row" onclick="selectEvent(3)">
+                  <div class="event-seq">3</div>
+                  <div class="event-type-dot dot-tool"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-tool_call">tool_call: search_crm</span>
+                      <span class="verify-badge verify-pass" data-reason="CRM query formed correctly: required fields present, query string non-empty.">Pass</span>
+                    </div>
+                    <div class="event-content">Querying HubSpot for "Sarah Chen" at "Acme Corp"</div>
+                  </div>
+                  <div class="event-time">+4s</div>
+                </div>
+
+                <!-- Event 4: TOOL_RESULT — verify pass, has Correct -->
+                <div class="event-row" onclick="selectEvent(4)">
+                  <div class="event-seq">4</div>
+                  <div class="event-type-dot dot-result"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-tool_result">tool_result: search_crm</span>
+                      <span class="verify-badge verify-pass" data-reason="search_crm returned HTTP 200. Contact record found with required fields: email, title, last_contact.">Pass</span>
+                    </div>
+                    <div class="event-content">Found 1 contact. Sarah Chen, VP Operations, sarah.chen@acmecorp.com. Last contacted Apr 28.</div>
+                  </div>
+                  <div class="event-hover-actions">
+                    <button class="correct-btn" onclick="openCorrectModal(4, event)">Correct</button>
+                  </div>
+                  <div class="event-time">+6s</div>
+                </div>
+
+                <!-- Event 5: LLM_CALL (draft email) — verify pass, has Correct -->
+                <div class="event-row" onclick="selectEvent(5)">
+                  <div class="event-seq">5</div>
+                  <div class="event-type-dot dot-llm"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-llm_call">llm_call</span>
+                      <span class="verify-badge verify-pass" data-reason="Email draft contains required fields: subject line, greeting, body, sign-off. No hallucinated contact details detected.">Pass</span>
+                    </div>
+                    <div class="event-content">Drafting email body using retrieved contact data and memory blocks (brand voice, key stakeholders, competitor context)</div>
+                  </div>
+                  <div class="event-hover-actions">
+                    <button class="correct-btn" onclick="openCorrectModal(5, event)">Correct</button>
+                  </div>
+                  <div class="event-time">+9s</div>
+                </div>
+
+                <!-- Event 6: TOOL_CALL (send_email) — verify FAIL -->
+                <div class="event-row" onclick="selectEvent(6)" style="border-left:3px solid var(--red-400);">
+                  <div class="event-seq">6</div>
+                  <div class="event-type-dot dot-tool"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-tool_call">tool_call: send_email</span>
+                      <span class="verify-badge verify-fail" data-reason="send_email runtime check failed: recipient domain 'acmecorp.com' is on the suppression list. Email was not sent. Run flagged for review.">Fail</span>
+                    </div>
+                    <div class="event-content">Preparing email to sarah.chen@acmecorp.com, subject "Following up on our Q2 proposal"</div>
+                  </div>
+                  <div class="event-time">+18s</div>
+                </div>
+
+                <!-- Event 7: HITL_GATE — verify pending (async, awaiting operator) -->
+                <div class="event-row" onclick="selectEvent(7)" style="border-left:3px solid var(--slate-300);">
+                  <div class="event-seq">7</div>
+                  <div class="event-type-dot dot-meta" style="background:var(--slate-400);"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label" style="color:var(--slate-600);">hitl_gate: send_email</span>
+                      <span class="verify-badge verify-pending" data-reason="Awaiting operator decision. Runtime check result will be recorded after approval or rejection.">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        Pending
+                      </span>
+                    </div>
+                    <div class="event-content">Awaiting operator approval before sending. Email queued in review.</div>
+                  </div>
+                  <div class="event-time">+19s</div>
+                </div>
+
+                <!-- Event 8: DELEGATION — verify pass -->
+                <div class="event-row" onclick="selectEvent(8)" style="border-left:3px solid var(--violet-400);">
+                  <div class="event-seq">8</div>
+                  <div class="event-type-dot dot-deleg"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-delegation">delegation: crm-enrichment-agent</span>
+                      <span class="verify-badge verify-pass" data-reason="Sub-agent completed successfully. Enrichment result returned with phone, LinkedIn, and interaction history.">Pass</span>
+                    </div>
+                    <div class="event-content">Delegating contact enrichment to CRM sub-agent. Awaiting completion.</div>
+                  </div>
+                  <div class="event-time">+28s</div>
+                </div>
+
+                <!-- placeholder rows -->
+                <div style="padding:10px 16px;font-size:11.5px;color:var(--slate-400);font-style:italic;border-bottom:1px solid var(--slate-100);">
+                  Events 9 through 46 (38 additional events) ...
+                </div>
+
+                <div class="event-row" id="streaming-event" onclick="selectEvent(47)" style="opacity:0.6;">
+                  <div class="event-seq">47</div>
+                  <div class="event-type-dot dot-llm" style="animation:pulse-dot 1s infinite;"></div>
+                  <div class="event-body">
+                    <div class="event-label-row">
+                      <span class="event-type-label etype-llm_call">llm_call</span>
+                    </div>
+                    <div class="event-content" style="color:var(--slate-400);">Streaming...</div>
+                  </div>
+                  <div class="event-time">+5m 32s</div>
+                </div>
+
+              </div>
+
+              <!-- Event detail panel -->
+              <div class="event-detail" id="event-detail-panel">
+                <div class="event-detail-header">
+                  <div class="event-detail-title" id="detail-title">Select an event</div>
+                  <div class="event-detail-sub" id="detail-sub">Click any row in the timeline to inspect it</div>
+                </div>
+                <div class="event-detail-body" id="detail-body">
+                  <div class="detail-placeholder">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.25;margin-bottom:10px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <div style="font-size:13px;font-weight:600;color:var(--slate-500);margin-bottom:4px;">No event selected</div>
+                    <div style="font-size:12px;color:var(--slate-400);">Click any event row to see its details here.</div>
+                  </div>
+                </div>
+                <div class="detail-footer" id="detail-footer" style="display:none;">
+                  <a class="raw-json-link" onclick="openRawJson()" href="#">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    View raw event JSON
+                  </a>
+                </div>
+              </div>
+            </div><!-- /inner flex -->
+          </div><!-- /tab-trace -->
+
+          <!-- Delegation graph tab -->
+          <div id="tab-graph" style="display:none;flex:1;align-items:center;justify-content:center;flex-direction:column;background:var(--slate-50);">
+            <div style="text-align:center;color:var(--slate-400);">
+              <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="opacity:0.3;margin:0 auto 12px;display:block;"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="12" y1="8" x2="5" y2="16"/><line x1="12" y1="8" x2="19" y2="16"/></svg>
+              <div style="font-size:14px;font-weight:600;color:var(--slate-600);margin-bottom:6px;">Delegation graph</div>
+              <div style="font-size:13px;max-width:280px;margin:0 auto;">Visual representation of agent delegation chain. This run has 1 sub-agent invocation.</div>
+            </div>
+          </div>
+
+        </div><!-- /run-content -->
+
+      </div><!-- /run-main -->
+    </div><!-- /run-layout -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- ── Correct modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="correct-modal" hidden onclick="handleCorrectModalBg(event)">
+  <div class="modal-card correct-modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title">Correct agent output</span>
+      <button class="modal-close" onclick="closeCorrectModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:20px;">
+      <div class="modal-section">
+        <div class="modal-section-label">Original output (read-only)</div>
+        <div class="original-output-block" id="correct-original"></div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Corrected output</div>
+        <textarea class="form-textarea" id="correct-edited" rows="5" style="min-height:100px;"></textarea>
+        <div class="char-hint">This will be saved as a high-signal memory entry for the Outreach Agent.</div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Reason <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);">(optional)</span></div>
+        <input class="form-input" type="text" id="correct-reason" placeholder="e.g. Tone was too formal for this contact">
+      </div>
+      <div class="modal-section" style="margin-bottom:0;">
+        <div class="correction-meta">
+          <div class="correction-meta-heading">About this correction</div>
+          <div class="correction-meta-row">
+            <span class="correction-meta-key">Scope</span>
+            <span class="correction-meta-val">This agent only</span>
+          </div>
+          <div class="correction-meta-row">
+            <span class="correction-meta-key">Persistence</span>
+            <span class="correction-meta-val">Active on next run</span>
+          </div>
+          <div class="correction-meta-row">
+            <span class="correction-meta-key">Confidence</span>
+            <span class="correction-meta-val">High signal — applied immediately, listed under Knowledge (Source: from corrections) where you can edit, override, or reject</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-direction:column;align-items:flex-start;gap:10px;">
+      <div style="font-size:12px;color:var(--slate-500);width:100%;">Your correction will appear in Knowledge for review and will improve future runs of this agent.</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="closeCorrectModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveCorrection()">Save correction</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Raw JSON modal ─────────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="raw-json-modal" style="display:none;" onclick="closeRawJson(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <span class="modal-head-title" id="raw-modal-title">Raw event JSON</span>
+      <button class="modal-close-sm" onclick="closeRawJson()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px;overflow-y:auto;flex:1;">
+      <pre class="modal-json" id="raw-json-content"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ─────────────────────────────────────────────────────────── -->
+<div class="toast hidden" id="save-toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  Captured as auto-memory.
+  <a class="toast-link" href="knowledge.html">View in Knowledge</a>
+</div>
+
+<script>
+// ── Event data ────────────────────────────────────────────────────────────────
+const EVENTS = {
+  1: { type:'RUN_START', label:'run_start', seq:1, total:47, timeIntoRun:'+0s', iso:'2026-05-06T09:00:00.000Z',
+    fields:{ trigger_source:'manual', started_by:'sarah@agency.io', agent_version:'outreach-agent@v2.4.1', parent_run:null,
+      input_payload:'{\n  "task": "Draft follow-up email to Sarah Chen at Acme Corp",\n  "context": "Last meeting was Apr 28, discussed Q2 renewal proposal",\n  "tone": "warm-professional"\n}' },
+    raw:'{\n  "event_id": "evt_01HXYZ123",\n  "type": "run_start",\n  "seq": 1,\n  "timestamp": "2026-05-06T09:00:00.000Z"\n}',
+    verify:{ state:'none', reason:'' },
+    hasOutput: false
+  },
+  2: { type:'LLM_CALL', label:'llm_call', seq:2, total:47, timeIntoRun:'+3s', iso:'2026-05-06T09:00:03.421Z',
+    fields:{ model:'claude-sonnet-4-6', prompt_tokens:1843, completion_tokens:312, latency_ms:1840, cost_usd:0.0038, temperature:1.0,
+      prompt_preview:'System: You are Outreach Agent. You help draft and send follow-up emails...\n\nUser: Draft follow-up email to Sarah Chen at Acme Corp.',
+      response_preview:"I'll help you draft a follow-up email to Sarah Chen. Let me first retrieve her contact details and any relevant notes from the CRM before drafting.\n\nPlanned steps:\n1. Search CRM for Sarah Chen at Acme Corp\n2. Review meeting notes from Apr 28\n3. Draft personalised email\n4. Await your approval before sending" },
+    raw:'{\n  "event_id": "evt_01HXYZ124",\n  "type": "llm_call",\n  "seq": 2,\n  "model": "claude-sonnet-4-6",\n  "timestamp": "2026-05-06T09:00:03.421Z"\n}',
+    verify:{ state:'pass', reason:'Planning output verified: 3 required actions identified, all valid skill names.' },
+    hasOutput: true
+  },
+  3: { type:'TOOL_CALL', label:'tool_call', seq:3, total:47, timeIntoRun:'+4s', iso:'2026-05-06T09:00:04.109Z',
+    fields:{ tool_name:'search_crm', called_by_step:2, expected_result_type:'contact_list',
+      input_args:'{\n  "query": "Sarah Chen Acme Corp",\n  "limit": 5,\n  "fields": ["email","title","last_contact","deal_stage"]\n}' },
+    raw:'{\n  "event_id": "evt_01HXYZ125",\n  "type": "tool_call",\n  "seq": 3,\n  "tool_name": "search_crm",\n  "timestamp": "2026-05-06T09:00:04.109Z"\n}',
+    verify:{ state:'pass', reason:'CRM query formed correctly: required fields present, query string non-empty.' },
+    hasOutput: false
+  },
+  4: { type:'TOOL_RESULT', label:'tool_result', seq:4, total:47, timeIntoRun:'+6s', iso:'2026-05-06T09:00:06.884Z',
+    fields:{ tool_name:'search_crm', status:'success', latency_ms:775,
+      result_payload:'{\n  "total": 1,\n  "contacts": [{\n    "name": "Sarah Chen",\n    "title": "VP Operations",\n    "email": "sarah.chen@acmecorp.com",\n    "last_contact": "2026-04-28",\n    "deal_stage": "proposal_sent"\n  }]\n}' },
+    raw:'{\n  "event_id": "evt_01HXYZ126",\n  "type": "tool_result",\n  "seq": 4,\n  "tool_name": "search_crm",\n  "status": "success",\n  "timestamp": "2026-05-06T09:00:06.884Z"\n}',
+    verify:{ state:'pass', reason:'search_crm returned HTTP 200. Contact record found with required fields.' },
+    hasOutput: true
+  },
+  5: { type:'LLM_CALL', label:'llm_call', seq:5, total:47, timeIntoRun:'+9s', iso:'2026-05-06T09:00:09.002Z',
+    fields:{ model:'claude-sonnet-4-6', prompt_tokens:3102, completion_tokens:618, latency_ms:3140, cost_usd:0.0087, temperature:0.7,
+      prompt_preview:'System: You are Outreach Agent...\n\n[CRM Result]: Sarah Chen, VP Operations...\n[Memory Block "brand-voice"]: We use warm, direct language...',
+      response_preview:'Subject: Following up on our Q2 proposal\n\nHi Sarah,\n\nI hope this note finds you well. I wanted to follow up on the proposal we shared last week for the Q2 renewal. We\'ve been thinking about your feedback on the enterprise tier and have a revised structure we think works better for Acme\'s headcount.\n\nWould you have 20 minutes this week to reconnect?\n\nWarm regards,\nAlex' },
+    raw:'{\n  "event_id": "evt_01HXYZ127",\n  "type": "llm_call",\n  "seq": 5,\n  "model": "claude-sonnet-4-6",\n  "timestamp": "2026-05-06T09:00:09.002Z"\n}',
+    verify:{ state:'pass', reason:'Email draft contains required fields. No hallucinated contact details detected.' },
+    hasOutput: true
+  },
+  6: { type:'TOOL_CALL', label:'tool_call', seq:6, total:47, timeIntoRun:'+18s', iso:'2026-05-06T09:00:18.451Z',
+    fields:{ tool_name:'send_email', called_by_step:5, expected_result_type:'email_send_receipt',
+      input_args:'{\n  "to": "sarah.chen@acmecorp.com",\n  "subject": "Following up on our Q2 proposal",\n  "body": "Hi Sarah,\\n\\nI hope this note finds you well...",\n  "from_alias": "Alex at Agency",\n  "track_opens": true\n}' },
+    raw:'{\n  "event_id": "evt_01HXYZ128",\n  "type": "tool_call",\n  "seq": 6,\n  "tool_name": "send_email",\n  "timestamp": "2026-05-06T09:00:18.451Z"\n}',
+    verify:{ state:'fail', reason:'send_email runtime check failed: recipient domain on suppression list. Email was not sent. Run flagged for review.' },
+    hasOutput: false
+  },
+  7: { type:'HITL_GATE', label:'hitl_gate', seq:7, total:47, timeIntoRun:'+19s', iso:'2026-05-06T09:00:19.210Z',
+    fields:{ gate_type:'approval', awaiting:'send_email tool execution', who_can_approve:'Role: operator / admin (this org)', queued_at:'2026-05-06T09:00:19Z', inbox_link:'#' },
+    raw:'{\n  "event_id": "evt_01HXYZ129",\n  "type": "hitl_gate",\n  "seq": 7,\n  "timestamp": "2026-05-06T09:00:19.210Z"\n}',
+    verify:{ state:'pending', reason:'Awaiting operator decision. Runtime check result will be recorded after approval or rejection.' },
+    hasOutput: false
+  },
+  8: { type:'DELEGATION', label:'delegation', seq:8, total:47, timeIntoRun:'+28s', iso:'2026-05-06T09:00:28.003Z',
+    fields:{ sub_agent_name:'CRM Enrichment Agent', sub_run_link:'#', delegation_reason:'Contact enrichment required: phone, LinkedIn, and latest interaction history.', status:'completed' },
+    raw:'{\n  "event_id": "evt_01HXYZ130",\n  "type": "delegation",\n  "seq": 8,\n  "timestamp": "2026-05-06T09:00:28.003Z"\n}',
+    verify:{ state:'pass', reason:'Sub-agent completed successfully. Enrichment result returned with phone, LinkedIn, and interaction history.' },
+    hasOutput: false
+  },
+  47: { type:'LLM_CALL', label:'llm_call', seq:47, total:47, timeIntoRun:'+5m 32s', iso:'2026-05-06T09:00:42.000Z',
+    fields:{ model:'claude-sonnet-4-6', prompt_tokens:0, completion_tokens:0, latency_ms:null, cost_usd:null, temperature:1.0,
+      prompt_preview:'...', response_preview:'Streaming...' },
+    raw:'{\n  "event_id": "evt_01HXYZ_streaming",\n  "type": "llm_call",\n  "seq": 47,\n  "status": "streaming",\n  "timestamp": "2026-05-06T09:00:42.000Z"\n}',
+    verify:{ state:'none', reason:'' },
+    hasOutput: false
+  }
+};
+
+// ── Detail panel builder ──────────────────────────────────────────────────────
+function buildDetailHtml(evt) {
+  const f = evt.fields;
+  let html = '';
+
+  // Verify block at top of detail (3 states: pass / fail / pending — none = no badge shown)
+  if (evt.verify.state !== 'none') {
+    const vLabels = { pass:'Pass', fail:'Fail', pending:'Pending' };
+    html += `<div class="detail-field">
+      <div class="detail-field-label">Runtime check result</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span class="verify-badge verify-${evt.verify.state}" style="cursor:default;">${vLabels[evt.verify.state] || evt.verify.state}</span>
+        <span style="font-size:12px;color:var(--slate-600);">${escHtml(evt.verify.reason)}</span>
+      </div>
+    </div>`;
+  }
+
+  if (evt.type === 'RUN_START') {
+    html += field('Trigger source', badge(f.trigger_source, 'slate'));
+    html += field('Started by', f.started_by);
+    html += field('Agent version', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.agent_version}</code>`);
+    html += field('Parent run', f.parent_run ? `<a href="#" style="color:var(--indigo-600);font-size:12.5px;">View parent run</a>` : '<span style="color:var(--slate-400);">None (root run)</span>');
+    html += fieldPre('Input payload', f.input_payload);
+  }
+  if (evt.type === 'LLM_CALL') {
+    const isStreaming = f.latency_ms === null;
+    html += field('Model', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.model}</code>`);
+    if (!isStreaming) {
+      html += field('Tokens', `${f.prompt_tokens.toLocaleString()} prompt + ${f.completion_tokens.toLocaleString()} completion`);
+      html += field('Latency', `${f.latency_ms.toLocaleString()} ms`);
+      html += fieldPreExpandable('Prompt preview', f.prompt_preview);
+      html += fieldPreExpandable('Response preview', f.response_preview);
+      if (evt.hasOutput) {
+        html += `<div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--slate-100);">
+          <button class="correct-btn" style="width:100%;text-align:center;padding:5px;" onclick="openCorrectModal(${evt.seq}, null)">Correct this output</button>
+        </div>`;
+      }
+    } else {
+      html += field('Status', badge('streaming', 'indigo'));
+    }
+  }
+  if (evt.type === 'TOOL_CALL') {
+    html += field('Tool name', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.tool_name}</code>`);
+    html += field('Called by step', `Step #${f.called_by_step}`);
+    html += fieldPre('Input args', f.input_args);
+  }
+  if (evt.type === 'TOOL_RESULT') {
+    html += field('Tool name', `<code style="font-size:11px;background:var(--slate-100);padding:2px 6px;border-radius:4px;">${f.tool_name}</code>`);
+    html += field('Status', badge(f.status, f.status === 'success' ? 'green' : 'red'));
+    html += field('Latency', `${f.latency_ms.toLocaleString()} ms`);
+    html += fieldPreExpandable('Result payload', f.result_payload);
+    if (evt.hasOutput) {
+      html += `<div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--slate-100);">
+        <button class="correct-btn" style="width:100%;text-align:center;padding:5px;" onclick="openCorrectModal(${evt.seq}, null)">Correct this output</button>
+      </div>`;
+    }
+  }
+  if (evt.type === 'HITL_GATE') {
+    html += field('Gate type', badge(f.gate_type, 'amber'));
+    html += field('Awaiting', f.awaiting);
+    html += field('Who can approve', f.who_can_approve);
+    html += field('Inbox item', `<a href="${f.inbox_link}" style="color:var(--indigo-600);font-size:12.5px;">Open in Inbox</a>`);
+  }
+  if (evt.type === 'DELEGATION') {
+    html += field('Sub-agent', f.sub_agent_name);
+    html += field('Status', badge(f.status, f.status === 'completed' ? 'green' : 'amber'));
+    html += field('Sub-run', `<a href="${f.sub_run_link}" style="color:var(--indigo-600);font-size:12.5px;">View sub-run trace</a>`);
+    html += fieldPre('Delegation reason', f.delegation_reason);
+  }
+  return html;
+}
+
+function field(label, valueHtml) {
+  return `<div class="detail-field"><div class="detail-field-label">${label}</div><div class="detail-field-value">${valueHtml}</div></div>`;
+}
+function fieldPre(label, text) {
+  return `<div class="detail-field"><div class="detail-field-label">${label}</div><div class="detail-field-pre">${escHtml(text)}</div></div>`;
+}
+function fieldPreExpandable(label, text) {
+  const id = 'expand_' + Math.random().toString(36).slice(2);
+  return `<div class="detail-field">
+    <div class="detail-field-label">${label}</div>
+    <div class="detail-field-pre expandable" id="${id}">${escHtml(text)}</div>
+    <a class="expand-link" onclick="toggleExpand('${id}',this);return false;" href="#">Show more</a>
+  </div>`;
+}
+function badge(text, color) {
+  return `<span class="badge badge-${color}" style="font-size:10.5px;">${text}</span>`;
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function toggleExpand(id, link) {
+  const el = document.getElementById(id);
+  if (!el.style.maxHeight || el.style.maxHeight === '80px') {
+    el.style.maxHeight = 'none'; link.textContent = 'Show less';
+  } else {
+    el.style.maxHeight = '80px'; link.textContent = 'Show more';
+  }
+}
+
+// ── Timestamps ────────────────────────────────────────────────────────────────
+function formatAbsTimestamp(iso) {
+  const d = new Date(iso);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h = d.getHours(); const ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const ss = String(d.getSeconds()).padStart(2,'0');
+  return `${h}:${mm}:${ss} ${ampm}, ${months[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
+}
+function timeAgoFromIso(iso) {
+  const runStartMs = new Date('2026-05-06T14:14:32.000Z').getTime();
+  const viewNowMs = runStartMs + (5 * 60 + 32) * 1000;
+  const diff = Math.round((viewNowMs - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff} seconds ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)} minutes ago`;
+  return `${Math.floor(diff/3600)} hours ago`;
+}
+
+// ── Select event ──────────────────────────────────────────────────────────────
+let currentEventIdx = null;
+function selectEvent(n) {
+  document.querySelectorAll('.event-row').forEach(r => r.classList.remove('selected'));
+  const rows = document.querySelectorAll('.event-row');
+  const rowMap = {1:0,2:1,3:2,4:3,5:4,6:5,7:6,8:7,47:9};
+  if (rowMap[n] !== undefined) rows[rowMap[n]].classList.add('selected');
+  const evt = EVENTS[n];
+  if (!evt) return;
+  currentEventIdx = n;
+  const absTime = formatAbsTimestamp(evt.iso);
+  const agoTime = timeAgoFromIso(evt.iso);
+  document.getElementById('detail-title').textContent = `Event #${evt.seq} of ${evt.total} · ${evt.label}`;
+  document.getElementById('detail-sub').innerHTML =
+    `<div style="font-size:13px;font-weight:600;color:var(--slate-900);margin:4px 0 2px;">${absTime}</div>` +
+    `<div style="font-size:11px;color:var(--slate-500);">${evt.timeIntoRun} into run · ${agoTime}</div>`;
+  document.getElementById('detail-body').innerHTML = buildDetailHtml(evt);
+  document.getElementById('detail-footer').style.display = '';
+}
+
+// ── Raw JSON ──────────────────────────────────────────────────────────────────
+function openRawJson() {
+  if (currentEventIdx === null) return;
+  const evt = EVENTS[currentEventIdx];
+  document.getElementById('raw-modal-title').textContent = `Raw event JSON (event #${evt.seq})`;
+  document.getElementById('raw-json-content').textContent = evt.raw;
+  document.getElementById('raw-json-modal').style.display = 'flex';
+}
+function closeRawJson(e) {
+  if (!e || e.target === document.getElementById('raw-json-modal')) {
+    document.getElementById('raw-json-modal').style.display = 'none';
+  }
+}
+
+// ── Correct modal ─────────────────────────────────────────────────────────────
+const OUTPUT_SAMPLES = {
+  2: "I'll help you draft a follow-up email to Sarah Chen. Let me first retrieve her contact details and any relevant notes from the CRM before drafting.\n\nPlanned steps:\n1. Search CRM for Sarah Chen at Acme Corp\n2. Review meeting notes from Apr 28\n3. Draft personalised email\n4. Await your approval before sending",
+  4: '{\n  "total": 1,\n  "contacts": [{\n    "name": "Sarah Chen",\n    "title": "VP Operations",\n    "email": "sarah.chen@acmecorp.com",\n    "last_contact": "2026-04-28",\n    "deal_stage": "proposal_sent"\n  }]\n}',
+  5: "Subject: Following up on our Q2 proposal\n\nHi Sarah,\n\nI hope this note finds you well. I wanted to follow up on the proposal we shared last week for the Q2 renewal. We've been thinking about your feedback on the enterprise tier and have a revised structure we think works better for Acme's headcount.\n\nWould you have 20 minutes this week to reconnect?\n\nWarm regards,\nAlex"
+};
+let currentCorrectSeq = null;
+
+function openCorrectModal(seq, evt) {
+  if (evt) evt.stopPropagation();
+  currentCorrectSeq = seq;
+  const originalText = OUTPUT_SAMPLES[seq] || '(output not available)';
+  document.getElementById('correct-original').textContent = originalText;
+  document.getElementById('correct-edited').value = originalText;
+  document.getElementById('correct-reason').value = '';
+  document.getElementById('correct-modal').removeAttribute('hidden');
+}
+function closeCorrectModal() {
+  document.getElementById('correct-modal').setAttribute('hidden', '');
+}
+function handleCorrectModalBg(e) {
+  if (e.target === document.getElementById('correct-modal')) closeCorrectModal();
+}
+function saveCorrection() {
+  closeCorrectModal();
+  showToast();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast() {
+  const t = document.getElementById('save-toast');
+  t.classList.remove('hidden');
+  setTimeout(() => t.classList.add('hidden'), 4000);
+}
+
+// ── Mode switcher ─────────────────────────────────────────────────────────────
+function setMode(mode, btn) {
+  document.querySelectorAll('.state-toggle-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  if (mode === 'live') {
+    document.getElementById('live-badge').style.display = 'inline-flex';
+    document.getElementById('hist-badge').style.display = 'none';
+    document.getElementById('cancel-btn').style.display = '';
+    document.getElementById('streaming-event').style.display = 'flex';
+    document.getElementById('duration-label').textContent = 'Duration: 5 min 32 sec';
+    document.getElementById('status-text').textContent = 'Running';
+    document.getElementById('status-text').style.color = 'var(--indigo-600)';
+    document.getElementById('event-count-label').textContent = '47 events';
+  } else {
+    document.getElementById('live-badge').style.display = 'none';
+    document.getElementById('hist-badge').style.display = 'inline-flex';
+    document.getElementById('cancel-btn').style.display = 'none';
+    document.getElementById('streaming-event').style.display = 'none';
+    document.getElementById('duration-label').textContent = 'Duration: 1m 14s';
+    document.getElementById('status-text').textContent = 'Completed';
+    document.getElementById('status-text').style.color = 'var(--emerald-600)';
+    document.getElementById('event-count-label').textContent = '52 events';
+  }
+}
+function switchRunTab(id, btn) {
+  document.querySelectorAll('.tabs .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-trace').style.display = id === 'trace' ? 'flex' : 'none';
+  document.getElementById('tab-graph').style.display = id === 'graph' ? 'flex' : 'none';
+}
+
+// Init
+document.getElementById('status-text').textContent = 'Running';
+document.getElementById('status-text').style.color = 'var(--indigo-600)';
+</script>
+</body>
+</html>

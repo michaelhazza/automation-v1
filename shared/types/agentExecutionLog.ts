@@ -7,6 +7,7 @@
 // Import and re-export EventOrigin for use within this file and by callers.
 import type { EventOrigin } from './workflowStepGate.js';
 export type { EventOrigin };
+import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.js';
 
 import type { RetrievalResult } from './retrieval.js';
 import type { ObservationType } from './agentObservations.js';
@@ -36,6 +37,7 @@ export type AgentExecutionSourceService =
   | 'runContextLoader'
   | 'orchestratorFromTaskJob'
   | 'requestClarification'
+  | 'correctionCaptureService'
   | 'retrievalService';
 
 // ---------------------------------------------------------------------------
@@ -99,6 +101,8 @@ export type AgentExecutionEventType =
   | 'tool.error'
   | 'run.terminal.summary_missing'
   | 'run.terminal.extracted_with_errorMessage'
+  | 'runtime_check.completed'
+  | 'correction.captured'
   | 'retrieval.summary'
   | 'retrieval.always_available.mode_changed'
   | 'observation_emitted';
@@ -277,6 +281,32 @@ export type AgentExecutionEventPayload =
       errorMessageLength: number;
     }
   | {
+      /** Trust & Verification Layer §11: per-step deterministic verification result. */
+      eventType: 'runtime_check.completed';
+      critical: false;
+      runId: string;
+      eventId?: string | null;
+      sequenceNumber: number;
+      skillSlug: string;
+      state: RuntimeCheckState;
+      reasonCode: string;
+      reasonText: string;
+      impact: 'blocking' | 'informational';
+      blastRadius: RuntimeCheckBlastRadius;
+      reversible: boolean;
+      suggestedFix: string | null;
+    }
+  | {
+      /** Trust & Verification Layer §13: operator correction captured to memory. */
+      eventType: 'correction.captured';
+      critical: false;
+      sourceRunId: string;
+      sourceEventId: string;
+      skillSlug: string;
+      memoryBlockId: string;
+      forcedGradeEnqueued: boolean;
+    }
+  | {
       /** Auto Knowledge Retrieval — exactly one per run (spec §10.4, §1.5 #7). */
       eventType: 'retrieval.summary';
       critical: false;
@@ -332,6 +362,8 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'tool.error': false,
   'run.terminal.summary_missing': false,
   'run.terminal.extracted_with_errorMessage': false,
+  'runtime_check.completed': false,
+  'correction.captured': false,
   'retrieval.summary': false,
   'retrieval.always_available.mode_changed': false,
   'observation_emitted': false,

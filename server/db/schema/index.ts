@@ -281,6 +281,16 @@ export * from './securityAuditEvents.js';
 export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
 
+// Trust & Verification Layer — runtime check verdicts (migration 0296)
+export * from './runtimeCheckResults.js';
+
+
+// Trust & Verification Layer — Stage 2: scorecards + bench (migrations 0297-0300)
+export * from './scorecards.js';
+export * from './agentScorecardAttachments.js';
+export * from './scorecardJudgements.js';
+export * from './benchRuns.js';
+
 // Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
 export * from './agentObservations';
 export * from './ieeSessions';

@@ -132,6 +132,14 @@ run_gate "$SCRIPT_DIR/verify-crm-query-planner-read-only.sh"
 run_gate "$SCRIPT_DIR/verify-derived-data-null-safety.sh"
 run_gate "$SCRIPT_DIR/__tests__/derived-data-null-safety/run-fixture-self-test.sh"
 
+# ── Trust & Verification Layer — runtime check coverage (§11.4) ──
+# Advisory (exit 2) while ACTION_REGISTRY backfill is pending; change to
+# blocking (exit 1 in the .mjs) once all entries have verify coverage.
+run_gate "$SCRIPT_DIR/gates/verify-runtime-check-coverage.sh"
+
+# ── Trust & Verification Layer Stage 2 — scorecard RLS coverage ──
+run_gate "$SCRIPT_DIR/gates/verify-scorecard-rls.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

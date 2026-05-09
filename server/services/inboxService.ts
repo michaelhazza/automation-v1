@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, reviewItems, agentRuns, actions, inboxReadStates, subaccounts } from '../db/schema/index.js';
 import { eq, and, or, isNull, desc, asc, gte, ilike, inArray, sql } from 'drizzle-orm';
 import { auditService } from './auditService.js';
@@ -824,3 +825,34 @@ export const inboxService = {
     return { tasks: t, reviews: r, failedRuns: f, total: t + r + f };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Runtime check fail inbox notification
+// ---------------------------------------------------------------------------
+//
+// Creates a task with status='inbox' so org/subaccount reviewers see an
+// actionable notification when an external-blast-radius skill check fails or
+// is inconclusive. This is fire-and-forget from runtimeCheckService — errors
+// here must never propagate to the caller.
+
+export async function createRuntimeCheckFailItem(input: {
+  runId: string;
+  skillSlug: string;
+  sequenceNumber: number;
+  state: 'fail' | 'inconclusive';
+  reasonText: string;
+  reasonCode: string;
+  organisationId: string;
+  subaccountId: string | null;
+}): Promise<void> {
+  const stateLabel = input.state === 'fail' ? 'Failed' : 'Inconclusive';
+  await getOrgScopedDb('inboxService.createRuntimeCheckFailItem').insert(tasks).values({
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    title: `Runtime check ${stateLabel.toLowerCase()}: ${input.skillSlug} (step ${input.sequenceNumber})`,
+    description: `A runtime check for skill "${input.skillSlug}" at step ${input.sequenceNumber} returned ${input.state}.\n\nReason: ${input.reasonText}\n\nRun ID: ${input.runId}\nCode: ${input.reasonCode}`,
+    status: 'inbox',
+    priority: input.state === 'fail' ? 'high' : 'normal',
+    position: 0,
+  });
+}

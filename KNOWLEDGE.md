@@ -2874,6 +2874,83 @@ When a parallel branch lands a UI consolidation that deletes pages, the feature 
 
 Always cross-check against the consolidating branch's App.tsx (`git show origin/main:client/src/App.tsx`) for the canonical mapping; do not invent route names. After the rewrite, also remove any duplicate redirect elsewhere in the file (e.g. an old `<Route path="/agents" element={<Navigate to="/" />} />` that conflicts with the new canonical `<Route path="/agents" element={<AgentsListPage />} />`).
 
+### [2026-05-08] Pattern — Coordinators run INLINE in the main session, never dispatched as sub-agents
+
+**Date:** 2026-05-08
+**Source:** Phase 2 launch attempt for `trust-verification-layer` build. Operator typed `launch feature coordinator`; main session called `Agent({subagent_type: "feature-coordinator", ...})`; the dispatched coordinator immediately hit `No such tool available: Task. Task is not available inside subagents.` when it tried to invoke `architect` at Step 3. Same constraint applies to `spec-coordinator` (mockup-designer + spec-reviewer + chatgpt-spec-review dispatches) and `finalisation-coordinator` (chatgpt-pr-review + builder dispatches).
+
+**Pattern:** the three coordinators (`spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`) and `audit-runner` run INLINE in the main Claude Code session. The operator's entry phrase (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `audit-runner: <mode>`) signals the main session to ADOPT the playbook — read the agent file at `.claude/agents/<name>.md` and execute its steps directly. It does NOT mean call `Agent({subagent_type: "<coordinator>"})`.
+
+**Why this matters:** the Claude Code runtime returns a hard error when a dispatched sub-agent attempts to dispatch a further sub-agent. The coordinator playbooks are built around sub-agent dispatch (architect, builder, the four reviewers, mockup-designer, chatgpt-pr-review, chatgpt-spec-review). Nesting a coordinator inside an `Agent` call breaks the pipeline at its first dispatch step. The main session has top-level `Agent` access — that's where the dispatches must issue from.
+
+**Two valid entry paths:**
+1. Fresh session: open a new Claude Code session, type the entry phrase as the first message, the main session adopts the playbook.
+2. In-flight adoption: operator types the entry phrase mid-session, the current main session reads the agent file and follows it directly. Same outcome.
+
+The agent definitions at `.claude/agents/feature-coordinator.md`, `.claude/agents/spec-coordinator.md`, and `.claude/agents/finalisation-coordinator.md` each carry an `## Invocation` section with this rule. CLAUDE.md's "Common invocations" section codifies the constraint for all four (three coordinators + audit-runner).
+
+### [2026-05-08] Pattern — Cross-tenant source-pill compression rule
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.8, Chunk 7.
+
+Scorecard source pills compress based on the viewer's scope, not the scorecard's scope. `compressSourcePill(scope, viewerScope)` returns five canonical values: `system`, `organisation`, `this_subaccount`, `platform`, `custom`. The rule: `subaccount`-scoped scorecards always show `this_subaccount`; `system`-scoped show `system` to org_admins and `platform` to workspace viewers; `org`-scoped show `organisation` to org_admins and `custom` to workspace viewers. This compression prevents org-name leakage to subaccount-scope viewers. Pure function in `scorecardServicePure.ts`; mirrored in `ScorecardSourcePill.tsx` for client-side rendering without a round-trip. Permutation test in `server/services/__tests__/scorecardServicePure.test.ts` covers all four `(scope, viewerScope)` combinations.
+
+### [2026-05-08] Pattern — Three-tier authority lock model for scorecards
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.4, Chunk 7.
+
+Scorecard authority resolves in three tiers: system > org > subaccount. When an agent has two attachments for the same scorecard slug — one from a higher tier and one from a lower tier — `resolveAuthority(attachments)` always picks the higher-tier source. Attachments at the same tier conflict only if the same org/subaccount owns two rows for the same slug; that is a data invariant violation, not a normal state. The resolver is a pure function in `scorecardServicePure.ts`, never hits the DB. Any route that surfaces "which scorecard is active" must pass the full attachment list through the resolver before responding.
+
+### [2026-05-08] Pattern — Single-share-toggle visibility primitive
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.3, Chunk 7.
+
+Scorecard visibility is controlled by a single `isShared` boolean. `isShared: true` makes the scorecard visible to all subaccounts under the owning org. `isShared: false` (default) makes it visible only to the owning org admins and the subaccount that created it. There is no per-subaccount sharing list, no ACL, no role-based filter — just one toggle. This keeps the permission surface minimal. Route-level visibility is enforced by `getVisibleScorecards(organisationId, subaccountId?)` in `scorecardService.ts`, which applies the `isShared` predicate in SQL rather than in application code.
+
+### [2026-05-08] Pattern — Idempotent UPSERT on operator correction capture
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §10.1, Chunk 13.
+
+Correction capture uses `onConflictDoUpdate` with a partial unique index target: `(organisation_id, source_run_id) WHERE captured_via = 'operator_correction' AND deleted_at IS NULL`. This means the operator can correct the same run multiple times and each subsequent correction silently updates the existing block (last-write-wins) rather than inserting a duplicate. The `targetWhere` clause in the Drizzle `onConflictDoUpdate` maps to the partial index predicate. Without `targetWhere`, Drizzle cannot locate the partial index and the UPSERT falls through to an error. Always specify both `target` columns and `targetWhere` when the conflict target is a partial index.
+
+### [2026-05-08] Pattern — Runtime check three-state UI collapsed from five internal states
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.2, Chunk 5.
+
+Internally, runtime check results carry five states: `pending`, `running`, `pass`, `fail`, `inconclusive`. The UI collapses these to three visual groups: loading (pending + running), pass, not-pass (fail + inconclusive). `inconclusive` is surfaced distinctly from `fail` in the drawer detail — `fail` means the check fired and found a problem; `inconclusive` means the check could not determine a verdict (e.g. model output was ambiguous or the check function threw). Never merge `fail` and `inconclusive` at the data layer — they carry different operator actions. Merge only at the UI summary level, and always expose both labels in the detail view.
+
+### [2026-05-08] Pattern — `verify` shape on actionService-wrapped skills always evaluates inconclusive
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer fix-loop, Codex P1 finding.
+
+`runtimeCheckService.dispatchEvaluation` reads the tool result's top-level `statusCode` / `status` field. Skills that go through `proposeAction` / `executeWithActionAudit` (review-gated AND most auto-gated skills) return the action service envelope `{ status: 'pending_approval' | 'approved' | 'completed', actionId, ... }` — `status` is a STRING, not a numeric HTTP status. So `verify: { kind: 'api_status_2xx' }` declared on these skills will resolve to `inconclusive` every time. With `blastRadius: 'external'` that maps to the same pause/inbox path as `fail` per spec §11.2 — every successful action would pause for inbox review.
+
+**Rule:** before declaring a concrete `verify` shape on an `ACTION_REGISTRY` entry, trace the actual handler path. If the handler routes through `executeWithActionAudit` or any other action service wrapper, declare `verify: null` with a justification ("Review-gated: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape" or "External read — backfill candidate; current actionService wrapper hides the inner field from the runtime-check dispatcher"). A future follow-on can teach the runtime-check dispatcher to unwrap the actionService envelope before evaluation.
+
+### [2026-05-08] Pattern — Position-match against agent_execution_events.sequence_number is wrong for toolCallsLog
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer fix-loop, Codex P2 finding.
+
+`runAgenticLoop` pushes one entry to `toolCallsLog` per tool dispatch, but does NOT emit `skill.invoked` / `skill.completed` events for every tool call. Those event types are emitted only by special paths (`crmQueryPlanner.plannerEvents`, `chargeRouterService`). A naive position-match — Nth toolCall ↔ Nth skill.completed event ordered by `sequence_number` — produces two failure modes: (a) ordinary tool calls resolve to `null` (they have no matching event), and (b) when special-path events DO exist, an event from one slug may be attached to a tool call from a different slug.
+
+**Rule:** when reconciling toolCallsLog entries to event-log rows, match by `(skillSlug, ordinal-within-slug)`, not by global position. Group events by `payload.skillSlug` and pair the Nth toolCall whose `tool === foo` with the Nth `skill.completed` event whose `payload.skillSlug === foo`. Tool calls without matching events resolve to `null` cleanly. See `linkToolCallsToEventIds` in `server/services/agentRunMessageServicePure.ts`.
+
+### [2026-05-08] Pattern — Cross-subaccount IDOR slips past RLS in agent-scoped routes
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer adversarial-review S-3.
+
+Subaccount-scoped routes that carry both `:subaccountId` and `:agentId` in the URL (e.g. `DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:id`) are protected by RLS at the org level but NOT at the subaccount level — RLS on the writes-target table (`scorecards`, `agents`, etc.) filters rows to the caller's org via `app.organisation_id`, but does not enforce that the named agent belongs to the named subaccount. A power user with `subaccount.X.manage` on subaccount A could target an agent in subaccount B (same org) and the route would proceed.
+
+**Rule:** for any subaccount-scoped route that carries both `:subaccountId` AND a target-resource id (`:agentId`, `:templateId`, etc.), add an explicit application-layer assertion that the resource has an active link to the named subaccount via `subaccount_agents` (or the relevant join table). Fail-403 not 404 — 404 leaks the resource's existence in another subaccount; 403 is the standard cross-tenant rejection envelope. Pure verdict-shaping helper (`assertAgentSubaccountMembership`) keeps the route → HTTP mapping testable.
+
 ### [2026-05-08] Pattern — Workers that opt out of `createWorker` auto-org-tx must wrap FORCE-RLS reads in a short org-scoped tx before any external I/O
 
 **Date:** 2026-05-08
@@ -2998,3 +3075,43 @@ When a feature lets operators flag documents as "always available" (loaded on ev
 ### [2026-05-09] Pattern — withOrgTx external side-effect boundary
 
 `ieeSessionService.tearDown()` uses `withOrgTx` for the DB update. The external container release (IEE infra teardown) MUST be placed AFTER the `await withOrgTx(...)` call returns — never inside the transaction callback. Pattern: commit first, then side-effect. Placing the release inside the callback violates atomicity: if the release throws before the implicit commit, the transaction may roll back leaving the DB row in a stale state while the container is already gone. `markFailed()` and `recordSummary()` use `getOrgScopedDb` because a single UPDATE needs no full transaction wrapper. File: `server/services/ieeSessionService.ts`.
+
+### [2026-05-09] Correction — chatgpt-pr-review is iterative until operator says done; never auto-close after a single APPROVED round
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #275 (slug: trust-verification-layer) Phase 3 finalisation. Round 1 was auto-closed by finalisation-coordinator with disposition `APPROVED — round-2 not requested` after a single round, without pausing for operator input. Operator pointed out that the agent contract is iterative.
+
+The `chatgpt-pr-review` agent is **operator-driven on cadence** — there is no auto-finalise on a single APPROVED round, even when the round produces no findings. Per `.claude/agents/chatgpt-pr-review.md` line 230 ("Empty findings array AND verdict APPROVED → log and ask the user whether to finalise or run another round") and `.claude/agents/finalisation-coordinator.md` line 237 ("Coordinator pauses inside this sub-agent for the operators full ChatGPT loop. No time cap. Operator drives cadence."), the coordinator MUST pause after every round and wait for the operator to either:
+
+- paste the next ChatGPT response (round N+1), or
+- say `done` (close the loop and proceed to step 6 doc-sync sweep).
+
+**Why:** even when ChatGPT returns APPROVED with no findings, the operator may want to run a second round at a different prompting angle (strategic risks, security framing, ergonomics). Auto-closing after a single round denies that option and silently truncates the review.
+
+**Detection heuristic.** When running finalisation Step 5, the coordinator must surface BOTH options at the end of every round, regardless of disposition: "say `done` to close the loop, or paste another ChatGPT response to run another round." Never write `APPROVED — round-N+1 not requested` as a self-decided verdict — that field is set only when the operator explicitly says done.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Step 5; `.claude/agents/chatgpt-pr-review.md` per-round loop step 9 (round summary). Both files are correct in their text — this entry exists to lock in the discipline against future drift.
+
+### [2026-05-09] Correction — finalisation-coordinator must auto-monitor CI, auto-fix CI red (with guardrails), and auto-merge
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #275 (slug: trust-verification-layer) Phase 3 finalisation. The prior contract for finalisation-coordinator stopped at Step 11 with "operator drives the merge sequence" — the operator pointed out that this has failed to fire automatically multiple times across recent finalisations. They want the full lifecycle (label → CI watch → CI fix → merge) automated, since they do not review CI logs themselves.
+
+The `finalisation-coordinator` agent now owns the entire post-Step-10 lifecycle:
+
+- **Step 11 (NEW):** CI monitoring + iterative fix loop. Polls `gh pr view {N}` every 90s via `ScheduleWakeup`. State machine: `green` → Step 12; `running` → schedule another poll; `red` → enter fix sub-loop. Bounded at 5 iterations per session.
+- **Step 12 (NEW):** Auto-merge. Update current-focus → NONE, commit + push, run `gh pr merge {N} --squash --delete-branch`, capture squash sha, patch main with the actual sha.
+- **Step 13 (was 11):** End-of-phase prompt — confirms merged.
+
+**Guardrails (mandatory) on the fix sub-loop.** Without these, auto-fix is unsafe — the agent can silently game tests, scope-creep, or mask real bugs. With them, the auto-fix path is bounded to genuinely mechanical CI red:
+
+1. **G1 — Test files off-limits.** Never modify `*.test.ts` / `*.spec.ts` / `tests/` / `__tests__/` / `e2e/` / `fixtures/` / vitest+jest config. Failing tests usually mean the implementation is wrong; the fix belongs in the implementation, never in the assertion. If the test really is outdated, escalate — the operator owns the spec-amendment decision.
+2. **G2 — Diff size cap: 50 lines per iteration.** Bigger fixes almost always indicate the agent is solving the wrong problem. The migration-0300 IMMUTABLE fix (1 line) and the corrections-route service-helper fix (30 lines) both fit comfortably. If a genuine fix needs more than 50 lines, that is a feature-scoped change — spawn `builder`, get pr-reviewer, do not roll it through the auto-fix path.
+3. **G3 — Category allowlist.** Auto-fix is allowed for: SQL/migration syntax, lint, typecheck, missing imports, gate-script bugs, RLS-contract violations, idempotency-index issues. Auto-fix is **escalate-immediately** for: failing unit / integration tests, security-scanner findings, "Workspace Actor Coverage" or similar policy gates, anything whose name does not match the allowlist.
+4. **G4 — Mandatory post-merge audit log.** Every iteration appends to `tasks/review-logs/auto-fix-log-{slug}-{timestamp}.md` with failed check, root cause, category, guardrail status, fix summary, commit sha, and CI re-fire result. The squash-commit preserves the log so post-hoc review of "what did the bot do under my nose" takes 30 seconds.
+
+**Why the guardrails matter.** The operator stated they do not review CI output themselves. That changes the risk profile of auto-fix from "minor inconvenience if the bot is wrong" to "real bug ships with no human gate". The four guardrails preserve the automation while bounding the blast radius — auto-fix handles "obvious mechanical CI red", escalation handles "behaviour might actually be broken".
+
+**Detection heuristic for future drift.** If a future agent edit removes any guardrail (G1–G4), the iteration cap (5), the stuck-detection rule, or the no-`--no-verify` rule, treat it as a contract violation and surface to operator before merging the change. These four guardrails are the difference between automated maintenance and unbounded agentic merge.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Steps 11, 12, 13. Locked in by operator 2026-05-09.
