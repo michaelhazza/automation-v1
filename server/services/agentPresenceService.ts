@@ -237,6 +237,7 @@ export async function applyEventToPresence(
 
   const sseEvent = {
     agentId,
+    organisationId,
     eventTimestamp: typeof event.eventTimestamp === 'string'
       ? event.eventTimestamp
       : new Date(event.eventTimestamp).toISOString(),

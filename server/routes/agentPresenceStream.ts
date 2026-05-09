@@ -1,18 +1,22 @@
 /**
  * Agent presence SSE stream endpoints.
  *
- * GET /api/agent-presence/stream/:agentId
- * GET /api/agent-presence/stream/workspace/:subaccountId
+ * POST /api/agent-presence/stream-token  — issue a short-lived signed token
+ * GET  /api/agent-presence/stream/:agentId
+ * GET  /api/agent-presence/stream/workspace/:subaccountId
  *
- * Agent Workspace Chunk 9.
+ * Agent Workspace Chunk 9 + B3 signed-token auth.
  */
 
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { authenticateSSE, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticateStreamToken } from '../middleware/authenticateStreamToken.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveAgent } from '../lib/resolveAgent.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { signStreamToken } from '../lib/agentPresenceStreamToken.js';
 import { logger } from '../lib/logger.js';
 import {
   subscribe,
@@ -89,18 +93,85 @@ function attachStream(
   });
 }
 
+// ── Endpoint 0: stream-token issuance ────────────────────────────────────────
+//
+// Issues a short-lived signed token (120s TTL) bound to the user's org + requested scope.
+// The browser holds the token in memory only (never in localStorage).
+// Client re-fetches this endpoint on token expiry before reconnecting.
+
+router.post(
+  '/api/agent-presence/stream-token',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
+  asyncHandler(async (req, res) => {
+    const { scope: scopeBody } = req.body as {
+      scope?: { kind?: string; agentId?: string; subaccountId?: string };
+    };
+
+    if (!scopeBody || !scopeBody.kind) {
+      res.status(400).json({ error: 'scope.kind required' });
+      return;
+    }
+
+    const orgId = req.orgId!;
+    const userId = req.user!.id;
+
+    if (scopeBody.kind === 'agent') {
+      if (!scopeBody.agentId) {
+        res.status(400).json({ error: 'scope.agentId required for agent scope' });
+        return;
+      }
+      await resolveAgent(scopeBody.agentId, orgId);
+      const { token, expiresAt } = signStreamToken({
+        userId,
+        orgId,
+        scope: { kind: 'agent', agentId: scopeBody.agentId },
+      });
+      res.json({ token, expiresAt });
+      return;
+    }
+
+    if (scopeBody.kind === 'workspace') {
+      if (!scopeBody.subaccountId) {
+        res.status(400).json({ error: 'scope.subaccountId required for workspace scope' });
+        return;
+      }
+      await resolveSubaccount(scopeBody.subaccountId, orgId);
+      const { token, expiresAt } = signStreamToken({
+        userId,
+        orgId,
+        scope: { kind: 'workspace', subaccountId: scopeBody.subaccountId },
+      });
+      res.json({ token, expiresAt });
+      return;
+    }
+
+    res.status(400).json({ error: 'scope.kind must be agent or workspace' });
+  }),
+);
+
 // ── Endpoint 1: agent-scoped stream ──────────────────────────────────────────
+//
+// Uses authenticateStreamToken — verifies the short-lived ?token= query param,
+// populates req.user / req.orgId / req.streamTokenScope, and strips the token
+// from req.url before loggers see it.
 
 router.get(
   '/api/agent-presence/stream/:agentId',
-  authenticateSSE,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
+  authenticateStreamToken,
   async (req: import('express').Request, res: import('express').Response) => {
     try {
+      // Verify the token's bound scope matches the URL path param
+      const claimedAgentId = (req.streamTokenScope as { agentId?: string } | undefined)?.agentId;
+      if (claimedAgentId && claimedAgentId !== req.params.agentId) {
+        res.status(403).json({ error: 'Token scope does not match requested agent' });
+        return;
+      }
+
       await resolveAgent(req.params.agentId, req.orgId!);
       sseSetup(res);
-      const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId };
+      const scope: PresenceScope = { kind: 'agent', agentId: req.params.agentId, organisationId: req.orgId! };
       attachStream(req, res, scope);
     } catch (err) {
       const status = (err as { statusCode?: number }).statusCode;
@@ -115,11 +186,16 @@ router.get(
 
 router.get(
   '/api/agent-presence/stream/workspace/:subaccountId',
-  authenticateSSE,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_PRESENCE_STREAM_SUBSCRIBE),
+  authenticateStreamToken,
   async (req: import('express').Request, res: import('express').Response) => {
     try {
+      // Verify the token's bound scope matches the URL path param
+      const claimedSubaccountId = (req.streamTokenScope as { subaccountId?: string } | undefined)?.subaccountId;
+      if (claimedSubaccountId && claimedSubaccountId !== req.params.subaccountId) {
+        res.status(403).json({ error: 'Token scope does not match requested workspace' });
+        return;
+      }
+
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
       sseSetup(res);
       const scope: PresenceScope = { kind: 'workspace', subaccountId: req.params.subaccountId };

@@ -11,6 +11,7 @@ import { logger } from '../lib/logger.js';
 
 export interface PresenceStreamEvent {
   agentId: string;
+  organisationId?: string;  // used to scope fanOut; absent on server_heartbeat
   eventTimestamp: string;  // ISO string
   serverNow: string;       // ISO string, freshly computed at emission
   eventId: string;
@@ -26,7 +27,7 @@ export interface PresenceStreamEvent {
 }
 
 export type PresenceScope =
-  | { kind: 'agent'; agentId: string }
+  | { kind: 'agent'; agentId: string; organisationId: string }
   | { kind: 'workspace'; subaccountId: string };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ const truncationLastLogAt = new Map<string, number>();
 
 function scopeKey(scope: PresenceScope): string {
   return scope.kind === 'agent'
-    ? `agent:${scope.agentId}`
+    ? `agent:${scope.organisationId}:${scope.agentId}`
     : `workspace:${scope.subaccountId}`;
 }
 
@@ -116,7 +117,8 @@ export function fanOut(event: PresenceStreamEvent): void {
   // Enforce payload cap before any delivery
   enforcePayloadCap(event);
 
-  const key = `agent:${event.agentId}`;
+  // organisationId is required to scope-isolate per-org agent streams (B1)
+  const key = `agent:${event.organisationId ?? ''}:${event.agentId}`;
 
   // Insert into ring buffer for this agent scope
   if (!ringBuffers.has(key)) ringBuffers.set(key, []);

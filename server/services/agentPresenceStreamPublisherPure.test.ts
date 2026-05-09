@@ -1,13 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { fanOut, subscribe, replaySinceLastEventId, type PresenceStreamEvent } from './agentPresenceStreamPublisher.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+const TEST_ORG = 'org-test-1';
+
 function makeEvent(overrides: Partial<PresenceStreamEvent> = {}): PresenceStreamEvent {
   return {
     agentId: 'agent-1',
+    organisationId: TEST_ORG,
     eventTimestamp: new Date().toISOString(),
     serverNow: new Date().toISOString(),
     eventId: crypto.randomUUID(),
@@ -24,7 +27,7 @@ function makeEvent(overrides: Partial<PresenceStreamEvent> = {}): PresenceStream
 describe('enforcePayloadCap (via fanOut)', () => {
   it('passes through events under the 32KB cap unchanged', () => {
     const received: PresenceStreamEvent[] = [];
-    const { unsubscribe } = subscribe({ kind: 'agent', agentId: 'agent-cap-1' }, 'sub-1', (e) => received.push(e));
+    const { unsubscribe } = subscribe({ kind: 'agent', agentId: 'agent-cap-1', organisationId: TEST_ORG }, 'sub-1', (e) => received.push(e));
 
     const event = makeEvent({ agentId: 'agent-cap-1', data: { x: 'a'.repeat(100) } });
     fanOut(event);
@@ -37,7 +40,7 @@ describe('enforcePayloadCap (via fanOut)', () => {
 
   it('truncates events that exceed 32KB and sets truncated flag', () => {
     const received: PresenceStreamEvent[] = [];
-    const { unsubscribe } = subscribe({ kind: 'agent', agentId: 'agent-cap-2' }, 'sub-2', (e) => received.push(e));
+    const { unsubscribe } = subscribe({ kind: 'agent', agentId: 'agent-cap-2', organisationId: TEST_ORG }, 'sub-2', (e) => received.push(e));
 
     // 40KB of data — well over the 32KB cap
     const largeData = { payload: 'x'.repeat(40_960) };
@@ -55,8 +58,8 @@ describe('enforcePayloadCap (via fanOut)', () => {
   it('cap decision is deterministic: same oversized event always yields truncated=true', () => {
     const received1: PresenceStreamEvent[] = [];
     const received2: PresenceStreamEvent[] = [];
-    const { unsubscribe: u1 } = subscribe({ kind: 'agent', agentId: 'agent-cap-3' }, 'sub-3a', (e) => received1.push(e));
-    const { unsubscribe: u2 } = subscribe({ kind: 'agent', agentId: 'agent-cap-3' }, 'sub-3b', (e) => received2.push(e));
+    const { unsubscribe: u1 } = subscribe({ kind: 'agent', agentId: 'agent-cap-3', organisationId: TEST_ORG }, 'sub-3a', (e) => received1.push(e));
+    const { unsubscribe: u2 } = subscribe({ kind: 'agent', agentId: 'agent-cap-3', organisationId: TEST_ORG }, 'sub-3b', (e) => received2.push(e));
 
     const largeData = { payload: 'y'.repeat(40_000) };
     fanOut(makeEvent({ agentId: 'agent-cap-3', data: largeData }));
@@ -75,7 +78,7 @@ describe('ring buffer eviction order', () => {
   it('evicts the oldest (eventTimestamp ASC, eventId ASC) entry when at capacity', () => {
     const agentId = 'agent-evict-1';
     const received: PresenceStreamEvent[] = [];
-    const { unsubscribe } = subscribe({ kind: 'agent', agentId }, 'sub-evict', (e) => received.push(e));
+    const { unsubscribe } = subscribe({ kind: 'agent', agentId, organisationId: TEST_ORG }, 'sub-evict', (e) => received.push(e));
 
     // We cannot directly test 300-event eviction in a unit test without flooding.
     // Instead, verify canonical ordering via replaySinceLastEventId.
@@ -94,7 +97,7 @@ describe('ring buffer eviction order', () => {
     unsubscribe();
 
     // Replay should return in canonical order: t1, t2, t3
-    const replayed = replaySinceLastEventId({ kind: 'agent', agentId }, null);
+    const replayed = replaySinceLastEventId({ kind: 'agent', agentId, organisationId: TEST_ORG }, null);
     const ids = replayed.map(e => e.eventId);
     expect(ids).toEqual(['id-a', 'id-b', 'id-c']);
   });
@@ -110,7 +113,7 @@ describe('ring buffer eviction order', () => {
     fanOut(e2);
     fanOut(e3);
 
-    const replayed = replaySinceLastEventId({ kind: 'agent', agentId }, 'r-id-a');
+    const replayed = replaySinceLastEventId({ kind: 'agent', agentId, organisationId: TEST_ORG }, 'r-id-a');
     expect(replayed.map(e => e.eventId)).toEqual(['r-id-b', 'r-id-c']);
   });
 
@@ -123,8 +126,27 @@ describe('ring buffer eviction order', () => {
     fanOut(e1);
     fanOut(e2);
 
-    const replayed = replaySinceLastEventId({ kind: 'agent', agentId }, 'not-in-buffer');
+    const replayed = replaySinceLastEventId({ kind: 'agent', agentId, organisationId: TEST_ORG }, 'not-in-buffer');
     expect(replayed.map(e => e.eventId)).toEqual(['rr-id-a', 'rr-id-b']);
+  });
+
+  it('events from different orgs on the same agentId are scoped separately (B1 isolation)', () => {
+    const agentId = 'shared-agent-uuid';
+    const orgA = 'org-a';
+    const orgB = 'org-b';
+
+    const receivedA: PresenceStreamEvent[] = [];
+    const receivedB: PresenceStreamEvent[] = [];
+
+    const { unsubscribe: ua } = subscribe({ kind: 'agent', agentId, organisationId: orgA }, 'sub-a', (e) => receivedA.push(e));
+    const { unsubscribe: ub } = subscribe({ kind: 'agent', agentId, organisationId: orgB }, 'sub-b', (e) => receivedB.push(e));
+
+    fanOut(makeEvent({ agentId, organisationId: orgA }));
+    ua(); ub();
+
+    // Only org-a subscriber receives the event
+    expect(receivedA).toHaveLength(1);
+    expect(receivedB).toHaveLength(0);
   });
 });
 
@@ -136,7 +158,7 @@ describe('subscribe / unsubscribe', () => {
   it('delivers events to subscribers', () => {
     const agentId = 'agent-sub-1';
     const received: PresenceStreamEvent[] = [];
-    const { unsubscribe } = subscribe({ kind: 'agent', agentId }, 'sub-lifecycle-1', (e) => received.push(e));
+    const { unsubscribe } = subscribe({ kind: 'agent', agentId, organisationId: TEST_ORG }, 'sub-lifecycle-1', (e) => received.push(e));
 
     fanOut(makeEvent({ agentId }));
     expect(received).toHaveLength(1);
@@ -150,10 +172,10 @@ describe('subscribe / unsubscribe', () => {
     const agentId = 'agent-sub-err';
     const goodReceived: PresenceStreamEvent[] = [];
 
-    const { unsubscribe: u1 } = subscribe({ kind: 'agent', agentId }, 'sub-err', () => {
+    const { unsubscribe: u1 } = subscribe({ kind: 'agent', agentId, organisationId: TEST_ORG }, 'sub-err', () => {
       throw new Error('subscriber boom');
     });
-    const { unsubscribe: u2 } = subscribe({ kind: 'agent', agentId }, 'sub-good', (e) => goodReceived.push(e));
+    const { unsubscribe: u2 } = subscribe({ kind: 'agent', agentId, organisationId: TEST_ORG }, 'sub-good', (e) => goodReceived.push(e));
 
     fanOut(makeEvent({ agentId }));
     u1(); u2();

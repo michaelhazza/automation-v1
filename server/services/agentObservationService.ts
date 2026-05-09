@@ -41,7 +41,7 @@ export async function append(
           .update(input.body.trim().toLowerCase())
           .digest('hex');
         return createHash('sha256')
-          .update(`${input.eventId}:${input.metadata.source_id ?? ''}:${input.observationType}:${normalisedBodyHash}`)
+          .update(`${input.eventId}|${input.metadata.source_id ?? ''}|${input.observationType}|${normalisedBodyHash}`)
           .digest('hex');
       })();
 
