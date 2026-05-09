@@ -39,6 +39,7 @@ import { connectorConfigs } from './connectorConfigs.js';
 import { canonicalContacts } from './canonicalEntities.js';
 import { canonicalTickets } from './canonicalTickets.js';
 import { canonicalSupportAgents } from './canonicalSupportAgents.js';
+import { canonicalTicketDrafts } from './canonicalTicketDrafts.js';
 
 export const canonicalTicketMessages = pgTable(
   'canonical_ticket_messages',
@@ -82,9 +83,8 @@ export const canonicalTicketMessages = pgTable(
     createdAtExternal:        timestamp('created_at_external', { withTimezone: true }).notNull(),
     createdAt:                timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 
-    // provenance — NO FK constraint, NO index on source_draft_id.
-    // The FK to draft_messages and the partial index are deferred to migration 0311 (C4).
-    sourceDraftId:            uuid('source_draft_id'),
+    // provenance — FK constraint and partial index added in migration 0311 (C4).
+    sourceDraftId:            uuid('source_draft_id').references(() => canonicalTicketDrafts.id),
 
     // common
     externalMetadata:         jsonb('external_metadata').$type<Record<string, unknown>>(),

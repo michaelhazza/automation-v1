@@ -1180,6 +1180,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0310_canonical_ticket_messages.sql',
     rationale: 'Support ticket message bodies — contain customer communications, internal notes, and agent replies. Cross-tenant leak exposes customer PII and business-sensitive support content.',
   },
+  // 0311 — Support Desk AI-proposed reply drafts
+  {
+    tableName: 'canonical_ticket_drafts',
+    schemaFile: 'canonicalTicketDrafts.ts',
+    policyMigration: '0311_canonical_ticket_drafts.sql',
+    rationale: 'AI-proposed support reply drafts with state machine and dispatch history — cross-tenant leak exposes AI reasoning, draft content, and operator review decisions.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
