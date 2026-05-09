@@ -78,7 +78,27 @@ Open a new Claude Code session and type `launch feature coordinator`.
 | 8.3 — pr-reviewer | done | Round 1 CHANGES_REQUESTED (5 blockers + 5 strong + 3 non-blocking) → fix-loop round 1 → Round 2 APPROVED. Logs: 21-41-38Z + 22-02-25Z. |
 | 8.4 — Fix-loop with G3 | done | Round 1: 5 blockers + S1, S3, S4 fixed in commit `f64cd397`. Round 2 (post dual-reviewer + post round 3 review): B1 webhook author FK + B2 boot recovery RLS fixed in commit `ec581e11`. |
 | 8.5 — dual-reviewer | done | APPROVED with 6 [ACCEPT] decisions over 3 iterations: 2 P1 (sentMessageId UUID, agent/bot author FK in polling) + 4 P2 (drafts hidden from review, retry_reconciliation stuck, matcher tightening, webhook back-link extension). Commits `c9bdec5c` + `6cc2542e`. Re-review: pr-reviewer round 3 found 2 NEW P1s (symmetric webhook author FK, boot recovery RLS) → fix-loop round 2 (`ec581e11`) → pr-reviewer round 4 APPROVED. Logs: dual-review-log-…22-30-00Z.md, pr-review-log-…22-38-27Z.md, pr-review-log-…22-50-50Z.md. |
-| 9 — Doc-sync gate | pending | |
+| 9 — Doc-sync gate | done | All 13 registered docs investigated. integration-reference.md updated (added Teamwork Desk entry); KNOWLEDGE.md +2 patterns; rest verified clean or n/a. See § Doc Sync gate below. |
 | 10 — Phase 2 handoff write | pending | |
 | 11 — current-focus.md → REVIEWING | pending | |
 | 12 — End-of-phase prompt + auto-commit | pending | |
+
+## Doc Sync gate
+
+Investigated all 13 docs registered in `docs/doc-sync.md` against branch diff `git diff origin/main...HEAD` (89+ files, cumulative C1-C15 + 2 fix-loops + spec-conformance + dual-reviewer fixes).
+
+- **architecture.md** — yes (§ Canonical Support Desk added in C15 commit `4165aa35`; dual-reviewer S4 corrected stale Teamwork file refs in `c9bdec5c`; pr-reviewer SDC-PR-7 deferred — permission-scope drift Subaccount vs Org)
+- **docs/capabilities.md** — yes (Customer Support Automation > Support Desk Skills subsection added in C15, 10 skills listed, vendor-neutral language)
+- **docs/integration-reference.md** — yes (Teamwork Desk entry added in this gate — slug `teamwork`, 4 read + 6 write capabilities, 9 webhook events, 10 skills enabled, known_gaps include OQ-1 + SDC-ADV-1/2/3)
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md** — no — checked for new build-discipline / RLS / convention rules; this build follows existing FORCE-RLS, withAdminConnection, withOrgTx, action_attempts ledger patterns; no new locked rule introduced
+- **CONTRIBUTING.md** — n/a — no lint-suppression policy, `// reason:` format, or contributor-facing convention changes
+- **docs/frontend-design-principles.md** — no — checked for new UI patterns / hard rules; 5 new pages reuse `consolidation-foundation` primitives (PageShell, Drawer, SortableTable, FormFooter) without introducing new design rules
+- **KNOWLEDGE.md** — yes (5 patterns total — 3 from Phase 1 spec-review at lines 3232+: deferred-FK migration, polymorphic-FK split, deletion-by-poll precondition; +2 from Phase 2 review-loop: symmetric ingest paths must implement same FK/CHECK contracts; cross-tenant boot scans against FORCE-RLS need withAdminConnectionGuarded + SET LOCAL ROLE admin_role)
+- **docs/spec-context.md** — n/a — feature pipeline, not spec-review
+- **docs/decisions/** — yes (ADR-0009 `0009-support-desk-canonical-not-conversations.md` added in C15; index updated in `docs/decisions/README.md`)
+- **docs/context-packs/** — n/a — no architecture.md anchor name changes; Canonical Support Desk added as a NEW section but no existing anchors renamed
+- **references/test-gate-policy.md** — n/a — no test-gate posture changes
+- **references/spec-review-directional-signals.md** — n/a — no spec-review signal surfaced >2 times
+- **.claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md** — n/a — repo-specific build, no agent-fleet/framework-layer changes
+
+**Summary:** 4 docs updated (architecture.md, capabilities.md, integration-reference.md, KNOWLEDGE.md), 1 ADR added, 8 verified clean or n/a. SDC-PR-7 (architecture.md permission-scope drift) deferred to post-merge backlog with explicit rationale (operator decision needed: rename to Org or migrate routes to subaccount permission).

@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md
 active_plan: tasks/builds/support-desk-canonical/plan.md
 build_slug: support-desk-canonical
 branch: claude/support-ticket-structure-xMcy8
-status: BUILDING
-last_updated: 2026-05-09
+status: REVIEWING
+last_updated: 2026-05-10
 last_merged_pr: #276
 last_merged_slug: agent-workspace
 last_merged_branch: claude/add-agent-cloud-compute-Kb4ii
@@ -24,11 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (Status: reviewing — locked pending OQ-1 + OQ-2; see handoff)
-**Active plan:** `tasks/builds/support-desk-canonical/plan.md` (to be written by `architect` in Phase 2)
+**Active spec:** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (Status: accepted)
+**Active plan:** `tasks/builds/support-desk-canonical/plan.md`
 **Active build slug:** support-desk-canonical
 **Branch:** claude/support-ticket-structure-xMcy8
-**Status:** **BUILDING** — Phase 1 (SPEC) complete. spec-reviewer Codex 5/5 READY_FOR_BUILD; chatgpt-spec-review APPROVED after 3 rounds (14 findings closed). Phase 1 handoff at `tasks/builds/support-desk-canonical/handoff.md`. **Hard gate before Phase 2 plan generation:** OQ-1 (Foundry parity) + OQ-2 (Teamwork status inventory) must close. Both are operator-owned. `feature-coordinator` pauses if either is open. Major-class scope: 5 canonical entities, 12 design invariants, 15-chunk single-PR build plan, Teamwork v1 validating implementation. PR [#277](https://github.com/michaelhazza/automation-v1/pull/277) (spec-only at this stage).
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete. All 15 chunks built + branch-level review pass complete (spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer HOLES_FOUND non-blocking with 6 routed to backlog, pr-reviewer 4 rounds APPROVED, dual-reviewer Codex APPROVED with 6 [ACCEPT] decisions including 2 P1 runtime bugs caught) + 2 fix-loop rounds + doc-sync gate (4 docs updated, ADR-0009, +2 KNOWLEDGE patterns). Handoff at `tasks/builds/support-desk-canonical/handoff.md`. PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). **Next:** new Claude Code session, type `launch finalisation`. 14 deferred items routed to `tasks/todo.md` SDC-PR-1..14 + 6 SDC-ADV-1..6 for post-merge backlog.
 
 **Just merged:** PR #276 — `agent-workspace` (squash-commit `5f7e63b8`, 2026-05-09T03:28:03Z). Persistent Agent Workspace + cloud-compute lifecycle. Spec: `tasks/builds/agent-workspace/spec.md` (1599 lines, LOCKED, 2 ChatGPT-spec-review rounds). Phase 3 handoff: `tasks/builds/agent-workspace/handoff.md`. Pipeline: 13 of 14 chunks built (Chunk 12 deferred per spec — Phase-1 contract lock) → branch-level review pass (spec-conformance CONFORMANT_AFTER_FIXES with 6 directional gaps deferred AGW-DEF-1..6, adversarial-reviewer 1 confirmed AGW-ADV-1 closed + 2 likely AGW-ADV-2/3 deferred, pr-reviewer 3 rounds APPROVED, dual-reviewer Codex APPROVED with 3 fixes, doc-sync sweep complete with ADR-0008 added for SSE stream-token decision) → chatgpt-pr-review 2 rounds APPROVED (Round 1 closed 4 Blockers + 3 Strong in `6a105041`; Round 2 closed 2 follow-ups + 1 polish in `3c4760ae`) → 3 CI auto-fix iterations (`4768ad23` 4 blocking gates fixed + preventive rules locked; `d0d79d14` chain FK + .js-extension imports; `5ec967b8` all 6 agent_runs FKs in migration 0305). CI ALL GREEN at merge time. KNOWLEDGE.md +5 patterns (paired-event accumulators need stable identity; permission-gated UI fails closed during async load; finalisation-coordinator commits Phase 3 BEFORE label; 4 CI-only gates G1 misses; .js extension required on relative imports inside `__tests__/`).
 

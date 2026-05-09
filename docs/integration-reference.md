@@ -818,6 +818,77 @@ last_verified: "2026-05-01"
 owner: platform-team
 ```
 
+### Teamwork Desk
+
+```yaml integration
+slug: teamwork
+name: Teamwork Desk
+provider_type: api_key
+status: fully_supported
+visibility: public
+read_capabilities:
+  - support_inbox_list
+  - support_agent_list
+  - support_ticket_list
+  - support_ticket_thread_read
+write_capabilities:
+  - support_reply_send
+  - support_internal_note_add
+  - support_ticket_assign
+  - support_ticket_status_set
+  - support_ticket_tag_set
+  - support_attachment_resolve
+skills_enabled:
+  - support.list_open_tickets
+  - support.read_thread
+  - support.propose_reply
+  - support.approve_draft
+  - support.reject_draft
+  - support.set_status
+  - support.assign
+  - support.tag
+  - support.find_customer_history
+  - support.add_internal_note
+primitives_required:
+  - api_key_connection
+  - webhook_receiver
+  - scheduled_run
+auth_method: api_key
+required_scopes: []
+webhook_events:
+  - ticket.created
+  - ticket.updated
+  - ticket.completed
+  - ticket.reopened
+  - ticket.deleted
+  - ticket.reply.created
+  - ticket.note.created
+  - ticket.assigned
+  - ticket.status_changed
+setup_steps_summary: Generate a Teamwork Desk API key, configure the webhook URL in Teamwork settings, and connect via the Synthetos integrations setup page.
+setup_doc_link: null
+typical_use_cases:
+  - AI-drafted reply queue with human approval gate
+  - Multi-inbox support automation across the agency
+  - Customer-history lookup spanning tickets, revenue, and accounts
+broadly_useful_patterns:
+  - Three-phase dispatch state machine with idempotency ledger (action_attempts)
+  - Polling Phase A→D with full-reconciliation tombstoning preconditions
+  - Webhook + polling convergent dual-path ingestion
+  - Canonical-layer support data isolated from provider vocabulary
+known_gaps:
+  - Foundry parity (OQ-1) deferred per operator override (SDC-OVERRIDE-1)
+  - Provider-side idempotency on addReply pending verification (SDC-ADV-2)
+  - Subaccount scoping on read endpoints not yet enforced (SDC-ADV-1)
+  - Webhook cross-tenant attribution risk if webhookSecret collides across orgs (SDC-ADV-3)
+client_specific_patterns:
+  - Inbox-level agent_config (mode autonomous/assisted/disabled, collision window thresholds)
+  - Per-inbox AI mode opt-ins (autonomous reply on waiting_on_customer)
+implemented_since: "2026-05-09"
+last_verified: "2026-05-09"
+owner: platform-team
+```
+
 ---
 
 ## GHL Agency vs Location Token Model

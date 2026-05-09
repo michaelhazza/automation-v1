@@ -133,3 +133,96 @@ launch feature coordinator
 `feature-coordinator` will read this handoff, restore Phase 1 context, and proceed with its playbook. Per the hard gate above, it MUST verify OQ-1 + OQ-2 closure before invoking `architect` for plan generation. If either is open, `feature-coordinator` pauses and prompts the operator to close them first (typically by amending the spec inline with the OQ resolutions, then re-running).
 
 Phase 2 plan generation, build chunks, branch-level review pass, and Phase 3 handoff all flow from `feature-coordinator` per its playbook. Total estimated chunk count: 15. Total estimated migrations: 5–6 (5 always + 1 conditional). Estimated PR shape: single-PR canonical-layer + Teamwork-validating-implementation per brief §11 recommendation.
+
+---
+
+## Phase 2 (BUILD) — complete
+
+**Plan path:** `tasks/builds/support-desk-canonical/plan.md`
+**Chunks built:** 15 (C1–C15)
+**Branch HEAD at handoff:** `<TBD on commit>`
+**G1 attempts (per chunk):** 1 each (architect + builder pre-checks held; no plan gaps surfaced)
+**G2 attempts:** 1 (lint 0 errors / typecheck clean on first attempt)
+
+**spec-conformance verdict:** CONFORMANT_AFTER_FIXES (round 1 NON_CONFORMANT 7 dir gaps → builder remediated all 7 in `74fb0306`; round 2 NON_CONFORMANT 1 low-sev gap REQ #72 → operator inline fix in `62f9a28e`)
+- Round 1 log: `tasks/review-logs/spec-conformance-log-support-desk-canonical-2026-05-09T20-34-30Z.md`
+- Round 2 log: `tasks/review-logs/spec-conformance-log-support-desk-canonical-2026-05-09T21-08-30Z.md`
+
+**adversarial-reviewer verdict:** HOLES_FOUND (2 confirmed-holes / 2 likely-holes / 3 worth-confirming) — non-blocking advisory; 6 items routed to `tasks/todo.md` SDC-ADV-1..6
+- Log: `tasks/review-logs/adversarial-review-log-support-desk-canonical-2026-05-09T21-28-46Z.md`
+- 1 confirmed-hole partially contradicted by spec design decision (chatgpt-spec-review R2): read-pathway permissions = org membership + sub-account scoping, but sub-account scoping NOT enforced in implementation (route handlers pass `subaccountId: null` hardcoded). Operator decision required: enforce subaccount scoping OR add read permission keys.
+
+**pr-reviewer verdict:** APPROVED (round 4 final, after 2 fix-loop rounds)
+- Round 1 (CHANGES_REQUESTED, 5 blocking + 5 strong + 3 non-blocking): `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T21-41-38Z.md`
+- Round 2 (APPROVED post fix-loop r1): `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-02-25Z.md`
+- Round 3 (CHANGES_REQUESTED post dual-reviewer, 2 NEW P1s): `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-38-27Z.md`
+- Round 4 (APPROVED final): `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-50-50Z.md`
+
+**Fix-loop iterations:** 2 (within 3-round cap)
+- Round 1 (`f64cd397`) — 5 blockers + S1 + S3 + S4 fixed
+- Round 2 (`ec581e11`) — 2 P1 blockers from post-dual-reviewer round (B1 symmetric webhook author FK, B2 boot recovery RLS bypass)
+
+**dual-reviewer verdict:** APPROVED with 6 [ACCEPT] decisions over 3 iterations (cap reached; natural convergence — each iteration's findings were direct cascading consequences of prior fix)
+- Iter 1: 2 P1 (sentMessageId UUID FK violation, agent/bot author FK in polling) + 2 P2 (drafts hidden from review queue, retry_reconciliation stuck)
+- Iter 2: 1 P2 cascading (matcher tightening after dispatch flow change)
+- Iter 3: 1 P2 cascading (webhook back-link extension to needs_reconciliation)
+- Commits: `c9bdec5c` + `6cc2542e`
+- Log: `tasks/review-logs/dual-review-log-support-desk-canonical-2026-05-09T22-30-00Z.md`
+
+**Doc-sync gate:**
+- architecture.md updated: yes (§ Canonical Support Desk + key files per domain in C15 `4165aa35`; dual-reviewer S4 corrected stale Teamwork file refs in `c9bdec5c`)
+- capabilities.md updated: yes (Customer Support Automation > Support Desk Skills subsection, 10 skills, in C15)
+- integration-reference.md updated: yes (Teamwork Desk entry added — slug `teamwork`, 4 read + 6 write capabilities, 9 webhook events, 10 skills_enabled, last_verified 2026-05-09)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked for new build-discipline / RLS / convention rules; this build follows existing FORCE-RLS, withAdminConnection, withOrgTx, action_attempts ledger patterns; no new locked rule introduced
+- frontend-design-principles.md updated: no — checked for new UI patterns / hard rules; 5 new pages reuse `consolidation-foundation` primitives without introducing new design rules
+- KNOWLEDGE.md updated: yes (5 entries — 3 from Phase 1 spec-review + 2 new from Phase 2 review-loop: symmetric ingest paths must implement same FK/CHECK contracts; cross-tenant boot scans need withAdminConnectionGuarded + SET LOCAL ROLE admin_role)
+- spec-context.md updated: n/a (feature pipeline)
+- docs/decisions/ updated: yes (ADR-0009 added in C15)
+- docs/context-packs/ updated: n/a (no anchor renames)
+- references/test-gate-policy.md updated: n/a
+- references/spec-review-directional-signals.md updated: n/a
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: n/a (repo-specific build)
+
+**Open issues for finalisation (deferred to operator triage in `tasks/todo.md`):**
+
+*Operator decisions:*
+- SDC-OVERRIDE-1 (OQ-1) — Foundry parity verification pending; spec drift risk acknowledged
+- SDC-ADV-1 — Read-pathway sub-account scoping not enforced (spec contradiction; operator decides)
+- SDC-PR-7 — Permission scope drift (architecture.md says Subaccount, code uses ORG_PERMISSIONS)
+
+*Strong post-merge work:*
+- SDC-PR-1 — `decideOutcome` matcher should exclude already-back-linked messages
+- SDC-PR-2 — Post-dispatch timestamp filter needs tolerance window
+- SDC-PR-3 — Move `support.find_customer_history` from skillExecutor to service layer
+- SDC-PR-4 — Add boot-recovery + worker orchestration tests
+- SDC-PR-5 — Add tests for B1 (webhook author resolution) + B2 (boot recovery RLS) fixes
+- SDC-ADV-2 — Verify Teamwork addReply provider-side idempotency
+- SDC-ADV-3 — Webhook cross-tenant attribution + persistent dedup store
+- SDC-ADV-4 — Thread organisationId predicate through approveDraft UPDATEs
+- SDC-ADV-5 — Replace drizzleSql.raw in boot-recovery with hardcoded SQL literal
+
+*Non-blocking polish:*
+- SDC-PR-6, SDC-PR-8 through SDC-PR-14 — type-safety drift, log levels, doc tidies, comment additions
+
+**Key Phase 2 metrics:**
+- 89+ files changed across the cumulative branch diff
+- 6 new migrations (0307–0312)
+- 5 canonical entities + 1 ledger + 4 ORG permission keys
+- 10 support skills wired
+- 5 UI pages
+- 1 ADR (0009)
+- 4 reviewers run (spec-conformance, adversarial-reviewer, pr-reviewer, dual-reviewer)
+- 4 pr-reviewer rounds + 2 fix-loop rounds + 3 Codex iterations
+- 16 commits on the branch (C1-C15 chunks + spec-conformance fixes + pr-review fix-loop rounds + dual-reviewer fixes + doc-sync logs)
+
+## How Phase 3 starts
+
+In a new Claude Code session — fresh prompt cache, clean context — type:
+
+```
+launch finalisation
+```
+
+`finalisation-coordinator` will read this Phase 2 handoff, restore context, and proceed with its playbook (S2 sync, G4 regression guard, chatgpt-pr-review manual rounds, doc-sync sweep, KNOWLEDGE.md pattern extraction, MERGE_READY transition, ready-to-merge label).
+
+Phase 2 status: **PHASE_2_COMPLETE**.

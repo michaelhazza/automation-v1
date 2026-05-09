@@ -3296,3 +3296,42 @@ If any precondition fails, deletion is **webhook-only** for the affected scope u
 **Applies to:** future spec authoring. Any spec that mirrors provider entities and supports deletion must include this precondition in its data-model section. The spec-authoring checklist Section 10 (execution-safety contracts) should add a sub-rule for deletion-by-poll.
 
 
+
+
+### [2026-05-09] Pattern — symmetric ingest paths must both implement the same FK / CHECK contracts
+
+**Date:** 2026-05-09
+**Source:** dual-reviewer iter-1 P1 #2 + pr-reviewer round 3 B1 on `support-desk-canonical` Phase 2. Two convergent ingest paths (polling Phase D + webhook delivery) both write to the same canonical table (`canonical_ticket_messages`). Migration 0310 enforces a polymorphic-FK CHECK requiring `author_support_agent_id NOT NULL` for `author_type IN ('agent','bot')`.
+
+The polling path was patched first (dual-reviewer iter-1) by adding the agent lookup. The webhook path was missed — every webhook-delivered agent reply would have failed the CHECK constraint at insert, aborting the transaction silently. A second review round caught it; without that round it would have shipped to prod and broken every agent reply via webhook.
+
+**Pattern (mandatory shape).** When a canonical table has multiple ingest paths (polling + webhook + manual + import), every path must independently:
+1. Resolve the same FK lookups (author, contact, agent — whichever the schema requires).
+2. Honour the same CHECK constraints (polymorphic discriminators, asymmetric NULL rules, status-invariant CHECKs).
+3. Emit the same `INGEST_CONTRACT_VIOLATION` (or equivalent) on lookup failure and skip the insert without crashing the surrounding transaction.
+
+A patch to one ingest path is incomplete unless the symmetric paths are patched in the same commit. Reviewers must verify symmetry explicitly — "I fixed the polling path" is not "I fixed the bug."
+
+**Detection heuristic.** When fixing an ingest-path bug, grep for OTHER call sites that insert into the same canonical table. Specifically search for `insert(canonicalTable)` and `tx.insert(canonicalTable)` patterns. Each call site is a separate ingest path that must satisfy the same contracts. The polling/webhook split is the most common case but not the only one — also check boot-recovery loops, manual-resolve handlers, and import scripts.
+
+**Applies to:** any canonical table with FK / CHECK contracts and >1 ingest path. Generalises beyond support — same rule for canonical_contacts (CRM polling + GHL webhook + Stripe webhook), canonical_revenue (Stripe polling + Stripe webhook + manual entry), etc.
+
+
+### [2026-05-09] Pattern — cross-tenant boot scans against FORCE-RLS tables silently no-op without admin role
+
+**Date:** 2026-05-09
+**Source:** pr-reviewer round 3 B2 on `support-desk-canonical` Phase 2. `supportDispatchBootRecovery.ts` imported raw `db` and ran a `SELECT ... FROM canonical_ticket_drafts WHERE status = 'dispatching'` at server boot. Intended behaviour: scan all orgs for stranded drafts and re-enqueue. Actual behaviour: the FORCE-RLS policy on `canonical_ticket_drafts` requires `current_setting('app.organisation_id', true) IS NOT NULL`. At boot, no session var is set; the policy fails closed; the SELECT returns ZERO rows even when stranded drafts exist. **The R5 mitigation is silently a no-op** — every restart leaks dispatching drafts.
+
+A `// guard-ignore reason="boot-time cross-tenant scan"` comment ACKNOWLEDGES the intent but does NOT authorise the access — RLS is enforced at the DB role layer, not the application layer.
+
+**Pattern (mandatory shape).** Boot-time cross-tenant scans against FORCE-RLS tables MUST:
+1. Use `withAdminConnectionGuarded({ allowRlsBypass: true, source, reason })` from `server/lib/rlsBoundaryGuard.ts`.
+2. Issue `SET LOCAL ROLE admin_role` as the FIRST `tx.execute(...)` call inside the callback, before any SELECT/UPDATE.
+3. Perform per-row UPDATEs through the same boundary-wrapped `tx` handle (the proxy enforces `wrapWithBoundary` checks).
+4. Justify `allowRlsBypass: true` inline within +/-1 line of the call (satisfies `verify-rls-protected-tables.sh` check 3).
+
+The `guard-ignore` comment is not a substitute for proper admin-role bypass — it only suppresses the static lint, not the runtime RLS policy.
+
+**Detection heuristic.** Grep boot-time / startup / scheduled-job code for `db.select(`, `db.update(`, `db.insert(` against canonical or RLS-protected tables. If the code runs without a per-call org context (no `withOrgTx`, no `getOrgScopedDb`), it must be inside `withAdminConnectionGuarded` with explicit `SET LOCAL ROLE admin_role`. Otherwise the access silently no-ops in prod and the operator never sees an error.
+
+**Applies to:** boot recovery jobs, maintenance jobs, cross-tenant sweepers, billing aggregators — anywhere a startup or scheduled task needs to scan across organisations. Same rule applies to peer-medians materialised view refresh, baseline rot detectors, and any future cross-tenant background work.
