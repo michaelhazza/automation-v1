@@ -27,4 +27,9 @@ CREATE POLICY canonical_inboxes_org_isolation ON canonical_inboxes
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );

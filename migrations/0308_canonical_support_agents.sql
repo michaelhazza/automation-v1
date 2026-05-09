@@ -28,4 +28,9 @@ CREATE POLICY canonical_support_agents_org_isolation ON canonical_support_agents
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
     AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
   );

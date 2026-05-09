@@ -1123,19 +1123,6 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0300_bench_runs.sql',
     rationale: 'Per-candidate per-sample bench outcomes — contains raw LLM outputs and verdicts scoped per org.',
   },
-  // 0307 — Support Desk canonical tables
-  {
-    tableName: 'canonical_inboxes',
-    schemaFile: 'canonicalInboxes.ts',
-    policyMigration: '0307_canonical_inboxes.sql',
-    rationale: 'Per-inbox agent configuration including mode, collision window, draft expiry, and model overrides — cross-tenant leak exposes support automation strategy.',
-  },
-  {
-    tableName: 'canonical_support_agents',
-    schemaFile: 'canonicalSupportAgents.ts',
-    policyMigration: '0308_canonical_support_agents.sql',
-    rationale: 'Helpdesk agent roster per organisation — cross-tenant leak exposes staffing and assignment data.',
-  },
   // 0305 — Agent Workspace: presence projections, observations, sessions, working time
   {
     tableName: 'agent_observations',
@@ -1166,6 +1153,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'agentWorkingTimeEventLedger.ts',
     policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'Idempotency ledger for working-time event folding — reveals which execution events have been billed. Cross-tenant leak exposes financial audit trail.',
+  },
+  // 0307 — Support Desk canonical tables
+  {
+    tableName: 'canonical_inboxes',
+    schemaFile: 'canonicalInboxes.ts',
+    policyMigration: '0307_canonical_inboxes.sql',
+    rationale: 'Per-inbox agent configuration including mode, collision window, draft expiry, and model overrides — cross-tenant leak exposes support automation strategy.',
+  },
+  {
+    tableName: 'canonical_support_agents',
+    schemaFile: 'canonicalSupportAgents.ts',
+    policyMigration: '0308_canonical_support_agents.sql',
+    rationale: 'Helpdesk agent roster per organisation — cross-tenant leak exposes staffing and assignment data.',
   },
 ];
 

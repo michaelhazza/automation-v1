@@ -16,7 +16,16 @@ export const canonicalInboxes = pgTable(
     name: text('name').notNull(),
     emailAddress: text('email_address'),
     isActive: boolean('is_active').notNull().default(true),
-    agentConfig: jsonb('agent_config').$type<SupportInboxAgentConfig>().notNull(),
+    agentConfig: jsonb('agent_config')
+      .$type<SupportInboxAgentConfig>()
+      .default({
+        version: 1,
+        mode: 'disabled',
+        collisionWindow: { minMinutesSinceHumanActivity: 30, respectHumanAssignee: true },
+        draftExpiry: { awaitingReviewHours: 72, draftHours: 24 },
+        optIns: { autonomousReplyOnWaitingOnCustomer: false, postResolutionFollowUp: false },
+      })
+      .notNull(),
     externalMetadata: jsonb('external_metadata').$type<Record<string, unknown>>(),
     lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
     sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
