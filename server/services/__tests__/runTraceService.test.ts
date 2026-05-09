@@ -240,6 +240,9 @@ describe('runTraceService', () => {
   // ── Cursor stability across pages ─────────────────────────────────────────
 
   it('cursor round-trip: page 2 excludes rows from page 1', async () => {
+    // Cursor predicate is now pushed into SQL via tuple comparison
+    // (ts, seq, source_table, source_id) > (cursor...). The mock returns the
+    // rows the SQL would have returned for each call (DB-side filtering).
     const { runTraceService } = await importService();
 
     // Build 3 rows
@@ -247,7 +250,7 @@ describe('runTraceService', () => {
     const row2 = makeUnionRow({ source_id: 'row-2', ts: '2026-01-01T10:01:00.000Z', seq: 2 });
     const row3 = makeUnionRow({ source_id: 'row-3', ts: '2026-01-01T10:02:00.000Z', seq: 3 });
 
-    // Page 1: limit=2, DB returns 3 (limit+1)
+    // Page 1: limit=2, DB returns 3 (limit+1) — no cursor yet
     mockRunSelect(makeRunRow());
     mockExecute.mockResolvedValueOnce([row1, row2, row3]);
 
@@ -256,12 +259,12 @@ describe('runTraceService', () => {
     const cursor = page1.pagination.nextCursor!;
     expect(cursor).toBeDefined();
 
-    // Page 2: DB returns all rows again; the cursor predicate should exclude row1 + row2
+    // Page 2: SQL applies the cursor predicate, so the mock returns only row3
+    // (row1 + row2 are excluded by the pushed-down tuple comparison).
     mockRunSelect(makeRunRow());
-    mockExecute.mockResolvedValueOnce([row1, row2, row3]);
+    mockExecute.mockResolvedValueOnce([row3]);
 
     const page2 = await runTraceService.query({ runId: RUN_ID, limit: 2, cursor }, ORG_ID);
-    // row-3 should be on page 2
     const sourceIds = page2.events
       .filter((e) => e.eventType !== 'run_terminated')
       .map((e) => e.sourceId);
@@ -272,36 +275,24 @@ describe('runTraceService', () => {
 
   // ── toolSlug filter ───────────────────────────────────────────────────────
 
-  it('filters events from tool-scoped tables by toolSlug', async () => {
+  it('filters tool-scoped events by toolSlug and excludes non-tool-scoped tables', async () => {
+    // Spec §4.4.5: when toolSlug is set, only actions, tool_call_security_events,
+    // and agent_execution_events (tool_call/tool_result subtypes) contribute rows.
+    // delegation_outcomes, review_audit_records, llm_requests, iee_steps, and
+    // routing/agent_runs are excluded entirely. The SQL UNION pushes these
+    // predicates per-arm; this test asserts that only tool-scoped rows surface
+    // in the result and that toolSlug column equality holds.
     const { runTraceService } = await importService();
 
     mockRunSelect(makeRunRow());
+    // Mock db.execute returns only the rows the SQL filter would produce.
+    // (Non-tool-scoped arms emit zero rows under the toolSlug predicate.)
     mockExecute.mockResolvedValue([
       makeUnionRow({
         event_type: 'tool_security_decision',
         source_table: 'tool_call_security_events',
         source_id: 'sec-match',
         payload: { toolSlug: 'send_email', riskTier: 0, gateLevel: 'auto', gateLevelSource: 'tier_default' },
-      }),
-      makeUnionRow({
-        event_type: 'tool_security_decision',
-        source_table: 'tool_call_security_events',
-        source_id: 'sec-no-match',
-        payload: { toolSlug: 'create_task', riskTier: 0, gateLevel: 'auto', gateLevelSource: 'tier_default' },
-      }),
-      makeUnionRow({
-        event_type: 'llm_call',
-        source_table: 'llm_requests',
-        source_id: 'llm-passes-through',
-        payload: {
-          llmRequestId: 'llm-passes-through',
-          provider: 'anthropic',
-          model: 'claude-3',
-          tokensIn: 10,
-          tokensOut: 5,
-          costWithMarginCents: 1,
-          durationMs: 100,
-        },
       }),
     ]);
 
@@ -315,9 +306,8 @@ describe('runTraceService', () => {
       .map((e) => e.sourceId);
 
     expect(sourceIds).toContain('sec-match');
-    expect(sourceIds).not.toContain('sec-no-match');
-    // llm_requests is not tool-scoped → always passes through
-    expect(sourceIds).toContain('llm-passes-through');
+    // No llm_requests / delegation_outcomes / review_audit_records / iee_steps
+    expect(sourceIds).not.toContain('llm-passes-through');
   });
 
   // ── Policy envelope in response ───────────────────────────────────────────
@@ -474,15 +464,12 @@ describe('runTraceService', () => {
   it('filters events by eventTypes when specified', async () => {
     const { runTraceService } = await importService();
 
+    // eventType filter is pushed into SQL via `event_type = ANY(...)`. The
+    // mock returns only the rows the SQL would have returned (i.e. only
+    // matching event types).
     mockRunSelect(makeRunRow());
     mockExecute.mockResolvedValue([
       makeUnionRow({ event_type: 'llm_call', source_id: 'llm-1' }),
-      makeUnionRow({
-        event_type: 'iee_step',
-        source_id: 'step-1',
-        source_table: 'iee_steps',
-        payload: { stepKind: 'browser_action', durationMs: 100 },
-      }),
     ]);
 
     const result = await runTraceService.query(
@@ -501,9 +488,10 @@ describe('runTraceService', () => {
     // Encode a cursor pointing past the first row
     const cursor = encodeCursor('2026-01-01T11:00:00.000Z', 0, 'llm_requests', 'row-1');
 
+    // The cursor predicate is pushed into SQL via tuple comparison; the mock
+    // returns only the rows the SQL would have returned (row-2 only).
     mockRunSelect(makeRunRow());
     mockExecute.mockResolvedValue([
-      makeUnionRow({ source_id: 'row-1', ts: '2026-01-01T11:00:00.000Z', seq: 0, source_table: 'llm_requests' }),
       makeUnionRow({ source_id: 'row-2', ts: '2026-01-01T11:01:00.000Z', seq: 0, source_table: 'llm_requests' }),
     ]);
 
@@ -511,7 +499,6 @@ describe('runTraceService', () => {
     const sourceIds = result.events
       .filter((e) => e.eventType !== 'run_terminated')
       .map((e) => e.sourceId);
-    // Cursor points past row-1; only row-2 should appear
     expect(sourceIds).toContain('row-2');
     expect(sourceIds).not.toContain('row-1');
   });

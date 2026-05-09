@@ -454,6 +454,12 @@ export function validateEventPayload(
       }
       return { ok: true };
 
+    case 'foundation.execution_environment.rejected':
+      if (!isStr(p.runId) || !isStr(p.error)) {
+        return { ok: false, reason: 'foundation.execution_environment.rejected_missing_fields' };
+      }
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

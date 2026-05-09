@@ -676,6 +676,11 @@ const runTraceQuerySchema = z.object({
 router.get(
   '/api/agent-runs/:runId/trace',
   authenticate,
+  // The run trace exposes per-run LLM metadata, tool decisions, review
+  // decisions, and the policy envelope snapshot — strictly more sensitive
+  // than delegation-graph/chain. Require AGENTS_VIEW so it sits at the same
+  // permission bar as /api/agent-activity (run listings).
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const parsed = runTraceQuerySchema.safeParse(req.query);
     if (!parsed.success) {

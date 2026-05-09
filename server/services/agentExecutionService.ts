@@ -88,7 +88,12 @@ import {
 } from '../config/limits.js';
 import { CONTROLLER_LIMITS } from '../config/controllerLimits.js';
 import { deriveControllerStyle } from './controllerStyleResolver.js';
-import { resolvePolicyEnvelope, persist as persistPolicyEnvelope } from './policyEnvelopeResolver.js';
+import {
+  resolvePolicyEnvelope,
+  persist as persistPolicyEnvelope,
+  ExecutionModeNotAllowedForAgentError,
+} from './policyEnvelopeResolver.js';
+import { executionModeToEnvironment } from '../../shared/types/executionEnvironment.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
 // orgAgentConfigService import removed — deprecated post-migration 0106
 import { organisations } from '../db/schema/index.js';
@@ -696,6 +701,21 @@ export const agentExecutionService = {
         const snapshot = await resolvePolicyEnvelope(policyEnvelopeCtx);
         await persistPolicyEnvelope(run.id, snapshot);
 
+        // Enforce allowedEnvironments (spec §4.2.8). The envelope captures
+        // the constraint at run start; this gate rejects a run whose
+        // requested executionMode maps to an environment the agent is not
+        // permitted to use. Without this check, a Governance-tab restriction
+        // (e.g. browser-disabled) is silently ignored.
+        const requestedEnv = executionModeToEnvironment(
+          request.executionMode ?? 'api',
+        );
+        if (!snapshot.allowedEnvironments.includes(requestedEnv)) {
+          throw new ExecutionModeNotAllowedForAgentError(
+            request.executionMode ?? 'api',
+            requestedEnv,
+          );
+        }
+
         tryEmitAgentEvent({
           runId: run.id,
           organisationId: request.organisationId,
@@ -716,13 +736,20 @@ export const agentExecutionService = {
         });
       } catch (envelopeErr) {
         const durationMs = Date.now() - startTime;
+        const isEnvViolation = envelopeErr instanceof ExecutionModeNotAllowedForAgentError;
+        const failureType = isEnvViolation
+          ? 'execution_mode_not_allowed_for_agent'
+          : 'policy_envelope_resolution_failed';
+
         tryEmitAgentEvent({
           runId: run.id,
           organisationId: request.organisationId,
           subaccountId: request.subaccountId ?? null,
           sourceService: 'agentExecutionService',
           payload: {
-            eventType: 'foundation.policy_envelope.resolution_failed',
+            eventType: isEnvViolation
+              ? 'foundation.execution_environment.rejected'
+              : 'foundation.policy_envelope.resolution_failed',
             critical: false,
             runId: run.id,
             error: envelopeErr instanceof Error ? envelopeErr.message : String(envelopeErr),
@@ -734,8 +761,8 @@ export const agentExecutionService = {
           status: 'failed',
           errorMessage: envelopeErr instanceof Error ? envelopeErr.message : 'Policy envelope resolution failed',
           errorDetail: {
-            type: 'policy_envelope_resolution_failed',
-            failureReason: 'policy_envelope_resolution_failed',
+            type: failureType,
+            failureReason: failureType,
           },
           completedAt: new Date(),
           durationMs,

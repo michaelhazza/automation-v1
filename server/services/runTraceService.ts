@@ -105,9 +105,81 @@ function toSeq(seq: string | number | null | undefined): number {
 // ---------------------------------------------------------------------------
 // UNION ALL query — returns raw rows ordered by (ts, seq, source_table, source_id)
 // All parameters are passed via sql template interpolation (safe, parameterised).
+//
+// Cursor + filter predicates (event-type, since/until timestamp, toolSlug) are
+// pushed into SQL so that LIMIT applies AFTER filtering — otherwise LIMIT N
+// against the earliest N+1 rows can return an empty filtered result with
+// hasMore=false even when matching events exist later in the run.
+//
+// `toolSlug` semantics (spec §4.4.5):
+//   - `actions`                   : action_type = $toolSlug
+//   - `tool_call_security_events` : tool_slug = $toolSlug (column)
+//   - `agent_execution_events`    : event_type IN ('tool_call','tool_result')
+//                                    AND payload->>'tool_slug' = $toolSlug
+//   - all other source tables     : excluded (rows omitted entirely)
 // ---------------------------------------------------------------------------
 
-async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionRow[]> {
+interface FetchOptions {
+  runId: string;
+  fetchLimit: number;
+  cursorTs: string | null;
+  cursorSeq: number | null;
+  cursorTable: string | null;
+  cursorId: string | null;
+  eventTypes: string[] | null;
+  sinceTimestamp: string | null;
+  untilTimestamp: string | null;
+  toolSlug: string | null;
+}
+
+async function fetchUnionRows(opts: FetchOptions): Promise<UnionRow[]> {
+  const {
+    runId,
+    fetchLimit,
+    cursorTs,
+    cursorSeq,
+    cursorTable,
+    cursorId,
+    eventTypes,
+    sinceTimestamp,
+    untilTimestamp,
+    toolSlug,
+  } = opts;
+
+  // Per-arm toolSlug predicate. When toolSlug is set, non-tool-scoped tables
+  // contribute zero rows; tool-scoped tables apply their column-level filter.
+  const aeeToolPredicate = toolSlug !== null
+    ? sql`AND event_type::text IN ('tool_call','tool_result') AND payload->>'tool_slug' = ${toolSlug}`
+    : sql``;
+  const tcseToolPredicate = toolSlug !== null
+    ? sql`AND tool_slug = ${toolSlug}`
+    : sql``;
+  const actionsToolPredicate = toolSlug !== null
+    ? sql`AND action_type = ${toolSlug}`
+    : sql``;
+
+  // When toolSlug is set, hide non-tool-scoped arms entirely (false-where).
+  const excludeWhenToolSlug = toolSlug !== null ? sql`AND FALSE` : sql``;
+
+  // Outer-query predicates (composable). Tuple comparison is the canonical
+  // pagination predicate: (ts, seq, source_table, source_id) > (cursor...)
+  // matches strictly later rows in the canonical sort order.
+  const cursorPredicate = cursorTs !== null
+    ? sql`AND (ts, COALESCE(seq, 0), source_table, source_id) > (${cursorTs}::timestamptz, ${cursorSeq ?? 0}, ${cursorTable ?? ''}, ${cursorId ?? ''})`
+    : sql``;
+
+  const eventTypePredicate = eventTypes !== null && eventTypes.length > 0
+    ? sql`AND event_type = ANY(${eventTypes}::text[])`
+    : sql``;
+
+  const sincePredicate = sinceTimestamp !== null
+    ? sql`AND ts >= ${sinceTimestamp}::timestamptz`
+    : sql``;
+
+  const untilPredicate = untilTimestamp !== null
+    ? sql`AND ts <= ${untilTimestamp}::timestamptz`
+    : sql``;
+
   const rows = await db.execute(sql`
     SELECT
       run_id,
@@ -118,10 +190,24 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
       source_id,
       payload
     FROM (
-      -- 1. agent_execution_events
+      -- 1. agent_execution_events — translate native log event codes into
+      -- the run-trace event vocabulary. The source event_type column uses
+      -- log codes (e.g. foundation.controller_style.derived, run.started);
+      -- the run-trace mapper switch expects the dotless variants. Translation
+      -- happens here (in SQL) so the outer event-type filter and the mapper
+      -- both operate on the canonical run-trace name. Rows whose log codes
+      -- don''t translate to a run-trace type are excluded from the trace.
+      -- Note: run.completed is intentionally NOT translated here — the
+      -- service synthesises exactly one run_terminated event from the
+      -- agent_runs row to avoid double-emission across schemas.
       SELECT
         run_id::text              AS run_id,
-        event_type::text          AS event_type,
+        CASE event_type
+          WHEN 'run.started'                              THEN 'run_started'
+          WHEN 'foundation.controller_style.derived'      THEN 'controller_style_decided'
+          WHEN 'foundation.policy_envelope.resolved'      THEN 'policy_envelope_resolved'
+          ELSE event_type::text
+        END                       AS event_type,
         event_timestamp           AS ts,
         sequence_number           AS seq,
         'agent_execution_events'  AS source_table,
@@ -129,10 +215,16 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
         payload
       FROM agent_execution_events
       WHERE run_id = ${runId}
+        AND event_type IN (
+          'run.started',
+          'foundation.controller_style.derived',
+          'foundation.policy_envelope.resolved'
+        )
+      ${aeeToolPredicate}
 
       UNION ALL
 
-      -- 2. delegation_outcomes
+      -- 2. delegation_outcomes (excluded when toolSlug is set per spec §4.4.5)
       SELECT
         run_id::text              AS run_id,
         CASE outcome
@@ -152,6 +244,7 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
         )                         AS payload
       FROM delegation_outcomes
       WHERE run_id = ${runId}
+      ${excludeWhenToolSlug}
 
       UNION ALL
 
@@ -171,10 +264,11 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
         )                             AS payload
       FROM tool_call_security_events
       WHERE agent_run_id = ${runId}
+      ${tcseToolPredicate}
 
       UNION ALL
 
-      -- 4. review_audit_records
+      -- 4. review_audit_records (excluded when toolSlug is set per spec §4.4.5)
       SELECT
         agent_run_id::text        AS run_id,
         'review_decided'          AS event_type,
@@ -190,6 +284,7 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
         )                         AS payload
       FROM review_audit_records
       WHERE agent_run_id = ${runId}
+      ${excludeWhenToolSlug}
 
       UNION ALL
 
@@ -216,10 +311,11 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
         )                         AS payload
       FROM actions
       WHERE agent_run_id = ${runId}
+      ${actionsToolPredicate}
 
       UNION ALL
 
-      -- 6. llm_requests
+      -- 6. llm_requests (excluded when toolSlug is set per spec §4.4.5)
       SELECT
         run_id::text              AS run_id,
         'llm_call'                AS event_type,
@@ -238,10 +334,11 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
         )                         AS payload
       FROM llm_requests
       WHERE run_id = ${runId}
+      ${excludeWhenToolSlug}
 
       UNION ALL
 
-      -- 7. iee_steps (joined via iee_runs for the agent_run_id)
+      -- 7. iee_steps (joined via iee_runs for the agent_run_id; excluded when toolSlug is set)
       SELECT
         ir.agent_run_id::text     AS run_id,
         'iee_step'                AS event_type,
@@ -256,7 +353,13 @@ async function fetchUnionRows(runId: string, fetchLimit: number): Promise<UnionR
       FROM iee_steps s
       JOIN iee_runs ir ON ir.id = s.iee_run_id
       WHERE ir.agent_run_id = ${runId}
+      ${excludeWhenToolSlug}
     ) AS all_events
+    WHERE TRUE
+      ${cursorPredicate}
+      ${eventTypePredicate}
+      ${sincePredicate}
+      ${untilPredicate}
     ORDER BY ts ASC, COALESCE(seq, 0) ASC, source_table ASC, source_id ASC
     LIMIT ${fetchLimit}
   `);
@@ -317,60 +420,31 @@ async function query(q: RunTraceQuery, orgId: string): Promise<RunTraceResult> {
     : null;
 
   // ── Execute UNION query (fetch limit+1 for hasMore detection) ─────────────
+  // Cursor + filter predicates are pushed into SQL so LIMIT applies AFTER
+  // filtering — not against the earliest N+1 rows of the run. See
+  // fetchUnionRows for the toolSlug semantics from spec §4.4.5.
   // No silent fallback: a DB error here must surface so observability and the
   // caller's error envelope can distinguish "no events yet" from a query failure.
   let rawRows: UnionRow[];
   try {
-    rawRows = await fetchUnionRows(q.runId, limit + 1);
+    rawRows = await fetchUnionRows({
+      runId: q.runId,
+      fetchLimit: limit + 1,
+      cursorTs,
+      cursorSeq,
+      cursorTable,
+      cursorId,
+      eventTypes: q.eventTypes && q.eventTypes.length > 0 ? q.eventTypes : null,
+      sinceTimestamp: q.sinceTimestamp ?? null,
+      untilTimestamp: q.untilTimestamp ?? null,
+      toolSlug: q.toolSlug ?? null,
+    });
   } catch (err) {
     logger.error('foundation.run_trace.query_failed', {
       runId: q.runId,
       error: err instanceof Error ? err.message : String(err),
     });
     throw err;
-  }
-
-  // ── Apply cursor predicate ─────────────────────────────────────────────────
-  if (cursorTs !== null) {
-    rawRows = rawRows.filter((row) => {
-      const rowTs = toIso(row.ts);
-      const rowSeq = toSeq(row.seq);
-      if (rowTs > cursorTs!) return true;
-      if (rowTs < cursorTs!) return false;
-      if (rowSeq > cursorSeq!) return true;
-      if (rowSeq < cursorSeq!) return false;
-      if (row.source_table > cursorTable!) return true;
-      if (row.source_table < cursorTable!) return false;
-      return row.source_id > cursorId!;
-    });
-  }
-
-  // ── Apply eventType filter ─────────────────────────────────────────────────
-  if (q.eventTypes && q.eventTypes.length > 0) {
-    const typeSet = new Set<string>(q.eventTypes);
-    rawRows = rawRows.filter((row) => typeSet.has(row.event_type));
-  }
-
-  // ── Apply toolSlug filter ──────────────────────────────────────────────────
-  // Per spec §4.4.5: filter on tool_slug for actions and tool_call_security_events;
-  // non-tool-related tables pass through unconditionally.
-  if (q.toolSlug) {
-    const toolScopedTables = new Set(['actions', 'tool_call_security_events']);
-    rawRows = rawRows.filter((row) => {
-      if (!toolScopedTables.has(row.source_table)) return true;
-      const p = row.payload ?? {};
-      return p['toolSlug'] === q.toolSlug;
-    });
-  }
-
-  // ── Apply time-range filters ───────────────────────────────────────────────
-  if (q.sinceTimestamp) {
-    const since = q.sinceTimestamp;
-    rawRows = rawRows.filter((row) => toIso(row.ts) >= since);
-  }
-  if (q.untilTimestamp) {
-    const until = q.untilTimestamp;
-    rawRows = rawRows.filter((row) => toIso(row.ts) <= until);
   }
 
   // ── Pagination ─────────────────────────────────────────────────────────────
@@ -525,20 +599,51 @@ async function query(q: RunTraceQuery, orgId: string): Promise<RunTraceResult> {
   });
 
   // ── Synthesise exactly one run_terminated event when the run is terminal ───
-  if (isTerminal && terminalTs) {
-    events.push({
-      id: `synthetic:run_terminated:${q.runId}`,
-      runId: q.runId,
-      organisationId: orgId,
-      timestamp: terminalTs,
-      sequenceNumber: 9999999,
-      sourceTable: 'agent_runs',
-      sourceId: q.runId,
-      eventType: 'run_terminated',
-      finalStatus: run.status,
-      failureReason: null,
-      totalDurationMs: run.durationMs ?? 0,
-    });
+  // The synthetic event must respect the query filters and pagination window
+  // — otherwise a `?eventTypes=llm_call` or `?toolSlug=X` query on a
+  // terminal run would still surface the terminal event, and any page can
+  // overflow `limit` by one. The synthetic event only appears when the
+  // caller would have included it had it lived in a source ledger.
+  if (isTerminal && terminalTs && !hasMore) {
+    // - Skip if cursor is set (the cursor is past the last source row by
+    //   construction; the synthetic event also lives "past" everything but
+    //   we only emit it on the last page, never on cursor-paged pages).
+    const cursorPaged = q.cursor !== undefined;
+    // - Skip if eventTypes filter is set and run_terminated is not in it.
+    const filteredOutByEventType =
+      q.eventTypes !== undefined &&
+      q.eventTypes.length > 0 &&
+      !q.eventTypes.includes('run_terminated');
+    // - Skip if toolSlug filter is set (run_terminated is not tool-scoped).
+    const filteredOutByToolSlug = q.toolSlug !== undefined && q.toolSlug !== null;
+    // - Skip if outside the time window.
+    const beforeSince = q.sinceTimestamp ? terminalTs < q.sinceTimestamp : false;
+    const afterUntil = q.untilTimestamp ? terminalTs > q.untilTimestamp : false;
+    // - Skip if including it would push the page past the requested limit.
+    const wouldOverflowLimit = events.length >= limit;
+
+    if (
+      !cursorPaged &&
+      !filteredOutByEventType &&
+      !filteredOutByToolSlug &&
+      !beforeSince &&
+      !afterUntil &&
+      !wouldOverflowLimit
+    ) {
+      events.push({
+        id: `synthetic:run_terminated:${q.runId}`,
+        runId: q.runId,
+        organisationId: orgId,
+        timestamp: terminalTs,
+        sequenceNumber: 9999999,
+        sourceTable: 'agent_runs',
+        sourceId: q.runId,
+        eventType: 'run_terminated',
+        finalStatus: run.status,
+        failureReason: null,
+        totalDurationMs: run.durationMs ?? 0,
+      });
+    }
   }
 
   // ── Build next cursor ──────────────────────────────────────────────────────

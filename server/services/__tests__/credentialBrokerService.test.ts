@@ -87,6 +87,9 @@ vi.mock('drizzle-orm', () => ({
   desc: vi.fn((col) => ({ _desc: col })),
   eq: vi.fn((col, val) => ({ _eq: { col, val } })),
   gte: vi.fn((col, val) => ({ _gte: { col, val } })),
+  // sql is the tagged-template function used for the metadata->>'subaccountId'
+  // predicate in audit(). Capture the parts so tests can assert if needed.
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ _sql: { strings, values } })),
 }));
 
 // ── Dynamic import after mocks ────────────────────────────────────────────────
@@ -319,6 +322,49 @@ describe('revoke', () => {
       credentialBrokerService.revoke({ organisationId: ORG_ID, credentialId: CONNECTION_ID, subaccountId: null }),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
+
+  test('subaccount-scoped revoke never delegates to revokeOrgConnection (cross-scope guard)', async () => {
+    // Regression: a subaccount-A actor calling revoke with subaccountId=A
+    // must not be able to revoke an org-level connection in the same org by
+    // supplying its credentialId. revokeOrgConnection MUST NOT be called.
+    const dbModule = await import('../../db/index.js');
+    // Provide a chainable update mock so the direct subaccount UPDATE can run.
+    // The chain ends in .returning(...) which yields the array of revoked rows.
+    (dbModule.db as unknown as { update: ReturnType<typeof vi.fn> }).update = vi.fn(() => ({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([{ id: CONNECTION_ID }]),
+    }));
+
+    const revoked = await credentialBrokerService.revoke({
+      organisationId: ORG_ID,
+      credentialId: CONNECTION_ID,
+      subaccountId: SUBACCOUNT_ID,
+    });
+
+    expect(integrationConnectionService.revokeOrgConnection).not.toHaveBeenCalled();
+    expect(revoked).toBe(true);
+  });
+
+  test('returns false when no row matches the requested scope', async () => {
+    // Pre-broker route returned 404 when the subaccount/connection pair did
+    // not exist. Broker.revoke now reports false in that case so the route
+    // can preserve 404 semantics rather than silently succeeding.
+    const dbModule = await import('../../db/index.js');
+    (dbModule.db as unknown as { update: ReturnType<typeof vi.fn> }).update = vi.fn(() => ({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([]),
+    }));
+
+    const revoked = await credentialBrokerService.revoke({
+      organisationId: ORG_ID,
+      credentialId: CONNECTION_ID,
+      subaccountId: SUBACCOUNT_ID,
+    });
+
+    expect(revoked).toBe(false);
+  });
 });
 
 // ── audit ─────────────────────────────────────────────────────────────────────
@@ -372,16 +418,16 @@ describe('audit', () => {
     expect(entries[0].organisationId).toBe(ORG_ID);
   });
 
-  test('filters by subaccountId when provided', async () => {
-    const otherSubaccountRow = {
-      ...MOCK_AUDIT_ROW,
-      metadata: { subaccountId: '00000000-0000-0000-0000-000000000099' },
-    };
+  test('pushes subaccountId predicate into SQL when provided', async () => {
+    // The subaccountId filter is pushed into SQL via metadata->>'subaccountId',
+    // so LIMIT applies AFTER the subaccount match — not against the latest
+    // org-wide window. The mock returns only the rows the SQL would have
+    // returned (i.e. only the matching subaccount's rows).
     const chain = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       orderBy: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([MOCK_AUDIT_ROW, otherSubaccountRow]),
+      limit: vi.fn().mockResolvedValue([MOCK_AUDIT_ROW]),
     };
     (db.select as ReturnType<typeof vi.fn>).mockReturnValue(chain);
 
@@ -391,9 +437,12 @@ describe('audit', () => {
     });
 
     // Only entries matching SUBACCOUNT_ID should appear
+    expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
       expect(entry.subaccountId).toBe(SUBACCOUNT_ID);
     }
+    // And the WHERE clause must have been called with the subaccount-id sql predicate
+    expect(chain.where).toHaveBeenCalled();
   });
 
   test('respects custom limit', async () => {

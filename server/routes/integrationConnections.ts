@@ -150,11 +150,16 @@ router.delete(
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
-    await credentialBrokerService.revoke({
+    const revoked = await credentialBrokerService.revoke({
       organisationId: req.orgId!,
       credentialId: req.params.id,
       subaccountId: subaccount.id,
     });
+    if (!revoked) {
+      // Connection not found in this subaccount scope — preserve the pre-broker
+      // 404 behaviour rather than returning success on a no-op delete.
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
 
     res.json({ success: true });
   })

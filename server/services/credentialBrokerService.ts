@@ -1,7 +1,7 @@
 // Credential Broker and Identity Boundary primitive per v1.2 brief. See docs/synthetos-nomenclature.md
 // 'operator_session' is Phase-3 forward-compatible — do NOT add the literal yet
 
-import { and, desc, eq, gte, isNull as isNullExpr } from 'drizzle-orm';
+import { and, desc, eq, gte, sql as sqlOp } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { auditEvents, integrationConnections } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -142,34 +142,46 @@ export const credentialBrokerService = {
 
   /**
    * Revoke a credential (connection) by its ID.
-   * Delegates to integrationConnectionService for org-level connections;
-   * performs a direct org+subaccount-scoped DB update for subaccount-scoped connections.
-   * Callers MUST pass `subaccountId` for subaccount-scoped revokes (or `null` for
-   * org-level) so the fallback UPDATE cannot cross subaccount boundaries within an org.
+   *
+   * Scope-strict: the caller's `subaccountId` controls which scope the revoke
+   * targets, and the matching predicate cannot be widened to a different scope.
+   *   - `subaccountId === null` → revoke an org-level row (subaccount_id IS NULL)
+   *     via integrationConnectionService.revokeOrgConnection (which already pins
+   *     `subaccount_id IS NULL`).
+   *   - `subaccountId === <id>`  → revoke a row in that exact subaccount via
+   *     a direct UPDATE pinned to (organisationId, subaccountId).
+   *
+   * Critically, a subaccount-scoped caller never falls through to an org-level
+   * revoke. If the supplied credentialId is actually an org-level row in the
+   * same org, the subaccount-pinned UPDATE matches no rows and the revoke is a
+   * no-op — the subaccount actor cannot reach across scope.
+   *
+   * Returns `true` when a row was revoked, `false` when no matching row was
+   * found in scope. Callers should map `false` to HTTP 404 — silently
+   * succeeding on a missing row would be a UX/security regression vs the
+   * pre-broker route behaviour.
+   *
    * Emits foundation.credential_broker.revoked on success.
    */
   async revoke(params: {
     organisationId: string;
     credentialId: string;
     subaccountId: string | null;
-  }): Promise<void> {
-    // Attempt org-level revoke first; if the row has a subaccountId the
-    // integrationConnectionService.revokeOrgConnection WHERE clause (subaccountId IS NULL)
-    // will find nothing — fall back to a direct org+subaccount-scoped update.
-    const revoked = await integrationConnectionService.revokeOrgConnection(
-      params.credentialId,
-      params.organisationId,
-    );
-
-    if (!revoked) {
-      // Subaccount-scoped connection: revoke directly with subaccount predicate so
-      // a subaccount-A actor cannot revoke a subaccount-B connection within the same org.
-      // Clears accessToken, refreshToken, and secretsRef (web_login password storage).
-      const subaccountPredicate = params.subaccountId === null
-        ? isNullExpr(integrationConnections.subaccountId)
-        : eq(integrationConnections.subaccountId, params.subaccountId);
-
-      await db
+  }): Promise<boolean> {
+    let revoked: boolean;
+    if (params.subaccountId === null) {
+      // Org-level revoke: integrationConnectionService.revokeOrgConnection
+      // already pins (id, organisationId, subaccount_id IS NULL).
+      revoked = await integrationConnectionService.revokeOrgConnection(
+        params.credentialId,
+        params.organisationId,
+      );
+    } else {
+      // Subaccount-scoped revoke: pin (id, organisationId, subaccountId) so a
+      // subaccount-A actor cannot revoke a subaccount-B connection nor an
+      // org-level connection within the same org. Clears accessToken,
+      // refreshToken, and secretsRef (web_login password storage).
+      const result = await db
         .update(integrationConnections)
         .set({
           connectionStatus: 'revoked',
@@ -182,21 +194,32 @@ export const credentialBrokerService = {
           and(
             eq(integrationConnections.id, params.credentialId),
             eq(integrationConnections.organisationId, params.organisationId),
-            subaccountPredicate,
+            eq(integrationConnections.subaccountId, params.subaccountId),
           ),
-        );
+        )
+        .returning({ id: integrationConnections.id });
+      revoked = result.length > 0;
     }
 
-    logger.info('foundation.credential_broker.revoked', {
-      credentialId: params.credentialId,
-      organisationId: params.organisationId,
-      subaccountId: params.subaccountId,
-    });
+    if (revoked) {
+      logger.info('foundation.credential_broker.revoked', {
+        credentialId: params.credentialId,
+        organisationId: params.organisationId,
+        subaccountId: params.subaccountId,
+      });
+    }
+
+    return revoked;
   },
 
   /**
    * Query credential audit log for a given scope.
    * Reads from auditEvents table with scope filter.
+   *
+   * The subaccountId predicate is pushed into SQL (against
+   * `metadata->>'subaccountId'`) so that LIMIT applies AFTER the subaccount
+   * match — otherwise an org-wide trailing window of newer rows belonging to
+   * other subaccounts would crowd out the requested scope's events.
    */
   async audit(params: {
     organisationId: string;
@@ -215,6 +238,14 @@ export const credentialBrokerService = {
       conditions.push(gte(auditEvents.createdAt, params.sinceTimestamp));
     }
 
+    if (params.subaccountId) {
+      // Match metadata->>'subaccountId' = $subaccountId. Drizzle has no
+      // first-class JSONB ->> operator helper, so we use a raw sql fragment.
+      conditions.push(
+        sqlOp`${auditEvents.metadata} ->> 'subaccountId' = ${params.subaccountId}`,
+      );
+    }
+
     const rows = await db
       .select()
       .from(auditEvents)
@@ -228,10 +259,6 @@ export const credentialBrokerService = {
 
       const meta = row.metadata as Record<string, unknown> | null ?? {};
       const rowSubaccountId = (meta.subaccountId as string | undefined) ?? null;
-
-      if (params.subaccountId && rowSubaccountId !== params.subaccountId) {
-        continue;
-      }
 
       entries.push({
         credentialId: row.entityId ?? '',

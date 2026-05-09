@@ -49,6 +49,23 @@ export class PolicyEnvelopePersistFailedError extends Error {
   }
 }
 
+// Thrown by agentExecutionService when the resolved Policy Envelope's
+// allowedEnvironments does not include the environment derived from the
+// run's executionMode. Spec §4.2.8 requires this gate before tool/IEE
+// dispatch (the envelope captures the constraint; this error enforces it).
+export class ExecutionModeNotAllowedForAgentError extends Error {
+  readonly statusCode = 403;
+  readonly errorCode = 'execution_mode_not_allowed_for_agent';
+
+  constructor(executionMode: string, environment: string) {
+    super(
+      `Execution mode '${executionMode}' (environment '${environment}') ` +
+        `is not in the agent's allowed_environments list.`,
+    );
+    this.name = 'ExecutionModeNotAllowedForAgentError';
+  }
+}
+
 // ── resolvePolicyEnvelope ─────────────────────────────────────────────────────
 
 /**

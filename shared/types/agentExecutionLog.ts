@@ -108,7 +108,8 @@ export type AgentExecutionEventType =
   | 'observation_emitted'
   | 'foundation.controller_style.derived'
   | 'foundation.policy_envelope.resolved'
-  | 'foundation.policy_envelope.resolution_failed';
+  | 'foundation.policy_envelope.resolution_failed'
+  | 'foundation.execution_environment.rejected';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -363,6 +364,19 @@ export type AgentExecutionEventPayload =
       critical: false;
       runId: string;
       error: string;
+    }
+  | {
+      /**
+       * Foundation refactor spec §3.5 / §4.2.8 — executionMode requested at
+       * run creation maps to an ExecutionEnvironment not present in the
+       * agent's allowed_environments list. Kept separate from
+       * foundation.controller_style.rejected so log searches can target
+       * each governance rejection class without overloading a single code.
+       */
+      eventType: 'foundation.execution_environment.rejected';
+      critical: false;
+      runId: string;
+      error: string;
     };
 
 // ---------------------------------------------------------------------------
@@ -401,6 +415,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'foundation.controller_style.derived': false,
   'foundation.policy_envelope.resolved': false,
   'foundation.policy_envelope.resolution_failed': false,
+  'foundation.execution_environment.rejected': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {
