@@ -1,6 +1,6 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** DRAFT v4 — incorporates three rounds of review feedback. Locked. Spec-ready pending the eight decisions in §9.
+**Status:** LOCKED v4.1 — incorporates four rounds of review feedback. Spec-ready pending the eight decisions in §9.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
 **Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, and the entities required. No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
@@ -184,18 +184,18 @@ Fields the agent needs to reason about:
 - **Provider catchall:** `external_metadata` JSONB for provider-specific fields we choose not to canonicalise.
 - **Sync metadata:** `last_synced_at`, `source_connection_id`.
 
-**Canonical status model.** Deliberately small. Provider-specific statuses live in `external_metadata`.
+**Canonical status model.** Deliberately small. Provider-specific statuses live in `external_metadata`. The "queue" columns split a status's visibility from its eligibility for autonomous reply: a ticket can be visible to the agent without being eligible for it to send.
 
-| Canonical status | In default actionable queue? | Meaning |
-|---|---|---|
-| `open` | Yes | Active, agent attention required, no party currently waiting. |
-| `pending_internal` | Yes | Waiting on internal action (engineering, finance, another team). Customer is not blocked. |
-| `waiting_on_customer` | Yes | Reply has gone out, awaiting customer response. |
-| `resolved` | No (opt-in) | Support outcome completed. Excluded from default agent queues; included only when an inbox `agent_config` explicitly enables post-resolution follow-up workflows. Customer reply reopens to `open`. |
-| `closed` | No | Terminal/archive state. Not expected to receive normal agent action; reopening is an explicit operation. |
-| `unknown_provider_status` | **No (quarantined)** | Provider returned a status the adapter has not mapped. Fail-closed: ticket is excluded from all actionable agent queues until the mapping is resolved. |
+| Canonical status | Visible in agent queues? | Eligible for autonomous reply? | Meaning |
+|---|---|---|---|
+| `open` | Yes | Yes | Active, agent attention required, no party currently waiting. |
+| `pending_internal` | Yes | No (status-change / internal-note only) | Waiting on internal action (engineering, finance, another team). Customer is not blocked. |
+| `waiting_on_customer` | Yes | No by default; opt-in for follow-up or SLA workflows | Reply has gone out, awaiting customer response. The agent should not generate a fresh customer-facing reply unless an inbox policy explicitly enables follow-up. |
+| `resolved` | No by default; opt-in for post-resolution workflows | No by default | Support outcome completed. Customer reply reopens to `open`. Follow-up automations (CSAT prompts, check-ins) must opt in via `agent_config`. |
+| `closed` | No | No | Terminal/archive state. Reopening is an explicit operation. |
+| `unknown_provider_status` | **No (quarantined)** | **No** | Provider returned a status the adapter has not mapped. Fail-closed: ticket is excluded from all agent queues and actions until the mapping is resolved. |
 
-The split between `resolved` and `closed` matters: `resolved` is an outcome ("we answered it"), `closed` is a lifecycle terminus ("the ticket is no longer in active circulation"). The reason `resolved` is opt-in actionable is to prevent the agent repeatedly touching tickets that are already done; follow-up automations (CSAT prompts, post-resolution check-ins) must explicitly opt in via inbox policy. Mapping each provider's status vocabulary into the first five canonical values is part of the adapter contract; `unknown_provider_status` is the quarantine bucket for anything else (see §7).
+The split between `resolved` and `closed` matters: `resolved` is an outcome ("we answered it"), `closed` is a lifecycle terminus ("the ticket is no longer in active circulation"). Mapping each provider's status vocabulary into the first five canonical values is part of the adapter contract; `unknown_provider_status` is the quarantine bucket for anything else (see §7).
 
 **Relationship to `canonical_conversations`.** `canonical_tickets` is the source of truth for support workflows. Tickets do not flow through `canonical_conversations`. The generic conversations table remains for non-ticket messaging channels (SMS, chat, phone). A future unified-activity-feed concern may link the two; v1 does not. This avoids overloading `canonical_conversations` with ticket semantics.
 
@@ -261,7 +261,7 @@ The home for agent-generated replies that are not yet sent. Required because the
 - `sent_message_id`: FK to `canonical_ticket_messages` once the provider confirms. Null until then.
 - `expires_at`: drafts auto-expire so stale suggestions do not sit in the queue forever.
 
-Autonomous-mode flow: agent writes a `draft` row, immediately transitions it to `approved`, then `dispatching` while the adapter calls the provider; on confirmation the row moves to `sent` and a `canonical_ticket_messages` row is reconciled in with `source_draft_id` pointing back. Assisted-mode flow: agent writes `awaiting_review`, a human approves or rejects, then the same approved-to-dispatching-to-sent path runs. Either way, the audit trail and idempotency key flow are identical.
+Autonomous-mode flow: agent writes a `draft` row, passes approval policy automatically, then transitions to `dispatching` (per §5.8) while the adapter calls the provider; on confirmation the row moves to `sent` and a `canonical_ticket_messages` row is reconciled in with `source_draft_id` pointing back. Assisted-mode flow: agent writes `awaiting_review`; human approval triggers the same three-phase dispatch path. Either way, the audit trail and idempotency key flow are identical.
 
 ### 6.6 What we explicitly do NOT canonicalise (yet)
 
