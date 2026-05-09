@@ -3227,3 +3227,9 @@ The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test fil
 **Apply to:** `.claude/agents/finalisation-coordinator.md` Step 12.3. Locked in by operator 2026-05-09.
 
 **Detection heuristic.** Any future Phase-3 merge that does NOT use `--admin` either: (a) skips the prep commit entirely (also valid — but loses the bundled `current-focus → NONE` state in the squash), OR (b) wastes a full CI run on a docs-only commit. If the playbook ever drops `--admin`, treat as a contract violation and surface to operator before merging.
+
+---
+
+### [2026-05-09] Correction — Scorecard system is one-way instrumentation, not closed-loop
+Operator asked whether the scorecard system implements a closed loop (score → proposed improvement → HITL approval → versioned change → before/after measurement). It does not. `scorecards`, `scorecard_judgements`, `agent_scorecard_attachments` (migrations 0297–0301), `server/services/scorecardJudgeRunner.ts`, `server/jobs/scorecardJudgeJob.ts`, and `server/jobs/scorecardJudgeForcedJob.ts` record verdicts and F1 snapshots but never feed those failures back into agent prompt/skill evolution. `snapshot_rubric_version` is hardcoded to 1; agent `masterPrompt`/`additionalPrompt` are unversioned, so before/after impact cannot be measured.
+The closed-loop templates already exist elsewhere and should be copied: `server/jobs/correctionPatternDetectorJob.ts` (daily clustering of operator corrections → promotes `memory_blocks` from draft to `pending_review` for HITL), `server/db/schema/skillAnalyzerResults.ts` (proposes merges + captures `userEditedMerge` + `warningResolutions`), `server/db/schema/reviewAuditRecords.ts` (captures `editedArgs` diff between proposed and approved actions), and `server/db/schema/interventionOutcomes.ts` (`healthScoreBefore`/`healthScoreAfter`/`configVersion` pattern). When asked about closed-loop scorecards, point to these as the missing wiring rather than implying nothing exists.
