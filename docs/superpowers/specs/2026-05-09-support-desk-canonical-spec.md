@@ -51,7 +51,7 @@ This spec inherits every invariant in the brief verbatim. Where the brief gives 
 
 1. Ship a canonical Support Desk runtime layer (5 entities) that exposes one provider-neutral shape for tickets, threads, messages, inboxes, and helpdesk agents.
 2. Extend the existing `teamworkAdapter` so one Teamwork Desk connection can ingest, dispatch, and reconcile against the canonical layer end-to-end.
-3. Expose a provider-neutral skill set (`support.list_open_tickets`, `support.read_thread`, `support.propose_reply`, `support.approve_draft`, `support.add_internal_note`, `support.set_status`, `support.assign`, `support.tag`, `support.find_customer_history`) the Support Agent will consume.
+3. Expose a provider-neutral skill set (`support.list_open_tickets`, `support.read_thread`, `support.propose_reply`, `support.approve_draft`, `support.reject_draft`, `support.add_internal_note`, `support.set_status`, `support.assign`, `support.tag`, `support.find_customer_history`) the Support Agent will consume.
 4. Surface operational state on existing screens per brief §5.12 (connection setup, tickets list, inbox config, draft review queue) without introducing a new monitoring dashboard.
 5. Preserve runtime-training alignment with Foundry's Teamwork loader (brief §5.1) — every divergence enumerated and justified in this spec, not discovered post-merge.
 
@@ -129,7 +129,7 @@ The PR is broken into ordered build chunks for the implementer (`feature-coordin
 | C6 | Teamwork adapter — ingestion implementation (`listInboxes`, `listSupportAgents`, `fetchTickets`, `fetchTicketMessages`, status-mapping fail-closed) | `server/adapters/teamworkAdapter.ts`; pure status-mapping module + tests; webhook event-type extension (`ticket.assigned`, `ticket.status_changed`); fixture-based unit tests for the mapping table |
 | C7 | Teamwork adapter — `addInternalNote` + `resolveAttachment` + idempotency-key plumbing for `addReply` and `addInternalNote` | `server/adapters/teamworkAdapter.ts`; new `action_attempts` ledger if §14.1 lands native-idempotency-not-supported |
 | C8 | Connector polling integration — ingestion phase split (inboxes → agents → tickets → messages), per-org sync ledger, sync-health classification | `server/services/connectorPollingService.ts` (extension only — no new infra); poll-phase enum extension |
-| C9 | Webhook ingestion — convergent dual-path with `(connector_config_id, external_id)` dedupe and `(connector_config_id, ticket_external_id, external_id)` for messages; dispatcher updates | `server/services/webhookAdapterService.ts` extension; new dispatcher case for ticket events; tests for duplicate-event collapse |
+| C9 | Webhook ingestion — convergent dual-path with `(connector_config_id, external_id)` dedupe and `(connector_config_id, ticket_external_id, external_id)` for messages; dispatcher updates | `server/services/webhookAdapterService.ts` extension; new dispatcher case for ticket events; manual smoke test against real Teamwork sandbox for duplicate-event collapse (per §17.1 + §20) |
 | C10 | `supportTicketService` (read-only canonical reads + thread assembly) and `supportInboxService` (config CRUD with `agent_config` JSONB) | new service files; principal-scoped methods; pure thread-ordering helper + test |
 | C11 | Three-phase dispatch service (`supportDraftDispatchService`) — preflight → durable transition → adapter call — with `needs_reconciliation` reconciler worker | new service file + pg-boss worker (`createWorker`); pure state-machine transition guard + test; reconciliation policy module + test |
 | C12 | Skill registrations (`support.list_open_tickets`, `support.read_thread`, `support.propose_reply`, `support.approve_draft`, `support.add_internal_note`, `support.set_status`, `support.assign`, `support.tag`, `support.find_customer_history`) | `server/skills/support/` directory; one markdown skill definition per skill; `actionRegistry` updates |
@@ -198,7 +198,9 @@ Reiterated from §1 non-goals so the domain model is unambiguous about what the 
 
 This is concept-level. Drizzle schema files, exact Postgres column types, and migration DDL are produced in Phase 2 (plan + builder). The spec locks (a) the columns the agent and the dispatch service depend on, (b) the dedupe keys, (c) the indexes load-bearing for read patterns, (d) the RLS posture, and (e) the closed enums.
 
-All five tables follow the canonical pattern from `canonicalAccounts` (§2): UUID PK, `organisation_id`, `connector_config_id`, `subaccount_id` (nullable), `external_id`, `external_metadata` JSONB, `last_sync_at`, `source_connection_id`, `created_at`, `updated_at`. RLS-protected on the org column. Owner/visibility scope columns are NOT added in v1.
+All five tables follow the canonical pattern from `canonicalAccounts` (§2): UUID PK, `organisation_id`, `connector_config_id`, `subaccount_id` (nullable), `external_metadata` JSONB, `last_synced_at`, `source_connection_id`, `created_at`, `updated_at`. RLS-protected on the org column. Owner/visibility scope columns are NOT added in v1.
+
+**Provider-mirrored tables also carry `external_id`** (`canonical_inboxes`, `canonical_support_agents`, `canonical_tickets`, `canonical_ticket_messages`). `canonical_ticket_drafts` is the only exception: it represents user-intent state generated locally, not a provider entity, so it has no `external_id` — its identity is the local UUID PK plus the FK chain through `ticket_id`.
 
 ### 5.1 `canonical_tickets`
 
@@ -374,6 +376,9 @@ A typed JSONB column carrying per-inbox Support Agent configuration. v1 schema (
 
 ```ts
 {
+  // Schema version anchor (§11.5). Adding a field bumps the version and triggers a Phase 2 migration step.
+  version: 1;
+
   mode: 'autonomous' | 'assisted' | 'disabled';
 
   // Collision-window (brief §5.4 + §6.1 collision primitives)
@@ -824,14 +829,15 @@ This section operationalises brief §5.7 + §5.8. The dispatch path is the most 
                   │              │ ────────────────► (surface to manual review; no auto-transition)
                   └──────────────┘
 
-       superseded — written when a newer draft for the same ticket replaces this one (rare; only when the agent writes a fresh draft over an existing awaiting_review draft for the same ticket)
+       superseded — written when a newer draft for the same ticket replaces this one. Transition: `draft | awaiting_review → superseded` only — and only when the agent (or a follow-up agent run) writes a fresh draft over an existing pre-dispatch draft for the same ticket. The supersede write is a single-statement update guarded by `WHERE status IN ('draft','awaiting_review')` so a draft already in `dispatching` or beyond cannot be superseded out from under the dispatch path. `superseded` is terminal — once a draft is in this state no further transitions occur.
 ```
 
 Forbidden transitions:
 - `dispatching → expired` — never. `dispatching` does not silently expire (brief §5.8).
 - `dispatching → failed` directly on timeout — never. Timeout routes through `needs_reconciliation` first.
 - `needs_reconciliation → expired` — never. Same reason.
-- Any transition out of `sent`, `failed`, `rejected`, or `expired` — terminal.
+- `dispatching | needs_reconciliation | sent | failed | rejected | expired → superseded` — never. Supersede only applies to pre-dispatch states (`draft`, `awaiting_review`).
+- Any transition out of `sent`, `failed`, `rejected`, `expired`, or `superseded` — terminal.
 - `unknown_provider_status` ticket → any draft transition — preflight refuses (§8.1).
 
 The transition guard is a pure function in `server/services/supportDraftDispatchServicePure.ts` with a fixture matrix asserting every valid + every forbidden transition, including the post-terminal prohibition (Section 10.4 of the spec authoring checklist).
@@ -922,11 +928,13 @@ Drafts whose reconciliation budget is exhausted appear in the draft review queue
 
 The surface offers three operator actions:
 
-- **Mark sent** — operator confirms the provider accepted it (because they checked Teamwork directly and saw the message). Transitions draft to `sent`, inserts the canonical message manually with the operator's `users.id` as the source. Audit-event written.
+- **Mark sent** — operator confirms the provider accepted it (because they checked Teamwork directly and saw the message). Transitions draft to `sent`. **Does NOT insert a row into `canonical_ticket_messages`** — the provider-confirmed message ledger only accepts rows that carry the provider's message ID (§5.2 `external_id` NOT NULL invariant), and the operator does not have one to provide. The confirmed message will land via webhook or the next poll cycle, where the existing convergence rule (§7) will dedupe-or-insert it and set `source_draft_id` from the still-pending draft → message link. Audit-event written.
 - **Mark failed** — operator confirms the provider rejected it. Transitions to `failed`. No canonical message inserted. Audit-event written.
 - **Retry reconciliation** — resets the budget and re-enqueues. Useful when the operator suspects a transient provider issue has resolved.
 
-This surface never causes a duplicate reply: phase 3 already used `action_idempotency_key`, so a "Mark sent" action that turns out to have been wrong is detected at the next webhook delivery (the message lands, source_draft_id is already linked, no duplicate row). Operator-triggered retries reuse the same key.
+This surface never causes a duplicate reply: phase 3 already used `action_idempotency_key`, so a "Mark sent" action that turns out to have been wrong is corrected at the next webhook delivery (the provider message lands and is linked via `source_draft_id`; if the provider never accepted, no message ever arrives and the operator can switch to Mark failed later). Operator-triggered retries reuse the same key.
+
+**Why Mark sent is fire-and-forget on the message side.** The alternative — capturing a synthetic provider message ID at Mark-sent time — would either fabricate an ID (violates §5.2 provider-confirmed-only invariant) or require the operator to copy the ID from the provider UI (high error rate for an action the operator only takes when reconciliation has already failed). The cleaner contract is: Mark sent transitions the draft only; the canonical message ledger is populated by ingestion, exactly as for every other confirmed message in the system.
 
 ### 8.6 Manual collision override (brief §5.4)
 
@@ -977,7 +985,7 @@ Skill registration adds a typed entry to `actionRegistry` with the new `'support
 
 ### Permission keys introduced
 
-- `support.draft.approve` — can press Approve on a draft. Inbox-scoped via `canonical_inboxes.agent_config` (an inbox in `mode='disabled'` blocks even admins from approving).
+- `support.draft.approve` — can press Approve on a draft. **Also gates the Edit action** on the draft review queue (`POST /api/support/drafts/:id/edit`): editing the proposed body before approving is a mutation toward approve and shares the approve key. Inbox-scoped via `canonical_inboxes.agent_config` (an inbox in `mode='disabled'` blocks even admins from approving).
 - `support.draft.reject` — can press Reject.
 - `support.draft.override_collision` — can override `human_collision_blocked` (§8.6). Strictly stronger than `support.draft.approve`.
 - `support.inbox.configure` — can edit `canonical_inboxes.agent_config`.
@@ -1226,7 +1234,7 @@ Per `docs/spec-authoring-checklist.md` §4, every new tenant-scoped table needs 
 |---|---|
 | RLS policy | `0309_canonical_tickets.sql` includes `ALTER TABLE canonical_tickets ENABLE ROW LEVEL SECURITY; ALTER TABLE canonical_tickets FORCE ROW LEVEL SECURITY;` plus `CREATE POLICY canonical_tickets_org_isolation ON canonical_tickets USING (organisation_id::text = current_setting('app.organisation_id', true))` |
 | Manifest entry | Added to `RLS_PROTECTED_TABLES` in `server/config/rlsProtectedTables.ts` in the same commit |
-| Route-level guard | `authenticate` + `requirePermission('support.tickets.read')` (or implicit via org-scoped reads) on all `/api/support/tickets/*` routes |
+| Route-level guard | `authenticate` + org-scoped reads on all `/api/support/tickets/*` routes. Read access does not require a permission key (per §10 access control); the org membership check plus RLS is the boundary. Mutating routes inherit the §9 permission keys. |
 | Principal-scoped context | Agent reads go through `withPrincipalContext` + `getOrgScopedDb` in `supportTicketService` |
 
 ### `canonical_ticket_messages` (migration 0310)
@@ -1400,9 +1408,12 @@ The dispatch path emits exactly one terminal event per draft lifecycle. Mutually
 | Reconciliation resolves to failed | `support.draft.failed` with `reason` | `failed` |
 | Operator rejects in queue | `support.draft.rejected` with reviewer | `rejected` |
 | Queue expiry | `support.draft.expired` | `expired` |
+| Newer draft for the same ticket replaces this one in a pre-dispatch state | `support.draft.superseded` with `draft_id`, `superseded_by_draft_id` | `superseded` |
 | Reconciliation budget exhausted, surfaced for manual review | NO terminal event yet — manual action emits one. The operator's "Mark sent" / "Mark failed" / "Retry reconciliation" path emits the corresponding terminal. **No silent expiry of `needs_reconciliation`** — brief §5.8 second paragraph. |
 
-Post-terminal prohibition: once a draft is in `sent`, `failed`, `rejected`, or `expired`, **no further events with the same `draft_id` are emitted**. Phase 2 includes a pure-tested invariant module asserting this.
+The `support.draft.*` event codes above are dispatch-lifecycle events, distinct from the §15 operational observability codes. Both namespaces are pinned in `shared/types/supportObservability.ts` (the `SUPPORT_LOG_CODES` const is extended in §15 to cover both groups; see §15 emitter pattern).
+
+Post-terminal prohibition: once a draft is in `sent`, `failed`, `rejected`, `expired`, or `superseded`, **no further events with the same `draft_id` are emitted**. Phase 2 includes a pure-tested invariant module asserting this.
 
 ### 14.5 No-silent-partial-success
 
@@ -1459,6 +1470,7 @@ Each emit is a structured `logger.warn` call (or `logger.info` for non-warning c
 
 ```ts
 export const SUPPORT_LOG_CODES = {
+  // Operational observability (§15 emitters)
   STATUS_UNKNOWN_PROVIDER_STATUS: 'support.status.unknown_provider_status',
   INGEST_DUPLICATE_COLLAPSED: 'support.ingest.duplicate_collapsed',
   ACTION_RETRY_IDEMPOTENT: 'support.action.retry_idempotent',
@@ -1469,6 +1481,13 @@ export const SUPPORT_LOG_CODES = {
   PROVIDER_RATE_LIMITED: 'support.provider.rate_limited',
   PROVIDER_POLL_PAGE_FAILED: 'support.provider.poll_page_failed',
   PROVIDER_WEBHOOK_UNMAPPED_EVENT: 'support.provider.webhook_unmapped_event',
+
+  // Dispatch lifecycle terminals (§14.4 emitters)
+  DRAFT_SENT: 'support.draft.sent',
+  DRAFT_FAILED: 'support.draft.failed',
+  DRAFT_REJECTED: 'support.draft.rejected',
+  DRAFT_EXPIRED: 'support.draft.expired',
+  DRAFT_SUPERSEDED: 'support.draft.superseded',
 } as const;
 ```
 
@@ -1548,7 +1567,7 @@ No backward dependencies. No orphaned deferrals (every prose mention of a deferr
 Each is a binary, testable criterion. The PR is not merge-ready until all are demonstrated:
 
 - [ ] One Teamwork connection ingests inboxes, support agents, tickets, and ticket messages into the canonical layer end-to-end on a real account.
-- [ ] Webhook and polling paths converge on the same canonical rows, verified with at least one duplicate-event test asserting no duplicate-row insert.
+- [ ] Webhook and polling paths converge on the same canonical rows, verified by manual smoke against a real Teamwork sandbox (replay the same event via webhook + poll cycle and confirm no duplicate-row insert) AND by the static gate `verify-rls-coverage.sh` plus the UNIQUE-index migrations from §5.1/§5.2 fixing the dedupe contract structurally. No vitest test of `connectorPollingService` or `webhookAdapterService` is required (per §20 testing posture).
 - [ ] One draft can be dispatched safely through the §8 three-phase flow end-to-end, with the confirmed message reconciled into `canonical_ticket_messages` and linked back to the draft via `source_draft_id`.
 - [ ] Attachment resolver returns a usable URL (or stream) for at least one real Teamwork attachment.
 - [ ] An unmapped Teamwork status quarantines the ticket as `unknown_provider_status` and excludes it from agent-actionable queues; the original provider value is preserved in `external_metadata.provider_status_raw`; the `support.status.unknown_provider_status` log code fires.
@@ -1560,7 +1579,7 @@ The acceptance bar is verified during Phase 2 by a combination of pure-function 
 
 ### 17.2 Capability matrix (brief §8.6, binary + testable)
 
-Per the brief lock — every `yes` cell names the specific endpoint or webhook event; every `no` cell names the explicit fallback path. **Every named fallback must have a test or fixture exercising it; a fallback with no test is a spec gap and counts as `no` with no fallback.**
+Per the brief lock — every `yes` cell names the specific endpoint or webhook event; every `no` cell names the explicit fallback path. **Every named fallback must be exercised by either (a) a pure-function test or fixture for the decision boundary, or (b) the §17.1 manual smoke against a real Teamwork sandbox; a fallback with no exercising path is a spec gap and counts as `no` with no fallback.** Per §20 the project's testing posture rules out vitest tests of `connectorPollingService` / `webhookAdapterService` / route files, so "exercising" means pure-function fixture coverage where the fallback has a clean decision boundary and manual smoke otherwise.
 
 The matrix below is provisional pending audit of Teamwork's current API surface (OQ-2 + OQ-4). Phase 2 confirms each row before C7 / C8 / C9 close. The cells marked `?` must resolve to either `yes:<endpoint>` or `no:<fallback>` before merge.
 
@@ -1667,7 +1686,7 @@ Per spec-authoring-checklist §2 — every file/column/migration/service/route m
   - `GET  /api/support/drafts/:id` — detail
   - `POST /api/support/drafts/:id/approve` — `support.draft.approve` (optional `override_collision: true` body field requires `support.draft.override_collision`)
   - `POST /api/support/drafts/:id/reject` — `support.draft.reject`
-  - `POST /api/support/drafts/:id/edit` — operator edits proposed body before approving
+  - `POST /api/support/drafts/:id/edit` — operator edits proposed body before approving (`support.draft.approve` per §9)
   - `POST /api/support/drafts/:id/manual-resolve` — for `needs_reconciliation` exhausted-budget surface (`mark_sent` / `mark_failed` / `retry_reconciliation`)
 
 ### Permission keys
