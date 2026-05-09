@@ -1187,6 +1187,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0311_canonical_ticket_drafts.sql',
     rationale: 'AI-proposed support reply drafts with state machine and dispatch history — cross-tenant leak exposes AI reasoning, draft content, and operator review decisions.',
   },
+  // 0312 — Support Desk action idempotency ledger
+  {
+    tableName: 'action_attempts',
+    schemaFile: 'actionAttempts.ts',
+    policyMigration: '0312_action_attempts.sql',
+    rationale: 'Action idempotency ledger — records in-flight and completed provider write attempts. Cross-tenant leak exposes which actions were attempted and their outcomes.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

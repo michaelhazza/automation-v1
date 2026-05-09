@@ -1,6 +1,6 @@
 **Status:** accepted — OQ-2 closed inline 2026-05-09 (full Teamwork status inventory now locked in §11.2). OQ-1 (Foundry parity) deferred per operator override 2026-05-09 with brief §5.1 spec-drift risk acknowledged; tracked in `tasks/todo.md` § "Deferred from feature-coordinator hard-gate override — support-desk-canonical (2026-05-09)". chatgpt-spec-review closed `APPROVED — operator finalised after Round 2`.
 **Spec date:** 2026-05-09
-**Last updated:** 2026-05-09 (Phase 2 hard-gate close — OQ-2 inventory locked in §11.2; OQ-1 deferred per operator override; §19 + §22 updated. Earlier Phase 1 finalisation: chatgpt-spec-review 2 rounds — 14 findings closed [5 high-severity blockers, 1 user-facing rename, 8 medium/low tightenings], round logs `ff6e21b6` / `180d0347`.)
+**Last updated:** 2026-05-09 (C7 close — OQ-3 closed as `no: ledger` [action_attempts migration 0312 ships]; OQ-4 closed as `{url}` [resolveAttachment returns URL, no stream proxy]. Earlier Phase 2 hard-gate close — OQ-2 inventory locked in §11.2; OQ-1 deferred per operator override; §19 + §22 updated. Phase 1 finalisation: chatgpt-spec-review 2 rounds — 14 findings closed [5 high-severity blockers, 1 user-facing rename, 8 medium/low tightenings], round logs `ff6e21b6` / `180d0347`.)
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)
@@ -2007,21 +2007,21 @@ Four open questions block the move to `Status: accepted`. Each has a defined clo
 
 **Resolution (2026-05-09):** Closed by inventory captured from the Teamwork Desk Support Center "Ticket Statuses" article (`https://support.teamwork.com/desk/inboxes/ticket-statuses`) and cross-checked against the V2 API reference (`https://apidocs.teamwork.com/docs/desk`). Teamwork Desk exposes exactly 6 non-customisable default system statuses (Active, Waiting on customer, On hold, Solved, Closed, Spam) plus operator-defined custom statuses. §11.2 now ships the full locked mapping table covering all 6 defaults + historical aliases consumed by the existing `server/adapters/teamworkAdapter.ts`. Three judgment calls captured inline in §11.2's "Judgment-call rationale" bullet: `On hold → pending_internal`, `Spam → closed`, custom statuses → fall-through to `'unknown_provider_status'`. The locked Phase 2 implementation in `server/adapters/teamwork/teamworkSupportStatusMap.ts` is a direct transcription of the §11.2 table.
 
-### OQ-3 — Teamwork native action-idempotency mechanism
+### OQ-3 — Teamwork native action-idempotency mechanism (CLOSED 2026-05-09)
 
 **Question:** Does Teamwork's `addReply` / `addInternalNote` API support a native idempotency-key header (or equivalent)? Brief §10 #13.
 
 **Why it matters:** if yes, the adapter forwards the §14.1 `action_idempotency_key` as a header and the provider deduplicates on its side. If no, the local `action_attempts` ledger ships in C7 + migration `0312`.
 
-**Closer:** Phase 2 chunk C7 audits Teamwork's API surface and locks one of the two paths. Spec amendment: §6 + §17 capability matrix `?` row + §18 conditional migration list become concrete `yes:<header>` or `no:<ledger>`. **Required before C7 closes.**
+**Resolution (2026-05-09):** Closed as `no: ledger`. Teamwork Desk does not expose a native idempotency-key header for reply or internal-note operations. The local `action_attempts` ledger ships as migration `0312_action_attempts.sql` — a UNIQUE constraint on `(connector_config_id, idempotency_key)` provides deduplication. The ledger is RLS-protected with the canonical org-isolation policy. The dispatch service (C11) wires the ledger into the send path.
 
-### OQ-4 — Teamwork attachment auth + URL lifecycle
+### OQ-4 — Teamwork attachment auth + URL lifecycle (CLOSED 2026-05-09)
 
 **Question:** What is Teamwork's attachment auth model — short-lived signed URLs, persistent auth-required URLs, or other? Brief §10 #14 + §6.2 attachment policy.
 
 **Why it matters:** drives whether `resolveAttachment` returns a fresh URL (cheap; provider does the auth) or streams bytes through our backend (expensive; we proxy).
 
-**Closer:** Phase 2 chunk C7 audits the auth model and Teamwork attachment URL behaviour. Spec amendment: §6 `resolveAttachment` return type may narrow to one of `{url}` or `{stream}`. **Required before C7 closes.**
+**Resolution (2026-05-09):** Closed as `{url}`. Teamwork returns authenticated download URLs on attachment objects. `resolveAttachment` fetches the attachment metadata via the threads API and returns `{ url: resolvedUrl, mimeType, success: true }`. No streaming proxy is required. Return type narrows to `{ url: string; mimeType?: string; success: true }` on the happy path.
 
 ### ~~OQ-5~~ — CLOSED in this revision (chatgpt-spec-review Round 1)
 

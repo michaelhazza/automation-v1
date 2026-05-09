@@ -304,3 +304,6 @@ export * from './canonicalSupportAgents.js';
 export * from './canonicalTickets.js';
 export * from './canonicalTicketMessages.js';
 export * from './canonicalTicketDrafts.js';
+
+// Support Desk action idempotency ledger (migration 0312)
+export * from './actionAttempts.js';

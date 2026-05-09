@@ -287,30 +287,83 @@ export const teamworkAdapter: IntegrationAdapter = {
       body: string,
       _options?: { idempotencyKey?: string },
     ): Promise<TicketReplyResult> {
-      const baseUrl = getBaseUrl(connection);
-      const headers = getAuthHeaders(connection);
-      await getProviderRateLimiter('teamwork').acquire(connection.id);
-
       try {
+        const baseUrl = getBaseUrl(connection);
+        const headers = getAuthHeaders(connection);
+        await getProviderRateLimiter('teamwork').acquire(connection.id);
+
+        const payload: Record<string, unknown> = {
+          body,
+          type: 'note',
+        };
+
         const response = await axios.post(
-          `${baseUrl}/tickets/${ticketId}/customerReplies.json`,
-          { reply: { body, type: 'note' } },
+          `${baseUrl}/tickets/${ticketId}/threads.json`,
+          payload,
           { headers, timeout: TIMEOUT_MS },
         );
-        const replyId = String((response.data as { reply?: { id?: unknown } })?.reply?.id ?? '');
-        return { replyId, success: true };
+
+        const thread = (response.data as { thread?: { id?: number } })?.thread;
+        return {
+          replyId: String(thread?.id ?? ''),
+          success: true,
+        };
       } catch (err) {
         return { replyId: '', success: false, error: classifyAdapterError(err, 'teamwork', 'addInternalNote') };
       }
     },
 
     async resolveAttachment(
-      _connection: IntegrationConnection,
-      _ticketId: string,
-      _messageId: string,
-      _attachmentExternalId: string,
+      connection: IntegrationConnection,
+      ticketId: string,
+      messageId: string,
+      attachmentExternalId: string,
     ): Promise<{ url?: string; stream?: NodeJS.ReadableStream; mimeType?: string; success: boolean; error?: AdapterError }> {
-      return { success: false, error: { code: 'unknown', retryable: false, message: 'resolveAttachment not implemented for Teamwork' } };
+      try {
+        const baseUrl = getBaseUrl(connection);
+        const headers = getAuthHeaders(connection);
+        await getProviderRateLimiter('teamwork').acquire(connection.id);
+
+        // Teamwork Desk returns authenticated download URLs on the attachment object.
+        // Fetch the attachment metadata from the thread to resolve the URL.
+        const response = await withBackoff(
+          async () => {
+            const res = await axios.get(
+              `${baseUrl}/tickets/${ticketId}/threads/${messageId}/attachments/${attachmentExternalId}.json`,
+              { headers, timeout: TIMEOUT_MS },
+            );
+            return res.data as { attachment?: { downloadUrl?: string; url?: string; mimeType?: string; contentType?: string } };
+          },
+          {
+            label: 'teamwork.resolveAttachment',
+            maxAttempts: 3,
+            baseDelayMs: 500,
+            maxDelayMs: 8000,
+            isRetryable: (err: unknown) => {
+              const e = err as { response?: { status?: number }; code?: string };
+              const status = e.response?.status;
+              return e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT' ||
+                status === 429 || (status !== undefined && status >= 500);
+            },
+            correlationId: connection.id,
+            runId: `${connection.id}:${attachmentExternalId}`,
+          },
+        );
+
+        const attachment = response.attachment;
+        const resolvedUrl = attachment?.downloadUrl ?? attachment?.url;
+        if (!resolvedUrl) {
+          return { success: false, error: { code: 'not_found', retryable: false, message: `Attachment ${attachmentExternalId} has no download URL` } };
+        }
+
+        return {
+          url: resolvedUrl,
+          mimeType: attachment?.mimeType ?? attachment?.contentType,
+          success: true,
+        };
+      } catch (err) {
+        return { success: false, error: classifyAdapterError(err, 'teamwork', 'resolveAttachment') };
+      }
     },
 
     async getTicket(
