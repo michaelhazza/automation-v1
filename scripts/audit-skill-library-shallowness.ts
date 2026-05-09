@@ -19,8 +19,9 @@
  * library has different framing; cross-reference detection only fires on
  * candidate.description). The audit dedupes (A,B) ≡ (B,A) to halve cost,
  * which means a problem visible only in one direction may be missed. Good
- * enough for a first pass — re-run with --no-dedupe if the findings look
- * incomplete.
+ * enough for a first pass. Directional/asymmetric re-runs are not implemented
+ * in this one-shot script; add a no-dedupe mode before relying on directional
+ * coverage.
  *
  * Usage:
  *   ANTHROPIC_API_KEY=… OPENAI_API_KEY=… DATABASE_URL=… \
