@@ -73,8 +73,8 @@ Open a new Claude Code session and type `launch feature coordinator`.
 |---|---|---|
 | 6 — G2 integrated-state gate | done | Attempt 1: `npm run lint` 0 errors / 888 pre-existing warnings (non-blocking); `npm run typecheck` clean. PASS. |
 | 7 — Post-G2 spec-validity checkpoint | pending | Operator confirmation required. |
-| 8.1 — spec-conformance | pending | |
-| 8.2 — adversarial-reviewer | pending | Auto-trigger check pending. |
+| 8.1 — spec-conformance | done | Round 1 NON_CONFORMANT (7 dir gaps); builder remediated all 7 in commit `74fb0306`. Round 2 NON_CONFORMANT (1 new low-sev gap REQ #72) — closed inline in commit `62f9a28e`. Logs: `tasks/review-logs/spec-conformance-log-support-desk-canonical-2026-05-09T20-34-30Z.md` + `…21-08-30Z.md`. |
+| 8.2 — adversarial-reviewer | done | HOLES_FOUND (2 confirmed-holes / 2 likely-holes / 3 worth-confirming). 1 spec-contradiction noted (read perms = spec design). 6 items routed to `tasks/todo.md` § *Deferred from adversarial-reviewer — support-desk-canonical (2026-05-09)*. Non-blocking advisory per playbook. Log: `tasks/review-logs/adversarial-review-log-support-desk-canonical-2026-05-09T21-28-46Z.md`. |
 | 8.3 — pr-reviewer | pending | |
 | 8.4 — Fix-loop with G3 | pending | Conditional on pr-reviewer verdict. |
 | 8.5 — dual-reviewer | pending | Codex availability check pending. |
