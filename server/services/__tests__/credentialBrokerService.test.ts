@@ -235,6 +235,7 @@ describe('injectIntoEnvironment', () => {
       issuedCredential: {
         credentialId: CONNECTION_ID,
         connectionId: CONNECTION_ID,
+        organisationId: ORG_ID,
         authType: 'oauth2',
         issuedAt: new Date(),
       },
@@ -253,6 +254,7 @@ describe('injectIntoEnvironment', () => {
       issuedCredential: {
         credentialId: CONNECTION_ID,
         connectionId: CONNECTION_ID,
+        organisationId: ORG_ID,
         authType: 'oauth2',
         issuedAt: new Date(),
       },
@@ -273,6 +275,7 @@ describe('injectIntoEnvironment', () => {
         issuedCredential: {
           credentialId: 'missing',
           connectionId: 'missing',
+          organisationId: ORG_ID,
           authType: 'api_key',
           issuedAt: new Date(),
         },

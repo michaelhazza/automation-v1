@@ -3622,10 +3622,7 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
 **Source log:** `tasks/review-logs/adversarial-review-log-synthetos-foundation-refactor-2026-05-09T13-15-00Z.md`
 **Verdict:** HOLES_FOUND (1 confirmed-hole closed in-branch + 2 likely-holes deferred below)
 
-- [ ] **ADV-B — `credentialBrokerService.injectIntoEnvironment` fetches connection by `connectionId` alone (no org/subaccount guard)**
-  - File: `server/services/credentialBrokerService.ts:118-141`
-  - Likelihood today: low — only the unit-test file calls it. Severity: medium when first production caller lands.
-  - Suggested fix: add `organisationId` and `subaccountId` to params; add `eq(integrationConnections.organisationId, params.organisationId)` and the matching subaccount predicate to the WHERE clause. Defense-in-depth before the first production caller deserializes an `IssuedCredential` from a queue payload, request body, or cache.
+- [x] **ADV-B — `credentialBrokerService.injectIntoEnvironment` fetches connection by `connectionId` alone (no org/subaccount guard)** — CLOSED 2026-05-09 in PR #279 auto-fix iteration 2. `organisationId` added to `IssuedCredential` (set from `conn.organisationId` in `credentialFromConnection`), and `injectIntoEnvironment` now filters on `and(eq(id), eq(organisationId))`. Forced by `verify-org-scoped-writes.sh` blocking gate.
 
 - [ ] **ADV-C — `credentialBrokerService.audit` filters subaccountId in application memory after a SQL `LIMIT`**
   - File: `server/services/credentialBrokerService.ts:191-237`

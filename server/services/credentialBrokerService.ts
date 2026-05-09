@@ -14,6 +14,7 @@ import type { IntegrationConnection } from '../db/schema/integrationConnections.
 export interface IssuedCredential {
   credentialId: string;
   connectionId: string;
+  organisationId: string;
   authType: 'oauth2' | 'api_key' | 'web_login';
   issuedAt: Date;
   expiresAt?: Date;
@@ -51,6 +52,7 @@ function credentialFromConnection(conn: IntegrationConnection): IssuedCredential
   return {
     credentialId: conn.id,
     connectionId: conn.id,
+    organisationId: conn.organisationId,
     authType: mapAuthType(conn.authType),
     issuedAt: new Date(),
     expiresAt: conn.tokenExpiresAt ? new Date(conn.tokenExpiresAt) : undefined,
@@ -124,7 +126,12 @@ export const credentialBrokerService = {
     const [conn] = await db
       .select()
       .from(integrationConnections)
-      .where(eq(integrationConnections.id, issuedCredential.connectionId))
+      .where(
+        and(
+          eq(integrationConnections.id, issuedCredential.connectionId),
+          eq(integrationConnections.organisationId, issuedCredential.organisationId),
+        ),
+      )
       .limit(1);
 
     if (!conn) {
