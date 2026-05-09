@@ -45,6 +45,7 @@ ALLOWLIST_DIRS=(
   "server/lib/createWorker.ts"
   "server/lib/reportingAgentRunHook.ts"
   "server/lib/resolveSubaccount.ts"
+  "server/lib/resolveAgent.ts"
   "server/lib/runCostBreaker.ts"
   "server/middleware/auth.ts"
   "server/middleware/subdomainResolution.ts"

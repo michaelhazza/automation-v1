@@ -144,8 +144,8 @@ CREATE TABLE agent_presence_projections (
   presence_subtitle           TEXT,
   active_run_id               UUID         REFERENCES agent_runs(id),
   current_focus_text          TEXT,
-  current_focus_event_id      UUID         REFERENCES agent_execution_events(id),
-  last_event_id               UUID         REFERENCES agent_execution_events(id),
+  current_focus_event_id      UUID         REFERENCES agent_execution_events(id) ON DELETE SET NULL,
+  last_event_id               UUID         REFERENCES agent_execution_events(id) ON DELETE SET NULL,
   last_event_run_id           UUID         REFERENCES agent_runs(id),
   last_event_run_seq          INTEGER      NOT NULL DEFAULT 0,
   last_event_timestamp        TIMESTAMP WITH TIME ZONE,
@@ -232,8 +232,7 @@ CREATE INDEX agent_working_time_event_ledger_agent_idx
 ALTER TABLE agent_working_time_event_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_working_time_event_ledger FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS agent_working_time_event_ledger_org_isolation ON agent_working_time_event_ledger;
-CREATE POLICY agent_working_time_event_ledger_org_isolation
-  ON agent_working_time_event_ledger
+CREATE POLICY agent_working_time_event_ledger_org_isolation ON agent_working_time_event_ledger
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''

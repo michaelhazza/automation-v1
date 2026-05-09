@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitIntervalAcrossBuckets, accumulateWorkingTime } from './agentWorkingTimeServicePure';
+import { splitIntervalAcrossBuckets, accumulateWorkingTime } from '../agentWorkingTimeServicePure';
 
 describe('splitIntervalAcrossBuckets', () => {
   it('throws RangeError when endMs <= startMs', () => {

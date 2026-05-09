@@ -321,32 +321,34 @@ The `last_merge_ready_*` fields are added so the audit trail survives — they r
 
 Compose the matching prose body for the same file. Status enum transitions `REVIEWING → MERGE_READY`.
 
-**Do NOT touch `tasks/current-focus.md` on disk yet.** Step 9 only prepares the new content in memory. The actual write — and the auto-commit — happen in Step 10 AFTER `tasks/builds/{slug}/handoff.md` has been updated. This preserves the abort-write-order invariant: handoff.md is always written before current-focus.md transitions to MERGE_READY.
+**Do NOT touch `tasks/current-focus.md` on disk yet.** Step 9 only prepares the new content in memory. The actual write happens in Step 10 — handoff.md first, then current-focus.md — BEFORE the ready-to-merge label is applied (so CI fires exactly once, on the final post-Phase-3 commit).
 
-## Step 10 — Apply ready-to-merge label
+## Step 10 — Write Phase 3 artefacts, commit + push, THEN apply ready-to-merge label
+
+**Order is load-bearing — never invert.** The ready-to-merge label triggers CI. If it is applied before the Phase 3 commit lands on the remote, CI runs against the pre-Phase-3 HEAD, the Phase 3 commit then lands and re-fires CI from scratch, and the first run becomes wasted compute. Operator-locked 2026-05-09 after a real waste-of-resources incident on PR #276 — see KNOWLEDGE.md `[2026-05-09] Correction — finalisation-coordinator must commit Phase 3 BEFORE applying ready-to-merge label`.
+
+**Step 10.1 — Write artefacts (no commit yet).**
+
+Capture the timestamp that will go into the Phase 3 handoff section:
 
 ```bash
-gh pr edit <pr-number> --add-label "ready-to-merge"
-LABEL_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+LABEL_TIMESTAMP_PLACEHOLDER=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ```
 
-This label is the operator's existing convention — labelling triggers CI, which runs G5 (full lint + typecheck + test gates) as the pre-merge backstop.
+This is the timestamp recorded as "ready-to-merge label applied at" — not the wall-clock instant of the `gh` call (which happens after the commit). It represents the operator-visible "labelling moment" of the build; using a single timestamp captured pre-commit means the handoff section, the commit message, and the actual label all reference one canonical instant. Drift between the three is at most a few seconds.
 
-If the label add fails (label doesn't exist, permissions, network): surface the exact error and pause. Do not attempt force-merge or any other workaround. Operator resolves.
+Then write in this order (abort-write-order invariant from §6.4.2):
 
-**After the label is applied, write and commit in this order (abort-write-order invariant from §6.4.2):**
-
-1. Append the Phase 3 handoff section to `tasks/builds/{slug}/handoff.md` (with the `LABEL_TIMESTAMP` captured above).
+1. Append the Phase 3 handoff section to `tasks/builds/{slug}/handoff.md` (with `LABEL_TIMESTAMP_PLACEHOLDER` recorded as "ready-to-merge label applied at").
 2. Write the new mission-control block + prose body to `tasks/current-focus.md` (composed in Step 9).
-3. Commit all Phase 3 files in a single commit:
+
+**Step 10.2 — Commit + push Phase 3 files in a single commit.**
 
 Stage and commit:
 - Updated `KNOWLEDGE.md`
 - Updated `tasks/todo.md`
 - Updated `tasks/current-focus.md`
 - Updated `tasks/builds/{slug}/handoff.md` (Phase 3 section just appended)
-
-**Write order invariant:** `tasks/builds/{slug}/handoff.md` MUST be written to disk before `tasks/current-focus.md` is updated to MERGE_READY. Step 9 only composes the new `current-focus.md` content in memory; Step 10 writes handoff.md first, then current-focus.md, then commits both atomically. If the process is interrupted after handoff.md is written but before current-focus.md is updated, the operator sees a Phase 3 section in handoff.md with `tasks/current-focus.md` still at `REVIEWING` — a recoverable state where finalisation-coordinator can be re-run from Step 9. The reverse mid-state (current-focus.md at MERGE_READY without a Phase 3 handoff section) is ruled out by this ordering, which would otherwise leave the pipeline stuck (finalisation-coordinator's entry guard requires REVIEWING; spec-coordinator refuses MERGE_READY).
 
 Commit message:
 
@@ -356,7 +358,19 @@ chore(finalisation-coordinator): Phase 3 complete — {slug}
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
 
-Push to branch. Never `--no-verify`, never `--amend`.
+Push to branch. Never `--no-verify`, never `--amend`. **Wait for the push to complete before proceeding to 10.3.**
+
+**Step 10.3 — Apply the ready-to-merge label.**
+
+```bash
+gh pr edit <pr-number> --add-label "ready-to-merge"
+```
+
+This is the moment CI fires. Because the Phase 3 commit is already on the remote, CI runs exactly once against the final post-Phase-3 HEAD — no wasted re-fire.
+
+If the label add fails (label doesn't exist, permissions, network): surface the exact error and pause. Do not attempt force-merge or any other workaround. Operator resolves. The Phase 3 commit is already on the remote, so the operator can apply the label manually after fixing the underlying issue and the contract is preserved.
+
+**Write order invariant:** `tasks/builds/{slug}/handoff.md` MUST be written to disk before `tasks/current-focus.md` is updated to MERGE_READY. Step 9 only composes the new `current-focus.md` content in memory; Step 10.1 writes handoff.md first, then current-focus.md, then 10.2 commits both atomically. If the process is interrupted after handoff.md is written but before current-focus.md is updated, the operator sees a Phase 3 section in handoff.md with `tasks/current-focus.md` still at `REVIEWING` — a recoverable state where finalisation-coordinator can be re-run from Step 9. The reverse mid-state (current-focus.md at MERGE_READY without a Phase 3 handoff section) is ruled out by this ordering, which would otherwise leave the pipeline stuck (finalisation-coordinator's entry guard requires REVIEWING; spec-coordinator refuses MERGE_READY).
 
 **Phase 3 handoff section** — append to existing `tasks/builds/{slug}/handoff.md` under `## Phase 3 (FINALISATION) — complete`:
 
@@ -369,7 +383,7 @@ Push to branch. Never `--no-verify`, never `--amend`.
 **Doc-sync sweep verdicts:** [verdict per doc]
 **KNOWLEDGE.md entries added:** N
 **tasks/todo.md items removed:** N
-**ready-to-merge label applied at:** {ISO timestamp from LABEL_TIMESTAMP}
+**ready-to-merge label applied at:** {ISO timestamp from LABEL_TIMESTAMP_PLACEHOLDER}
 ```
 
 ## Step 11 — CI monitoring + iterative fix loop

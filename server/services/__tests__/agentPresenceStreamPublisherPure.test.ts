@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fanOut, subscribe, replaySinceLastEventId, type PresenceStreamEvent } from './agentPresenceStreamPublisher.js';
+import { fanOut, subscribe, replaySinceLastEventId, type PresenceStreamEvent } from '../agentPresenceStreamPublisher.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { orderHomePresenceSections, getEffectiveSection, PresenceRow } from './orderHomePresenceSections';
+import { orderHomePresenceSections, getEffectiveSection, PresenceRow } from '../orderHomePresenceSections';
 
 function row(overrides: Partial<PresenceRow> & Pick<PresenceRow, 'agentId' | 'presenceState'>): PresenceRow {
   return {

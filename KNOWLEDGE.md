@@ -3142,3 +3142,55 @@ When a UI surface is permission-gated and the permission set loads asynchronousl
 **Detection heuristic.** Any `useMemo` / filter that returns the full unfiltered list when the permission state is `null` is using the broken pattern. The correct shape is: `if (perms === null) return false` (per-tab) inside the filter. Pair this with a top-level `if (permsAreLoading) return <Loading/>` so content rendering also waits.
 
 File: `client/src/pages/build/AgentEditPage.tsx`.
+
+
+### [2026-05-09] Correction — finalisation-coordinator must commit Phase 3 BEFORE applying ready-to-merge label
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation. The original `finalisation-coordinator` Step 10 ordered: apply label → write handoff → write current-focus → commit → push. Applying the label fired CI on the pre-Phase-3 HEAD; the Phase 3 commit then landed and re-fired CI from scratch. Operator caught it and pointed out the wasted compute / wasted minutes.
+
+**Rule:** the ready-to-merge label is what triggers CI on this repo. CI must therefore fire against the final post-Phase-3 commit, never against a pre-Phase-3 HEAD that the next push will immediately invalidate. Apply the label LAST in the Phase 3 sequence, AFTER all Phase 3 artefacts (`handoff.md`, `current-focus.md`, `KNOWLEDGE.md`, `tasks/todo.md`) are committed and pushed.
+
+**Required Step 10 order (locked):**
+
+1. Capture `LABEL_TIMESTAMP_PLACEHOLDER` via `date -u`.
+2. Write `tasks/builds/{slug}/handoff.md` Phase 3 section (recording the placeholder timestamp).
+3. Write `tasks/current-focus.md` mission-control + prose for MERGE_READY.
+4. Commit all four files in a single `chore(finalisation-coordinator): Phase 3 complete` commit.
+5. Push to remote. **Wait for push to complete.**
+6. THEN run `gh pr edit {N} --add-label "ready-to-merge"`.
+
+The pre-captured placeholder timestamp is the operator-visible "labelling moment" recorded in the handoff. Drift between the placeholder and the actual `gh` call is at most a few seconds and is acceptable; the alternative (capture timestamp after `gh`, then amend the handoff) requires either an `--amend` (forbidden in this flow) or a second commit (which itself triggers a third CI run).
+
+**Detection heuristic.** If a future `finalisation-coordinator` edit reorders Step 10 such that `gh pr edit ... --add-label "ready-to-merge"` runs before the Phase 3 commit, treat it as a contract violation and surface to the operator before merging the change. The label-after-commit ordering is what makes the auto-CI-watch loop affordable; reverting it doubles every Phase 3's CI cost.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Step 10. Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Correction — four CI-only gates that G1 (lint + typecheck) misses; comply WHILE writing, not after
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation. CI red after `ready-to-merge` label fired surfaced four blocking-gate failures that G1 did not catch. Operator asked: "anything you can add into knowledge or doco to prevent this in the future instead of having to fix it from failing tests".
+
+The G1 gate run inside `builder` only exercises lint + typecheck + targeted vitest. Four static gates run CI-only and routinely catch chunks that G1 cleared. Every one of them is mechanical to satisfy WHILE writing the chunk and 10–30× more expensive to fix retroactively.
+
+**The four gates and their pre-flight rules:**
+
+1. **`verify-test-quality.sh`** — `*.test.ts` MUST live under `__tests__/`. Inline siblings (`server/services/foo.test.ts`) are silently invisible to Vitest's discovery glob. Correct shape: `server/services/__tests__/foo.test.ts` (and the import is `../foo`, not `./foo`). Same rule for `client/src/**/*.test.ts`. PR #276 had 7 violations from chunks that landed tests inline. Reference: `docs/testing-conventions.md § Test discovery`.
+
+2. **`verify-rls-coverage.sh`** — `CREATE POLICY <name> ON <table>` must be on a single line. The gate uses line-oriented grep. Splitting across two lines (`CREATE POLICY <name>\n  ON <table>`) makes the gate fail to match. The body (`USING (...) / WITH CHECK (...)`) can wrap normally. PR #274 + PR #276 both hit this. KNOWLEDGE.md `[2026-05-08]` recorded the PR #274 instance and the rule still got missed in PR #276 — promote it from history to a checklist item every migration writer reads.
+
+3. **`verify-rls-contract-compliance.sh`** — no raw `db` import from `server/db/index.js` outside `server/services/**`. New helpers in `server/lib/*.ts` that need a query either: (a) use `getOrgScopedDb('caller-tag')` from `server/lib/orgScopedDb.ts` (allowed everywhere); (b) move into a `server/services/` file; or (c) deliberately add the path to `ALLOWLIST_DIRS` in `scripts/verify-rls-contract-compliance.sh` (reserved for short bootstrap helpers — `resolveSubaccount.ts`, `resolveAgent.ts` are the precedents).
+
+4. **FK references to `agent_execution_events(id)` need `ON DELETE` clause.** Default `NO ACTION` blocks integration-test cleanup that deletes events for the run. Pointer columns (nullable: "last seen", "current focus") → `ON DELETE SET NULL`. Dependent rows (NOT NULL: "this row was generated from this event") → think about retention before choosing CASCADE vs the default. PR #276's `agent_presence_projections.last_event_id_fkey` was the first integration-test failure; both pointer columns now `SET NULL`.
+
+**Why the rule lives here AND in `builder.md`.** The `builder` agent definition has a "CI-gate pre-flight" subsection in Step 3 — that's the workflow-level reminder. KNOWLEDGE.md is the durable cross-session record so the lesson survives builder agent revisions and so any agent reading project knowledge sees it as a known-tripwire pattern.
+
+**Detection heuristic.** When writing or reviewing a chunk that touches: any new `*.test.ts` (gate 1), any new `migrations/*.sql` (gate 2 + gate 4), any new `server/lib/*.ts` that queries the DB (gate 3) — run the corresponding compliance check by hand before claiming SUCCESS:
+
+- `find <chunk dir> -name '*.test.ts' -not -path '*/__tests__/*' -print` should return zero.
+- `grep -E '^CREATE POLICY[^O]*$' migrations/<new>.sql` should return zero (any line that starts with CREATE POLICY but has no ON before EOL).
+- `grep -l "from '../db/index" server/lib/<new-files>.ts` plus check it's in the gate allowlist.
+- `grep "REFERENCES agent_execution_events" migrations/<new>.sql` should not return entries without an `ON DELETE` clause unless the column is intentionally `NO ACTION`.
+
+**Applies to:** `.claude/agents/builder.md` Step 3 ("CI-gate pre-flight"); `docs/testing-conventions.md § Test discovery` (already names the rule but builder agents missed it). Locked in by operator 2026-05-09.

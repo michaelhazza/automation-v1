@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateCurrentFocus, buildStaleFallbackFocus } from './currentFocusValidator';
+import { validateCurrentFocus, buildStaleFallbackFocus } from '../currentFocusValidator';
 
 describe('validateCurrentFocus', () => {
   it('rejects empty string', () => {

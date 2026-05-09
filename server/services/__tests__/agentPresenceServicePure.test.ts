@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePresenceFromEvents, PresenceInput } from './agentPresenceServicePure';
-import { PRESENCE_FRESHNESS_THRESHOLDS_MS } from '../../shared/types/agentPresence';
+import { resolvePresenceFromEvents, PresenceInput } from '../agentPresenceServicePure';
+import { PRESENCE_FRESHNESS_THRESHOLDS_MS } from '../../../shared/types/agentPresence';
 
 function makeInput(overrides: Partial<PresenceInput> = {}): PresenceInput {
   return {
