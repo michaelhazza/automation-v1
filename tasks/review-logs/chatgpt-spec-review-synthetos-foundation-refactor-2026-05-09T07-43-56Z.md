@@ -105,3 +105,51 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0).
 
 Rationale: cross-checked closure rule (§3.6), mapping function (§4.2.8), schema default (§5.2.9), UI mockup (§5.2.3), code-change table (§4.2.9), test inventory (§7.2), and rollout doc (§8.3) for `allowed_environments` — internally consistent. Cross-checked terminal timestamp short version (§3.6) and full pin (§4.4.4) — consistent. Cross-checked INV-19 (§3.3), new log code (§3.5), implementation sketch (§4.5.6), acceptance count (§9.4) — consistent. INV-19 vs INV-6 NULL-tolerance reconciled explicitly via "INV-19 governs new runs only" clause. F1 backfill removal cleaned in three places (§3.6, §6.4, §10).
 
+---
+
+## Round 2 — 2026-05-09T08-01-19Z
+
+### ChatGPT Feedback (raw)
+
+Round 2 looks materially stronger. The seven previous blockers were addressed cleanly. I would not run another broad review loop. I'd apply 3 small final tightenings, then lock.
+
+Verdict: Ready to lock after minor patch. No architectural blockers remain. The remaining items are precision fixes to prevent builder interpretation drift.
+
+**Final tightenings**
+
+1. **Fix `controller_style_decided` payload source union** — In §4.1.6 `ControllerStyleSource` includes `'override' | 'execution_mode_default' | 'subaccount_constraint'` but the Run Trace event type in §4.4.4 only allows `'override' | 'execution_mode_default'`. That omits the downgrade path added for `native_only`. Add `'subaccount_constraint'` to the union.
+
+2. **Pin `foundation.controller_style.rejected` vs environment rejection naming** — §4.2.8 currently says environment rejection emits `foundation.controller_style.rejected`, but the rejected field is `executionMode | ExecutionEnvironment`, not controller style. Semantically muddy. Preferred fix: add a separate `foundation.execution_environment.rejected` log code with payload `{ runId, agentId, executionMode, executionEnvironment, allowedEnvironments, reason: 'execution_mode_not_allowed_for_agent' }`. Update §3.5 and §9.4 log-code count from 7 to 8. Alternative: rename to a broader governance rejection event. ChatGPT prefers the separate code.
+
+3. **Clarify failure headline for Policy Envelope resolution failure** — §4.5.6 says envelope failure transitions the run to failed but the headline reads "blocked by policy" or equivalent. That confuses operators because the failure is infrastructure/config, not policy. Fix: reserve "blocked by policy" for actual policy decisions; use "Native/Operator run · failed before execution · $0.00" for the INV-19 fail-closed path. Optional detail: "Policy settings could not be resolved, so the run was stopped before any tools or model calls executed."
+
+**Smaller optional improvement**
+
+Add `allowed_environments` validator to acceptance: an acceptance checkbox stating "Application-layer validation rejects any `allowed_environments` value outside `'api_tool' | 'headless' | 'browser' | 'terminal_repo'` on create/update." Avoids relying on the prose-only closure.
+
+**Lock recommendation**
+
+Apply the three final tightenings above. Then mark the spec accepted and move to build planning. Would not ask for another full review unless these edits introduce new structural changes.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| R2-1: ControllerStyleSource union mismatch in §4.4.4 event payload | technical | apply | apply (user delegated decision: "decide what to implement from here and then finalise") | medium | Pure type-consistency fix; missing third union value would cause TypeScript to reject the downgrade event the spec already specifies in §4.1.6 |
+| R2-2: Separate `foundation.execution_environment.rejected` log code | technical | apply (per ChatGPT's preferred fix) | apply (user delegated) | medium | INV-16 says log codes are stable consumer contracts; overloading a single code for two distinct rejection classes complicates dashboards and search. Separate code is cleaner. Updated §3.5 (added the new code) + §4.2.8 (enforcement reference) + §9.4 (count 7 → 8) |
+| R2-3: Failure-headline copy distinction | user-facing | apply | apply (user delegated decision; ChatGPT's wording adopted verbatim) | medium | Headline copy is non-technical-operator-facing. ChatGPT's "failed before execution" wording is more accurate than "blocked by policy" for the INV-19 fail-closed path. §4.5.6 failure-path observability paragraph rewritten + §5.1.3 headline variations extended with two new lines |
+| R2-Optional: Application-layer validator for `allowed_environments` | technical | apply | apply (user delegated) | low | Closure paragraph in §3.6 is prose-only because the column is `text[]`. Acceptance checkbox in §9.1 makes the runtime backstop a durable verification item |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] **R2-1** Added `'subaccount_constraint'` to the `controller_style_decided` event payload source union in §4.4.4.
+- [auto] **R2-2** Added `foundation.execution_environment.rejected` to §3.5 with payload schema; rewrote §4.2.8 enforcement reference to use the new code; updated §9.4 acceptance to list eight log codes.
+- [auto] **R2-Optional** Added application-layer validator acceptance checkbox to §9.1 anchored on §3.6 closure rule.
+- [user-delegated] **R2-3** Replaced the "blocked by policy or equivalent" headline copy in §4.5.6 with explicit "failed before execution" rule; added two new headline variations to §5.1.3 with cross-reference notes pinning each copy to its trigger condition.
+
+### Integrity check
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+Rationale: cross-checked log-code count (§3.5 8 entries; §9.4 8 listed) — consistent. Cross-checked `controller_style_decided` source union (§4.1.6 type union, §4.4.4 payload union) — now match. Cross-checked headline copy rules (§4.5.6 prohibits "blocked by policy" for envelope failure; §5.1.3 reserves "blocked by policy" for policy decisions, adds "failed before execution" for envelope failure) — consistent and non-overlapping. The R2-2 separation cleanly partitions controller-style-rejection (`foundation.controller_style.rejected`) from environment-rejection (`foundation.execution_environment.rejected`); §4.2.8 enforcement now references the correct code.
+

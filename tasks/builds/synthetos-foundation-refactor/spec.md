@@ -226,7 +226,8 @@ These are non-negotiable properties of the foundation refactor. Every change mus
 **INV-16. Structured logs use stable codes.** Foundation work introduces these stable log codes (consumers depend on them; do not rename):
 
 - `foundation.controller_style.derived` — `controllerStyle` resolved at run start, with source (`override` / `execution_mode_default` / `subaccount_constraint`).
-- `foundation.controller_style.rejected` — per-run `controllerStyle` override rejected because the agent's `controller_style_allowed` doesn't permit it (Section 4.1.6).
+- `foundation.controller_style.rejected` — per-run `controllerStyle` override rejected because the agent's `controller_style_allowed` doesn't permit it (Section 4.1.6). Scoped to controller-style rejections only; environment rejections use the dedicated code below.
+- `foundation.execution_environment.rejected` — `executionMode` requested at run creation maps (via `executionModeToEnvironment`, §4.2.8) to an `ExecutionEnvironment` not present in the agent's `allowed_environments`. Payload: `{ runId, agentId, executionMode, executionEnvironment, allowedEnvironments, reason: 'execution_mode_not_allowed_for_agent' }`. Kept separate from `foundation.controller_style.rejected` so log searches and dashboards can target each governance rejection class without overloading a single code.
 - `foundation.risk_tier.gate_derived` — `gateLevel` derived from `riskTier`, with source (`tier_default` / `preserved_existing` / `policy_override` / `subaccount_constraint`).
 - `foundation.credential_broker.issued` — credential issued via the facade, with scope and purpose.
 - `foundation.policy_envelope.resolved` — snapshot resolved at run start, with source counts.
@@ -632,7 +633,7 @@ The `riskTier` and the derivation source are returned from the policy decision s
 **Subaccount-agent governance enforcement (Section 5.2.9 columns).** The new governance columns on `subaccount_agents` are enforced at distinct checkpoints — they are NOT used by the Policy Envelope (replay/audit only, per §4.5.7):
 
 - **`controller_style_allowed`** is enforced inside `controllerStyleResolver.deriveControllerStyle` (see §4.1.6 above).
-- **`allowed_environments`** is enforced inside `agentRunService.createRun` at run creation against the *mapped* `ExecutionEnvironment`, not the raw `executionMode`. Enforcement uses the closed mapping below; if the mapped environment is not in `allowed_environments`, the route returns HTTP 422 with code `execution_mode_not_allowed_for_agent` and emits `foundation.controller_style.rejected` (the same audit event covers both governance rejections; payload includes the rejected field plus both the raw `executionMode` and the mapped `ExecutionEnvironment`).
+- **`allowed_environments`** is enforced inside `agentRunService.createRun` at run creation against the *mapped* `ExecutionEnvironment`, not the raw `executionMode`. Enforcement uses the closed mapping below; if the mapped environment is not in `allowed_environments`, the route returns HTTP 422 with code `execution_mode_not_allowed_for_agent` and emits the dedicated `foundation.execution_environment.rejected` log code (§3.5). Payload includes both the raw `executionMode` and the mapped `executionEnvironment` so consumers can correlate against the controller-style rejection event without overloading a single log code.
 
   **Closed `ExecutionEnvironment` enum + `executionModeToEnvironment` mapping (new contract for §4.2.8 enforcement).**
 
@@ -1014,7 +1015,7 @@ export interface RunTraceEventBase {
 }
 
 export type RunTraceEvent =
-  | RunTraceEventBase & { eventType: 'controller_style_decided'; payload: { controllerStyle: ControllerStyle; source: 'override' | 'execution_mode_default' } }
+  | RunTraceEventBase & { eventType: 'controller_style_decided'; payload: { controllerStyle: ControllerStyle; source: 'override' | 'execution_mode_default' | 'subaccount_constraint' } }
   | RunTraceEventBase & { eventType: 'tool_security_decision'; payload: { toolSlug: string; decision: 'allow' | 'deny' | 'review'; riskTier: RiskTier; gateLevel: GateLevel; gateLevelSource: 'tier_default' | 'preserved_existing' | 'policy_override' | 'subaccount_constraint' } }
   // ... full discriminated union for each event type
   ;
@@ -1411,7 +1412,16 @@ emitEvent('foundation.policy_envelope.resolved', {
 
 Mid-run constraint changes (e.g., a credential is revoked) do NOT rewrite the snapshot. They surface as separate Run Trace events. The snapshot answers "what was in force at run start"; live state changes are tracked separately.
 
-**Failure-path observability.** Runs that fail at this checkpoint surface as `agent_runs.status = 'failed'` with reason `policy_envelope_resolution_failed`. Run Trace shows the run terminated before any tool calls executed, the headline reads "blocked by policy" (or the equivalent failure-state copy), and the `foundation.policy_envelope.resolution_failed` log is the first signal in any post-incident triage. This is intentionally a fail-closed posture: a run with no enforceable constraint set is not allowed to execute external actions.
+**Failure-path observability.** Runs that fail at this checkpoint surface as `agent_runs.status = 'failed'` with reason `policy_envelope_resolution_failed`. Run Trace shows the run terminated before any tool calls executed; the `foundation.policy_envelope.resolution_failed` log is the first signal in any post-incident triage. This is intentionally a fail-closed posture: a run with no enforceable constraint set is not allowed to execute external actions.
+
+**Headline copy distinction.** The Run Trace headline must NOT use "blocked by policy" for envelope resolution failure, because the run never reached a policy decision — it failed at infrastructure/config resolution before policy was evaluated. The headline copy for this case is:
+
+```
+Native run · failed before execution · $0.00
+Operator run · failed before execution · $0.00
+```
+
+(Controller-style label is preserved because `controllerStyle` is resolved before the snapshot resolver runs, per §4.1.6.) Optional detail line in the trace tree: "Policy settings could not be resolved, so the run was stopped before any tools or model calls executed." "Blocked by policy" is reserved for runs that reached a policy decision and were denied (§5.1.3 case `Operator run · blocked by policy · ...`).
 
 #### 4.5.7 Read sites
 
@@ -1647,7 +1657,11 @@ Operator run · auto-approved · 2 min 14 sec · $0.42
 Native run · awaiting approval · 12 sec · $0.03
 Operator run · blocked by policy · 8 sec · $0.01
 Native run · failed · 3 sec · $0.00
+Native run · failed before execution · $0.00      (Policy Envelope resolution failure, per §4.5.6)
+Operator run · failed before execution · $0.00    (Policy Envelope resolution failure, per §4.5.6)
 ```
+
+The "failed before execution" copy is reserved for the INV-19 fail-closed path where the agent loop never started. "Blocked by policy" is reserved for runs that reached a policy decision and were denied. "Failed" (without "before execution") is for runs that started, executed at least one step, then errored.
 
 What the headline shows:
 
@@ -2123,6 +2137,7 @@ The foundation refactor is **accepted** when all of the following are true.
 - [ ] `agent_runs.controller_style text NOT NULL DEFAULT 'native'` column exists in production.
 - [ ] `agent_runs.policy_envelope_snapshot jsonb` column exists in production.
 - [ ] `subaccount_agents.controller_style_allowed`, `allowed_environments`, `max_risk_tier`, `require_approval_at_tier` columns exist.
+- [ ] Application-layer validation (e.g., Zod or equivalent on the create/update routes for `subaccount_agents`) rejects any `allowed_environments` element outside the closed enum `'api_tool' | 'headless' | 'browser' | 'terminal_repo'`. Closure is enforced in code per §3.6 because the column is `text[]` rather than a Postgres enum; this acceptance item is the durable check that the prose-only closure has a runtime backstop.
 - [ ] All migrations have `.down.sql` counterparts that successfully reverse them on staging.
 - [ ] All 110 actions in `actionRegistry.ts` have `riskTier` assigned (CI gate passes).
 - [ ] `CredentialBrokerService` exists at `server/services/credentialBrokerService.ts` with the five methods specified in Section 4.3.3 (`issueCredential`, `injectIntoEnvironment`, `revoke`, `audit`, `resolveAvailableCredentials`).
@@ -2147,7 +2162,7 @@ The foundation refactor is **accepted** when all of the following are true.
 
 ### 9.4 Observability
 
-- [ ] All seven new log codes (`foundation.controller_style.derived`, `foundation.controller_style.rejected`, `foundation.risk_tier.gate_derived`, `foundation.credential_broker.issued`, `foundation.policy_envelope.resolved`, `foundation.policy_envelope.resolution_failed`, `foundation.run_trace.queried`) are emitted in expected scenarios.
+- [ ] All eight new log codes (`foundation.controller_style.derived`, `foundation.controller_style.rejected`, `foundation.execution_environment.rejected`, `foundation.risk_tier.gate_derived`, `foundation.credential_broker.issued`, `foundation.policy_envelope.resolved`, `foundation.policy_envelope.resolution_failed`, `foundation.run_trace.queried`) are emitted in expected scenarios.
 - [ ] Existing Langfuse spans continue to fire.
 - [ ] Run Trace endpoint observability emits the `foundation.run_trace.queried` event with latency; alerting thresholds (p95 > 500ms) wired up. Performance baselines themselves are deferred per `performance_baselines: defer_until_production`.
 
