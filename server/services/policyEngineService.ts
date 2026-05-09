@@ -389,7 +389,7 @@ export const policyEngineService = {
       riskTier,
       subaccountGov,
     );
-    console.log('foundation.risk_tier.gate_derived', {
+    logger.info('foundation.risk_tier.gate_derived', {
       actionSlug: ctx.toolSlug,
       riskTier,
       gateLevel: constrained.decision,
