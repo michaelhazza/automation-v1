@@ -14,12 +14,15 @@ import { SuspendIdentityDialog } from '../components/workspace/SuspendIdentityDi
 import { RevokeIdentityDialog } from '../components/workspace/RevokeIdentityDialog';
 import {
   getAgentIdentity,
-  suspendAgentIdentity,
   resumeAgentIdentity,
-  revokeAgentIdentity,
   archiveAgentIdentity,
   toggleAgentEmailSending,
 } from '../lib/api';
+import ExecutionTab from '../components/agent-config/ExecutionTab';
+import type { AllowedEnvironment } from '../components/agent-config/ExecutionTab';
+import GovernanceTab from '../components/agent-config/GovernanceTab';
+import ModelsIdentityTab from '../components/agent-config/ModelsIdentityTab';
+import IntegrationsTab from '../components/agent-config/IntegrationsTab';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,6 +48,10 @@ interface LinkDetail {
   catchUpPolicy: 'skip_missed' | 'enqueue_missed_with_cap';
   catchUpCap: number;
   maxConcurrentRuns: number;
+  controllerStyleAllowed: 'native_only' | 'native_and_operator';
+  allowedEnvironments: string[];
+  maxRiskTier: number;
+  requireApprovalAtTier: number;
   agent: {
     id: string;
     name: string;
@@ -59,7 +66,7 @@ interface LinkDetail {
   };
 }
 
-type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity' | 'activity';
+type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity' | 'activity' | 'execution' | 'governance' | 'models_identity' | 'integrations';
 
 interface AgentIdentity {
   identityId: string;
@@ -139,6 +146,8 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
   const [customInstructions, setCustomInstructions] = useState('');
   const [budget, setBudget] = useState({ tokenBudgetPerRun: 30000, maxToolCallsPerRun: 20, timeoutSeconds: 300, maxCostPerRunCents: '' as string | number });
   const [scheduling, setScheduling] = useState({ scheduleCron: '', scheduleEnabled: false, scheduleTimezone: 'UTC', concurrencyPolicy: 'skip_if_active' as LinkDetail['concurrencyPolicy'], catchUpPolicy: 'skip_missed' as LinkDetail['catchUpPolicy'], catchUpCap: 3, maxConcurrentRuns: 1 });
+  const [execution, setExecution] = useState<{ controllerStyleAllowed: 'native_only' | 'native_and_operator'; allowedEnvironments: AllowedEnvironment[] }>({ controllerStyleAllowed: 'native_only', allowedEnvironments: ['api_tool', 'headless', 'browser'] });
+  const [governance, setGovernance] = useState({ maxRiskTier: 3, requireApprovalAtTier: 4 });
 
   // Save state per section
   const [saving, setSaving] = useState<Tab | null>(null);
@@ -171,6 +180,14 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
           catchUpPolicy: detail.catchUpPolicy,
           catchUpCap: detail.catchUpCap,
           maxConcurrentRuns: detail.maxConcurrentRuns,
+        });
+        setExecution({
+          controllerStyleAllowed: detail.controllerStyleAllowed ?? 'native_only',
+          allowedEnvironments: (detail.allowedEnvironments ?? ['api_tool', 'headless', 'browser']) as AllowedEnvironment[],
+        });
+        setGovernance({
+          maxRiskTier: detail.maxRiskTier ?? 3,
+          requireApprovalAtTier: detail.requireApprovalAtTier ?? 4,
         });
         setAvailableSkills(skillsRes.data ?? []);
       } catch (e: unknown) {
@@ -214,6 +231,21 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
 
   const saveSkills = () => patch('skills', { skillSlugs });
   const saveInstructions = () => patch('instructions', { customInstructions: customInstructions || null });
+  const saveExecution = () => patch('execution', {
+    controllerStyleAllowed: execution.controllerStyleAllowed,
+    allowedEnvironments: execution.allowedEnvironments,
+    scheduleCron: scheduling.scheduleCron || null,
+    scheduleEnabled: scheduling.scheduleEnabled,
+    scheduleTimezone: scheduling.scheduleTimezone,
+    concurrencyPolicy: scheduling.concurrencyPolicy,
+    catchUpPolicy: scheduling.catchUpPolicy,
+    catchUpCap: Number(scheduling.catchUpCap),
+    maxConcurrentRuns: Number(scheduling.maxConcurrentRuns),
+  });
+  const saveGovernance = () => patch('governance', {
+    maxRiskTier: governance.maxRiskTier,
+    requireApprovalAtTier: governance.requireApprovalAtTier,
+  });
   const saveBudget = () => patch('budget', {
     tokenBudgetPerRun: Number(budget.tokenBudgetPerRun),
     maxToolCallsPerRun: Number(budget.maxToolCallsPerRun),
@@ -247,6 +279,10 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     { id: 'instructions', label: 'Instructions' },
     { id: 'budget', label: 'Budget' },
     { id: 'scheduling', label: 'Scheduling' },
+    { id: 'execution', label: 'Execution' },
+    { id: 'governance', label: 'Governance' },
+    { id: 'models_identity', label: 'Models and Identity' },
+    { id: 'integrations', label: 'Integrations' },
     { id: 'beliefs', label: 'Beliefs' },
     { id: 'identity', label: 'Identity' },
     { id: 'activity', label: 'Activity' },
@@ -540,6 +576,48 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             {saved === 'scheduling' && <span className="text-[13px] text-green-600 font-medium">Saved</span>}
           </div>
         </div>
+      )}
+
+      {/* ── Execution tab ── */}
+      {activeTab === 'execution' && (
+        <ExecutionTab
+          controllerStyleAllowed={execution.controllerStyleAllowed}
+          allowedEnvironments={execution.allowedEnvironments}
+          isSystemAgent={false}
+          scheduling={scheduling}
+          saving={saving === 'execution'}
+          saved={saved === 'execution'}
+          onControllerStyleChange={v => setExecution(e => ({ ...e, controllerStyleAllowed: v }))}
+          onAllowedEnvironmentsChange={v => setExecution(e => ({ ...e, allowedEnvironments: v }))}
+          onSchedulingChange={setScheduling}
+          onSave={saveExecution}
+        />
+      )}
+
+      {/* ── Governance tab ── */}
+      {activeTab === 'governance' && (
+        <GovernanceTab
+          maxRiskTier={governance.maxRiskTier}
+          requireApprovalAtTier={governance.requireApprovalAtTier}
+          saving={saving === 'governance'}
+          saved={saved === 'governance'}
+          onMaxRiskTierChange={v => setGovernance(g => ({ ...g, maxRiskTier: v }))}
+          onRequireApprovalAtTierChange={v => setGovernance(g => ({ ...g, requireApprovalAtTier: v }))}
+          onSave={saveGovernance}
+        />
+      )}
+
+      {/* ── Models and Identity tab ── */}
+      {activeTab === 'models_identity' && (
+        <ModelsIdentityTab
+          modelProvider={link.agent.modelProvider}
+          modelId={link.agent.modelId}
+        />
+      )}
+
+      {/* ── Integrations tab ── */}
+      {activeTab === 'integrations' && subaccountId && (
+        <IntegrationsTab subaccountId={subaccountId} />
       )}
 
       {/* ── Beliefs tab ── */}

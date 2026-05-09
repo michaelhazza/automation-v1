@@ -325,6 +325,13 @@ export const subaccountAgentService = {
     timeoutSeconds?: number;
     maxCostPerRunCents?: number | null;
     maxLlmCallsPerRun?: number | null;
+    // Governance (spec §5.2.9). The Agent Config Governance tab posts these
+    // four fields; updateLink must persist them so the new tab can actually
+    // configure the link.
+    controllerStyleAllowed?: 'native_only' | 'native_and_operator';
+    allowedEnvironments?: ('api_tool' | 'headless' | 'browser' | 'terminal_repo')[];
+    maxRiskTier?: number;
+    requireApprovalAtTier?: number;
   }) {
     const [link] = await db
       .select()
@@ -381,6 +388,11 @@ export const subaccountAgentService = {
     if (data.timeoutSeconds !== undefined) update.timeoutSeconds = data.timeoutSeconds;
     if ('maxCostPerRunCents' in data) update.maxCostPerRunCents = data.maxCostPerRunCents ?? null;
     if ('maxLlmCallsPerRun' in data) update.maxLlmCallsPerRun = data.maxLlmCallsPerRun ?? null;
+    // Governance (spec §5.2.9)
+    if (data.controllerStyleAllowed !== undefined) update.controllerStyleAllowed = data.controllerStyleAllowed;
+    if (data.allowedEnvironments !== undefined) update.allowedEnvironments = data.allowedEnvironments;
+    if (data.maxRiskTier !== undefined) update.maxRiskTier = data.maxRiskTier;
+    if (data.requireApprovalAtTier !== undefined) update.requireApprovalAtTier = data.requireApprovalAtTier;
 
     if ('parentSubaccountAgentId' in data) {
       const parentId = data.parentSubaccountAgentId;

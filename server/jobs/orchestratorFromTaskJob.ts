@@ -1,3 +1,5 @@
+// Capability-Aware Orchestrator (also called 'Router and Execution Planner' in the v1.2 product brief). See docs/synthetos-nomenclature.md
+
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, conversations } from '../db/schema/index.js';

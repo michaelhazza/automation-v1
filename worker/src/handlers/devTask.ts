@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------------------
 // pg-boss subscription for iee-dev-task. Spec §7.
+// IEE dev task handler. IEE (Integrated Execution Environment) scope expands per v1.2. See docs/synthetos-nomenclature.md
 // ---------------------------------------------------------------------------
 
 import type PgBoss from 'pg-boss';

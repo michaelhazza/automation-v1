@@ -101,6 +101,12 @@ export interface ProposeActionInput {
   toolIntentConfidence?: number | null;
   estimatedCostMinor?: number | null;
   subaccountScope?: 'single' | 'multiple';
+  /**
+   * Chunk 4 (synthetos-foundation-refactor) — subaccount-agent link ID.
+   * Passed to the policy engine so subaccount-constraint rules
+   * (max_risk_tier block, require_approval_at_tier upgrade) can be applied.
+   */
+  subaccountAgentId?: string | null;
 }
 
 export interface ProposeActionResult {
@@ -142,7 +148,21 @@ export const actionService = {
       return { actionId: existing.id, status: existing.status as ActionStatus, isNew: false };
     }
 
-    const gateLevel = await resolveGateLevel(definition.defaultGateLevel, input);
+    const resolved = await resolveGateLevel(definition.defaultGateLevel, input);
+
+    // Merge riskTier / gateLevelSource into metadata so the tool_security_decision
+    // Run Trace event (chunk 7) can read them without a schema migration now.
+    const enrichedMetadata: Record<string, unknown> | null = (() => {
+      const base = input.metadata ?? {};
+      if (resolved.riskTier !== undefined || resolved.gateLevelSource !== undefined) {
+        return {
+          ...base,
+          ...(resolved.riskTier !== undefined ? { riskTier: resolved.riskTier } : {}),
+          ...(resolved.gateLevelSource !== undefined ? { gateLevelSource: resolved.gateLevelSource } : {}),
+        };
+      }
+      return Object.keys(base).length > 0 ? base : null;
+    })();
 
     // Create the action record
     const [action] = await db
@@ -157,11 +177,11 @@ export const actionService = {
         actionType: input.actionType,
         actionCategory: definition.actionCategory,
         isExternal: definition.isExternal,
-        gateLevel,
+        gateLevel: resolved.gate,
         status: 'proposed',
         idempotencyKey: input.idempotencyKey,
         payloadJson: input.payload,
-        metadataJson: input.metadata ?? null,
+        metadataJson: enrichedMetadata,
         maxRetries: definition.retryPolicy.maxRetries,
         estimatedCostMinor: input.estimatedCostMinor ?? null,
         subaccountScope: input.subaccountScope ?? 'single',
@@ -174,12 +194,12 @@ export const actionService = {
     await this.emitEvent(action.id, input.organisationId, 'created');
 
     // Apply gate logic
-    if (gateLevel === 'block') {
+    if (resolved.gate === 'block') {
       await this.transitionState(action.id, input.organisationId, 'blocked');
       return { actionId: action.id, status: 'blocked', isNew: true };
     }
 
-    if (gateLevel === 'review') {
+    if (resolved.gate === 'review') {
       // Compute suspend_until from policy rule timeout or default 30 min
       const definition = getActionDefinition(input.actionType);
       const timeoutMs = (definition as { timeoutSeconds?: number } | undefined)
@@ -543,10 +563,16 @@ function higherGate(a: string, b: string): 'auto' | 'review' | 'block' {
  * 3. Task-level reviewRequired flag (escalates auto → review)
  * 4. Agent metadata needs_human_review flag (escalates auto → review)
  */
+interface ResolvedGate {
+  gate: 'auto' | 'review' | 'block';
+  riskTier?: number;
+  gateLevelSource?: 'subaccount_constraint' | 'policy_override' | 'preserved_existing' | 'tier_default';
+}
+
 async function resolveGateLevel(
   _registryDefault: 'auto' | 'review' | 'block',
   input: ProposeActionInput
-): Promise<'auto' | 'review' | 'block'> {
+): Promise<ResolvedGate> {
   // 1. Policy engine — first-match, with registry default as fallback
   const policyDecision = await policyEngineService.evaluatePolicy({
     toolSlug: input.actionType,
@@ -554,6 +580,7 @@ async function resolveGateLevel(
     organisationId: input.organisationId,
     input: input.payload,
     toolIntentConfidence: input.toolIntentConfidence,
+    subaccountAgentId: input.subaccountAgentId,
   });
   let gate = policyDecision.decision;
 
@@ -588,5 +615,5 @@ async function resolveGateLevel(
     }
   }
 
-  return gate;
+  return { gate, riskTier: policyDecision.riskTier, gateLevelSource: policyDecision.gateLevelSource };
 }

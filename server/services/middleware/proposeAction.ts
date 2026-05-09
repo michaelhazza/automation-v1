@@ -306,6 +306,7 @@ export const proposeActionMiddleware: PreToolMiddleware = {
         payload: toolCall.input,
         toolIntentConfidence,
         metadata: spendMeta,
+        subaccountAgentId: ctx.saLink?.id ?? null,
       });
 
       // Blocked by policy engine or gate resolution
