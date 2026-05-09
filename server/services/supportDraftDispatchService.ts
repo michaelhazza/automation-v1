@@ -338,6 +338,148 @@ export async function approveDraft(
 }
 
 // ---------------------------------------------------------------------------
+// listDraftsForReview
+// ---------------------------------------------------------------------------
+
+export async function listDraftsForReview(
+  filter: { ticketId?: string },
+  principalCtx: PrincipalContext,
+): Promise<CanonicalTicketDraft[]> {
+  const db = getOrgScopedDb('supportDraftDispatchService.listDraftsForReview');
+  const conditions = [
+    eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+    inArray(canonicalTicketDrafts.status, ['awaiting_review', 'needs_reconciliation']),
+  ];
+  if (filter.ticketId) {
+    conditions.push(eq(canonicalTicketDrafts.ticketId, filter.ticketId));
+  }
+  return db
+    .select()
+    .from(canonicalTicketDrafts)
+    .where(and(...conditions))
+    .orderBy(canonicalTicketDrafts.createdAt);
+}
+
+// ---------------------------------------------------------------------------
+// getDraftById
+// ---------------------------------------------------------------------------
+
+export async function getDraftById(
+  draftId: string,
+  principalCtx: PrincipalContext,
+): Promise<CanonicalTicketDraft> {
+  const db = getOrgScopedDb('supportDraftDispatchService.getDraftById');
+  const [draft] = await db
+    .select()
+    .from(canonicalTicketDrafts)
+    .where(
+      and(
+        eq(canonicalTicketDrafts.id, draftId),
+        eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+      ),
+    )
+    .limit(1);
+  if (!draft) {
+    throw notFoundError('support.draft.not_found');
+  }
+  return draft;
+}
+
+// ---------------------------------------------------------------------------
+// editDraft
+// ---------------------------------------------------------------------------
+
+export async function editDraft(
+  draftId: string,
+  proposedBodyText: string,
+  principalCtx: PrincipalContext,
+): Promise<CanonicalTicketDraft> {
+  const db = getOrgScopedDb('supportDraftDispatchService.editDraft');
+  const [updated] = await db
+    .update(canonicalTicketDrafts)
+    .set({ proposedBodyText, updatedAt: new Date() })
+    .where(
+      and(
+        eq(canonicalTicketDrafts.id, draftId),
+        eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+        inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+      ),
+    )
+    .returning();
+  if (!updated) {
+    throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+  }
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
+// manualResolveDraft
+// ---------------------------------------------------------------------------
+
+export async function manualResolveDraft(
+  draftId: string,
+  action: 'mark_sent' | 'mark_failed' | 'retry_reconciliation',
+  principalCtx: PrincipalContext,
+  options?: { notes?: string },
+): Promise<void> {
+  const db = getOrgScopedDb('supportDraftDispatchService.manualResolveDraft');
+  const now = new Date();
+
+  if (action === 'mark_sent') {
+    const result = await db
+      .update(canonicalTicketDrafts)
+      .set({ status: 'manually_marked_sent', updatedAt: now })
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+          eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+        ),
+      )
+      .returning({ id: canonicalTicketDrafts.id });
+    if (result.length === 0) {
+      throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+    }
+
+  } else if (action === 'mark_failed') {
+    const result = await db
+      .update(canonicalTicketDrafts)
+      .set({ status: 'failed', updatedAt: now })
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+          eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+        ),
+      )
+      .returning({ id: canonicalTicketDrafts.id });
+    if (result.length === 0) {
+      throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+    }
+
+  } else if (action === 'retry_reconciliation') {
+    const result = await db
+      .update(canonicalTicketDrafts)
+      .set({ status: 'dispatching', reconciliationAttemptCount: 0, dispatchingStartedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+          eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+        ),
+      )
+      .returning({ id: canonicalTicketDrafts.id });
+    if (result.length === 0) {
+      throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+    }
+    const boss = await getPgBoss();
+    await boss.send('support-draft-reconciliation', { organisationId: principalCtx.organisationId, draftId }, getJobConfig('support-draft-reconciliation'));
+  }
+
+  void options; // notes param reserved for future audit log integration
+}
+
+// ---------------------------------------------------------------------------
 // rejectDraft
 // ---------------------------------------------------------------------------
 

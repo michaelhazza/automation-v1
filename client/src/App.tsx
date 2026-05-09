@@ -122,6 +122,12 @@ const ScorecardCreatePage = lazy(() => import('./pages/govern/ScorecardCreatePag
 const ModelBenchPage = lazy(() => import('./pages/govern/ModelBenchPage'));
 const SubaccountApprovalChannelsPage = lazy(() => import('./pages/SubaccountApprovalChannelsPage'));
 const OrgApprovalChannelsPage = lazy(() => import('./pages/OrgApprovalChannelsPage'));
+// Support Desk canonical substrate (C13)
+const TicketsListPage = lazy(() => import('./pages/support/TicketsListPage'));
+const TicketDetailPage = lazy(() => import('./pages/support/TicketDetailPage'));
+const DraftReviewQueue = lazy(() => import('./pages/support/DraftReviewQueue'));
+const InboxConfigPage = lazy(() => import('./pages/support/InboxConfigPage'));
+const SupportDeskSetupPage = lazy(() => import('./pages/integrations/SupportDeskSetupPage'));
 
 function PageLoader() {
   return (
@@ -519,6 +525,13 @@ export default function App() {
             <Route path="/admin/spending-budgets"                        element={<Navigate to="/spending" replace />} />
             <Route path="/admin/spending-budgets/:budgetId"             element={<Navigate to="/spending" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<Navigate to="/spending" replace />} />
+            {/* Support Desk canonical substrate (C13) */}
+            <Route path="/support/tickets" element={<TicketsListPage />} />
+            <Route path="/support/tickets/:id" element={<TicketDetailPage />} />
+            <Route path="/support/drafts" element={<DraftReviewQueue />} />
+            <Route path="/support/drafts/:id" element={<DraftReviewQueue />} />
+            <Route path="/support/inboxes" element={<InboxConfigPage />} />
+            <Route path="/integrations/support-desk/setup" element={<SupportDeskSetupPage />} />
           </Route>
 
           {/* ClientPulse routes — gated by module subscription. Sidebar suppresses

@@ -69,6 +69,13 @@ export const APP_ROUTE_PATTERNS = [
   '/inbox',
   '/activity',
   '/run-trace/:id',
+  // Support Desk canonical substrate (C13)
+  '/support/tickets',
+  '/support/tickets/:id',
+  '/support/drafts',
+  '/support/drafts/:id',
+  '/support/inboxes',
+  '/integrations/support-desk/setup',
 ] as const;
 
 export type AppRoutePattern = (typeof APP_ROUTE_PATTERNS)[number];
