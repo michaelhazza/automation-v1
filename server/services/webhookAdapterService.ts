@@ -885,6 +885,46 @@ export async function dispatchSupportEvent(
           return;
         }
 
+        // Resolve author FK per polymorphic-FK CHECK constraint (migration 0310):
+        // agent/bot messages MUST carry author_support_agent_id; customer messages must NOT.
+        let authorSupportAgentId: string | null = null;
+        if (authorType !== 'customer') {
+          const authorObj = messageData?.author as Record<string, unknown> | undefined;
+          const authorExternalId = authorObj?.id ? String(authorObj.id) : null;
+          if (!authorExternalId) {
+            logger.warn('support.webhook.message_event_missing_author_id', {
+              code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+              connectorConfigId,
+              ticketExternalId,
+              messageExternalId,
+              authorType,
+              reason: 'missing_author_external_id',
+            });
+            return;
+          }
+          const [agentRow] = await orgDb
+            .select({ id: canonicalSupportAgents.id })
+            .from(canonicalSupportAgents)
+            .where(
+              and(
+                eq(canonicalSupportAgents.connectorConfigId, connectorConfigId),
+                eq(canonicalSupportAgents.externalId, authorExternalId),
+              ),
+            );
+          if (!agentRow) {
+            logger.warn('support.webhook.message_event_unknown_agent', {
+              code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+              connectorConfigId,
+              ticketExternalId,
+              messageExternalId,
+              authorExternalId,
+              reason: 'unknown_agent_external_id',
+            });
+            return;
+          }
+          authorSupportAgentId = agentRow.id;
+        }
+
         const inserted = await orgDb
           .insert(canonicalTicketMessages)
           .values({
@@ -896,6 +936,7 @@ export async function dispatchSupportEvent(
             direction,
             visibility,
             authorType,
+            authorSupportAgentId,
             bodyText: (messageData?.body as string | undefined) ?? '',
             bodyHtml: (messageData?.bodyHtml as string | undefined) ?? null,
             createdAtExternal: event.sourceTimestamp ?? event.timestamp,
