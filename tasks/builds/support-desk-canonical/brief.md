@@ -1,6 +1,6 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** DRAFT v5 — adds Teamwork Desk as the first validating implementation in scope. Spec-ready pending the decisions in §10.
+**Status:** LOCKED v5.1 — adds Teamwork Desk as first validating implementation, plus provider-neutrality invariant, drift guard, acceptance bar, and capability-matrix requirement. Spec-ready pending the fourteen decisions in §10.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
 **Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, the entities required, and the scope of the first validating provider integration (Teamwork Desk). No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
@@ -162,8 +162,15 @@ Every operational anomaly emits a structured log with a stable code, not a free-
 - `support.attachment.resolve_failed` — adapter `resolveAttachment` returned an error.
 - `support.ticket.human_collision_blocked` — agent action blocked by inbox collision-window policy.
 - `support.ingest.contact_unmatched` — inbound ticket has customer email with no canonical contact match.
+- `support.provider.rate_limited` — provider returned a rate-limit response; adapter backed off.
+- `support.provider.poll_page_failed` — incremental poll page errored; ingestion retried or surfaced as a partial sync.
+- `support.provider.webhook_unmapped_event` — webhook delivered an event type the adapter does not yet handle.
 
 This list is the floor, not the ceiling. The spec defines the channel (log sink, metrics, optional UI surface); the brief locks in the requirement that "we logged it somewhere" is not acceptable.
+
+### 5.11 Provider adapters validate the canonical layer; they do not define it
+
+Provider-specific concepts must remain in `external_metadata` unless they are required by a provider-neutral Support Agent skill or shared by at least one follow-on provider. The canonical model is shaped by the agent's needs and by what generalises across helpdesks, not by what is convenient for the first provider. This invariant exists because Teamwork is shipping in the same body of work as the canonical layer (§8) and there is a real risk of the schema accidentally becoming Teamwork-shaped. Promoting a Teamwork field into a canonical column requires evidence either of a portable agent skill that needs it, or of at least one other helpdesk surfacing the same concept. Without that evidence, the field stays in JSON.
 
 ## 6. Proposed Canonical Entities (For Stress-Testing)
 
@@ -287,7 +294,7 @@ Once entities are agreed, the per-provider adapter contract is roughly:
 - **Webhook (push, event-driven):** Verify provider signature; normalise `ticket.created`, `ticket.updated`, `ticket.reply.added`, `ticket.assigned`, `ticket.status_changed` into canonical events. Webhook handlers must be idempotent per §5.3.
 - **Status mapping (fail-closed):** Adapter declares the mapping from provider status vocabulary into the canonical five (`open`, `pending_internal`, `waiting_on_customer`, `resolved`, `closed`). Provider statuses the adapter has not mapped become `unknown_provider_status` (§6.1). Unknown statuses must **never** silently become `open` — that would let the agent act on tickets it should not touch. Quarantined tickets are excluded from agent-actionable queues, the original provider value is preserved in `external_metadata`, and a structured ingestion warning is raised so the mapping can be added.
 
-Teamwork already covers the acting and webhook side. We need to add the ingestion methods, the attachment resolver, and the status map.
+Teamwork-specific existing coverage and gaps are detailed in §8.
 
 ## 8. Teamwork Desk: First Validating Implementation
 
@@ -299,6 +306,8 @@ Teamwork Desk is the first provider adapter shipped against this canonical layer
 - A partial adapter already exists (`server/adapters/teamworkAdapter.ts`) with ticketing actions and webhook normalisation; we are extending, not greenfielding.
 - Teamwork exposes a public REST API with documented webhook events and signature verification, which is enough surface area to validate the canonical contract against.
 - Foundry already pulls Teamwork tickets for training data, so runtime-training alignment per §5.1 is most testable here.
+
+**Foundry-runtime drift guard.** We now have two Teamwork consumers: the Foundry historical loader and this runtime adapter. Any difference between them — API version, field shape, status mapping, timestamp normalisation, attachment handling — must be documented and justified. Drift is allowed only when explicit and tested. The default position is parity: same API version, same field interpretations, same canonical mapping. Where parity is not possible, the divergence is named in the spec and an eval covers it.
 
 ### 8.2 Existing coverage in `teamworkAdapter.ts`
 
@@ -329,13 +338,43 @@ These are not abstract canonical-layer decisions; they are concrete questions ab
 - Pagination and rate-limit handling for incremental polls.
 - Attachment auth model and short-lived URL lifecycle (drives the `resolveAttachment` implementation).
 
-### 8.5 Out of scope for the Teamwork v1 implementation
+### 8.5 Teamwork v1 acceptance bar
 
-- Teamwork-specific custom-field promotion to canonical columns (stays in `external_metadata`).
+Concrete end-state for the Teamwork part of this body of work. The spec inherits these as acceptance criteria:
+
+- One Teamwork connection can ingest inboxes, support agents, tickets, and ticket messages into the canonical layer.
+- Webhook and polling paths converge on the same canonical rows per §5.3 (verified with at least one duplicate-event test).
+- One draft can be dispatched safely through the §5.8 three-phase flow, end to end, with the confirmed message reconciled into `canonical_ticket_messages` and linked back to the draft.
+- The attachment resolver returns a usable URL or stream for at least one real Teamwork attachment.
+- An unmapped Teamwork status is quarantined as `unknown_provider_status` and excluded from agent-actionable queues per §6.1 and §7.
+- The action idempotency retry path is tested: a simulated post-dispatch failure resumes via the same key without producing a duplicate customer-visible reply.
+- The seven base observability codes plus the three provider codes from §5.10 fire correctly in their respective conditions.
+
+This is "minimum viable provider" — production-correct on the paths it covers, not feature-complete with every Teamwork capability mirrored.
+
+### 8.6 Provider capability matrix (spec deliverable)
+
+The spec must produce a capability matrix for the Teamwork adapter, even though Teamwork is the only adapter implemented now. The matrix forces gaps to be declared rather than hidden, and gives Zendesk and Freshdesk a concrete contract to fill out later. Required columns:
+
+| Capability | Teamwork v1 | Canonical fallback when absent |
+|---|---|---|
+| Incremental ticket fetch (since cursor) | yes / no | poll full window per inbox |
+| Reply / message webhook event | yes / no | poll messages for active tickets |
+| Native action idempotency mechanism | yes / no | local action-attempt ledger (§5.7) |
+| Fresh attachment URL on demand | yes / no | backend stream via adapter |
+| Assignment change webhook | yes / no | poll ticket header on cadence |
+| Status change webhook | yes / no | poll ticket header on cadence |
+| Internal note distinct from public reply | yes / no | adapter declines `addInternalNote` |
+
+Adapters declare their row in the matrix; the canonical layer relies on the declared "fallback when absent" path for any cell that is `no`. Zendesk and Freshdesk are out of scope for this body of work but inherit this contract.
+
+### 8.7 Out of scope for the Teamwork v1 implementation
+
+- Teamwork-specific custom-field promotion to canonical columns (stays in `external_metadata`; see §5.11).
 - Time tracking, billable-hours, or productivity reports.
 - Teamwork projects, milestones, and tasks (different product surface than Desk).
 - Native Teamwork CRM integration (separate canonical CRM, already covered by other adapters).
-- Bulk historical backfill beyond what the polling service already supports via `syncPhase = backfill`. If Foundry's backfill window is longer than what the connector polling service handles, Foundry remains the historical loader.
+- **Bulk historical backfill.** Runtime backfill is limited to the minimum window required to make live support operation coherent — for example, currently open tickets plus their recent message history. Foundry remains the historical training and evaluation loader; the runtime adapter does not attempt to ingest years of Teamwork history just because the canonical tables support it.
 
 ## 9. Skills the Canonical Layer Unlocks
 
@@ -385,9 +424,9 @@ Approve the canonical approach plus Teamwork Desk as the first validating implem
 4. `canonical_support_agents`
 5. `canonical_ticket_drafts`
 
-Approve the ten design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions, three-phase dispatch sequencing, denormalised tenant isolation, structured observability with stable codes) as non-negotiable constraints for the spec.
+Approve the eleven design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions, three-phase dispatch sequencing, denormalised tenant isolation, structured observability with stable codes, provider-neutral canonical model) as non-negotiable constraints for the spec.
 
-Approve the Teamwork v1 scope in §8: extend the existing adapter with ingestion methods, attachment resolver, status map, idempotency-key plumbing, and three-phase dispatch wiring. No new polling infrastructure.
+Approve the Teamwork v1 scope in §8: extend the existing adapter with ingestion methods, attachment resolver, status map, idempotency-key plumbing, and three-phase dispatch wiring. No new polling infrastructure. Acceptance bar in §8.5 is the end-state; the capability matrix in §8.6 is a required spec deliverable.
 
 Park CSAT, KB articles, custom fields, multi-thread per ticket, and attachment mirroring for later.
 
