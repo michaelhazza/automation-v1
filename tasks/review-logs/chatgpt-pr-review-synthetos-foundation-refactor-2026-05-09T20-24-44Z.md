@@ -274,3 +274,23 @@ ChatGPT Round 2 verdict: **APPROVED with follow-ups** — all six Round 1 blocke
 ### Final ChatGPT verdict
 
 **APPROVED.** All six Round 1 blockers closed in Round 2; all three Round 2 follow-ups closed in Round 3. Loop closed at operator's explicit signal.
+
+## Final Summary (Phase 3 doc-sync sweep)
+
+Doc-sync sweep run by `finalisation-coordinator` against full feature change-set (106 files including Round 3 follow-ups + S2 sync of `4e01e16f`). Investigation procedure executed per `docs/doc-sync.md`.
+
+- **architecture.md updated:** yes (SynthetOS Phase 1 Foundation Primitives section — schema additions row updated to mention `.min(1)` non-empty constraint on `allowed_environments` per Round 3 S2 fix; existing 14-member runTraceEvent description already correct). Previously updated in Phase 2 with the full SynthetOS section.
+- **docs/capabilities.md updated:** n/a — checked grep terms `SynthetOS`, `controllerStyle`, `riskTier`, `policyEnvelope`, `runTrace`, `credentialBroker`, `14-member`, `allowedEnvironments`; zero hits. Foundation refactor ships internal infrastructure per spec §2 NG6 ("ships only the foundation refactor and the minimum UI to expose it") — no product/agency capability/skill/integration is added, removed, or renamed.
+- **docs/integration-reference.md updated:** n/a — checked grep terms `SynthetOS`, `controllerStyle`, `policyEnvelope`, `runTrace`, `credentialBroker`; zero hits. CredentialBrokerService is a structural facade per INV-11; no integration behaviour, scopes, OAuth providers, MCP presets, or capability slugs change. No `last_verified` bump warranted.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** n/a — checked grep terms `SynthetOS`, `synthetos`, `controller_style`, `risk_tier`, `policy_envelope`, `run_trace`, `credential_broker`, `controllerStyle`, `riskTier`, `policyEnvelope`, `runTrace`, `credentialBroker`, `14-member`, `allowedEnvironments`; zero hits in either doc. No changes to build discipline, RLS rules, schema invariants, gate protocol, migration rules, fleet, review pipeline, or §8 development discipline. Foundation log codes use the existing structured-logger pattern.
+- **CONTRIBUTING.md updated:** n/a — file does not exist in this repo (per `git ls-files | grep CONTRIBUTING` returns nothing). The doc-sync.md table lists CONTRIBUTING.md but no such file is registered in this repo's tree; trigger does not apply.
+- **docs/frontend-design-principles.md updated:** n/a — checked grep terms `RunTrace`, `controllerStyle`, `riskTier`, `allowedEnvironments`, `policyEnvelope`, `credentialBroker`; zero hits. UI tabs (RunTraceHeadline, ApprovalRiskContext, CredentialsAuditLog, four agent-config tabs) follow existing patterns; no new UI rule, hard rule, or worked example.
+- **KNOWLEDGE.md updated:** yes (5 patterns appended in Phase 2 — first-resolver-wins UPDATE org-predicate sourcing; replace_all=true silently missing different-indentation duplicates; pagination correctness requires SQL filter pushdown not in-memory after LIMIT; subaccount-scoped fallback UPDATE needs subaccountId predicate not just organisationId; stable structured-log codes must use logger.info not console.log). Round 3 introduced no new durable patterns — the S1/S2/N1 closure is doc/test cleanup and is already captured in the Phase 2 patterns above (Pattern: closed-enum service-boundary mapping covers the S2 `.min(1)` invariant).
+- **docs/spec-context.md updated:** n/a — feature pipeline build, not a spec-review session.
+- **docs/decisions/ updated:** n/a — Round 3 introduced no new durable architectural choices. The 14-event deviation is recorded in spec §11.0 as an Accepted Implementation Deviation with cross-reference to chatgpt-pr-review-log finding F5; this is build-local context, not a cross-cutting policy choice meriting an ADR.
+- **docs/context-packs/ updated:** n/a — no architecture.md section anchors changed; no new context-pack mode needed.
+- **references/test-gate-policy.md updated:** n/a — no change to test-gate posture.
+- **references/spec-review-directional-signals.md updated:** n/a — no spec-reviewer signal repeats surfaced.
+- **.claude/FRAMEWORK_VERSION + CHANGELOG.md updated:** n/a — no framework-level change in this build (no agent fleet add/remove/rename, no convention change, no hook).
+
+Doc-sync verdict: **PASS.** All registered docs verified; no missing or unsubstantiated verdicts.

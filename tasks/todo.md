@@ -3614,10 +3614,7 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - Gap: spec specifies `defaultMaxToolCalls` / `approvalDefaultMin`; implementation ships `maxToolCallsPerRun` / `approvalDefault`. Semantic intent identical; identifiers differ.
   - Suggested approach: either rename the interface fields in `shared/types/controllerStyle.ts` and propagate through `server/config/controllerLimits.ts` and consumers, OR update spec §4.1.5 to canonicalise the shipped names. Cross-cutting but mechanical once direction is set.
 
-- [ ] **SCD-2 — `controller_style_allowed` enum value `'operator_allowed'` diverges from spec `'native_and_operator'`**
-  - Spec section: §3.6 (State machine closure), §4.1.6 (Default derivation rule), §5.2.9 (Subaccount governance schema)
-  - Gap: spec specifies closed enum `'native_only' | 'native_and_operator'`; implementation ships `'native_only' | 'operator_allowed'` consistently across migration 0307, Drizzle schema, Zod validator, tests, and 2 UI components. The DB CHECK constraint already encodes `'operator_allowed'`, so a follow-up migration would be needed to switch.
-  - Suggested approach: operator decision — rename code to spec (write a follow-up migration to broaden CHECK + UPDATE existing rows + rename Drizzle/Zod/UI), OR update the spec text in §3.6, §4.1.6, §5.2.9, §6 (and inline references) to canonicalise `'operator_allowed'`. Recommend the latter given the migration is already shipped and `'operator_allowed'` is arguably more readable in the agent-allow-list context.
+- [x] **SCD-2 — `controller_style_allowed` enum value `'operator_allowed'` diverges from spec `'native_and_operator'`** — CLOSED by chatgpt-pr-review Round 2 finding F1 (operator-decided: rename code to match spec). Migration 0307 + Drizzle schema + Zod + tests + 2 UI components all updated to `'native_and_operator'`. See `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` Round 2.
 
 ## Adversarial review findings — synthetos-foundation-refactor (2026-05-09)
 
@@ -3644,9 +3641,7 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - File: `server/routes/agentRuns.ts:39`
   - A non-`'native' | 'operator'` value silently maps to `default` in `deriveControllerStyle`. Should return HTTP 400 at the route layer. Correctness only.
 
-- [ ] **ADV-OBS-3 — `require_approval_at_tier` CHECK 0-7 vs spec text 0-6**
-  - File: `migrations/0307_subaccount_agents_governance.sql:14`
-  - Implementation uses 7 as a sentinel ("never require"); spec §5.2.9 SQL block says 0-6. Update spec text to canonicalise the sentinel, or tighten CHECK and use NULL for "never require".
+- [x] **ADV-OBS-3 — `require_approval_at_tier` CHECK 0-7 vs spec text 0-6** — CLOSED by chatgpt-pr-review Round 2 finding F3 (operator-decided: REMOVE sentinel, revert to 0-6). Migration 0307 CHECK now `BETWEEN 0 AND 6`; Zod max=6; "Never require approval" UI option removed; tests inverted. See `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` Round 2.
 
 ## PR re-review findings — synthetos-foundation-refactor (2026-05-10)
 
@@ -3663,10 +3658,7 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - File: `server/services/__tests__/subaccountAgentService.test.ts` (new)
   - Given an existing link, when updateLink is called with the four governance fields, then the row reflects all four; partial updates do not clobber unspecified fields.
 
-- [ ] **SFR-N8 — Zod `allowedEnvironments` accepts empty array (lockout risk)**
-  - File: `server/schemas/subaccountAgents.ts:37`
-  - Empty array silently locks an agent out (every run fails with ExecutionModeNotAllowedForAgentError after dual-reviewer fix #3).
-  - Suggested: add `.min(1)` to the Zod array, or UI-side guard preventing all-unchecked save, or both.
+- [x] **SFR-N8 — Zod `allowedEnvironments` accepts empty array (lockout risk)** — CLOSED by chatgpt-pr-review Round 3 finding S2. `.min(1)` added to `z.array(z.enum([...]))` in `server/schemas/subaccountAgents.ts`; new test in `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts` asserts empty-array rejection. Spec §9.1 + architecture.md updated. UI-side guard left as future enhancement (server-side rejection now provides the backstop).
 
 - [ ] **SFR-N9 — Future-only: functional index on `audit_events ((metadata->>'subaccountId'))`**
   - File: `server/db/schema/auditEvents.ts`

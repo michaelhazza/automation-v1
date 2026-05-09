@@ -96,3 +96,15 @@ Additional Phase 1 framings the architect must respect when building the plan:
 ## Phase 2 entry note (operator-written, not from spec-coordinator)
 
 The Phase 1 → Phase 2 handoff was not written automatically by `spec-coordinator` at the close of Round 2. This file was authored at Phase 2 entry (2026-05-09) by the operator-driven `feature-coordinator` adoption, reconstructed from the spec, the four spec-review-related commits (`58d4c477`, `06020dee`, `b2786c84`, `bd48fa8e`), and the per-iteration review logs. Build proceeds on the existing branch `claude/openclaw-worker-mode-VnjQT` per operator confirmation.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #279
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md` (Rounds 1, 2, 3 — APPROVED at Round 3 close)
+**spec_deviations reviewed:** yes — Round 1 finding F5 + Round 3 follow-up S1 reached final disposition: 14-event Phase 1 union with `routing_path_chosen` deferred to Phase 3 alongside canonical Run Trace ledger consolidation. Now formally documented in spec §11.0 "Accepted Implementation Deviation" + plan.md Post-review change #1 + architecture.md SynthetOS Phase 1 Foundation Primitives.
+**Doc-sync sweep verdicts:** PASS — architecture.md updated (Round 3 amendment to mention `.min(1)` constraint); KNOWLEDGE.md previously updated with 5 Phase 2 patterns; capabilities.md / integration-reference.md / CLAUDE.md / DEVELOPMENT_GUIDELINES.md / frontend-design-principles.md / spec-context.md / decisions/ / context-packs / test-gate-policy / spec-review-directional-signals / FRAMEWORK_VERSION all `n/a` with rationale captured in the canonical session log Final Summary block. CONTRIBUTING.md `n/a` (file does not exist in this repo).
+**KNOWLEDGE.md entries added:** 0 (Round 3 introduced no new durable patterns; all 5 Phase 2 patterns already in place).
+**tasks/todo.md items removed:** 3 — SCD-2 (controller_style_allowed enum drift, closed by Round 2 F1), ADV-OBS-3 (require_approval_at_tier 0-7 vs 0-6, closed by Round 2 F3), SFR-N8 (allowedEnvironments empty-array lockout risk, closed by Round 3 S2). 8 deferred items remain in `tasks/todo.md`: R-G (spec rationale paragraph), SCD-1 (ControllerLimits field naming), ADV-B + ADV-C (credential broker hardening), ADV-OBS-1 (claude-code → operator mapping), ADV-OBS-2 (controllerStyle route validation), SFR-S7 (cosmetic comment cleanup), SFR-S8 (governance-fields persistence test), SFR-N9 (future-only audit_events functional index).
+**ready-to-merge label applied at:** 2026-05-09T21:17:58Z

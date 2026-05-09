@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/synthetos-foundation-refactor/spec.md
-active_plan: tasks/builds/synthetos-foundation-refactor/plan.md
-build_slug: synthetos-foundation-refactor
-branch: claude/openclaw-worker-mode-VnjQT
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-10
+last_merge_ready_pr: #279
+last_merge_ready_slug: synthetos-foundation-refactor
+last_merge_ready_branch: claude/openclaw-worker-mode-VnjQT
 last_merged_pr: #276
 last_merged_slug: agent-workspace
 last_merged_branch: claude/add-agent-cloud-compute-Kb4ii
@@ -24,11 +27,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/synthetos-foundation-refactor/spec.md` (LOCKED — chatgpt-spec-review APPROVED 2026-05-09)
-**Active plan:** `tasks/builds/synthetos-foundation-refactor/plan.md` (LOCKED — chatgpt-plan-review APPROVED 2026-05-09)
-**Active build slug:** `synthetos-foundation-refactor`
-**Branch:** `claude/openclaw-worker-mode-VnjQT`
-**Status:** **REVIEWING** — Phase 2 build complete (11/11 chunks, all G1 1-attempt). Branch-level review pass complete: spec-conformance NON_CONFORMANT (2 directional naming gaps deferred — SCD-1 ControllerLimits field names, SCD-2 controller_style_allowed enum value); adversarial-reviewer HOLES_FOUND (1 confirmed-hole ADV-A fixed in-branch — cross-subaccount revoke; 2 likely-holes ADV-B/C deferred); pr-reviewer CHANGES_REQUESTED → APPROVED after 4 fix-loop rounds (5 blockers B1-B5 closed); dual-reviewer CHANGES_APPLIED → APPROVED (10 ACCEPT / 1 REJECT — 1 P1 cross-scope auth + 5 P2 functional regressions + 2 P2 API contract regressions + AGENTS_VIEW guard); pr-reviewer round 4 re-review APPROVED post-dual-reviewer. Doc-sync gate complete (architecture.md "SynthetOS Phase 1 Foundation Primitives" section + 5 KNOWLEDGE.md patterns; capabilities/integration-reference/CLAUDE/DEVELOPMENT_GUIDELINES/frontend-design-principles n/a per scope). **Next step:** run `chatgpt-pr-review` in a dedicated new Claude Code session as the manual final review pass before MERGE_READY.
+**Status:** **MERGE_READY** — PR #279 (`synthetos-foundation-refactor`) cleared the full Phase 3 pipeline. Round 3 chatgpt-pr-review APPROVED (S1+S2+N1 follow-ups closed in `7eb39776`); S2 branch-sync merged main commit `4e01e16f` (Deep modules audit) cleanly; G4 regression guard PASSED (lint 0 errors, typecheck clean); doc-sync sweep recorded. SynthetOS Phase 1 foundation refactor delivered: 6 primitives (controllerStyle field on agent runs, 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke, PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs`, 14-member Run Trace virtual view across 7 ledger tables, naming glossary + awareness comments). 11 chunks built across migrations 0307-0309. Three review pipelines executed: spec-conformance, pr-reviewer (4 rounds APPROVED), dual-reviewer (3 iterations APPROVED), adversarial-reviewer, chatgpt-pr-review (3 rounds APPROVED). **Active branch:** `claude/openclaw-worker-mode-VnjQT`. ready-to-merge label about to be applied; CI fires next on the Phase 3 commit.
 
 **Just merged:** PR #276 — `agent-workspace` (squash-commit `5f7e63b8`, 2026-05-09T03:28:03Z). Persistent Agent Workspace + cloud-compute lifecycle. Spec: `tasks/builds/agent-workspace/spec.md` (1599 lines, LOCKED, 2 ChatGPT-spec-review rounds). Phase 3 handoff: `tasks/builds/agent-workspace/handoff.md`. Pipeline: 13 of 14 chunks built (Chunk 12 deferred per spec — Phase-1 contract lock) → branch-level review pass (spec-conformance CONFORMANT_AFTER_FIXES with 6 directional gaps deferred AGW-DEF-1..6, adversarial-reviewer 1 confirmed AGW-ADV-1 closed + 2 likely AGW-ADV-2/3 deferred, pr-reviewer 3 rounds APPROVED, dual-reviewer Codex APPROVED with 3 fixes, doc-sync sweep complete with ADR-0008 added for SSE stream-token decision) → chatgpt-pr-review 2 rounds APPROVED (Round 1 closed 4 Blockers + 3 Strong in `6a105041`; Round 2 closed 2 follow-ups + 1 polish in `3c4760ae`) → 3 CI auto-fix iterations (`4768ad23` 4 blocking gates fixed + preventive rules locked; `d0d79d14` chain FK + .js-extension imports; `5ec967b8` all 6 agent_runs FKs in migration 0305). CI ALL GREEN at merge time. KNOWLEDGE.md +5 patterns (paired-event accumulators need stable identity; permission-gated UI fails closed during async load; finalisation-coordinator commits Phase 3 BEFORE label; 4 CI-only gates G1 misses; .js extension required on relative imports inside `__tests__/`).
 
@@ -84,7 +83,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-09 (Phase 2 closed for `agent-workspace`; status → REVIEWING; branch ready for Phase 3 finalisation)
+**Last updated:** 2026-05-10 (Phase 3 finalisation complete for `synthetos-foundation-refactor`; status → MERGE_READY; PR #279 ready for ready-to-merge label)
 
 ---
 
