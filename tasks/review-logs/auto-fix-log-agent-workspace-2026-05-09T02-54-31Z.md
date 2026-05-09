@@ -103,3 +103,32 @@ Estimated ~13 lines net (8 + 5). Well within G2's 50-line cap.
 ### Preventive-rule update
 
 The `verify-pure-helper-convention.sh` `.js`-extension requirement was NOT in the iteration-1 builder.md / KNOWLEDGE.md preventive entries. Adding to KNOWLEDGE.md as a sub-bullet under the existing `[2026-05-09] Correction — four CI-only gates that G1 misses` entry.
+
+## Iteration 3 — 2026-05-09T03:21:30Z
+
+One residual failure on commit `d0d79d14`. Iteration 2 cleared all `agent_execution_events(id)` FKs and fixed the gate; the LAEL test now gets past the events delete and into the runs delete, where it hits the next FK chain.
+
+### Failure 3.A — `integration tests` (FK violation, third level — `agent_runs(id)`)
+
+- **Failed check:** `integration tests`
+- **Failed test:** `server/services/__tests__/llmRouterLaelIntegration.test.ts > test 1`
+- **Error signature:** `update or delete on table "agent_runs" violates foreign key constraint "agent_presence_projections_last_event_run_id_fkey" on table "agent_presence_projections"`
+- **Root cause:** Migration 0305 added 6 FK references to `agent_runs(id)` from new agent-workspace tables, all without `ON DELETE` clauses. The integration test now succeeds at deleting events but blocks at deleting runs because `agent_presence_projections.last_event_run_id` (and 5 other columns) reference `agent_runs(id)` with default NO ACTION.
+- **Stuck-detection check:** third iteration on the same integration test, but each iteration fixed a distinct FK chain level (events → ledger/iee_artifacts → runs). Postgres reports one FK at a time, so each iteration uncovered the next blocked level. Iteration 3 fixes ALL 6 agent_runs FKs at once to break the cycle and prevent a fourth FK-only iteration.
+- **Category (G3 allowlist match):** SQL / migration syntax (FK ON DELETE clauses).
+- **Guardrail status:** G1=PASS (no test file modified), G2=24 lines (6 FK column edits + 6 explanatory comments), G3=PASS, G4=logged.
+- **Fix:** Add ON DELETE clauses to all 6 agent_runs FKs in migration 0305:
+  - `agent_observations.run_id` (nullable) → `ON DELETE SET NULL`
+  - `iee_sessions.run_id` (NOT NULL UNIQUE) → `ON DELETE CASCADE` (session belongs to run)
+  - `iee_sessions.parent_run_id` (nullable) → `ON DELETE SET NULL` (sub-agent delegation pointer)
+  - `agent_presence_projections.active_run_id` (nullable) → `ON DELETE SET NULL`
+  - `agent_presence_projections.last_event_run_id` (nullable) → `ON DELETE SET NULL` (the failing one)
+  - `iee_artifacts.agent_run_id` (nullable) → `ON DELETE SET NULL`
+
+### Operator note
+
+Operator confirmed mid-iteration: "make sure you fix existing migrations not create new ones, they haven't been run." This iteration edits `migrations/0305_agent_workspace_presence_and_sessions.sql` directly (no new migration file), matching that direction.
+
+### Cumulative diff stat for iteration 3
+
+24 lines (6 column edits + 6 comments). Within G2's 50-line cap.

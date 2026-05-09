@@ -3,7 +3,9 @@ CREATE TABLE agent_observations (
   organisation_id             UUID         NOT NULL REFERENCES organisations(id),
   subaccount_id               UUID         REFERENCES subaccounts(id),
   agent_id                    UUID         NOT NULL REFERENCES agents(id),
-  run_id                      UUID         REFERENCES agent_runs(id),
+  -- ON DELETE SET NULL: nullable pointer to the run that produced this
+  -- observation. Observation outlives the run via its own retention TTL.
+  run_id                      UUID         REFERENCES agent_runs(id) ON DELETE SET NULL,
   event_id                    UUID         NOT NULL REFERENCES agent_execution_events(id),
   observation_type            TEXT         NOT NULL,
   body                        TEXT         NOT NULL,
@@ -98,8 +100,14 @@ CREATE TABLE iee_sessions (
   organisation_id             UUID         NOT NULL REFERENCES organisations(id),
   subaccount_id               UUID         REFERENCES subaccounts(id),
   agent_id                    UUID         NOT NULL REFERENCES agents(id),
-  run_id                      UUID         NOT NULL UNIQUE REFERENCES agent_runs(id),
-  parent_run_id               UUID         REFERENCES agent_runs(id),
+  -- ON DELETE CASCADE: an iee_session belongs to its run. If the run is
+  -- deleted (retention prune, integration-test cleanup), the session row
+  -- has no anchor and should be removed too.
+  run_id                      UUID         NOT NULL UNIQUE REFERENCES agent_runs(id) ON DELETE CASCADE,
+  -- ON DELETE SET NULL: parent_run_id is a nullable sub-agent delegation
+  -- pointer. If the parent run is pruned, the child session retains its own
+  -- lifecycle.
+  parent_run_id               UUID         REFERENCES agent_runs(id) ON DELETE SET NULL,
   container_handle            TEXT,
   status                      TEXT         NOT NULL,
   idle_timeout_seconds        INTEGER      NOT NULL DEFAULT 300,
@@ -142,11 +150,15 @@ CREATE TABLE agent_presence_projections (
   subaccount_id               UUID         REFERENCES subaccounts(id),
   presence_state              TEXT         NOT NULL,
   presence_subtitle           TEXT,
-  active_run_id               UUID         REFERENCES agent_runs(id),
+  -- ON DELETE SET NULL on every nullable pointer column below — projections
+  -- are derived current-state views; if a referenced row is gone, the pointer
+  -- nulls out so the projection survives. Without these clauses, deleting a
+  -- run or event blocks on the projection's dangling pointer.
+  active_run_id               UUID         REFERENCES agent_runs(id) ON DELETE SET NULL,
   current_focus_text          TEXT,
   current_focus_event_id      UUID         REFERENCES agent_execution_events(id) ON DELETE SET NULL,
   last_event_id               UUID         REFERENCES agent_execution_events(id) ON DELETE SET NULL,
-  last_event_run_id           UUID         REFERENCES agent_runs(id),
+  last_event_run_id           UUID         REFERENCES agent_runs(id) ON DELETE SET NULL,
   last_event_run_seq          INTEGER      NOT NULL DEFAULT 0,
   last_event_timestamp        TIMESTAMP WITH TIME ZONE,
   next_run_at                 TIMESTAMP WITH TIME ZONE,
@@ -249,7 +261,9 @@ CREATE POLICY agent_working_time_event_ledger_org_isolation ON agent_working_tim
   );
 
 ALTER TABLE iee_artifacts
-  ADD COLUMN agent_run_id UUID REFERENCES agent_runs(id),
+  -- ON DELETE SET NULL: agent_run_id is a nullable pointer ("the run that
+  -- produced this artifact"). The artifact itself can outlive the run.
+  ADD COLUMN agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
   -- ON DELETE SET NULL: producing_event_id is a nullable pointer ("the event
   -- that produced this artifact"). If the source event is pruned, the artifact
   -- itself outlives it — null out the pointer instead of cascading.
