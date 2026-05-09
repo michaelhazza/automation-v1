@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-09
-**Last updated:** 2026-05-09 (post chatgpt-spec-review Round 1 — 8 findings closed: 4 high-severity blockers fixed [source_draft_id FK migration order, split author_id columns, manually_marked_sent state, deletion/redaction tombstone semantics], 1 user-facing rename ["Mark provider send as verified"], 3 medium-severity tightenings [propose_reply soft-uniqueness, OQ-2 strengthen, acceptance-bar verification methods])
+**Last updated:** 2026-05-09 (post chatgpt-spec-review Round 2 — 6 regression-pass findings closed: 1 high-severity blocker fixed [deletion-by-poll precondition tightened to full-reconciliation only], 5 polish tightenings [§14.2 propose_reply state-based wording, §5.5 supersession transaction order pinned, §18 test inventory updated, §18 access-controls rename, §17.2 capability-matrix `?`-row clarification]. Round 1 closed 8 findings — see commit `ff6e21b6`.)
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)
@@ -248,10 +248,21 @@ The collision-window policy that consumes these primitives lives in `canonical_i
 
 Teamwork's existing `mapTeamworkEventType` already normalises `ticket.deleted` events, so deletion handling cannot be deferred to a future spec amendment — it is in scope for v1.
 
-- `provider_deleted` boolean NOT NULL DEFAULT false — set true when a provider deletion event is observed (webhook `ticket.deleted`) or when a poll cycle proves a previously-known ticket is no longer returned by the provider.
+- `provider_deleted` boolean NOT NULL DEFAULT false — set true only when a provider deletion event is observed (webhook `ticket.deleted`) **or** when a strict full-reconciliation poll pass proves the ticket is gone (see deletion-by-poll precondition below).
 - `deleted_at_external` timestamp with timezone, nullable — provider's deletion timestamp where exposed; otherwise NULL.
 - `deleted_at_canonical` timestamp with timezone, nullable — the canonical layer's first observation of the deletion.
 - `deletion_source` text — closed enum: `provider_webhook | provider_poll_observation | manual_admin`. NULL when `provider_deleted=false`.
+
+**Deletion-by-poll precondition (load-bearing).** Polling may set `provider_deleted=true` with `deletion_source='provider_poll_observation'` **only** during an explicit **full-reconciliation pass** for the relevant inbox. All of the following must hold for the pass to qualify:
+
+1. Every page of the relevant provider endpoint has completed successfully (no partial pagination state).
+2. No `support.provider.poll_page_failed` was emitted during the pass for that inbox.
+3. No rate-limit truncation occurred (`support.provider.rate_limited` did not interrupt the pass).
+4. The provider endpoint used has semantics where absence proves deletion or removal (i.e. an unfiltered "all tickets in this inbox" endpoint, not a filtered or windowed search).
+
+**Incremental polls must NEVER infer deletion from absence.** A ticket missing from an incremental window or a paginated cursor read is "not in this slice", not "deleted". The day-to-day `connectorPollingService` cycle (Phase C in §7) is incremental and is therefore explicitly forbidden from setting `provider_deleted` via the poll path. The full-reconciliation pass is a distinct cadence — Phase 2 names it explicitly when wiring `connectorPollingService` (e.g. nightly per inbox, or operator-triggered) — and is the only poll-driven path allowed to tombstone a ticket.
+
+If the precondition is not met during a given attempt, deletion remains webhook-only for the affected inbox until the next qualifying full-reconciliation pass succeeds. False tombstones would silently hide live tickets from the agent queue, which is the worst-case correctness failure for this layer; the precondition exists to make that failure mode structurally impossible.
 
 Read-filter rules — every read path applies these consistently:
 
@@ -561,7 +572,11 @@ There is intentionally no durable `approved` resting state. Approval is the trig
 - `(organisation_id, status, created_at)` partial WHERE `status IN ('awaiting_review','needs_reconciliation','manually_marked_sent')` — supports the review queue + reconciliation queue + manually-marked-sent back-link queue.
 - `(connector_config_id, action_idempotency_key)` UNIQUE WHERE `action_idempotency_key IS NOT NULL`.
 - `(organisation_id, expires_at)` WHERE `status IN ('draft','awaiting_review')` — supports the queue-expiry sweeper.
-- **Soft-uniqueness guard for `support.propose_reply` retry-noise** (per §14.1): UNIQUE partial index `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility) WHERE status IN ('draft','awaiting_review')`. This converts a same-run double-proposal from "two queue rows the operator must reconcile" into a deterministic conflict at the insert boundary, which the dispatch service handles by **explicit supersession at insert time** — the new draft writes; the prior pre-dispatch draft for the same `(ticket_id, agent_run_id, visibility)` transitions to `superseded` in the same transaction. This bounds review-queue noise from agent retries while preserving the user-visible duplicate-draft path for cross-run double-proposals.
+- **Soft-uniqueness guard for `support.propose_reply` retry-noise** (per §14.1): UNIQUE partial index `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility) WHERE status IN ('draft','awaiting_review')`. This converts a same-run double-proposal from "two queue rows the operator must reconcile" into a deterministic supersede-then-insert flow.
+
+  **Same-run supersession transaction order is load-bearing** (the partial UNIQUE will fire if the order is wrong). Within one transaction, in this exact sequence: (a) `UPDATE canonical_ticket_drafts SET status='superseded', updated_at=NOW() WHERE organisation_id=$1 AND ticket_id=$2 AND created_by_agent_run_id=$3 AND proposed_visibility=$4 AND status IN ('draft','awaiting_review')` — moves any matching prior draft out of the partial-UNIQUE-protected status set; (b) `INSERT INTO canonical_ticket_drafts (...) VALUES (...)` — writes the new draft. If the INSERT fails, the transaction rolls back and the prior draft is preserved in its original state. **Inserting before superseding is forbidden** — the partial UNIQUE will reject the insert and the supersede branch will not run.
+
+  This bounds review-queue noise from agent retries while preserving the user-visible duplicate-draft path for cross-run double-proposals (different `agent_run_id` → distinct partial-UNIQUE keys → both rows coexist).
 
 **RLS**
 
@@ -1456,7 +1471,7 @@ The ledger is RLS-protected on `organisation_id` and added to `RLS_PROTECTED_TAB
 | Webhook event handler | **safe** | The `external_event_id` dedupe at the dispatcher is the boundary. |
 | Polling cycle phase A/B/C/D | **safe** | UNIQUE indexes + upsert form ensure replay safety. |
 | `support.list_open_tickets` etc. | **safe** | Read-only. |
-| `support.propose_reply` | **unsafe** (writes a new draft each time) | Wrapped by the supersede check at preflight + the operator-visible duplicate-draft surface. Out of band of this spec — the agent's contract owns the retry. |
+| `support.propose_reply` | **guarded / state-based** | Same-run duplicate proposals are bounded by the partial UNIQUE index on `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility) WHERE status IN ('draft','awaiting_review')` plus the §5.5 + §14.1 same-transaction supersede-then-insert order. A retry within the same agent run produces a deterministic supersession of the prior pre-dispatch draft, not a sibling row. Cross-run duplicate proposals (different `agent_run_id`) remain operator-visible by design — different reasoning passes deserve operator judgement. |
 
 ### 14.3 Concurrency guards
 
@@ -1705,6 +1720,8 @@ The matrix below is provisional pending audit of Teamwork's current API surface 
 
 Every `?` row resolves to a concrete cell during Phase 2 spec-conformance: `yes:<endpoint>` (and fallback row stays as a defensive code path), or `no:<fallback>` (and the named fallback ships in the same chunk).
 
+**`?` rows are acceptable at spec acceptance time** — only OQ-2 (status vocabulary inventory) is required to close before the spec moves to `Status: accepted` (per §22). The remaining matrix `?` rows are gated by OQ-3 (idempotency mechanism) and OQ-4 (attachment auth model), both of which legitimately close inside Phase 2 chunks (C7 in particular). A future reviewer should NOT block the spec on every `?` — the OQs are the closure path.
+
 The capability matrix is the contract Zendesk + Freshdesk inherit when those adapters are written. Adding a new column requires evidence that the canonical layer can hide the difference behind a defensive read.
 
 ## 18. File inventory
@@ -1751,9 +1768,9 @@ Per spec-authoring-checklist §2 — every file/column/migration/service/route m
 - `server/services/supportDraftDispatchServicePure.ts` — pure transition guard for `canonical_ticket_drafts.status` + idempotency-key derivation.
 - `server/services/supportDraftReconciliationPure.ts` — pure decision module for `needs_reconciliation` outcome.
 - `server/services/supportContactResolutionPure.ts` — pure email-match resolver.
-- `server/services/__tests__/supportDraftDispatchService.test.ts` — pure-function tests.
-- `server/services/__tests__/supportDraftReconciliation.test.ts` — pure-function tests.
-- `server/services/__tests__/supportTicketServicePure.test.ts` — pure transition tests.
+- `server/services/__tests__/supportDraftDispatchService.test.ts` — pure transition-guard tests + idempotency-key derivation tests + same-run supersession transaction-order test (per §14.1 the UPDATE-then-INSERT order is load-bearing).
+- `server/services/__tests__/supportDraftReconciliation.test.ts` — pure-function tests for the reconciliation decision module + the §8.5 back-link match logic (reply path + internal-note path + ambiguous match path).
+- `server/services/__tests__/supportTicketServicePure.test.ts` — pure transition tests + **deletion read-filter tests** (agent reads exclude `provider_deleted=true`; human UI sees tombstone) + **redaction read-filter tests** (agent sees `'[redacted]'`; human UI sees tombstone) + **deletion-by-poll precondition tests** (incremental poll never sets `provider_deleted`; full-reconciliation pass with all conditions met sets it; pass with any condition unmet does not).
 - `server/services/__tests__/supportContactResolutionPure.test.ts` — pure-function tests.
 - `server/services/__tests__/teamworkSupportStatusMap.test.ts` — pure-function tests.
 
@@ -1799,13 +1816,16 @@ Per spec-authoring-checklist §2 — every file/column/migration/service/route m
   - `POST /api/support/drafts/:id/edit` — operator edits proposed body before approving (`support.draft.approve` per §9)
   - `POST /api/support/drafts/:id/manual-resolve` — for `needs_reconciliation` exhausted-budget surface; sub-actions `mark_sent` and `retry_reconciliation` require `support.draft.approve`, `mark_failed` requires `support.draft.reject` (per §9)
 
-### Permission keys
+### Access controls
 
-- `support.tickets.read` — implicit via org membership; not a new key, simply the read pathway.
-- `support.draft.approve` (new)
-- `support.draft.reject` (new)
-- `support.draft.override_collision` (new)
-- `support.inbox.configure` (new)
+**Read access** to `/api/support/tickets/*`, `/api/support/inboxes` (GET), and `/api/support/drafts/*` (GET) is gated by `authenticate` plus org-scoped reads via `getOrgScopedDb`. There is **no `support.tickets.read` permission key** — read-pathway authorisation is implicit in org membership + sub-account scoping.
+
+**New permission keys** (registered in `permissionSetService` per existing pattern):
+
+- `support.draft.approve` — gates POST /approve, the manual-resolve `mark_sent` and `retry_reconciliation` sub-actions, and the POST /edit path (per §9).
+- `support.draft.reject` — gates POST /reject and the manual-resolve `mark_failed` sub-action.
+- `support.draft.override_collision` — gates the `override_collision: true` body field on POST /approve. Strictly stronger than `support.draft.approve`.
+- `support.inbox.configure` — gates PATCH /inboxes/:id.
 
 Permission key registration follows the existing `permissionSetService` pattern.
 

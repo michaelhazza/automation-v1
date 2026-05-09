@@ -75,6 +75,65 @@ No other integrity issues found. The 8 round-1 edits + 1 integrity-check edit ar
 
 ---
 
-## Round 2 — pending operator paste
+## Round 2 — 2026-05-09T08-50-00Z
 
-(Operator: copy the updated spec into ChatGPT-web, paste the response back to begin Round 2; or say "done" to finalise.)
+### ChatGPT Feedback (raw)
+
+> Round 2 is much cleaner. I'm doing a regression pass now: checking whether the fixes introduced any new contradictions or implementation traps, rather than re-litigating accepted design choices.
+>
+> Round 2 is close, but I would do one more small patch before finalising. The Round 1 blockers are materially fixed: deferred FK pattern is now explicit, author columns are split, manually_marked_sent resolves the sent ⇒ message_id invariant, and deletion/redaction is now v1 scope.
+>
+> **Findings:**
+> F1 — Poll-based deletion proof is unsafe as written. Tighten to strict full-reconciliation precondition (high severity).
+> F2 — `support.propose_reply` retry classification still uses stale "unsafe" wording; fix §14.2 row.
+> F3 — Same-run supersession transaction order needs to be explicit (UPDATE then INSERT, otherwise partial UNIQUE will fire).
+> P1 — File inventory should list tombstone/redaction pure helpers or fold them into existing helpers.
+> P2 — `support.tickets.read` is described as "not a new key" but listed under Permission keys; move to Access Controls.
+> P3 — Capability matrix `?` rows acceptable except OQ-2-gated; clarify so future reviewer doesn't block on every `?`.
+>
+> Verdict: Apply F1-F3, then finalise. No need for a major Round 3.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| F1 deletion-by-poll precondition unsafe (incremental polls infer absence as deletion) | technical-escalated | apply (full-reconciliation precondition) | user-approved apply (as recommended) | high | Data correctness. False tombstones would hide live tickets from agent queue. Tighten §5.1 to require explicit full-reconciliation pass + no poll-page-failed + no rate-limit-truncation + provider endpoint with absence=deletion semantics. Incremental polls explicitly forbidden from setting `provider_deleted`. |
+| F2 §14.2 stale wording for `support.propose_reply` ("unsafe") | technical | apply | auto (apply) | medium | Internal contradiction with §14.1 + §5.5 (now state-based, not unsafe). Update row to "guarded / state-based" with same-run supersede-then-insert semantics. |
+| F3 Same-run supersession transaction order needs explicit pin | technical | apply | auto (apply) | medium | Implementation correctness. Within-tx order is load-bearing under partial UNIQUE: must UPDATE existing matches to `superseded` first, then INSERT new draft. Rollback preserves prior draft on insert failure. Inserting before superseding is forbidden. |
+| P1 §18 test inventory missing tombstone/redaction coverage | technical | apply | auto (apply) | low | File-inventory drift. Fold deletion + redaction read-filter cases + deletion-by-poll precondition tests into `supportTicketServicePure.test.ts`; same for back-link match logic into `supportDraftReconciliation.test.ts`. |
+| P2 `support.tickets.read` listed under Permission keys but isn't one | technical | apply | auto (apply) | low | Naming clarity. Rename §18 subsection to "Access controls"; explicitly state "no support.tickets.read permission key — read-pathway authorisation is implicit in org membership + sub-account scoping". |
+| P3 Capability matrix `?` rows should not block spec acceptance except for OQ-2 | technical | apply | auto (apply) | low | Reviewer guidance. §17.2 now states that `?` rows are acceptable at acceptance time, with OQ-3 (idempotency) + OQ-4 (attachment auth) gated to Phase 2 chunk C7. Only OQ-2 (status inventory) blocks acceptance per §22. |
+
+### Integrity check (per playbook step 4a)
+
+Ran one pass over the spec for forward references, contradictions, and missing inputs/outputs introduced by this round's edits.
+
+- §5.1 deletion-by-poll precondition references `support.provider.poll_page_failed` and `support.provider.rate_limited` — both already present in §15. ✓
+- §14.2 row update aligns with §14.1 propose_reply posture. ✓
+- §5.5 same-run supersession order paragraph aligns with §14.1 and §3 phase plan C4 ("soft-uniqueness guard partial UNIQUE"). ✓
+- §18 access-controls rename consistent with §12 ("Read access does not require a permission key") added by spec-reviewer iteration. ✓
+- §18 test inventory expansion lists `deletion-by-poll precondition tests` matching §5.1 precondition + §17.1 acceptance bar tombstone test. ✓
+- §17.2 `?`-row clarification aligns with §22 OQ enumeration. ✓
+
+No new integrity issues introduced. Round 2 edits are internally consistent.
+
+### Applied (auto-applied technical + user-approved + integrity)
+
+- [user] F1 deletion-by-poll precondition tightened — incremental polls forbidden from setting `provider_deleted`; full-reconciliation pass required with explicit conditions enumerated.
+- [auto] F2 §14.2 propose_reply row corrected to "guarded / state-based".
+- [auto] F3 §5.5 same-run supersession transaction order pinned (UPDATE-then-INSERT).
+- [auto] P1 §18 test inventory expanded with deletion + redaction + back-link cases folded into existing pure test files.
+- [auto] P2 §18 "Permission keys" subsection renamed "Access controls"; `support.tickets.read` removed from key list with explicit explanation.
+- [auto] P3 §17.2 capability-matrix `?`-row clarification added.
+
+### Top themes
+
+- **Implementation-trap detection.** Round 2 was a regression-pass, not a fresh-eyes review. The findings were all about whether Round 1's fixes introduced new contradictions or builder hazards. None broke design — all were tightenings.
+- **Constraint-driven implementation order matters.** Partial UNIQUE indexes are load-bearing during multi-row updates; the spec should pin the within-transaction order so a builder doesn't trip the constraint mid-flight.
+- **Polling semantics ≠ provider semantics.** Inferring deletion from absence is a recurring mistake when the polling cursor / pagination / rate-limiting can hide live entities. Tombstoning requires either a webhook-confirmed deletion event or a strict full-reconciliation precondition.
+
+---
+
+## Round 3 — pending operator paste
+
+(Operator: copy the updated spec into ChatGPT-web for one more pass, paste the response; or say "done" to finalise.)
