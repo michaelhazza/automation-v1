@@ -3514,7 +3514,7 @@ Five tenant-isolated tables (all carry `organisation_id` + RLS):
 - `canonical_support_agents` — helpdesk agent identity; `external_id`, `display_name`, `email`, `is_active`. Read-only mirror; no write-back to provider.
 - `canonical_tickets` — core support ticket; FK to `canonical_inboxes` + nullable FK to `canonical_support_agents` (assignee); columns: `status` (open/pending/solved/closed/spam/quarantine), `priority`, `subject`, `customer_email`, `tags` (text[]), `provider_deleted`, `sla_breach_at`. `status='quarantine'` is a fail-closed sentinel for unknown provider statuses.
 - `canonical_ticket_messages` — messages and internal notes on a ticket. **Polymorphic-FK split:** `author_type IN ('customer','agent','bot','system')` discriminator + `author_contact_id` (→ `canonical_contacts`) + `author_support_agent_id` (→ `canonical_support_agents`) + CHECK constraint. `source_draft_id` UUID column (no inline FK in migration 0310; FK + partial index added in migration 0311 after the drafts table exists — deferred-FK pattern).
-- `canonical_ticket_drafts` — AI-proposed replies; status state machine `draft → awaiting_review → dispatching → dispatched | rejected | manual_resolved`; `dispatch_action_id` FK to `actions`.
+- `canonical_ticket_drafts` — AI-proposed replies; status state machine: `draft | awaiting_review → dispatching → sent | needs_reconciliation | failed`; also `rejected`, `expired`, `superseded` (pre-dispatch exits); `manually_marked_sent` (operator override from `needs_reconciliation`). `dispatch_action_id` FK to `actions`.
 
 ### Identity model
 
@@ -3534,7 +3534,7 @@ All provider-write operations go through `server/services/supportDraftDispatchSe
 
 1. **Preflight** — verify draft is in `awaiting_review`; check collision (same ticket, another draft already `dispatching`).
 2. **Durable gate** — `UPDATE canonical_ticket_drafts SET status='dispatching' WHERE id=? AND status IN ('draft','awaiting_review')`. This single atomic write is the point-of-no-return. Any crash after this is handled by the reconciliation worker.
-3. **Adapter call** — provider write (Teamwork reply creation). On success: `status='dispatched'`. On failure: worker reconciles.
+3. **Adapter call** — provider write (Teamwork reply creation). On success: `status='sent'`. On non-retryable failure: `status='failed'`. On retryable/uncertain failure: `status='needs_reconciliation'` and the `support-draft-reconciliation` pg-boss queue is signalled. A crash between phase 2 and 3 is recovered at boot: `supportDispatchBootRecovery.ts` transitions any `dispatching` row older than 60 s to `needs_reconciliation` and enqueues reconciliation.
 
 This three-phase pattern prevents duplicate customer-visible replies regardless of crash, retry, or concurrent approval attempts.
 
