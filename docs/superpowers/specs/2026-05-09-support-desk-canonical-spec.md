@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-09
-**Last updated:** 2026-05-09 (post spec-reviewer Codex 5/5 — READY_FOR_BUILD; chatgpt-spec-review in flight)
+**Last updated:** 2026-05-09 (post chatgpt-spec-review Round 1 — 8 findings closed: 4 high-severity blockers fixed [source_draft_id FK migration order, split author_id columns, manually_marked_sent state, deletion/redaction tombstone semantics], 1 user-facing rename ["Mark provider send as verified"], 3 medium-severity tightenings [propose_reply soft-uniqueness, OQ-2 strengthen, acceptance-bar verification methods])
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)
@@ -123,8 +123,8 @@ The PR is broken into ordered build chunks for the implementer (`feature-coordin
 |---|---|---|
 | C1 | Schema + RLS for `canonical_inboxes` and `canonical_support_agents` (the dimensional tables tickets and drafts depend on) | migration `0307`, `0308`; schema files; `rlsProtectedTables.ts` manifest; basic Drizzle types |
 | C2 | Schema + RLS for `canonical_tickets` | migration `0309`; schema file; manifest update; canonical status enum (TypeScript union) |
-| C3 | Schema + RLS for `canonical_ticket_messages` | migration `0310`; schema file; manifest update; thread-ordering index |
-| C4 | Schema + RLS for `canonical_ticket_drafts` (state machine, idempotency-key column, reconciliation bookkeeping) | migration `0311`; schema file; manifest update; UNIQUE constraint on `action_idempotency_key`; partial index on draft `status` for the review queue |
+| C3 | Schema + RLS for `canonical_ticket_messages` | migration `0310`; schema file; manifest update; thread-ordering index. **`source_draft_id` is created as a plain nullable UUID without FK** because `canonical_ticket_drafts` does not exist yet; the FK + partial index are added in C4 / 0311. |
+| C4 | Schema + RLS for `canonical_ticket_drafts` (state machine, idempotency-key column, reconciliation bookkeeping) + add deferred FK from `canonical_ticket_messages.source_draft_id` to `canonical_ticket_drafts.id` | migration `0311`; schema file; manifest update; UNIQUE constraint on `action_idempotency_key`; partial index on draft `status` for the review queue; soft-uniqueness guard partial UNIQUE on `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility)` per §14.1; **ALTER TABLE on `canonical_ticket_messages` to add the deferred FK + partial index `(organisation_id, source_draft_id) WHERE source_draft_id IS NOT NULL`**. |
 | C5 | Adapter contract extensions (interface only — `addInternalNote`, `resolveAttachment`, `ingestion` for support entities, broadened `getTicket`) | `server/adapters/integrationAdapter.ts`; new canonical types (`CanonicalTicketData`, `CanonicalTicketMessageData`, `CanonicalSupportAgentData`, `CanonicalInboxData`); webhook entity-type extension if needed |
 | C6 | Teamwork adapter — ingestion implementation (`listInboxes`, `listSupportAgents`, `fetchTickets`, `fetchTicketMessages`, status-mapping fail-closed) | `server/adapters/teamworkAdapter.ts`; pure status-mapping module + tests; webhook event-type extension (`ticket.assigned`, `ticket.status_changed`); fixture-based unit tests for the mapping table |
 | C7 | Teamwork adapter — `addInternalNote` + `resolveAttachment` + idempotency-key plumbing for `addReply` and `addInternalNote` | `server/adapters/teamworkAdapter.ts`; new `action_attempts` ledger if §14.1 lands native-idempotency-not-supported |
@@ -230,7 +230,7 @@ Migration: `0309_canonical_tickets.sql`. Schema: `server/db/schema/canonicalTick
 
 **Collision-avoidance primitives** (brief §6.1)
 
-- `last_human_activity_at` — timestamp of the most recent message or status change attributable to a human helpdesk agent. Updated by ingestion when a `canonical_ticket_messages` row with `author_type='agent'` AND `author_id` references a `canonical_support_agents` with `agent_kind='human'` lands, OR when a status change is observed without a corresponding bot draft transition.
+- `last_human_activity_at` — timestamp of the most recent message or status change attributable to a human helpdesk agent. Updated by ingestion when a `canonical_ticket_messages` row with `author_type='agent'` AND `author_support_agent_id` references a `canonical_support_agents` with `agent_kind='human'` lands, OR when a status change is observed without a corresponding bot draft transition.
 - `last_bot_activity_at` — timestamp of the most recent action attributable to our Support Agent (bot draft `sent` transition, bot status change, etc.).
 - `bot_claimed_at`, `bot_claimed_by_run_id` — set when our agent claims the ticket (typically when it begins drafting), cleared when it releases (sent or rejected).
 
@@ -243,6 +243,25 @@ The collision-window policy that consumes these primitives lives in `canonical_i
 **SLA tracking**
 
 - `sla_due_at` (nullable), `sla_breached` boolean (default false), `sla_policy_external_id` text (nullable). v1 reads these fields from the provider where exposed; we do NOT model an SLA-policy table.
+
+**Tombstone (provider-side deletion, brief §12)**
+
+Teamwork's existing `mapTeamworkEventType` already normalises `ticket.deleted` events, so deletion handling cannot be deferred to a future spec amendment — it is in scope for v1.
+
+- `provider_deleted` boolean NOT NULL DEFAULT false — set true when a provider deletion event is observed (webhook `ticket.deleted`) or when a poll cycle proves a previously-known ticket is no longer returned by the provider.
+- `deleted_at_external` timestamp with timezone, nullable — provider's deletion timestamp where exposed; otherwise NULL.
+- `deleted_at_canonical` timestamp with timezone, nullable — the canonical layer's first observation of the deletion.
+- `deletion_source` text — closed enum: `provider_webhook | provider_poll_observation | manual_admin`. NULL when `provider_deleted=false`.
+
+Read-filter rules — every read path applies these consistently:
+
+| Audience | Reads `provider_deleted=true` rows? |
+|---|---|
+| Agent prompt + `support.read_thread` + `support.list_open_tickets` | **No** — filtered out at the service-layer boundary |
+| Human ticket UI list + detail | yes, with a tombstone treatment ("Deleted in provider · {date}") and confirmed-message visibility hidden behind a "show archived content" toggle |
+| Audit / replay | yes, with explicit deletion-source label |
+
+Restoring a previously-deleted ticket (provider re-creates a ticket with the same external ID after deletion — rare but possible on some providers) clears `provider_deleted` + tombstone columns and re-enables agent visibility. Logged via `support.ticket.restored_after_deletion` (§15).
 
 **Provider catchall**
 
@@ -309,12 +328,39 @@ Migration: `0310_canonical_ticket_messages.sql`. Schema: `server/db/schema/canon
 - `direction` text — closed enum: `inbound | outbound | internal_note`.
 - `visibility` text — closed enum: `public | internal`.
 - `author_type` text — closed enum: `customer | agent | bot | system`.
-- `author_id` UUID, nullable. References `canonical_contacts.id` if `author_type='customer'`, `canonical_support_agents.id` if `author_type IN ('agent','bot')`. NULL for `system`.
+- `author_contact_id` UUID, nullable. FK → `canonical_contacts.id`. Set when `author_type='customer'` and a deterministic contact match exists (per §11.6 resolution); NULL otherwise.
+- `author_support_agent_id` UUID, nullable. FK → `canonical_support_agents.id`. Set when `author_type IN ('agent','bot')`; NULL otherwise.
+- CHECK constraint enforces exactly the right column is populated per `author_type`:
+  - `author_type='customer'` → `author_support_agent_id IS NULL` (`author_contact_id` may be NULL when no canonical-contact match resolves; the customer is still identified by `customer_email` on the parent ticket).
+  - `author_type IN ('agent','bot')` → `author_contact_id IS NULL` AND `author_support_agent_id IS NOT NULL`.
+  - `author_type='system'` → both columns NULL.
+
+The split replaces a single polymorphic `author_id` because a single Postgres column cannot have conditional FKs to two different parent tables. This shape preserves the brief §5.9 denormalisation invariant (no FK joins back to the parent ticket for RLS) while giving the read layer a clean join target per author type.
 
 **Content**
 
 - `body_text` text NOT NULL, `body_html` text (nullable; falls back to text if not provided).
 - `attachments` JSONB array — `[{filename, provider_url, mime_type, size, external_id}]`. URLs may be auth-scoped + short-lived; the adapter `resolveAttachment` method (§6) is the on-demand refresh path. v1 does not mirror to object storage.
+
+**Redaction (provider-side message-level redaction, brief §12)**
+
+Some providers expose message-level redaction (the message remains in the thread but its content is removed for compliance / privacy). v1 supports the read-side handling because Teamwork's existing event normalisation may surface redaction events even though `mapTeamworkEventType` does not yet recognise them (§22 OQ-5 closed by this section).
+
+- `redacted` boolean NOT NULL DEFAULT false — set true when the provider notifies the layer that the content has been redacted.
+- `redacted_at_external` timestamp with timezone, nullable.
+- `redacted_at_canonical` timestamp with timezone, nullable.
+- When `redacted=true`, the upsert path **must null out the content**: `body_text='[redacted]'`, `body_html=NULL`, `attachments='[]'`. The metadata fields (timestamps, author, direction, visibility, source_draft_id) are preserved so the thread structure remains intact.
+- `external_metadata.redaction_reason` (optional) carries the provider-supplied reason where exposed.
+
+Read-filter rules:
+
+| Audience | Sees redacted message metadata? | Sees redacted content? |
+|---|---|---|
+| Agent prompt + `support.read_thread` | yes (the message exists with author/timestamp/direction) | no — `body_text='[redacted]'` is what the agent sees |
+| Human ticket UI | yes | shows tombstone "[content redacted on {date}]" |
+| Audit / replay | yes | shows `'[redacted]'` only — the original content is not retained anywhere in canonical (it was overwritten on redact) |
+
+Per brief §12, the canonical layer does NOT silently retain content the provider has removed. The redact-overwrite happens in the same transaction as the redaction-event ingestion.
 
 **Timestamps**
 
@@ -323,7 +369,8 @@ Migration: `0310_canonical_ticket_messages.sql`. Schema: `server/db/schema/canon
 
 **Provenance link**
 
-- `source_draft_id` UUID FK to `canonical_ticket_drafts.id`, nullable. Links a confirmed bot message back to its originating draft. NULL for inbound + human-authored messages.
+- `source_draft_id` UUID, nullable. Links a confirmed bot message back to its originating draft.
+- **Migration sequencing.** The column is created in C3 / migration 0310 as a plain nullable UUID **without** an FK constraint, because `canonical_ticket_drafts` does not exist yet at that point. The FK constraint (`FOREIGN KEY (source_draft_id) REFERENCES canonical_ticket_drafts(id)`) is added in C4 / migration 0311 via `ALTER TABLE` after the drafts table lands. The C4 migration also adds the partial index `(organisation_id, source_draft_id) WHERE source_draft_id IS NOT NULL`. NULL for inbound + human-authored messages, and for any pre-C4 row (no such rows exist in production at v1 ship time, but the migration is safe regardless).
 
 **Provider catchall**
 
@@ -331,9 +378,9 @@ Migration: `0310_canonical_ticket_messages.sql`. Schema: `server/db/schema/canon
 
 **Indexes**
 
-- `(connector_config_id, ticket_external_id, external_id)` UNIQUE.
-- `(organisation_id, ticket_id, created_at_external, id)` — supports ordered thread reads with deterministic tiebreaker (§5.2.A).
-- `(organisation_id, source_draft_id)` WHERE `source_draft_id IS NOT NULL` — supports the draft → confirmed-message reverse lookup.
+- `(connector_config_id, ticket_external_id, external_id)` UNIQUE — added in C3 / 0310.
+- `(organisation_id, ticket_id, created_at_external, id)` — supports ordered thread reads with deterministic tiebreaker (§5.2.A). Added in C3 / 0310.
+- `(organisation_id, source_draft_id)` WHERE `source_draft_id IS NOT NULL` — supports the draft → confirmed-message reverse lookup. **Added in C4 / 0311** alongside the `source_draft_id` FK constraint, because the FK + partial index are only meaningful once `canonical_ticket_drafts` exists.
 
 **RLS**
 
@@ -349,13 +396,15 @@ The `support.read_thread` skill orders by `(created_at_external ASC, id ASC)`. T
 
 Three audience tiers; read paths and what they see:
 
-| Audience | Reads from | Sees `dispatching` drafts? | Sees `needs_reconciliation` drafts? |
-|---|---|---|---|
-| Agent prompt + `support.read_thread` | `canonical_ticket_messages` only | **No** (hard boundary, enforced in service layer) | **No** |
-| Human ticket UI | `canonical_ticket_messages` + `canonical_ticket_drafts` overlay (visually distinct) | yes (labelled "pending send") | yes (labelled "reconciling") |
-| Audit / replay | both, with explicit labels | yes | yes |
+| Audience | Reads from | Sees `dispatching` drafts? | Sees `needs_reconciliation` drafts? | Sees `provider_deleted` tickets? | Sees `redacted` message content? |
+|---|---|---|---|---|---|
+| Agent prompt + `support.read_thread` | `canonical_ticket_messages` only | **No** (hard boundary, enforced in service layer) | **No** | **No** (filtered at service-layer boundary) | message metadata only — content is `'[redacted]'` |
+| Human ticket UI | `canonical_ticket_messages` + `canonical_ticket_drafts` overlay (visually distinct) | yes (labelled "pending send") | yes (labelled "reconciling") | yes — tombstoned with "Deleted in provider · {date}" + "show archived content" toggle | yes — tombstoned with "[content redacted on {date}]" |
+| Audit / replay | both, with explicit labels | yes | yes | yes — labelled with `deletion_source` | yes — content is `'[redacted]'` (original was overwritten on redact, never retained) |
 
-The agent-thread skill is the boundary that must enforce the separation. Phase 2 names a single read function (`supportTicketService.readThreadForAgent(ticketId, principalCtx)`) as the only path for agent prompt assembly. The separate human-UI read uses `supportTicketService.readThreadForHumanUi()` which composes the confirmed thread with a draft overlay.
+The agent-thread skill is the boundary that must enforce the separation. Phase 2 names a single read function (`supportTicketService.readThreadForAgent(ticketId, principalCtx)`) as the only path for agent prompt assembly. The separate human-UI read uses `supportTicketService.readThreadForHumanUi()` which composes the confirmed thread with a draft overlay. Both functions apply the `provider_deleted` and `redacted` filters per the table above.
+
+`support.list_open_tickets` similarly filters `provider_deleted=true` rows out at the service-layer boundary; the agent never sees a deleted ticket.
 
 ### 5.3 `canonical_inboxes`
 
@@ -473,9 +522,11 @@ Migration: `0311_canonical_ticket_drafts.sql`. Schema: `server/db/schema/canonic
 
 `status` text — closed enum:
 
-`draft | awaiting_review | dispatching | needs_reconciliation | sent | rejected | failed | expired | superseded`
+`draft | awaiting_review | dispatching | needs_reconciliation | manually_marked_sent | sent | rejected | failed | expired | superseded`
 
 There is intentionally no durable `approved` resting state. Approval is the trigger that transitions `awaiting_review → dispatching` (or `draft → dispatching` for autonomous mode). See §8 for the full transition diagram.
+
+`manually_marked_sent` is a **non-terminal** state introduced for the manual-resolution surface in §8.5. It represents "operator confirmed the provider accepted this send, but no provider message has been observed in canonical yet." The state resolves to terminal `sent` automatically when ingestion subsequently lands the provider's confirmed message and the §8.5 back-link routine sets `sent_message_id`. **Invariant: `sent` always has `sent_message_id IS NOT NULL`.** `manually_marked_sent` always has `sent_message_id IS NULL`.
 
 **Three-phase dispatch columns** (brief §5.8 + §5.7)
 
@@ -507,9 +558,10 @@ There is intentionally no durable `approved` resting state. Approval is the trig
 **Indexes**
 
 - `(organisation_id, ticket_id, status)` — supports per-ticket draft overlay for human UI.
-- `(organisation_id, status, created_at)` partial WHERE `status IN ('awaiting_review','needs_reconciliation')` — supports the review queue + reconciliation queue.
+- `(organisation_id, status, created_at)` partial WHERE `status IN ('awaiting_review','needs_reconciliation','manually_marked_sent')` — supports the review queue + reconciliation queue + manually-marked-sent back-link queue.
 - `(connector_config_id, action_idempotency_key)` UNIQUE WHERE `action_idempotency_key IS NOT NULL`.
 - `(organisation_id, expires_at)` WHERE `status IN ('draft','awaiting_review')` — supports the queue-expiry sweeper.
+- **Soft-uniqueness guard for `support.propose_reply` retry-noise** (per §14.1): UNIQUE partial index `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility) WHERE status IN ('draft','awaiting_review')`. This converts a same-run double-proposal from "two queue rows the operator must reconcile" into a deterministic conflict at the insert boundary, which the dispatch service handles by **explicit supersession at insert time** — the new draft writes; the prior pre-dispatch draft for the same `(ticket_id, agent_run_id, visibility)` transitions to `superseded` in the same transaction. This bounds review-queue noise from agent retries while preserving the user-visible duplicate-draft path for cross-run double-proposals.
 
 **RLS**
 
@@ -821,13 +873,23 @@ This section operationalises brief §5.7 + §5.8. The dispatch path is the most 
                          │ reconciler proves provider accepted
                          │
                          ▼
-                  ┌──────────────┐  reconciler proves provider accepted
+                  ┌──────────────┐  reconciler proves provider accepted (back-link sets sent_message_id)
                   │              │ ────────────────► sent
                   │ needs_       │  reconciler proves provider rejected
                   │ reconciliation│ ────────────────► failed
                   │              │  reconciler exhausts budget (still ambiguous)
                   │              │ ────────────────► (surface to manual review; no auto-transition)
+                  │              │  operator confirms send via §8.5 manual surface
+                  │              │ ────────────────► manually_marked_sent
                   └──────────────┘
+
+                  ┌──────────────────────┐  later ingestion lands the provider message
+                  │                      │  AND back-link routine sets sent_message_id
+                  │ manually_marked_sent │ ────────────────────────────────────────────► sent
+                  │ (non-terminal)       │                                                 (terminal — sent_message_id NOT NULL)
+                  │                      │  no provider message ever lands
+                  │                      │ ────────────────────────────────► (stays in manually_marked_sent indefinitely; operator's confirmed answer)
+                  └──────────────────────┘
 
        superseded — written when a newer draft for the same ticket replaces this one. Transition: `draft | awaiting_review → superseded` only — and only when the agent (or a follow-up agent run) writes a fresh draft over an existing pre-dispatch draft for the same ticket. The supersede write is a single-statement update guarded by `WHERE status IN ('draft','awaiting_review')` so a draft already in `dispatching` or beyond cannot be superseded out from under the dispatch path. `superseded` is terminal — once a draft is in this state no further transitions occur.
 ```
@@ -836,9 +898,13 @@ Forbidden transitions:
 - `dispatching → expired` — never. `dispatching` does not silently expire (brief §5.8).
 - `dispatching → failed` directly on timeout — never. Timeout routes through `needs_reconciliation` first.
 - `needs_reconciliation → expired` — never. Same reason.
-- `dispatching | needs_reconciliation | sent | failed | rejected | expired → superseded` — never. Supersede only applies to pre-dispatch states (`draft`, `awaiting_review`).
+- `manually_marked_sent → expired | failed | rejected` — never. Manual confirmation is the operator's terminal answer on the dispatch decision; it can only resolve to `sent` (via back-link) or remain in `manually_marked_sent` indefinitely.
+- `dispatching | needs_reconciliation | manually_marked_sent | sent | failed | rejected | expired → superseded` — never. Supersede only applies to pre-dispatch states (`draft`, `awaiting_review`).
+- `sent → manually_marked_sent` — never. The transition runs the other direction.
 - Any transition out of `sent`, `failed`, `rejected`, `expired`, or `superseded` — terminal.
 - `unknown_provider_status` ticket → any draft transition — preflight refuses (§8.1).
+
+`manually_marked_sent` is **non-terminal** — it can transition to `sent` when the back-link routine succeeds. The post-terminal prohibition therefore does NOT apply to `manually_marked_sent` rows.
 
 The transition guard is a pure function in `server/services/supportDraftDispatchServicePure.ts` with a fixture matrix asserting every valid + every forbidden transition, including the post-terminal prohibition (Section 10.4 of the spec authoring checklist).
 
@@ -926,19 +992,19 @@ The reconciler reads provider state with the same connection token + `getOrgScop
 
 Drafts whose reconciliation budget is exhausted appear in the draft review queue (existing prototype `prototypes/support-desk-canonical/draft-review.html`) with a distinct visual treatment. Brief §5.12 + §6.5 + §10 #3.
 
-The surface offers three operator actions:
+The surface offers three operator actions. **UI labels matter** — they communicate to the operator that they are confirming provider state, not synthesising canonical state:
 
-- **Mark sent** — operator confirms the provider accepted it (because they checked Teamwork directly and saw the message). Transitions draft to terminal `sent`. **Does NOT insert a row into `canonical_ticket_messages`** — the provider-confirmed message ledger only accepts rows that carry the provider's message ID (§5.2 `external_id` NOT NULL invariant), and the operator does not have one to provide. The confirmed message will land via webhook or the next poll cycle. Once `sent` is written, the draft is terminal and the `support.draft.sent` event has fired (§14.4); the post-terminal prohibition applies. Audit-event written.
-- **Mark failed** — operator confirms the provider rejected it. Transitions to `failed`. No canonical message inserted. Audit-event written.
-- **Retry reconciliation** — resets the budget and re-enqueues. Useful when the operator suspects a transient provider issue has resolved.
+- **"Mark provider send as verified"** (button label) — operator has checked Teamwork directly and confirmed the message landed. Transitions draft to **`manually_marked_sent`** (non-terminal — see §5.5 + §14.7). **Does NOT insert a row into `canonical_ticket_messages`** — the provider-confirmed message ledger only accepts rows that carry the provider's message ID (§5.2 `external_id` NOT NULL invariant). The confirmed message will land via webhook or the next poll cycle, at which point the §8.5 back-link routine sets `sent_message_id` and the draft transitions to terminal `sent`. Emits `support.draft.manually_marked_sent` (§14.4) for operator/audit visibility — distinct from the `support.draft.sent` terminal event, which fires only when `sent_message_id IS NOT NULL`. Audit-event written to `auditEvents` recording the operator's manual confirmation.
+- **"Mark as failed in provider"** — operator has checked Teamwork directly and confirmed the provider rejected the send (or never received it and is not going to). Transitions to terminal `failed`. No canonical message inserted. Emits `support.draft.failed`. Audit-event written.
+- **"Retry reconciliation"** — resets the reconciliation budget and re-enqueues the draft for the §8.4 worker. Useful when the operator suspects a transient provider issue has resolved. The `action_idempotency_key` is reused, so the retry is safe.
 
-**Late linking of the provider-confirmed message after Mark sent.** When ingestion subsequently lands the provider's confirmed message via webhook or poll, the message-upsert path (§7 convergence) runs a "back-link" check after a successful insert/update: for every newly-landed `canonical_ticket_messages` row with `direction IN ('outbound', 'internal_note')` and `source_draft_id IS NULL`, look up drafts on the same ticket in terminal `sent` state with `sent_message_id IS NULL` whose `proposed_visibility` matches the message direction (public reply ↔ outbound, internal note ↔ internal_note). Then attempt a body + timestamp match (same proposed_body_text and the message's `created_at_external` near `dispatching_started_at`). If a unique match is found, set `source_draft_id` on the message row and `sent_message_id` on the draft in the same transaction. **This back-link is bookkeeping only; no draft state transition occurs and no new dispatch event is emitted.** Match logic and disambiguation rules are colocated in `supportDraftReconciliationPure.ts` (the same module that drives §8.4) and pure-tested across both reply and internal-note paths. The back-link routine is the third allowed writer of `source_draft_id` per §11.4 — alongside the dispatch service (sync-confirm) and the reconciliation worker (`needs_reconciliation` resolution) — and the bounded writer set means raw ingestion still never sets the column on its own.
+**Late linking of the provider-confirmed message after manual confirmation.** When ingestion subsequently lands the provider's confirmed message via webhook or poll, the message-upsert path (§7 convergence) runs a "back-link" check after a successful insert/update: for every newly-landed `canonical_ticket_messages` row with `direction IN ('outbound', 'internal_note')` and `source_draft_id IS NULL`, look up drafts on the same ticket in `manually_marked_sent` state (or in terminal `sent` with `sent_message_id IS NULL`, for any pre-`manually_marked_sent` rows that may exist) whose `proposed_visibility` matches the message direction (public reply ↔ outbound, internal note ↔ internal_note). Then attempt a body + timestamp match (same proposed_body_text and the message's `created_at_external` near `dispatching_started_at`). If a unique match is found, set `source_draft_id` on the message row, set `sent_message_id` on the draft, **and transition the draft from `manually_marked_sent` to terminal `sent`** — all in the same transaction. The terminal `support.draft.sent` event fires at this point with the now-non-null `message_id`, satisfying the §14.4 contract. Match logic and disambiguation rules are colocated in `supportDraftReconciliationPure.ts` (the same module that drives §8.4) and pure-tested across both reply and internal-note paths. The back-link routine is the third allowed writer of `source_draft_id` per §11.4 — alongside the dispatch service (sync-confirm) and the reconciliation worker (`needs_reconciliation` resolution) — and the bounded writer set means raw ingestion still never sets the column on its own.
 
-If the provider ultimately did not accept the message (no provider message ever lands), the draft stays in `sent` per the operator's manual confirmation. There is no automatic switch back to `failed` after Mark sent — Mark sent is the operator's confirmed terminal answer. The operator is responsible for choosing Mark sent vs Mark failed correctly when they exhaust reconciliation; the surface is built specifically so they verify provider state in the helpdesk UI before deciding.
+If the provider ultimately did not accept the message (no provider message ever lands), the draft stays in `manually_marked_sent` indefinitely. There is no automatic switch back to `failed` after the manual confirmation — the operator's confirmation is their answer for the dispatch decision. The operator is responsible for choosing "Mark provider send as verified" vs "Mark as failed in provider" correctly when they exhaust reconciliation; the surface is built specifically so they verify provider state in the helpdesk UI before deciding.
 
-This surface never causes a duplicate reply: phase 3 already used `action_idempotency_key`, so a future webhook for the same send finds the row dedupe-collapsed by the UNIQUE index. Operator-triggered Retry reconciliation reuses the same key.
+This surface never causes a duplicate reply: phase 3 already used `action_idempotency_key`, so a future webhook for the same send finds the row dedupe-collapsed by the UNIQUE index. Operator-triggered "Retry reconciliation" reuses the same key.
 
-**Why Mark sent is fire-and-forget on the message side.** The alternative — capturing a synthetic provider message ID at Mark-sent time — would either fabricate an ID (violates §5.2 provider-confirmed-only invariant) or require the operator to copy the ID from the provider UI (high error rate for an action the operator only takes when reconciliation has already failed). The cleaner contract is: Mark sent transitions the draft only; the canonical message ledger is populated by ingestion plus the back-link pass above, exactly the path every other confirmed message takes.
+**Why the surface keeps `manually_marked_sent` non-terminal.** The alternative — capturing a synthetic provider message ID at manual-confirmation time, or transitioning straight to terminal `sent` with `sent_message_id IS NULL` — would either fabricate an ID (violates §5.2 provider-confirmed-only invariant) or break the `sent ⇒ sent_message_id IS NOT NULL` invariant (which the §14.4 `support.draft.sent` event contract depends on for its `message_id` field). The current shape preserves both invariants: `manually_marked_sent` is the operator's confirmed answer on the dispatch decision; `sent` always has a confirmed canonical message linked back; the `support.draft.sent` event always has a non-null `message_id`.
 
 ### 8.6 Manual collision override (brief §5.4)
 
@@ -1017,7 +1083,8 @@ Quarantined tickets (`unknown_provider_status`) are always a distinct filter and
 ### Draft review queue — surfacing rules
 
 - `awaiting_review` — the standard queue. Approve / Edit / Reject visible.
-- `needs_reconciliation` — same list, distinct visual treatment ("Reconciling" badge + reconciliation status + last-reconciliation timestamp). Approve / Reject NOT visible (the dispatch is in flight); only "Mark sent / Mark failed / Retry reconciliation" visible per §8.5.
+- `needs_reconciliation` — same list, distinct visual treatment ("Reconciling" badge + reconciliation status + last-reconciliation timestamp). Approve / Reject NOT visible (the dispatch is in flight); only "Mark provider send as verified" / "Mark as failed in provider" / "Retry reconciliation" visible per §8.5.
+- `manually_marked_sent` — surfaced separately with a "Verified by operator, awaiting back-link" label until the back-link routine resolves to terminal `sent`. Operator can re-open the ticket in Teamwork to confirm; no further actions visible (the operator already made their decision).
 - Drafts in `dispatching` for less than 30 seconds are NOT shown (avoids flashing). Once they cross the threshold without resolving, they appear under the same `needs_reconciliation` treatment with a "still dispatching…" sub-label.
 
 ### Operational state surfaces (brief §5.12)
@@ -1053,7 +1120,7 @@ Phase 2 build retains these properties. The provenance block on the draft review
 
 - Tickets list, ticket detail, draft review queue: gated by org membership + sub-account scope. Read access does not require a permission key.
 - Approve / Reject / Edit on the draft review queue: requires `support.draft.approve` / `support.draft.reject`.
-- Manual-resolve actions on `needs_reconciliation` drafts: Mark sent and Retry reconciliation require `support.draft.approve`; Mark failed requires `support.draft.reject` (per §9).
+- Manual-resolve actions on `needs_reconciliation` drafts: "Mark provider send as verified" and "Retry reconciliation" require `support.draft.approve`; "Mark as failed in provider" requires `support.draft.reject` (per §9).
 - Override-collision: requires `support.draft.override_collision`. Visually hidden (NOT disabled) for users without it (per `docs/frontend-design-principles.md` § Admin-only controls).
 - Inbox config edit: requires `support.inbox.configure`. Read-only for everyone else.
 
@@ -1361,7 +1428,7 @@ Per spec-authoring-checklist §10. The dispatch path is the highest-stakes write
 | `canonical_tickets` upsert from ingestion | **key-based** | UNIQUE index on `(connector_config_id, external_id)`. Re-ingestion is a deterministic update. |
 | `canonical_ticket_messages` upsert from ingestion | **key-based** | UNIQUE index on `(connector_config_id, ticket_external_id, external_id)`. |
 | `canonical_inboxes` / `canonical_support_agents` upsert from ingestion | **key-based** | UNIQUE index on `(connector_config_id, external_id)` per table. |
-| `canonical_ticket_drafts` insert (skill `support.propose_reply`) | **non-idempotent (intentional)** — but bounded | A double agent invocation of `support.propose_reply` for the same `(ticket_id, agent_run_id)` produces two `draft` rows; the second supersedes the first via the supersede check at preflight (§8.1 #7). The skill caller (the agent) owns the retry contract — the agent does not propose the same reply twice in the same run. Out-of-run double-proposals are operator-visible (two drafts in the queue); the operator acts on one and rejects the other. |
+| `canonical_ticket_drafts` insert (skill `support.propose_reply`) | **state-based (bounded by partial UNIQUE)** | A same-run double-proposal — same `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility)` while the prior draft is still in `draft` or `awaiting_review` — is bounded by the partial UNIQUE index on those columns (§5.5 indexes). The dispatch service writes the new draft and supersedes the prior pre-dispatch draft to `superseded` in the same transaction, which keeps the review queue free of agent-retry-induced sibling drafts. Cross-run double-proposals (different agent run IDs) remain operator-visible — the operator acts on one and rejects the other; this is rare and intended (different reasoning passes deserve operator judgement). |
 | Dispatch transition from `awaiting_review`/`draft` → `dispatching` | **state-based** | `UPDATE … WHERE status IN ('draft','awaiting_review')` — 0 rows affected = already dispatched (concurrency guard). |
 | Adapter `addReply` / `addInternalNote` call | **key-based** | `action_idempotency_key` derived deterministically from `(connector_config_id, ticket_id, action_type, draft_id)` for sends. For native-idempotent providers (Teamwork — TBD per OQ-3), the key is forwarded as a header. For non-native providers, a local `action_attempts` ledger keyed on `(connector_config_id, action_idempotency_key)` provides the same guarantee. |
 | Adapter in-place mutation (`updateTicket` for status / assignment / tag changes via `support.set_status`/`assign`/`tag`) | **key-based** | Idempotency key derived from `(connector_config_id, ticket_id, action_type, deterministic_payload_hash)`. Same payload + same target = same key. Repeating the call is a no-op or deterministic update. |
@@ -1406,19 +1473,24 @@ The ledger is RLS-protected on `organisation_id` and added to `RLS_PROTECTED_TAB
 
 The dispatch path emits exactly one terminal event per draft lifecycle. Mutually exclusive paths:
 
-| Path | Terminal event | `status` field |
-|---|---|---|
-| Sync-confirm success | `support.draft.sent` with `draft_id`, `message_id`, `idempotency_key` | `success` |
-| Reconciliation resolves to sent | `support.draft.sent` (same shape) | `success` |
-| Reconciliation resolves to failed | `support.draft.failed` with `reason` | `failed` |
-| Operator rejects in queue | `support.draft.rejected` with reviewer | `rejected` |
-| Queue expiry | `support.draft.expired` | `expired` |
-| Newer draft for the same ticket replaces this one in a pre-dispatch state | `support.draft.superseded` with `draft_id`, `superseded_by_draft_id` | `superseded` |
-| Reconciliation budget exhausted, surfaced for manual review | NO terminal event yet — manual action emits one. The operator's "Mark sent" / "Mark failed" / "Retry reconciliation" path emits the corresponding terminal. **No silent expiry of `needs_reconciliation`** — brief §5.8 second paragraph. |
+| Path | Event emitted | `status` field | Terminal? |
+|---|---|---|---|
+| Sync-confirm success | `support.draft.sent` with `draft_id`, `message_id` (NOT NULL), `idempotency_key` | `success` | yes — terminal |
+| Reconciliation resolves to sent | `support.draft.sent` (same shape; `message_id` NOT NULL) | `success` | yes — terminal |
+| Back-link from `manually_marked_sent` resolves to sent | `support.draft.sent` (same shape; `message_id` NOT NULL — provided by the back-linked canonical message) | `success` | yes — terminal |
+| Reconciliation resolves to failed | `support.draft.failed` with `reason` | `failed` | yes — terminal |
+| Operator chooses "Mark as failed in provider" on §8.5 surface | `support.draft.failed` (same shape; `reason='operator_marked_failed'`) | `failed` | yes — terminal |
+| Operator chooses "Mark provider send as verified" on §8.5 surface | `support.draft.manually_marked_sent` with `draft_id`, `idempotency_key`, `reviewer_user_id`, `reviewed_at` | `manually_marked_sent` | **no — non-terminal**; resolves to terminal `sent` when the back-link routine succeeds, at which point `support.draft.sent` fires |
+| Operator rejects in queue | `support.draft.rejected` with reviewer | `rejected` | yes — terminal |
+| Queue expiry | `support.draft.expired` | `expired` | yes — terminal |
+| Newer draft for the same ticket replaces this one in a pre-dispatch state (including the §14.1 same-run soft-uniqueness path) | `support.draft.superseded` with `draft_id`, `superseded_by_draft_id` | `superseded` | yes — terminal |
+| Reconciliation budget exhausted, surfaced for manual review | NO event emitted yet — operator action emits one. The operator's "Mark provider send as verified" / "Mark as failed in provider" / "Retry reconciliation" path emits the corresponding event. **No silent expiry of `needs_reconciliation`** — brief §5.8 second paragraph. | — | — |
 
 The `support.draft.*` event codes above are dispatch-lifecycle events, distinct from the §15 operational observability codes. Both namespaces are pinned in `shared/types/supportObservability.ts` (the `SUPPORT_LOG_CODES` const is extended in §15 to cover both groups; see §15 emitter pattern).
 
-Post-terminal prohibition: once a draft is in `sent`, `failed`, `rejected`, `expired`, or `superseded`, **no further events with the same `draft_id` are emitted**. Phase 2 includes a pure-tested invariant module asserting this.
+**`support.draft.sent` invariant.** This event always carries a non-null `message_id`. The post-terminal prohibition for `sent` therefore guarantees a 1:1 mapping from terminal `sent` event to confirmed canonical message — consumers (audit replay, Foundry alignment loaders, KPI rollups) rely on this.
+
+Post-terminal prohibition: once a draft is in `sent`, `failed`, `rejected`, `expired`, or `superseded`, **no further events with the same `draft_id` are emitted**. `manually_marked_sent` is non-terminal, so a draft in that state may still emit `support.draft.sent` later when the back-link succeeds (this is the only legitimate transition from a non-pre-dispatch state into a terminal state). Phase 2 includes a pure-tested invariant module asserting both rules.
 
 ### 14.5 No-silent-partial-success
 
@@ -1446,9 +1518,16 @@ No `23505` ever bubbles to the API consumer as a 500. Phase 2 tests confirm the 
 
 ### 14.7 State machine closure (per spec-authoring-checklist §10.7)
 
-`canonical_ticket_drafts.status` is a closed enum (§5.5). Valid transitions, forbidden transitions, and post-terminal prohibition are all asserted by the pure transition-guard module (`supportDraftDispatchServicePure.ts`) with a fixture matrix in Phase 2.
+`canonical_ticket_drafts.status` is a closed enum (§5.5). Valid transitions, forbidden transitions, and post-terminal prohibition are all asserted by the pure transition-guard module (`supportDraftDispatchServicePure.ts`) with a fixture matrix in Phase 2. Closed-enum invariants the guard enforces:
+
+- `sent ⇒ sent_message_id IS NOT NULL` (always).
+- `manually_marked_sent ⇒ sent_message_id IS NULL` (always — until the back-link transitions to `sent`).
+- `manually_marked_sent` is the only non-terminal state that may transition into a terminal state without going back through a queue / dispatching cycle (it transitions to `sent` via the back-link routine in §8.5).
+- Terminal states (`sent`, `failed`, `rejected`, `expired`, `superseded`) admit no further transitions.
 
 `canonical_tickets.status` is a closed enum (§5.1.A). Valid transitions are asserted by `supportTicketServicePure.ts`. The transition matrix has one provider-driven escape valve: `unknown_provider_status → any_other` is permitted only when the inbound row contains a status value that does map. This handles the case where the operator (or Phase 2 mapping editor) added a new entry to the status map and the next ingestion cycle resolves the quarantined ticket.
+
+`canonical_tickets.provider_deleted` is a separate boolean column (§5.1) that gates read visibility but does not participate in the status state machine. A deleted ticket retains its last-known `status` value; `provider_deleted=true` is the read-side filter, not a status transition.
 
 Adding a status value to either enum requires a spec amendment (this spec) plus a coordinated DB CHECK constraint update.
 
@@ -1468,6 +1547,9 @@ Brief §5.10 reserves the v1 code list. Each code maps to an emitter and a (per 
 | `support.provider.rate_limited` | adapter call (any) | adapter received `429` | `organisation_id`, `connector_config_id`, `provider`, `endpoint`, `retry_after_ms` | sync-health pill on connection setup + tickets list |
 | `support.provider.poll_page_failed` | polling cycle | a poll page errored | `organisation_id`, `connector_config_id`, `phase` (A/B/C/D), `inbox_external_id`, `error_code`, `partial` (boolean) | sync-health pill |
 | `support.provider.webhook_unmapped_event` | webhook dispatcher | `mapTeamworkEventType` returned null | `organisation_id`, `connector_config_id`, `provider`, `raw_event_type` | logs only |
+| `support.ticket.provider_deleted` | ingestion path (poll + webhook) | `ticket.deleted` webhook observed, OR a poll cycle proves a previously-known ticket is no longer returned | `organisation_id`, `connector_config_id`, `ticket_id`, `provider`, `deletion_source`, `deleted_at_external` | tickets list (deleted ticket disappears from agent queues; tombstone shown in human UI) |
+| `support.ticket.restored_after_deletion` | ingestion path | a previously `provider_deleted=true` ticket reappears in provider state with the same `external_id` | `organisation_id`, `connector_config_id`, `ticket_id`, `provider` | tickets list (re-appears in agent queues; tombstone removed from human UI) |
+| `support.message.redacted` | ingestion path | provider redaction event observed; canonical row's body content is overwritten in the same transaction | `organisation_id`, `connector_config_id`, `ticket_id`, `message_id`, `provider`, `redaction_reason` (where exposed) | ticket detail (redacted message shows tombstone "[content redacted on {date}]") |
 
 ### Emitter pattern
 
@@ -1487,12 +1569,18 @@ export const SUPPORT_LOG_CODES = {
   PROVIDER_POLL_PAGE_FAILED: 'support.provider.poll_page_failed',
   PROVIDER_WEBHOOK_UNMAPPED_EVENT: 'support.provider.webhook_unmapped_event',
 
-  // Dispatch lifecycle terminals (§14.4 emitters)
+  // Dispatch lifecycle events (§14.4 emitters)
   DRAFT_SENT: 'support.draft.sent',
   DRAFT_FAILED: 'support.draft.failed',
   DRAFT_REJECTED: 'support.draft.rejected',
   DRAFT_EXPIRED: 'support.draft.expired',
   DRAFT_SUPERSEDED: 'support.draft.superseded',
+  DRAFT_MANUALLY_MARKED_SENT: 'support.draft.manually_marked_sent',  // non-terminal; resolves to DRAFT_SENT via back-link
+
+  // Tombstone events (§5.1 + §5.2)
+  TICKET_PROVIDER_DELETED: 'support.ticket.provider_deleted',
+  TICKET_RESTORED_AFTER_DELETION: 'support.ticket.restored_after_deletion',
+  MESSAGE_REDACTED: 'support.message.redacted',
 } as const;
 ```
 
@@ -1577,10 +1665,27 @@ Each is a binary, testable criterion. The PR is not merge-ready until all are de
 - [ ] Attachment resolver returns a usable URL (or stream) for at least one real Teamwork attachment.
 - [ ] An unmapped Teamwork status quarantines the ticket as `unknown_provider_status` and excludes it from agent-actionable queues; the original provider value is preserved in `external_metadata.provider_status_raw`; the `support.status.unknown_provider_status` log code fires.
 - [ ] Action idempotency retry path is tested: simulated post-dispatch failure resumes via the same key without producing a duplicate customer-visible reply (the `(connector_config_id, action_idempotency_key)` UNIQUE constraint plus the reconciliation worker prevents duplicate insertion).
-- [ ] All ten operational observability codes from §15 fire in their respective conditions, plus the five draft-lifecycle terminal events from §14.4 (`support.draft.sent`, `support.draft.failed`, `support.draft.rejected`, `support.draft.expired`, `support.draft.superseded`).
+- [ ] All thirteen operational observability codes from §15 fire in their respective conditions (the ten original plus `support.ticket.provider_deleted`, `support.ticket.restored_after_deletion`, `support.message.redacted`), plus the six draft-lifecycle events from §14.4 (`support.draft.sent`, `support.draft.failed`, `support.draft.rejected`, `support.draft.expired`, `support.draft.superseded`, `support.draft.manually_marked_sent`).
 - [ ] Manual collision override (§8.6) emits an audit event, requires `support.draft.override_collision`, and is unavailable to autonomous agent execution.
+- [ ] Provider-side deletion: a Teamwork `ticket.deleted` event sets `provider_deleted=true`, hides the ticket from agent queues, and surfaces the tombstone in the human UI; subsequent ticket recreation with the same `external_id` clears the tombstone.
+- [ ] Provider-side redaction (if Teamwork exposes a redaction surface — confirmed during C9): a redaction event nulls the canonical message body in the same transaction; agent reads see `'[redacted]'`; human UI surfaces the tombstone.
 
-The acceptance bar is verified during Phase 2 by a combination of pure-function tests (status mapping, transition guard, reconciliation decision module, idempotency-key derivation) and an operator-driven manual smoke test against a real Teamwork sandbox.
+The acceptance bar is verified by **three named verification methods**, applied per code:
+
+| Acceptance criterion | Verification method |
+|---|---|
+| End-to-end ingestion (inboxes / agents / tickets / messages) | Manual sandbox smoke against a real Teamwork connection (operator-driven). |
+| Webhook + poll convergence (no duplicate-row insert) | Pure-function fixture for the upsert-decision boundary + manual smoke replaying the same event via both paths. |
+| Three-phase dispatch end-to-end | Pure-function tests on transition guard + idempotency-key derivation + manual sandbox dispatch of one draft. |
+| Attachment resolver returns usable URL/stream | Manual sandbox call with one real Teamwork attachment. |
+| Status fail-closed quarantine + `unknown_provider_status` log code | Pure-function fixture covering the mapping function (every known value, NULL, unknown), plus pure-function test of the emit call site asserting the code constant + required fields fire. |
+| Action idempotency retry path | Pure-function test on key derivation + manual sandbox simulated post-dispatch failure. |
+| Operational observability codes fire | Per code: pure-function test on the emit call site (asserting code constant + required fields) + manual sandbox action where the trigger condition is reachable from the UI (e.g. collision-blocked is reachable from inbox config + draft approval). Codes only reachable via fixture injection (e.g. `webhook_unmapped_event`) are verified by fixture injection in the pure test. |
+| Draft-lifecycle terminal events fire | Pure-function test on the emit call site for each terminal transition (`sent`, `failed`, `rejected`, `expired`, `superseded`, `manually_marked_sent`) asserting code constant + required fields. The `support.draft.sent` event is additionally asserted to always carry a non-null `message_id` per §14.4 invariant. |
+| Manual collision override | Pure-function test on permission check + audit-event write; manual sandbox confirmation. |
+| Tombstone (deletion + redaction) | Pure-function fixture for the deletion-upsert + read-filter decision boundaries + manual sandbox where reachable. |
+
+No non-pure vitest tests of `connectorPollingService` / `webhookAdapterService` / route files are added (per §20 testing posture). Where a code's trigger requires non-pure plumbing (real provider webhook, polling cycle), the verification is manual smoke against the real Teamwork sandbox.
 
 ### 17.2 Capability matrix (brief §8.6, binary + testable)
 
@@ -1611,9 +1716,9 @@ Per spec-authoring-checklist §2 — every file/column/migration/service/route m
 - `migrations/0307_canonical_inboxes.sql` — table + indexes + FORCE-RLS policy + manifest entry.
 - `migrations/0307_canonical_inboxes.down.sql` — drop policy + drop table + idempotent.
 - `migrations/0308_canonical_support_agents.sql` + down.
-- `migrations/0309_canonical_tickets.sql` + down — includes CHECK constraint on `status` enum.
-- `migrations/0310_canonical_ticket_messages.sql` + down — includes thread-ordering index.
-- `migrations/0311_canonical_ticket_drafts.sql` + down — includes UNIQUE on `(connector_config_id, action_idempotency_key)` (partial WHERE not null).
+- `migrations/0309_canonical_tickets.sql` + down — includes CHECK constraint on `status` enum + tombstone columns (`provider_deleted`, `deleted_at_external`, `deleted_at_canonical`, `deletion_source` with CHECK on enum).
+- `migrations/0310_canonical_ticket_messages.sql` + down — includes thread-ordering index, split author columns (`author_contact_id`, `author_support_agent_id`) with CHECK enforcing exactly-one-non-null per `author_type`, redaction columns (`redacted`, `redacted_at_external`, `redacted_at_canonical`), and `source_draft_id` as a plain nullable UUID **without** FK constraint (FK + partial index added in 0311).
+- `migrations/0311_canonical_ticket_drafts.sql` + down — includes UNIQUE on `(connector_config_id, action_idempotency_key)` (partial WHERE not null), partial UNIQUE soft-uniqueness guard on `(organisation_id, ticket_id, created_by_agent_run_id, proposed_visibility) WHERE status IN ('draft','awaiting_review')`, CHECK enforcing `sent ⇒ sent_message_id IS NOT NULL` and `manually_marked_sent ⇒ sent_message_id IS NULL`. **Includes ALTER TABLE on `canonical_ticket_messages` adding the deferred FK from `source_draft_id` → `canonical_ticket_drafts.id` plus the partial index `(organisation_id, source_draft_id) WHERE source_draft_id IS NOT NULL`.**
 - (conditional, OQ-3) `migrations/0312_action_attempts.sql` + down — IF native idempotency is unavailable.
 
 ### Schema files (new)
@@ -1747,7 +1852,7 @@ Per spec-authoring-checklist §7, every prose mention of "deferred" / "later" / 
 - **Real-time co-presence ("the bot is typing…").** Brief §12.
 - **Bulk historical backfill.** Brief §8.7. Runtime backfill is limited; Foundry remains historical loader.
 - **Attachment mirroring to Synthetos object storage.** Brief §10 #5. v1 is provider URL + on-demand `resolveAttachment`. Mirroring promotes when a concrete need emerges (e.g. retention compliance, deleted-from-provider preservation).
-- **Provider-side deletion / redaction handling.** Brief §12 final bullet. Tombstone semantics required if provider webhooks expose deletion or redaction events. The spec does NOT define the schema in v1; OQ-5 captures the required Phase-2-or-later spec amendment. Until then, the canonical layer does not silently retain content the provider has removed (handled by the next ingestion cycle marking the row stale and not re-fetching).
+- ~~**Provider-side deletion / redaction handling.**~~ **CLOSED — now in v1 scope.** Brief §12 final bullet mandated tombstone definition once provider webhooks expose deletion. Teamwork's existing `mapTeamworkEventType` already normalises `ticket.deleted`, so the canonical layer ships v1 tombstone semantics: `canonical_tickets.provider_deleted` + deletion timestamps + `deletion_source` (§5.1); `canonical_ticket_messages.redacted` + content nulling rule (§5.2); read filtering per §5.2.B; new log codes `support.ticket.provider_deleted`, `support.ticket.restored_after_deletion`, `support.message.redacted` (§15). OQ-5 closes with this design.
 - **Reconciliation queue UI for unmatched contacts.** Brief §10 #2 — "Reconciliation queue UI deferred." v1 surfaces unmatched at row level (right rail "Customer not in CRM"); a dedicated reconciliation surface lands later.
 - **Cost rollups, KPI dashboards, observability explorers for support volume.** Per `docs/frontend-design-principles.md`, these are deferred-by-default. v1 ships zero such surfaces.
 - **Foundry schema parity verification.** OQ-1. The spec author has not verified Foundry's current ticket schema against this spec. Resolved by operator before Phase 2 plan generation.
@@ -1845,7 +1950,7 @@ All fourteen brief-locked decisions are either (a) implemented in this spec or (
 
 ## 22. Open questions
 
-Five open questions block the move to `Status: accepted`. Each has a defined closer.
+Four open questions block the move to `Status: accepted`. Each has a defined closer. (OQ-5 closed in this revision — see §19 deferred-items entry and §5.1 / §5.2 tombstone definitions.)
 
 ### OQ-1 — Foundry ticket-schema parity verification
 
@@ -1859,9 +1964,9 @@ Five open questions block the move to `Status: accepted`. Each has a defined clo
 
 **Question:** What is the complete set of values Teamwork Desk's API returns for ticket status? Brief §10 #12.
 
-**Why it matters:** the canonical status map (§6 + §11.2) is fail-closed; any provider value not in the map quarantines the ticket. An incomplete map produces unnecessary quarantine; a wrong map produces silent misclassification.
+**Why it matters:** the canonical status map (§6 + §11.2) is fail-closed; any provider value not in the map quarantines the ticket. An incomplete map produces unnecessary quarantine; a wrong map produces silent misclassification. Brief §10 #12 explicitly says "the spec cannot be approved until the inventory is complete" — this OQ is the reason this spec stays at `Status: reviewing` rather than `Status: accepted`.
 
-**Closer:** during Phase 2 chunk C6, the implementer inventories Teamwork's status values (from Teamwork API docs + a real Teamwork account's reported values) and locks the full mapping table in `server/adapters/teamwork/teamworkSupportStatusMap.ts`. The `spec-conformance` agent checks that the spec's referenced inventory matches the locked module. **Required before C6 closes.**
+**Closer:** the operator inventories Teamwork's status values (from Teamwork API docs + a real Teamwork account's reported values) and the spec is amended with the full mapping table inlined into §11.2 (replacing the partial example) before the Phase 1 → Phase 2 handoff completes. The locked Phase 2 implementation in `server/adapters/teamwork/teamworkSupportStatusMap.ts` is then a direct transcription of the spec table. **Required before spec acceptance — i.e. before Phase 2 plan generation.** This is the only accepted pre-build discovery task the spec defers; every other open question may close inside Phase 2 chunks.
 
 ### OQ-3 — Teamwork native action-idempotency mechanism
 
@@ -1879,16 +1984,22 @@ Five open questions block the move to `Status: accepted`. Each has a defined clo
 
 **Closer:** Phase 2 chunk C7 audits the auth model and Teamwork attachment URL behaviour. Spec amendment: §6 `resolveAttachment` return type may narrow to one of `{url}` or `{stream}`. **Required before C7 closes.**
 
-### OQ-5 — Provider-side deletion / redaction tombstone semantics
+### ~~OQ-5~~ — CLOSED in this revision (chatgpt-spec-review Round 1)
 
-**Question:** Does Teamwork expose ticket-delete or message-redact webhook events? If yes, what canonical schema change is required to reflect tombstone state without leaking deleted content?
+OQ-5 originally asked whether Teamwork exposes deletion/redaction events and what canonical schema change was required. ChatGPT's Round 1 review noted that Teamwork's existing `mapTeamworkEventType` already normalises `ticket.deleted`, so the question was no longer theoretical — deletion handling had to ship in v1.
 
-**Why it matters:** Brief §12 final bullet — the canonical layer must not silently retain content the provider has removed.
+**Resolution (now in v1 scope):**
+- `canonical_tickets`: new tombstone columns `provider_deleted`, `deleted_at_external`, `deleted_at_canonical`, `deletion_source` (§5.1).
+- `canonical_ticket_messages`: new redaction columns `redacted`, `redacted_at_external`, `redacted_at_canonical` plus content-nulling rule on redact (§5.2).
+- §5.2.B audience-tier table extended with deletion + redaction visibility per audience (agent / human UI / audit).
+- §15: three new log codes — `support.ticket.provider_deleted`, `support.ticket.restored_after_deletion`, `support.message.redacted`.
+- §17.1 acceptance bar: tombstone test added.
+- §19: provider-side deletion entry moved from "deferred" to "now in v1 scope".
 
-**Closer:** Phase 2 chunk C9 audits Teamwork's webhook catalogue for delete + redact events. If present, this spec is amended (in flight or post-Phase-1) to define a `deleted_at` / `redacted_at` column shape and the read-side filtering rule. If absent, the open question closes with "Teamwork v1: no provider-side deletion events; Phase N spec covers Zendesk + Freshdesk if those expose them." **Required before C9 closes — at minimum the answer to the audit must be recorded.**
+If Teamwork does not in fact expose a message-level redaction event, the redaction columns ship anyway as defensive coverage for future Zendesk / Freshdesk adapters; the redaction schema is provider-neutral.
 
 ### Notes for the spec-reviewer
 
-- This spec is being reviewed before any of OQ-1..OQ-5 close. Per `docs/spec-context.md`'s spec-reviewer policy, OQs are valid framing — the reviewer should not classify "incomplete status inventory" as a directional finding because the inventory is OQ-2.
+- This spec is being reviewed before any of OQ-1..OQ-4 close (OQ-5 closed in this revision). Per `docs/spec-context.md`'s spec-reviewer policy, OQs are valid framing — the reviewer should not classify "incomplete status inventory" as a directional finding because the inventory is OQ-2.
 - Any reviewer finding that proposes work in a `convention_rejections` category (vitest for non-pure code, supertest, frontend tests, feature flags for migrations, staged rollout) is rejected by the framing per `docs/spec-context.md`.
 - The Foundry-alignment finding (if Codex raises one) is OQ-1 and is operator-owned, not auto-fixable.
