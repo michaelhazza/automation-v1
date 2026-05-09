@@ -6,13 +6,17 @@
 
 import { Router } from 'express';
 import { eq, and } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
-import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
+import { authenticate, requireSubaccountPermission, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
+import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
+import { listConnections, getConnectionUsage, disconnectConnection } from '../services/connectionsService.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
 
@@ -223,6 +227,107 @@ router.get(
 
     channels.sort((a, b) => a.name.localeCompare(b.name));
     res.json(channels);
+  })
+);
+
+// ── Govern surface: unified connections list (org scope) ─────────────────────
+
+router.get(
+  '/api/connections',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    const querySchema = z.object({
+      scope: z.enum(['workspace', 'org']).optional(),
+      subaccountId: z.string().uuid().optional(),
+      authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie']).optional(),
+      status: z.enum(['connected', 'expired', 'failed', 'pending']).optional(),
+      q: z.string().trim().min(1).max(200).optional(),
+    }).refine(
+      (q) => q.scope !== 'workspace' || !!q.subaccountId,
+      { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+    );
+    const parsed = querySchema.safeParse({
+      scope: req.query.scope,
+      subaccountId: req.query.subaccountId,
+      authMethod: req.query.authMethod,
+      status: req.query.status,
+      q: req.query.q,
+    });
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid query parameter', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 50, 50);
+    const result = await listConnections({
+      organisationId: req.orgId!,
+      scope: parsed.data.scope,
+      subaccountId: parsed.data.subaccountId,
+      provider: req.query.provider as string | undefined,
+      authMethod: parsed.data.authMethod,
+      status: parsed.data.status,
+      q: parsed.data.q,
+      cursor: (req.query.cursor as string) || null,
+      limit,
+      sortDir: req.query.sortDir === 'asc' ? 'asc' : 'desc',
+    });
+    res.json(result);
+  })
+);
+
+// GET usage impact for a connection (agents / workflows using it)
+router.get(
+  '/api/connections/:id/usage',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const usage = await getConnectionUsage(req.params.id, req.orgId!);
+    res.json(usage);
+  })
+);
+
+// POST disconnect a connection — delegates to per-kind revoke/delete per spec §4.10
+router.post(
+  '/api/connections/:id/disconnect',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_MANAGE),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const result = await disconnectConnection(req.params.id, req.orgId!);
+    if ('notFound' in result) {
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
+    res.status(200).json({ success: true, alreadyDisconnected: result.alreadyDisconnected, kind: result.kind });
+  })
+);
+
+// POST test a connection — always returns 200 per spec §4.9
+router.post(
+  '/api/connections/:id/test',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const result = await connectionTokenService.testConnection({
+      id: req.params.id,
+      organisationId: req.orgId!,
+    });
+    if ('notFound' in result) {
+      res.status(404).json({ error: 'Connection not found' });
+      return;
+    }
+    res.status(200).json(result);
   })
 );
 

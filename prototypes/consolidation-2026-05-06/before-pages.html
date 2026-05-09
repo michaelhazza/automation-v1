@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<!--
+  BEFORE: PageProjectsPage — current production state
+  Route: /admin/subaccounts/:id/page-projects (labeled "Sites" in old nav)
+
+  PageProjectsPage.tsx: flat table list with columns Name, Slug/URL, Custom domain,
+  Created, Updated, Actions. "Add page" button. No status filtering (production
+  does not have it). Links to a separate detail route per project.
+
+  PageProjectDetailPage.tsx: separate route, full edit form.
+
+  Problems documented in the problems box at the bottom.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: PageProjectsPage (Sites)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  body { background: var(--slate-100); }
+
+  .before-banner {
+    background: #fef9c3;
+    border-bottom: 2px solid #ca8a04;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    color: #92400e;
+    font-weight: 600;
+  }
+  .before-banner a {
+    color: #1d4ed8;
+    font-weight: 700;
+    margin-left: auto;
+    font-size: 13px;
+    text-decoration: none;
+  }
+  .before-banner a:hover { text-decoration: underline; }
+  .before-banner .route {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: #fde68a;
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: #78350f;
+    font-weight: 400;
+  }
+
+  .content-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 28px 24px;
+  }
+
+  /* Simulated old nav sidebar (compact) */
+  .two-col { display: flex; gap: 20px; align-items: flex-start; }
+  .old-sidebar {
+    width: 180px;
+    flex-shrink: 0;
+    background: #1e293b;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .old-sidebar-logo {
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 13px;
+    font-weight: 700;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .old-sidebar-logo-icon {
+    width: 22px; height: 22px;
+    border-radius: 5px;
+    background: linear-gradient(135deg,#6366f1,#8b5cf6);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .old-nav-section { padding: 8px 0 4px; }
+  .old-nav-label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: rgba(255,255,255,0.25); padding: 0 14px 3px;
+  }
+  .old-nav-item {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 14px;
+    font-size: 11.5px; color: rgba(255,255,255,0.55);
+    text-decoration: none;
+  }
+  .old-nav-item.active {
+    color: #a5b4fc;
+    background: rgba(99,102,241,0.14);
+    border-left: 2px solid #818cf8;
+  }
+  .old-nav-item .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+  /* Main production page shell */
+  .page-shell {
+    flex: 1;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .page-topbar {
+    background: white;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .page-topbar h2 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--slate-800);
+    flex: 1;
+  }
+  .mini-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: default;
+    white-space: nowrap;
+  }
+  .mini-btn-primary { background: var(--indigo-600); color: white; }
+  .mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+  .mini-btn-link { color: var(--indigo-600); background: none; padding: 3px 6px; }
+
+  /* Table */
+  .prod-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .prod-table th {
+    background: var(--slate-50);
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 11px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    color: var(--slate-600);
+    white-space: nowrap;
+  }
+  .prod-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--slate-100);
+    color: var(--slate-700);
+    vertical-align: top;
+  }
+  .prod-table tr:last-child td { border-bottom: none; }
+  .prod-table tr:hover td { background: var(--slate-50); }
+  .slug-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--slate-500);
+  }
+  .domain-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--slate-500);
+  }
+  .date-cell { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+  .actions-cell { display: flex; gap: 4px; align-items: center; }
+
+  /* Detail route annotation */
+  .route-annotation {
+    background: var(--amber-50);
+    border: 1px dashed var(--amber-500);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 11.5px;
+    color: var(--amber-700);
+    margin: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .route-annotation code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    background: #fef3c7;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Problems box */
+  .problems-box {
+    margin-top: 20px;
+    background: white;
+    border: 2px solid #fca5a5;
+    border-radius: 10px;
+    padding: 16px 20px;
+    box-shadow: var(--shadow-sm);
+  }
+  .problems-box h3 {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--red-700);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .problems-box ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .problems-box li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--slate-700);
+    line-height: 1.5;
+  }
+  .problems-box li::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--red-400);
+    margin-top: 7px;
+    flex-shrink: 0;
+  }
+  .problems-box .vs {
+    font-weight: 600;
+    color: var(--indigo-600);
+    font-size: 11px;
+    background: var(--indigo-50);
+    border: 1px solid var(--indigo-100);
+    border-radius: 4px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }
+
+  /* Section label for the detail page screenshot */
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--slate-400);
+    margin-bottom: 8px;
+  }
+
+  /* Simulated detail page (read-only sketch) */
+  .detail-sketch {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    margin-top: 20px;
+  }
+  .detail-sketch-header {
+    background: var(--slate-50);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .detail-sketch-header h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); flex: 1; }
+  .detail-inner { padding: 14px 16px; }
+  .detail-field {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--slate-100);
+  }
+  .detail-field:last-child { border-bottom: none; }
+  .detail-field-label { font-size: 11.5px; font-weight: 600; color: var(--slate-500); }
+  .detail-field-value { font-size: 12px; color: var(--slate-700); font-family: 'JetBrains Mono', monospace; }
+  .detail-field-value.plain { font-family: inherit; }
+  .detail-actions { padding: 10px 16px; border-top: 1px solid var(--border); background: var(--slate-50); display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>BEFORE</span>
+  <span class="route">/admin/subaccounts/:id/page-projects</span>
+  <span style="font-weight:400;font-size:13px;">PageProjectsPage.tsx + PageProjectDetailPage.tsx</span>
+  <a href="pages.html">View redesigned Pages &rarr;</a>
+</div>
+
+<div class="content-wrap">
+
+  <div style="font-size:13px;font-weight:600;color:var(--slate-700);margin-bottom:14px;">
+    Production state: list page links to a separate detail route. No card grid, no status filter, no theme visibility.
+  </div>
+
+  <div class="two-col">
+    <!-- Old nav sidebar -->
+    <div class="old-sidebar">
+      <div class="old-sidebar-logo">
+        <div class="old-sidebar-logo-icon">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        </div>
+        Automation OS
+      </div>
+      <div class="old-nav-section">
+        <div class="old-nav-label">Workspace</div>
+        <div class="old-nav-item"><span class="dot"></span> Home</div>
+        <div class="old-nav-item"><span class="dot"></span> Inbox</div>
+        <div class="old-nav-item"><span class="dot"></span> Calendar</div>
+        <div class="old-nav-item"><span class="dot"></span> Agents</div>
+        <div class="old-nav-item"><span class="dot"></span> Automations</div>
+        <div class="old-nav-item"><span class="dot"></span> Workflows</div>
+        <div class="old-nav-item"><span class="dot"></span> Knowledge</div>
+        <div class="old-nav-item"><span class="dot"></span> Connections</div>
+        <div class="old-nav-item"><span class="dot"></span> Tasks</div>
+        <div class="old-nav-item"><span class="dot"></span> Portal</div>
+        <div class="old-nav-item active"><span class="dot"></span> Sites</div>
+        <div class="old-nav-item"><span class="dot"></span> Team</div>
+        <div class="old-nav-item"><span class="dot"></span> Manage</div>
+      </div>
+    </div>
+
+    <!-- Main page content -->
+    <div class="page-shell">
+      <div class="page-topbar">
+        <h2>Sites</h2>
+        <span class="mini-btn mini-btn-primary">+ Add page</span>
+      </div>
+
+      <table class="prod-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Slug / URL</th>
+            <th>Custom domain</th>
+            <th>Created</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-weight:600;font-size:12px;">Welcome to Acme</td>
+            <td class="slug-cell">acme.synthetos.ai/</td>
+            <td class="domain-cell">acme.com</td>
+            <td class="date-cell">Jan 12, 2026</td>
+            <td class="date-cell">May 5, 2026</td>
+            <td class="actions-cell">
+              <span class="mini-btn mini-btn-link">Edit</span>
+              <span class="mini-btn mini-btn-secondary" style="font-size:10.5px;">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;font-size:12px;">Pricing</td>
+            <td class="slug-cell">acme.synthetos.ai/pricing</td>
+            <td class="domain-cell" style="color:var(--slate-300);">None</td>
+            <td class="date-cell">Feb 3, 2026</td>
+            <td class="date-cell">May 4, 2026</td>
+            <td class="actions-cell">
+              <span class="mini-btn mini-btn-link">Edit</span>
+              <span class="mini-btn mini-btn-secondary" style="font-size:10.5px;">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;font-size:12px;">Free trial signup</td>
+            <td class="slug-cell">acme.synthetos.ai/trial</td>
+            <td class="domain-cell" style="color:var(--slate-300);">None</td>
+            <td class="date-cell">Feb 18, 2026</td>
+            <td class="date-cell">May 2, 2026</td>
+            <td class="actions-cell">
+              <span class="mini-btn mini-btn-link">Edit</span>
+              <span class="mini-btn mini-btn-secondary" style="font-size:10.5px;">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;font-size:12px;">About us</td>
+            <td class="slug-cell">acme.synthetos.ai/about</td>
+            <td class="domain-cell" style="color:var(--slate-300);">None</td>
+            <td class="date-cell">Mar 5, 2026</td>
+            <td class="date-cell">May 1, 2026</td>
+            <td class="actions-cell">
+              <span class="mini-btn mini-btn-link">Edit</span>
+              <span class="mini-btn mini-btn-secondary" style="font-size:10.5px;">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;font-size:12px;">Holiday promo 2025</td>
+            <td class="slug-cell">acme.synthetos.ai/holiday-2025</td>
+            <td class="domain-cell" style="color:var(--slate-300);">None</td>
+            <td class="date-cell">Nov 1, 2025</td>
+            <td class="date-cell">Mar 6, 2026</td>
+            <td class="actions-cell">
+              <span class="mini-btn mini-btn-link">Edit</span>
+              <span class="mini-btn mini-btn-secondary" style="font-size:10.5px;">Delete</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;font-size:12px;">Beta program</td>
+            <td class="slug-cell">acme.synthetos.ai/beta</td>
+            <td class="domain-cell" style="color:var(--slate-300);">None</td>
+            <td class="date-cell">Apr 10, 2026</td>
+            <td class="date-cell">Apr 28, 2026</td>
+            <td class="actions-cell">
+              <span class="mini-btn mini-btn-link">Edit</span>
+              <span class="mini-btn mini-btn-secondary" style="font-size:10.5px;">Delete</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="route-annotation">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Editing a page navigates to a separate route:
+        <code>/admin/subaccounts/:id/page-projects/:projectId</code>
+        (PageProjectDetailPage.tsx)
+      </div>
+    </div>
+  </div>
+
+  <!-- PageProjectDetailPage sketch -->
+  <div style="margin-top:20px;">
+    <div class="section-label">SEPARATE DETAIL ROUTE: PageProjectDetailPage.tsx</div>
+    <div class="detail-sketch">
+      <div class="detail-sketch-header">
+        <span class="mini-btn mini-btn-secondary" style="font-size:11px;">&larr; Back to Sites</span>
+        <h3>Edit: Welcome to Acme</h3>
+        <span style="font-size:11px;color:var(--slate-400);">/admin/subaccounts/acme-123/page-projects/page-abc</span>
+      </div>
+      <div class="detail-inner">
+        <div class="detail-field">
+          <div class="detail-field-label">Project name</div>
+          <div class="detail-field-value plain">Welcome to Acme</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Slug</div>
+          <div class="detail-field-value"></div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Custom domain</div>
+          <div class="detail-field-value">acme.com</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Primary color</div>
+          <div class="detail-field-value">#4f46e5</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Created</div>
+          <div class="detail-field-value plain">Jan 12, 2026</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Updated</div>
+          <div class="detail-field-value plain">May 5, 2026</div>
+        </div>
+      </div>
+      <div class="detail-actions">
+        <span class="mini-btn mini-btn-primary">Save changes</span>
+        <span class="mini-btn mini-btn-secondary">Cancel</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Problems box -->
+  <div class="problems-box">
+    <h3>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Problems with current state
+    </h3>
+    <ul>
+      <li>Two-step navigation to edit: list page then full-page detail route. A simple slug change requires a full page load. <span class="vs">After: inline drawer, no navigation</span></li>
+      <li>Flat table has no visual thumbnail or color preview. Operator cannot tell pages apart at a glance. <span class="vs">After: card grid with browser-frame mock and color dot</span></li>
+      <li>No status field exposed in list. Draft, Published and Archived pages all look identical. <span class="vs">After: status badge on each card</span></li>
+      <li>No status filter. To find all drafts the operator must scroll and remember. <span class="vs">After: status filter pills (All / Published / Draft / Archived)</span></li>
+      <li>Theme primaryColor shown only as a raw hex string in the detail page. No visual swatch on the list. <span class="vs">After: color dot on every card, color picker in settings tab</span></li>
+      <li>No analytics surfaced anywhere. Visits and conversion rate require leaving the product entirely. <span class="vs">After: Analytics tab in the drawer with key metrics inline</span></li>
+      <li>Nav item labeled "Sites". Name does not match the product concept "landing pages". <span class="vs">After: renamed to "Pages" throughout</span></li>
+    </ul>
+  </div>
+
+</div><!-- /content-wrap -->
+</body>
+</html>

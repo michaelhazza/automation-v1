@@ -2,12 +2,12 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import api from './lib/api';
-import { logAndSwallow } from './lib/silentCatchHelper';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ConfigAssistantPopupProvider } from './hooks/useConfigAssistantPopup';
 import ConfigAssistantPopup from './components/config-assistant/ConfigAssistantPopup';
+import { buildOperateRedirectUrl } from './lib/operateRedirects';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
@@ -15,8 +15,11 @@ const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const AutomationsPage = lazy(() => import('./pages/AutomationsPage'));
 const AutomationExecutionPage = lazy(() => import('./pages/AutomationExecutionPage'));
-const ActivityPage = lazy(() => import('./pages/ActivityPage'));
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+// Operate stream pages (C8)
+const HomePage = lazy(() => import('./pages/operate/HomePage'));
+const InboxPage = lazy(() => import('./pages/operate/InboxPage'));
+const OperateActivityPage = lazy(() => import('./pages/operate/ActivityPage'));
+const RunTracePage = lazy(() => import('./pages/operate/RunTracePage'));
 const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminAutomationsPage = lazy(() => import('./pages/AdminAutomationsPage'));
@@ -33,25 +36,23 @@ const PortalPage = lazy(() => import('./pages/PortalPage'));
 const PortalExecutionPage = lazy(() => import('./pages/PortalExecutionPage'));
 const PortalExecutionHistoryPage = lazy(() => import('./pages/PortalExecutionHistoryPage'));
 const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
-const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
+// Build stream consolidated pages (replaces legacy AdminAgentsPage / AdminAgentEditPage / AdminSkillsPage / AdminSkillEditPage / SystemAgentsPage / GoalsPage / SkillAnalyzerPage / SkillStudioPage / ScheduledTasksPage)
+const AgentsListPage = lazy(() => import('./pages/build/AgentsListPage'));
+const AgentEditPage = lazy(() => import('./pages/build/AgentEditPage'));
+const RecurringTasksPage = lazy(() => import('./pages/build/RecurringTasksPage'));
+const ProjectEditPage = lazy(() => import('./pages/build/ProjectEditPage'));
 const SubaccountBlueprintsPage = lazy(() => import('./pages/SubaccountBlueprintsPage'));
 const ClientPulseSettingsPage = lazy(() => import('./pages/ClientPulseSettingsPage'));
-const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
-const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const McpServersPage = lazy(() => import('./pages/McpServersPage'));
 const IntegrationsAndCredentialsPage = lazy(() => import('./pages/IntegrationsAndCredentialsPage'));
-const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 
-const SystemAgentsPage = lazy(() => import('./pages/SystemAgentsPage'));
 const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
 const SystemSkillsPage = lazy(() => import('./pages/SystemSkillsPage'));
 const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
 const SystemPnlPage = lazy(() => import('./pages/SystemPnlPage'));
 const SystemIncidentsPage = lazy(() => import('./pages/SystemIncidentsPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
-const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
-const SubaccountKnowledgePage = lazy(() => import('./pages/SubaccountKnowledgePage'));
 // Memory & Briefings Phase 2 — HITL review queue (S7)
 const MemoryReviewQueuePage = lazy(() => import('./pages/MemoryReviewQueuePage'));
 // Memory & Briefings Phase 3 — subaccount onboarding flow (S5)
@@ -60,7 +61,6 @@ const SubaccountOnboardingPage = lazy(() => import('./pages/SubaccountOnboarding
 const ConfigDocumentUploadPage = lazy(() => import('./pages/ConfigDocumentUploadPage'));
 // Memory & Briefings Phase 5 — memory block detail + version history (S24)
 const MemoryBlockDetailPage = lazy(() => import('./pages/MemoryBlockDetailPage'));
-const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 const ScheduleCalendarPage = lazy(() => import('./pages/ScheduleCalendarPage'));
 const SubaccountScheduleCalendarPage = lazy(() => import('./pages/SubaccountScheduleCalendarPage'));
@@ -72,7 +72,6 @@ const WorkflowsLibraryPage = lazy(() => import('./pages/WorkflowsLibraryPage'));
 const WorkflowRunDetailPage = lazy(() => import('./pages/WorkflowRunDetailPage'));
 const WorkflowRunPage = lazy(() => import('./pages/subaccount/WorkflowRunPage'));
 const WorkflowStudioPage = lazy(() => import('./pages/WorkflowStudioPage'));
-const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
@@ -83,9 +82,7 @@ const AgentTriggersPage = lazy(() => import('./pages/AgentTriggersPage'));
 const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const SubaccountSkillsPage = lazy(() => import('./pages/SubaccountSkillsPage'));
 
-const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
-const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AgentRunLivePage = lazy(() => import('./pages/AgentRunLivePage'));
 // Workflows V1 Phase 2 — open task view (Chunk 11)
@@ -97,7 +94,6 @@ const LearnedRulesPage = lazy(() => import('./pages/LearnedRulesPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
 const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 
-const SkillStudioPage = lazy(() => import('./pages/SkillStudioPage'));
 const ConfigAssistantPage = lazy(() => import('./pages/ConfigAssistantPage'));
 const ConfigSessionHistoryPage = lazy(() => import('./pages/ConfigSessionHistoryPage'));
 const AgentMailboxPage = lazy(() => import('./pages/AgentMailboxPage'));
@@ -116,9 +112,14 @@ const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'));
 const SystemModulesPage = lazy(() => import('./pages/SystemModulesPage'));
 
 // Agentic Commerce — Chunk 14 spend UI
-const SpendingBudgetsListPage = lazy(() => import('./pages/SpendingBudgetsListPage'));
-const SpendingBudgetDetailPage = lazy(() => import('./pages/SpendingBudgetDetailPage'));
-const SpendLedgerPage = lazy(() => import('./pages/SpendLedgerPage'));
+// Govern surface (consolidation-govern)
+const KnowledgePage = lazy(() => import('./pages/govern/KnowledgePage'));
+const SpendingPage = lazy(() => import('./pages/govern/SpendingPage'));
+const ConnectionsPage = lazy(() => import('./pages/govern/ConnectionsPage'));
+// Trust & Verification Layer — Stage 2 UI (Chunk 12)
+const QualityPage = lazy(() => import('./pages/govern/QualityPage'));
+const ScorecardCreatePage = lazy(() => import('./pages/govern/ScorecardCreatePage'));
+const ModelBenchPage = lazy(() => import('./pages/govern/ModelBenchPage'));
 const SubaccountApprovalChannelsPage = lazy(() => import('./pages/SubaccountApprovalChannelsPage'));
 const OrgApprovalChannelsPage = lazy(() => import('./pages/OrgApprovalChannelsPage'));
 
@@ -204,59 +205,123 @@ function SystemAdminGuard({ user }: { user: User | null }) {
   return <ErrorBoundary><Outlet /></ErrorBoundary>;
 }
 
+// Module-driven guard for routes whose visibility is governed by the org's sidebar
+// config (e.g. /clientpulse/*, /reports/*). System admins bypass. Mirrors the
+// fail-open default used by Layout's `hasSidebarItem`: a missing or empty
+// config is treated as "all items enabled" so a config-endpoint outage does
+// not lock users out of features they are entitled to. The authoritative gate
+// remains the corresponding API endpoint.
+function ModuleGuard({ user, slug }: { user: User | null; slug: string }) {
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!user) { setAllowed(false); return; }
+    if (user.role === 'system_admin') { setAllowed(true); return; }
+    let cancelled = false;
+    api.get<{ items?: string[] }>('/api/my-sidebar-config')
+      .then(({ data }) => {
+        if (cancelled) return;
+        const items = data?.items;
+        if (!Array.isArray(items) || items.length === 0) {
+          setAllowed(true);
+        } else {
+          setAllowed(items.includes(slug));
+        }
+      })
+      .catch(() => { if (!cancelled) setAllowed(true); });
+    return () => { cancelled = true; };
+  }, [user, slug]);
+
+  if (!user) return <Navigate to="/login" replace />;
+  if (allowed === null) return <PageLoader />;
+  if (!allowed) return <Navigate to="/" replace />;
+  return <ErrorBoundary><Outlet /></ErrorBoundary>;
+}
+
 function SubaccountIntegrationsRoute({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   return <IntegrationsAndCredentialsPage user={user} subaccountId={subaccountId} />;
-}
-
-// Agentic Commerce — permission-aware route wrappers (Chunk 14)
-// Server enforces actual permission checks; these wrappers derive UI-level
-// edit/read-only mode from the permissions already loaded in Layout context.
-// Using user.role for a fast local decision; spend_approver is a permission-set
-// key that lives in orgPerms (Layout), not on user.role directly — so we default
-// canCreate/canEdit to true and let each page call /api/my-permissions if needed.
-// The server's 403 response is the authoritative gate.
-
-function SpendingBudgetsListPageRoute({ user }: { user: User }) {
-  const [canCreate, setCanCreate] = useState(false);
-  useEffect(() => {
-    api.get('/api/my-permissions').then(({ data }) => {
-      const perms: string[] = data?.permissions ?? [];
-      setCanCreate(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(logAndSwallow('SpendingBudgetsListPageRoute: permissions fetch', { severity: 'critical' }));
-  }, [user]);
-  return <SpendingBudgetsListPage canCreate={canCreate} />;
-}
-
-function SpendingBudgetDetailPageRoute({ user }: { user: User }) {
-  const [canEdit, setCanEdit] = useState(false);
-  useEffect(() => {
-    api.get('/api/my-permissions').then(({ data }) => {
-      const perms: string[] = data?.permissions ?? [];
-      setCanEdit(perms.includes('org.spend.admin') || user.role === 'org_admin' || user.role === 'system_admin');
-    }).catch(logAndSwallow('SpendingBudgetDetailPageRoute: permissions fetch'));
-  }, [user]);
-  return <SpendingBudgetDetailPage user={user} canEdit={canEdit} />;
-}
-
-function SpendLedgerPageRoute({ user }: { user: User }) {
-  const { subaccountId } = useParams<{ subaccountId: string }>();
-  const [readOnly, setReadOnly] = useState(true);
-  useEffect(() => {
-    if (!subaccountId) return;
-    api.get(`/api/subaccounts/${subaccountId}/my-permissions`).then(({ data }) => {
-      const perms: string[] = data?.permissions ?? [];
-      const hasSpend = perms.includes('spend_approver') || perms.includes('org.spend.admin');
-      setReadOnly(!hasSpend);
-    }).catch(logAndSwallow('SpendLedgerPageRoute: permissions fetch'));
-  }, [subaccountId]);
-  return <SpendLedgerPage user={user} readOnly={readOnly} />;
 }
 
 function BriefRedirect() {
   const { briefId } = useParams<{ briefId: string }>();
   if (!briefId) return <Navigate to="/admin/tasks" replace />;
   return <Navigate to={`/admin/tasks/${briefId}`} replace />;
+}
+
+function RedirectAgentEdit() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/agents/${id}/edit`} replace />;
+}
+
+// ── Operate-stream redirects (C8) ────────────────────────────────────────────
+// Locked redirect grammar — see client/src/lib/operateRedirects.ts
+
+/** /admin/runs/:runId?<query> → /run-trace/:runId?<query> */
+function AdminRunRedirect() {
+  const { runId } = useParams<{ runId: string }>();
+  const { search, hash } = useLocation();
+  if (!runId) return <Navigate to="/" replace />;
+  const to = buildOperateRedirectUrl(`/run-trace/${encodeURIComponent(runId)}`, search, undefined, hash);
+  return <Navigate to={to} replace />;
+}
+
+/** /admin/subaccounts/:subaccountId/runs/:runId?<query>
+ *  → /run-trace/:runId?subaccountId=:subaccountId&<query> */
+function AdminSubaccountRunRedirect() {
+  const { subaccountId, runId } = useParams<{ subaccountId: string; runId: string }>();
+  const { search, hash } = useLocation();
+  if (!runId || !subaccountId) return <Navigate to="/" replace />;
+  const to = buildOperateRedirectUrl(
+    `/run-trace/${encodeURIComponent(runId)}`,
+    search,
+    { key: 'subaccountId', value: subaccountId },
+    hash,
+  );
+  return <Navigate to={to} replace />;
+}
+
+/** /admin/agent-inbox?<query> → /inbox?<query> */
+function AdminAgentInboxRedirect() {
+  const { search, hash } = useLocation();
+  const to = buildOperateRedirectUrl('/inbox', search, undefined, hash);
+  return <Navigate to={to} replace />;
+}
+
+/** /subaccounts/:subaccountId/agent-inbox?<query>
+ *  → /inbox?subaccountId=:subaccountId&<query> */
+function SubaccountAgentInboxRedirect() {
+  const { subaccountId } = useParams<{ subaccountId: string }>();
+  const { search, hash } = useLocation();
+  if (!subaccountId) return <Navigate to="/inbox" replace />;
+  const to = buildOperateRedirectUrl(
+    '/inbox',
+    search,
+    { key: 'subaccountId', value: subaccountId },
+    hash,
+  );
+  return <Navigate to={to} replace />;
+}
+
+/** /admin/subaccounts/:subaccountId/activity?<query>
+ *  → /activity?subaccountId=:subaccountId&<query>
+ *
+ *  Preserves the workspace scope as a query param so a downstream consumer
+ *  (ActivityPage URL-param wiring — deferred to Phase 3) can pick it up.
+ *  Even before the page wires it, preserving the param keeps the URL lossless
+ *  for bookmarks/copy-paste sharing.
+ */
+function AdminSubaccountActivityRedirect() {
+  const { subaccountId } = useParams<{ subaccountId: string }>();
+  const { search, hash } = useLocation();
+  if (!subaccountId) return <Navigate to="/activity" replace />;
+  const to = buildOperateRedirectUrl(
+    '/activity',
+    search,
+    { key: 'subaccountId', value: subaccountId },
+    hash,
+  );
+  return <Navigate to={to} replace />;
 }
 
 export default function App() {
@@ -333,12 +398,14 @@ export default function App() {
         } />
 
         <Route element={<ProtectedLayout user={user} loading={loading} />}>
-          <Route path="/" element={<DashboardPage user={user!} />} />
+          <Route path="/" element={<HomePage user={user!} />} />
           <Route path="/automations" element={<AutomationsPage user={user!} />} />
           <Route path="/automations/:id" element={<AutomationExecutionPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
-          <Route path="/inbox" element={<Navigate to="/" replace />} />
+          <Route path="/inbox" element={<InboxPage user={user!} />} />
+          <Route path="/activity" element={<OperateActivityPage user={user!} />} />
+          <Route path="/run-trace/:id" element={<RunTracePage user={user!} />} />
           <Route path="/workflows" element={<WorkflowsLibraryPage user={user!} />} />
           <Route path="/workflow-runs/:runId" element={<WorkflowRunDetailPage user={user!} />} />
           {/* §9.2 — subaccount-scoped run page (envelope endpoint + WS live). */}
@@ -359,24 +426,29 @@ export default function App() {
             <Route path="/admin/permission-sets" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />
-            <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
-            <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
+            {/* New consolidated agent / recurring-tasks / project routes (Build stream) */}
+            <Route path="/agents" element={<AgentsListPage />} />
+            <Route path="/agents/:id/edit" element={<AgentEditPage />} />
+            <Route path="/recurring-tasks" element={<RecurringTasksPage />} />
+            <Route path="/projects/:id/edit" element={<ProjectEditPage />} />
+            {/* Legacy redirects — bookmarks and old links */}
+            <Route path="/admin/agents" element={<Navigate to="/agents" replace />} />
+            <Route path="/admin/agents/:id" element={<RedirectAgentEdit />} />
+            <Route path="/admin/skills" element={<Navigate to="/agents" replace />} />
+            <Route path="/admin/skills/:id" element={<Navigate to="/agents" replace />} />
             <Route path="/agents/blueprints" element={<SubaccountBlueprintsPage user={user!} />} />
             {/* Legacy path — kept for bookmarks; renders the renamed page. */}
             <Route path="/admin/agent-templates" element={<SubaccountBlueprintsPage user={user!} />} />
             <Route path="/clientpulse/settings" element={<ClientPulseSettingsPage user={user!} />} />
-            <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
             <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
-            <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/mailbox" element={<AgentMailboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/calendar" element={<AgentCalendarPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
-            {/* Unified Knowledge page (spec §7.2) — References + Memory Blocks in one place */}
-            <Route path="/admin/subaccounts/:subaccountId/knowledge" element={<SubaccountKnowledgePage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/memory"    element={<Navigate to="/knowledge" replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/knowledge" element={<Navigate to="/knowledge" replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<Navigate to="/recurring-tasks" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
             <Route path="/admin/subaccounts/:subaccountId/schedule-calendar" element={<SubaccountScheduleCalendarPage user={user!} />} />
@@ -391,18 +463,18 @@ export default function App() {
             {/* Memory & Briefings Phase 5 — block detail (S24) */}
             <Route path="/admin/memory-blocks/:blockId" element={<MemoryBlockDetailPage />} />
             <Route path="/admin/subaccounts/:subaccountId/inbox" element={<Navigate to="/" replace />} />
-            <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<AdminSubaccountRunRedirect />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects" element={<PageProjectsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects/:projectId" element={<PageProjectDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/triggers" element={<AgentTriggersPage />} />
             <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
             <Route path="/admin/subaccounts/:subaccountId/skills" element={<SubaccountSkillsPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/goals" element={<GoalsPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/goals" element={<Navigate to="/" replace />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
             <Route path="/admin/org-memory" element={<Navigate to="/admin/org-settings?tab=memory" replace />} />
-            <Route path="/admin/org-agent-configs" element={<Navigate to="/admin/agents?tab=org-execution" replace />} />
-            <Route path="/admin/hierarchy-templates" element={<Navigate to="/admin/agents?tab=team-templates" replace />} />
+            <Route path="/admin/org-agent-configs" element={<Navigate to="/agents?tab=org-execution" replace />} />
+            <Route path="/admin/hierarchy-templates" element={<Navigate to="/agents?tab=team-templates" replace />} />
             <Route path="/admin/connectors" element={<Navigate to="/admin/mcp-servers" replace />} />
             {/* Workspace health audit findings */}
             <Route path="/admin/health-findings" element={<AdminHealthFindingsPage user={user!} />} />
@@ -411,12 +483,14 @@ export default function App() {
             {/* Pulse — retired; redirect to home */}
             <Route path="/admin/pulse" element={<Navigate to="/" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/pulse" element={<Navigate to="/" replace />} />
-            {/* Activity — org scope (redirects to home) */}
-            <Route path="/admin/activity" element={<Navigate to="/" replace />} />
-            {/* Activity — subaccount scope */}
-            <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
-            {/* Skill Studio — org scope */}
-            <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
+            {/* Activity — org scope (redirects to canonical /activity) */}
+            <Route path="/admin/activity" element={<Navigate to="/activity" replace />} />
+            {/* Agent Inbox — redirects to canonical /inbox (locked redirect grammar C8) */}
+            <Route path="/admin/agent-inbox" element={<AdminAgentInboxRedirect />} />
+            {/* Activity — subaccount scope (redirects to canonical /activity, scope promoted per locked C8 grammar) */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<AdminSubaccountActivityRedirect />} />
+            {/* Skill Studio — org scope (consolidated into /agents) */}
+            <Route path="/admin/skill-studio" element={<Navigate to="/agents" replace />} />
             {/* Configuration Assistant */}
             <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
@@ -430,20 +504,35 @@ export default function App() {
             {/* Learned Rules library (Phase 5) */}
             <Route path="/rules" element={<LearnedRulesPage user={user!} />} />
             <Route path="/subaccounts/:id/rules" element={<LearnedRulesPage user={user!} />} />
-            {/* Agentic Commerce — Chunk 14: Spending Budgets + Spend Ledger + Approval Channels */}
-            <Route path="/admin/spending-budgets" element={<SpendingBudgetsListPageRoute user={user!} />} />
-            <Route path="/admin/spending-budgets/:budgetId" element={<SpendingBudgetDetailPageRoute user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<SpendLedgerPageRoute user={user!} />} />
+            {/* Agentic Commerce — legacy approval channels */}
             <Route path="/admin/subaccounts/:subaccountId/approval-channels" element={<SubaccountApprovalChannelsPage />} />
             <Route path="/admin/org-approval-channels" element={<OrgApprovalChannelsPage user={user!} />} />
+            {/* Govern surface — consolidated pages */}
+            <Route path="/knowledge"    element={<KnowledgePage />} />
+            <Route path="/spending"     element={<SpendingPage />} />
+            <Route path="/connections"  element={<ConnectionsPage />} />
+            {/* Trust & Verification Layer — Stage 2 Quality surface (Chunk 12) */}
+            <Route path="/quality"                     element={<QualityPage />} />
+            <Route path="/quality/scorecards/create"   element={<ScorecardCreatePage />} />
+            <Route path="/quality/bench"               element={<ModelBenchPage />} />
+            {/* Redirect legacy spend paths so bookmarks survive */}
+            <Route path="/admin/spending-budgets"                        element={<Navigate to="/spending" replace />} />
+            <Route path="/admin/spending-budgets/:budgetId"             element={<Navigate to="/spending" replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<Navigate to="/spending" replace />} />
           </Route>
 
-          {/* ClientPulse routes */}
-          <Route path="/clientpulse" element={<ClientPulseDashboardPage user={user!} />} />
-          <Route path="/clientpulse/clients" element={<ClientPulseClientsListPage user={user!} />} />
-          <Route path="/clientpulse/clients/:subaccountId" element={<ClientPulseDrilldownPage user={user!} />} />
-          <Route path="/reports" element={<ReportsListPage user={user!} />} />
-          <Route path="/reports/:id" element={<ReportDetailPage user={user!} />} />
+          {/* ClientPulse routes — gated by module subscription. Sidebar suppresses
+              the nav items via hasSidebarItem('clientpulse'); ModuleGuard mirrors
+              that gate at the route level to prevent direct-URL access. */}
+          <Route element={<ModuleGuard user={user} slug="clientpulse" />}>
+            <Route path="/clientpulse" element={<ClientPulseDashboardPage user={user!} />} />
+            <Route path="/clientpulse/clients" element={<ClientPulseClientsListPage user={user!} />} />
+            <Route path="/clientpulse/clients/:subaccountId" element={<ClientPulseDrilldownPage user={user!} />} />
+          </Route>
+          <Route element={<ModuleGuard user={user} slug="reports" />}>
+            <Route path="/reports" element={<ReportsListPage user={user!} />} />
+            <Route path="/reports/:id" element={<ReportDetailPage user={user!} />} />
+          </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
@@ -451,20 +540,20 @@ export default function App() {
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
             <Route path="/system/job-queues" element={<JobQueueDashboardPage />} />
-            <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
+            <Route path="/system/agents" element={<Navigate to="/agents" replace />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
             <Route path="/system/llm-pnl" element={<SystemPnlPage />} />
             <Route path="/system/incidents" element={<SystemIncidentsPage />} />
-            <Route path="/system/skill-analyser" element={<SkillAnalyzerPage user={user!} />} />
+            <Route path="/system/skill-analyser" element={<Navigate to="/agents" replace />} />
             <Route path="/system/workflow-studio" element={<WorkflowStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/automations" element={<SystemAutomationsPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
-            {/* Activity — system scope */}
-            <Route path="/system/activity" element={<ActivityPage user={user!} />} />
-            {/* Skill Studio — system scope */}
-            <Route path="/system/skill-studio" element={<SkillStudioPage user={user!} />} />
+            {/* Activity — system scope (redirects to canonical /activity) */}
+            <Route path="/system/activity" element={<Navigate to="/activity" replace />} />
+            {/* Skill Studio — system scope (consolidated into /agents) */}
+            <Route path="/system/skill-studio" element={<Navigate to="/agents" replace />} />
           </Route>
 
           {/* Subaccount connections */}
@@ -477,8 +566,11 @@ export default function App() {
           {/* Review queue (portal access) */}
           <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
 
-          {/* Run trace viewer — org-level (admin agent and skill test runs) */}
-          <Route path="/admin/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
+          {/* Run trace — org-level redirect to canonical /run-trace/:runId */}
+          <Route path="/admin/runs/:runId" element={<AdminRunRedirect />} />
+
+          {/* Agent Inbox (subaccount-scoped) — redirects to canonical /inbox (locked redirect grammar C8) */}
+          <Route path="/subaccounts/:subaccountId/agent-inbox" element={<SubaccountAgentInboxRedirect />} />
 
           {/* Live Agent Execution Log — per-run live + historical timeline.
               Spec: tasks/live-agent-execution-log-spec.md §6.5. */}
@@ -494,8 +586,7 @@ export default function App() {
           {/* Org Chart */}
           <Route path="/org-chart" element={<OrgChartPage user={user!} />} />
 
-          {/* AI Agents */}
-          <Route path="/agents" element={<Navigate to="/" replace />} />
+          {/* AI Agents — /agents is the canonical AgentsListPage (registered above in the protected layout) */}
           <Route path="/agents/:id" element={<AgentChatPage user={user!} />} />
           {/* Brain Tree OS adoption P3 — agent run history */}
           <Route path="/agents/:agentId/runs" element={<AgentRunHistoryPage user={user!} />} />

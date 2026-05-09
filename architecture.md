@@ -400,7 +400,7 @@ Endpoints:
 - `GET /api/subaccounts/:subaccountId/agents/:agentId/latest-handoff` — same, scoped to a subaccount
 - `getLatestHandoffForAgent(agentId, orgId, subaccountId?)` — service helper used by future continuity flows
 
-Frontend: `client/src/components/HandoffCard.tsx` is rendered at the top of `RunTraceViewerPage` whenever `run.handoffJson` is populated, and `client/src/components/SessionLogCardList.tsx` extracts the `nextRecommendedAction` for the "Next: …" line on each card.
+Frontend: `client/src/components/HandoffCard.tsx` is rendered at the top of `client/src/pages/operate/RunTracePage.tsx` whenever `run.handoffJson` is populated, and `client/src/components/SessionLogCardList.tsx` extracts the `nextRecommendedAction` for the "Next: …" line on each card.
 
 ### Planning prelude
 
@@ -412,7 +412,7 @@ interface PlanJson {
 }
 ```
 
-Frontend: `client/src/components/ExecutionPlanPane.tsx` renders the plan as a right-side pane on `RunTraceViewerPage` with progress derived by cross-referencing `plan_json` against `toolCallsLog`. The pure helper `client/src/lib/runPlanView.ts` computes "done / current / pending" status per planned action.
+Frontend: `client/src/components/ExecutionPlanPane.tsx` renders the plan as a right-side pane on `client/src/pages/operate/RunTracePage.tsx` with progress derived by cross-referencing `plan_json` against `toolCallsLog`. The pure helper `client/src/lib/runPlanView.ts` computes "done / current / pending" status per planned action.
 
 ### Session log surfacing
 
@@ -832,15 +832,6 @@ A single `agent_data_sources` row can be scoped one of four ways. Higher precede
 
 A CHECK constraint on `agent_data_sources` enforces that `subaccount_agent_id` and `scheduled_task_id` are mutually exclusive — they're orthogonal scoping axes.
 
-### Eager vs lazy loading
-
-Each `agent_data_sources` row has a `loading_mode` (default `eager`):
-
-- **Eager** — content is fetched at run start and rendered into the `## Your Knowledge Base` block of the system prompt, subject to `MAX_EAGER_BUDGET` (60k tokens).
-- **Lazy** — only a manifest entry (name, scope, size) appears in the system prompt under `## Available Context Sources`. The agent fetches the actual content on demand by calling the `read_data_source` skill.
-
-Lazy mode is the scaling escape hatch for runs with many or large reference files. Manifest entries are capped at `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` (25) for prompt size; the full list is always available via `read_data_source op='list'`.
-
 ### Same-name override resolution
 
 When two sources across scopes share a normalised name (lowercase, trimmed), the highest-precedence scope wins as an explicit override. The losing source is suppressed: it does not appear in the prompt, is invisible to the `read_data_source` skill, but is persisted in the run snapshot with `suppressedByOverride: true` so the debug UI can explain why it wasn't used.
@@ -854,9 +845,7 @@ When two sources across scopes share a normalised name (lowercase, trimmed), the
 3. Sorts by scope precedence then per-scope priority
 4. Assigns `orderIndex` to the full sorted pool BEFORE override suppression (so suppressed entries have stable indices)
 5. Resolves same-name overrides
-6. Splits eager / lazy
-7. Walks the eager budget upstream, marking `includedInPrompt: true/false` deterministically
-8. Caps the lazy manifest for in-prompt rendering
+6. Walks the eager budget, marking `includedInPrompt: true/false` deterministically (all sources are now eager — `loading_mode` column removed in migration 0293)
 
 The downstream `buildSystemPrompt` character-level truncation is now a safety net only — the upstream walk is the primary budget mechanism.
 
@@ -868,7 +857,7 @@ When a run is fired by a scheduled task (`triggerContext.source === 'scheduled_t
 
 Single retrieval interface across all four scopes. Two ops:
 
-- `list` — returns the manifest of all active (non-suppressed) sources, including which are already in the Knowledge Base and which are lazy
+- `list` — returns the manifest of all active (non-suppressed) sources, including which are already in the Knowledge Base
 - `read` — fetches a specific source's content with optional `offset` / `limit` for chunked walks of large sources
 
 Enforced limits (in `server/config/limits.ts`):
@@ -878,13 +867,12 @@ Enforced limits (in `server/config/limits.ts`):
 | `MAX_EAGER_BUDGET` | 60000 | Total tokens in the `## Your Knowledge Base` block |
 | `MAX_READ_DATA_SOURCE_CALLS_PER_RUN` | 20 | Per-run cap on `op: 'read'` calls |
 | `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL` | 15000 | Per-call clamp on the `limit` parameter |
-| `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` | 25 | Lazy manifest entries rendered into the prompt |
 
 The skill is auto-injected onto every agent run via `agentExecutionService` step 5a — no per-agent configuration needed.
 
 ### Run-time snapshot
 
-`agent_runs.context_sources_snapshot` (JSONB) captures every source considered at run start, including winners, suppressed losers, eager-but-budget-excluded, and lazy manifest entries. Each entry carries `orderIndex`, `includedInPrompt`, `suppressedByOverride`, `suppressedBy`, and `exclusionReason` for debugging. Frozen after run start; surfaced in the run trace viewer's Context Sources panel.
+`agent_runs.context_sources_snapshot` (JSONB) captures every source considered at run start, including winners, suppressed losers, and budget-excluded sources. Each entry carries `orderIndex`, `includedInPrompt`, `suppressedByOverride`, `suppressedBy`, and `exclusionReason` for debugging. Frozen after run start; surfaced in the run trace viewer's Context Sources panel. Historical rows (pre-migration 0293) may carry a `loadingMode` field — this is a legacy field; `loadingMode` is optional in the current type.
 
 ### Permissions
 
@@ -972,6 +960,128 @@ Both are process-local (single-instance assumption — see tasks/todo.md D-GPT-1
 | `GET /api/integrations/google-drive/auth-url` | `googleDrive.ts` | Begin OAuth |
 | `GET /api/integrations/google-drive/callback` | `googleDrive.ts` | OAuth callback |
 | `POST /api/integrations/google-drive/picker-token` | `googleDrive.ts` | Issue short-lived picker access token |
+
+---
+
+<a id="document-retrieval-pipeline"></a>
+## Document Retrieval Pipeline
+
+Auto-knowledge-retrieval ranks document chunks by semantic relevance at run start instead of dumping every attached document into the prompt. Spec: [`tasks/builds/auto-knowledge-retrieval/spec.md`](./tasks/builds/auto-knowledge-retrieval/spec.md). Migrations 0288–0294.
+
+### Five-tier scope model
+
+A document attaches at exactly one tier per `reference_document_data_sources` link row. Higher precedence wins on same-name override.
+
+| Tier | Tier ID | Scope key columns |
+|---|---|---|
+| 1. Task instance | `task_instance` | `task_instance_id` non-NULL |
+| 2. Recurring task | `recurring_task` | `scheduled_task_id` non-NULL |
+| 3. Agent | `agent` | `agent_id` non-NULL |
+| 4. Sub-account | `subaccount` | `subaccount_id` non-NULL |
+| 5. Organisation | `organisation` | all four scope FK columns NULL |
+
+CHECK constraint on `reference_document_data_sources` (migration 0290) enforces "exactly one tier active per row" by naming the four FK columns explicitly. A polymorphic `scope_type` + `scope_id` was rejected so RLS policies stay straightforward and tier-specific partial indexes remain possible.
+
+### Modes
+
+`reference_documents.mode` is a closed enum:
+
+- `auto` (default) — eligible for retrieval, participates in threshold + ranking + budget
+- `always_available` — bypasses threshold and ranking, but **still participates in the overall context budget**. If always-available alone exceeds context, the system surfaces operator guidance via the always-available starvation telemetry (§Always-available telemetry below).
+- `reference_only` — never auto-loaded. Only title + 1–2 sentence summary appears in the prompt manifest; the agent fetches full content via `read_data_source`.
+
+Adding a new mode is a spec amendment, not an emergent shape.
+
+### Source provenance
+
+`reference_documents.source` (closed enum): `manual` (default), `from_file`, `auto_memory_approved`, `synthesised_by_agent` (reserved), `external` (legacy Drive). Only non-default values render a UI badge — the absence of a badge is the visual carrier of "this is normal".
+
+### Data model
+
+| Table | Migration | Purpose |
+|---|---|---|
+| `reference_documents` (extended) | 0288 | New columns: `mode`, `summary`, `summary_stale`, `summary_generated_at`, `last_chunked_at`, `active_embedding_model`, `retrieval_version_id`. The two pointers (`active_embedding_model`, `retrieval_version_id`) are the read-side switches; chunking flips them atomically only when the new chunk set is complete. |
+| `reference_document_chunks` | 0289 | New. Keyed `(version_id, chunk_index, embedding_model)` with `vector(1536)` embedding column + HNSW index. Each chunk references its parent `document_version_id` so version pinning survives. Retrieval reads at chunk granularity; whole-document embeddings are NOT stored on `reference_documents`. |
+| `reference_document_data_sources` | 0290 | New join table. One row per (document, scope) attachment. Carries the five-tier scope key columns + tier CHECK constraint. Mode is on the document, not the link, so all attachments of the same document share the same mode (§Modes above). |
+| `memory_blocks` (extended) | 0291 | Adds nullable `scheduled_task_id` for the new "recurring task" memory-block tier. Memory blocks do NOT gain `task_instance_id` (persistent memory at an ephemeral scope is a category error). |
+| `agent_execution_events` (extended) | 0292 | Partial unique index enforcing exactly one `retrieval.summary` event per run. |
+| `agent_data_sources` (extended) | 0293 | Drops `loading_mode` column after Phase 4 cutover. All sources are eager — see § Eager loading after migration 0293. |
+| `document_promotion_audit` | 0294 | New append-only ledger of `(file_id, document_id, organisation_id, principal_id, created_at)` with `UNIQUE (file_id) WHERE deleted_at IS NULL`. Idempotency anchor for Add-to-Knowledge promotion. |
+
+### Retrieval version completeness invariant
+
+`reference_documents.retrieval_version_id` MUST always reference a version whose full chunk set exists for `active_embedding_model`. The chunking job MUST NOT flip the pointer until every chunk for the new version has been written + embedded. Mid-flip reads would surface partial documents — pinned by the test fixture in `documentRetrievalServicePure.test.ts`.
+
+### Ranking determinism
+
+The pure ranker (`retrievalServicePure.ts`) consumes `RetrievalCandidate[]` (chunks + memory blocks via the same shape) and returns deterministic load order. Comparator chain — DO NOT REORDER:
+
+```
+finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC
+```
+
+`id ASC` is the determinism anchor. Document-level relevance is `MAX(chunk.finalScore)` — never average / sum / weighted. Pinned in `retrievalServicePure.test.ts`.
+
+### Generic ranker shared with memory blocks
+
+`memoryBlockRetrievalServicePure` retains its block-specific filters (priority enum, divergence flags, owner-agent) but delegates ranking to the same `retrievalServicePure` core. Future cross-encoder re-ranking, learned thresholds, and new knowledge primitives all benefit from concentrating the algorithm in one place.
+
+### Bounded observability payload contract
+
+`retrievalObservabilityService` emits a single `retrieval.summary` event per run into `agent_execution_events` (canonical storage). Truncation values are constants; tests assert byte-bounded payloads, and replays must be byte-identical (ranking determinism invariant). When production traces look thin, the documented escalation path is to migrate to the deferred dedicated `retrieval_events` table — NOT to raise the truncation caps in place.
+
+### Always-available telemetry
+
+Preventive surface, not a runtime safety net. Constants in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred.
+
+- Soft warning surfaces in the Documents tab when `doc_count >= 30` OR `token_cost >= 30000` for always-available documents in scope.
+- Operator-facing copy when always-available documents exceed budget mid-run: `"Context limits prevented some always-available documents from loading."`
+- Telemetry events: `retrieval.always_available.doc_count`, `retrieval.always_available.token_cost`. Threshold tuning is a post-launch amendment once production data lands.
+
+### Files vs Documents
+
+`execution_files` is NOT modified by this build. The Files tab is a read view of existing rows filtered by sub-account / agent / scope. The "Add to Knowledge" action transforms an `execution_files` row into a new `reference_documents` row plus link rows; the file row itself is untouched in the inline transaction. The source file becomes durable — `execution_files.expiresAt` is flipped to NULL or far-future by the `document:promotion-finalise` job after the chunking job commits. Until finalise runs, the file is still expirable; the `document_promotion_audit` row prevents the promotion path from re-running if expiry races finalise. Operator-facing: the file row is marked "durable" in the UI as soon as the inline transaction completes (audit-row backed); the `expiresAt` flip is invisible to the operator.
+
+### Key files
+
+| File | Purpose |
+|---|---|
+| `server/services/retrievalServicePure.ts` | Generic ranker over `RetrievalCandidate[]`. Pure. |
+| `server/services/retrievalService.ts` | DB-backed surface: builds candidate pool RLS-scoped, hands to the pure ranker, returns load order + observability snapshot. |
+| `server/services/documentRetrievalServicePure.ts` | Document-specific filters before ranking (mode, version pinning, chunk grouping). |
+| `server/services/memoryBlockRetrievalServicePure.ts` | Block-specific filters; delegates ranking to `retrievalServicePure`. |
+| `server/services/documentChunkingServicePure.ts` | Chunk-boundary heuristics. Pure. |
+| `server/services/documentEmbeddingService.ts` | OpenAI embedding for chunks. Wraps `withBackoff`. |
+| `server/services/documentSummariseService.ts` | Cheap-LLM summarisation, async. |
+| `server/services/documentDataSourceService.ts` | CRUD + scope validation for `reference_document_data_sources`. The only path that mutates link rows. |
+| `server/services/documentPromotionService.ts` | Add-to-Knowledge transaction: file → document + link rows + `document_promotion_audit` row. |
+| `server/services/retrievalObservabilityService.ts` | Emits the `retrieval.summary` event into `agent_execution_events`. |
+| `server/services/retrievalObservabilityServicePure.ts` | Pure truncation + payload-shaping helpers. |
+| `server/services/referenceDocumentService.ts` | Chunk-aware version write; mode-update API; triggers summarise + chunk-embed jobs. |
+| `server/jobs/documentSummariseJob.ts` | `document:summarise` queue handler. |
+| `server/jobs/documentChunkEmbedJob.ts` | `document:chunk-embed` queue handler. Atomic-swap source of truth for `retrieval_version_id`. |
+| `server/jobs/documentReembedJob.ts` | `document:reembed` queue handler. Background sweep on embedding-model upgrade. |
+| `server/jobs/documentPromotionFinaliseJob.ts` | `document:promotion-finalise` queue handler. Marks file durable + emits telemetry. |
+| `server/db/schema/referenceDocumentChunks.ts` | Drizzle schema. |
+| `server/db/schema/referenceDocumentDataSources.ts` | Drizzle schema. |
+| `server/db/schema/documentPromotionAudit.ts` | Drizzle schema. |
+| `shared/types/retrieval.ts` | `RetrievalCandidate`, `RetrievalResult`, `RetrievalRejectionReason`, `RetrievalMode`. |
+| `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` | Documents tab — list / add / edit / promote. |
+| `client/src/pages/govern/components/KnowledgeFilesTab.tsx` | Files tab — read view of `execution_files` with Add-to-Knowledge action. |
+| `client/src/api/filesApi.ts` | Client API hooks for the Files tab. |
+| `prototypes/auto-knowledge-retrieval/` | Mockup directory; design source of truth. |
+
+### Routes
+
+| Route | File | Purpose |
+|---|---|---|
+| `GET /api/reference-documents/...` | `referenceDocuments.ts` | List documents in scope; mode + scope link CRUD; promotion endpoint |
+| `GET /api/files/...` | `files.ts` | List execution files for a given scope (Files tab surface) |
+| Existing scheduled-task data-source routes | `scheduledTasks.ts` | Unchanged; consumed for the recurring-task tier |
+
+### Eager loading after migration 0293
+
+`agent_data_sources.loading_mode` was dropped. All sources are now eager and walk through `runContextLoader.ts` step 6. Historical `agent_runs.context_sources_snapshot` rows may carry a legacy `loadingMode` field — the type marks it optional for backward compat. The lazy-manifest cap (`MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT`) is gone.
 
 ---
 
@@ -1738,7 +1848,7 @@ Append-only ledger (`mcp_tool_invocations`) for every MCP tool call attempt, one
 | Room | Format | Events | Consumer |
 |------|--------|--------|----------|
 | Subaccount | `subaccount:{id}` | Task/board updates | Board pages, activity feed |
-| Agent run | `agent-run:{runId}` | `agent:run:started`, `agent:run:progress`, `agent:run:completed`, `agent:run:failed` | `RunTraceViewerPage`, `TestPanel` |
+| Agent run | `agent-run:{runId}` | `agent:run:started`, `agent:run:progress`, `agent:run:completed`, `agent:run:failed` | `client/src/pages/operate/RunTracePage.tsx`, `TestPanel` |
 | Playbook run | `playbook-run:{runId}` | Step dispatch, step completion, approval state, form-input requests, run-level transitions | `PlaybookRunDetailPage` |
 
 **Client hook:** `useSocketRoom(namespace, id, eventHandlers, onJoin)` from `client/src/hooks/useSocket.ts`. Joins the room on mount, leaves on unmount, invokes handlers per event. Typical pattern: each handler calls a REST refresh to maintain payload consistency (socket as notification, REST as source of truth).
@@ -1751,7 +1861,7 @@ Live updates to the home dashboard use a coalescing + last-write-wins pattern in
 
 **Topic family.** `dashboard.approval.changed`, `dashboard.activity.updated`, `dashboard.client.health.changed`, `dashboard.queue.changed`. Emitted from `server/services/reportService.ts`, `server/routes/reviewItems.ts`, `server/services/reviewService.ts`, plus agent-run and workflow-run terminal-state hooks. The legacy `dashboard:update` topic is retained for `ClientPulseDashboardPage` parity but is not used by the home dashboard.
 
-**Client primitives** (`client/src/pages/DashboardPage.tsx`):
+**Client primitives** (`client/src/pages/operate/HomePage.tsx`):
 - **`applyIfNewer(currentTs, incomingTs, apply)`** — strict-greater-than guard on per-group `serverTimestamp`. Out-of-order responses drop silently.
 - **Per-group inflight + pending coalescing** — if a refetch is in flight when an event arrives, set `pending = true` instead of firing a second request. The in-flight finalizer re-fires once if `pending` was set. Replaces the earlier drop-on-inflight pattern (which left stale UI state when the inflight response was older than the suppressed event).
 - **`markFresh(ts)`** — single freshness clock fed by every successful `applyIfNewer` apply; consumed by `FreshnessIndicator` for the "last updated · Ns ago" line.
@@ -1897,10 +2007,12 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 ## Client Patterns
 
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
-- **Permissions-driven nav** — `Layout.tsx` loads `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` to show/hide nav items
+- **Permissions-driven nav** — `Layout.tsx` loads `/api/my-permissions` and `/api/subaccounts/:id/my-permissions` to show/hide nav items; nav structure built by `buildNavItems` in `client/src/config/sidebar.ts` (`NavGroup` types).
+- **Route registry** — all client-side path constants live in `client/src/config/routes.ts` (`APP_ROUTE_PATTERNS` literal-tuple, `AppRoute` brand type, `buildRoute`/`staticRoute` helpers). Never hard-code path strings outside this file.
+- **Page layout** — new pages wrap their body in `<PageShell>` (`client/src/components/PageShell.tsx`). Provides `.page-shell` / `.page-content` / `.page-body` structure and the correct scroll context for fixed footers (`<FormFooter>`).
 - **Real-time updates** — `useSocketRoom` for per-entity rooms (agent runs, playbook runs); `useSocket` for subaccount-scoped board updates. WebSocket is the primary update path; backstop polling covers reconnect windows (see Event-Driven Architecture above).
 - **API wrapper** — all HTTP calls go through `src/lib/api.ts`
-- **Shared client utilities** — `formatMoney.ts` (currency display), `runStatus.ts` (run state enum + guards), `runPlanView.ts` (execution plan rendering). New client-wide helpers go in `src/lib/`.
+- **Shared client utilities** — `formatMoney.ts` (currency display), `runStatus.ts` (run state enum + guards), `runPlanView.ts` (execution plan rendering), `colorHash.ts` (deterministic FNV-1a palette hash for workspace colours), `workspace.ts` (`switchWorkspace` — only allowed reload call site for workspace switching). New client-wide helpers go in `src/lib/`.
 
 ---
 
@@ -2039,7 +2151,7 @@ The direct-ledger pair exists because `cost_aggregates` is updated asynchronousl
 
 ### Per-run cost visibility — `client/src/components/run-cost/`
 
-The `RunCostPanel` component renders per-run LLM spend on every run-detail surface (`SessionLogCardList` compact row, `RunTraceView` full panel, `AdminAgentEditPage` compact row). Branch decisions + formatted strings live in `RunCostPanelPure.ts` so the full §9.1 rendering matrix (loading / error / zero / in-progress / data with compact + full breakdowns) is pinned by pure tests — the project does not ship React Testing Library, so the component is a thin shell around the pure module.
+The `RunCostPanel` component renders per-run LLM spend on every run-detail surface (`SessionLogCardList` compact row, `RunTraceView` full panel, `AgentEditPage` compact row — consolidated page, formerly `AdminAgentEditPage`). Branch decisions + formatted strings live in `RunCostPanelPure.ts` so the full §9.1 rendering matrix (loading / error / zero / in-progress / data with compact + full breakdowns) is pinned by pure tests — the project does not ship React Testing Library, so the component is a thin shell around the pure module.
 
 The shared response type `RunCostResponse` (`shared/types/runCost.ts`) and the `/api/runs/:runId/cost` handler (`server/routes/llmUsage.ts`) return:
 
@@ -2852,7 +2964,7 @@ A unified, filter-driven activity table at three scopes (subaccount / org / syst
 
 Query params: `type`, `status`, `from`, `to`, `agentId`, `severity`, `assignee`, `q`, `sort`, `limit`, `offset`.
 
-**Frontend:** `ActivityPage.tsx` — filter bar + ColHeader sort/filter table (matches `SystemSkillsPage` pattern). Client-side exclusion-set column filters, 10s polling. Routes: `/admin/activity`, `/system/activity`, `/admin/subaccounts/:subaccountId/activity`.
+**Frontend:** `client/src/pages/operate/ActivityPage.tsx` — filter bar + ColHeader sort/filter table (matches `SystemSkillsPage` pattern). Client-side exclusion-set column filters, 10s polling. Client routes: `/activity` (org), `/system/activity`, `/admin/subaccounts/:subaccountId/activity`. Redirects from legacy `/admin/activity` paths handled by C8 redirect rules in `client/src/App.tsx`.
 
 ### Prioritized Work Feed (Feature 2)
 
@@ -2885,7 +2997,7 @@ A chat-driven authoring surface for refining skill definitions and master prompt
 
 **Studio agent skills:** 5 skills (`skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save`) registered in `SKILL_HANDLERS`. These are the tools the `skill-author` system agent uses to read regressions, propose fixes, simulate, and save.
 
-**Frontend:** `SkillStudioPage.tsx` — two-pane layout: left = skill list sorted by regression count, right = definition editor + instructions editor + simulation results + version history with rollback. Routes: `/system/skill-studio`, `/admin/skill-studio`.
+**Frontend:** `SkillStudioPage.tsx` — retired in the consolidation-build (2026-05-07); skill authoring is now reached via `AgentEditPage.tsx` > Skills tab. Legacy routes `/system/skill-studio` and `/admin/skill-studio` redirect to the consolidated page. See ADR `docs/decisions/0007-consolidation-build-page-retirement.md`.
 
 ### Slack Conversational Surface (Feature 4)
 
@@ -3000,7 +3112,7 @@ Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerf
 | File | Purpose |
 |------|---------|
 | `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
-| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers) |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers). Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
 | `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
 | `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
 | `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
@@ -3417,7 +3529,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a fire-and-forget persistence path | Use `server/lib/softBreakerPure.ts` — pure sliding-window breaker (config: `windowSize`, `minSamples`, `failThreshold`, `openDurationMs`). Pattern: wrap the write with `shouldAttempt(state, now)` before + `recordOutcome(state, success, now, config)` after; log exactly once on `trippedNow: true`. Example: `persistHistoryEvent` in `llmInflightRegistry.ts`. Never block the primary path on the breaker — it only gates the write, not the caller. |
 | Stream tokens from a provider adapter | Adapter contract in `server/services/providers/types.ts` — optional `stream?(): AsyncIterable<StreamTokenChunk> & { done: Promise<ProviderResponse> }`. Router opt-in via `RouterCallParams.stream: true`. Server-side 1 Hz throttle per runtimeKey in `llmInflightRegistry.emitProgress()`; socket event `llm-inflight:progress`. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution. No provider ships `stream()` yet — adding it is the hand-off from this branch. |
 | View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `prototypes/system-costs-page.html`. |
-| Modify the per-run cost panel | `client/src/components/run-cost/RunCostPanel.tsx` (thin shell) + `RunCostPanelPure.ts` (branch decisions + formatters) + `shared/types/runCost.ts` (response type) + `server/routes/llmUsage.ts` (`/api/runs/:runId/cost` handler). Panel is hosted on `SessionLogCardList`, `RunTraceView`, and `AdminAgentEditPage`. Pure module covers the full §9.1 rendering matrix. |
+| Modify the per-run cost panel | `client/src/components/run-cost/RunCostPanel.tsx` (thin shell) + `RunCostPanelPure.ts` (branch decisions + formatters) + `shared/types/runCost.ts` (response type) + `server/routes/llmUsage.ts` (`/api/runs/:runId/cost` handler). Panel is hosted on `SessionLogCardList`, `RunTraceView`, and `AgentEditPage` (Build stream, formerly `AdminAgentEditPage`). Pure module covers the full §9.1 rendering matrix. |
 | Modify the per-thread cost & token meter | `client/src/components/CostMeterPill.tsx` (pill UI, reads from `conversationCost` context) + `server/services/conversationCostService.ts` (aggregates `cost_cents`, `tokens_in`, `tokens_out`, `model_id` from `agent_messages`) + `shared/types/conversationCost.ts` (response shape) + route `GET /api/agents/:agentId/conversations/:convId/cost` in `server/routes/agentRuns.ts`. Migration 0262 adds the four cost columns to `agent_messages`; `agentExecutionService.ts` populates them at LLM call time. Cost approach: on-row (not `cost_aggregates` rollup) — see spec-conformance deferred B-D1 before switching to the canonical cost path. |
 | Modify the suggested next-action chips | `client/src/components/SuggestedActionChips.tsx` (chip row rendered below each assistant message) + `server/services/suggestedActionDispatchService.ts` (dispatches chip clicks to the agent) + `server/routes/suggestedActions.ts` (`POST /api/agents/:agentId/conversations/:convId/suggested-actions/:actionId/dispatch`) + `shared/types/messageSuggestedActions.ts` (`MessageSuggestedAction` shape). Chips are stored as JSONB in `agent_messages.suggested_actions` (migration 0263). Agent emits them via the `suggest_next_actions` action registered in `server/config/actionRegistry.ts` and handled by `server/services/skillExecutor.ts`. |
 | Modify the thread context panel | `client/src/components/ThreadContextPanel.tsx` (right-pane editor: task / approach / decisions) + `server/services/conversationThreadContextService.ts` (read + patch) + `server/services/conversationThreadContextServicePure.ts` (patch-application pure fn with OCC version predicate and idempotency Map, capped at 10k entries; also exports `formatThreadContextBlock` for prompt injection) + `server/routes/conversationThreadContext.ts` (`GET /PATCH /api/agents/:agentId/conversations/:convId/thread-context`) + `server/db/schema/conversationThreadContext.ts` + `shared/types/conversationThreadContext.ts`. Migration 0264 creates `conversation_thread_context` (RLS: `organisation_id = current_setting('app.organisation_id')::uuid`); migration 0266 adds the WITH CHECK clause symmetry. Every param in the route path (`agentId`, `convId`) must appear in the DB WHERE clause — see KNOWLEDGE.md [2026-05-01] pattern. **LLM injection** (PR #247): `agentExecutionService.ts` calls `buildThreadContextReadModel` then `formatThreadContextBlock`, prepending the `<thread_context>` block before all other system-prompt augmentation; wrapped in 500ms `Promise.race` timeout — fail-open on timeout/error. Version persisted to `agentRuns.runMetadata.threadContextVersionAtStart` (fire-and-forget). `agentResumeService.ts` refreshes the version on resume so the next `executeRun` re-injection stays consistent. |
@@ -3428,13 +3540,43 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Attach a Google Drive file as a live external reference | `server/services/externalDocumentResolverService.ts` (resolve pipeline) + `server/services/resolvers/googleDriveResolver.ts` (Drive fetch + normalisation) + `server/routes/externalDocumentReferences.ts` (CRUD) + `server/routes/integrations/googleDrive.ts` (OAuth + picker). Cache: `document_cache`. Audit log: `document_fetch_events`. Pure helpers: `server/services/runContextLoaderPure.ts`. See §External Document References above. |
 | Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Entry point: `server/services/cachedContextOrchestrator.ts::cachedContextOrchestrator.execute()`. Pipeline: budget resolution (`executionBudgetResolver.ts`) → bundle snapshotting (`bundleResolutionService.ts`) → assembly + validation (`contextAssemblyEngine.ts` + pure `contextAssemblyEnginePure.ts`) → `llmRouter.routeCall` (gains `prefixHash` + `cacheTtl` params) → terminal `agent_runs` UPDATE. Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. Hash: `computeAssembledPrefixHash` in `contextAssemblyEnginePure.ts` (constant `ASSEMBLY_VERSION`). HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry.ts`. New `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. New `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. |
 | Modify document bundle membership or attachments | `server/services/documentBundleService.ts` (create/promote/attach/dismiss) + pure helpers in `documentBundleServicePure.ts` (computeDocSetHash). Unnamed bundles store `doc_set_hash:<hash>` as description sentinel for O(1) lookup. Attachment routes: `server/routes/documentBundles.ts`. Upload flow: `server/routes/referenceDocuments.ts` (reusable multi-file upload `POST /api/reference-documents/upload`). |
+| Modify the document retrieval pipeline (chunk ranking, mode handling, scope precedence) | `server/services/retrievalServicePure.ts` (pure ranker, comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` — DO NOT REORDER) + `server/services/retrievalService.ts` (DB-backed surface) + `server/services/documentRetrievalServicePure.ts` (mode + version-pinning filters) + `server/services/documentChunkingServicePure.ts` (chunk boundaries) + `server/services/documentEmbeddingService.ts` + `server/services/documentSummariseService.ts` + `server/services/retrievalObservabilityService.ts` + `server/services/retrievalObservabilityServicePure.ts` + `shared/types/retrieval.ts`. Jobs: `documentSummariseJob`, `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`. Tables: `reference_documents` (extended), `reference_document_chunks`, `reference_document_data_sources`, `document_promotion_audit`. Migrations 0288–0294. See § Document Retrieval Pipeline above. |
+| Modify the Knowledge Documents / Files tabs | `client/src/pages/govern/KnowledgePage.tsx` (tab strip) + `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` + `client/src/pages/govern/components/KnowledgeFilesTab.tsx` + `client/src/api/filesApi.ts`. Mockups: `prototypes/auto-knowledge-retrieval/` (design source of truth). Routes: `GET /api/reference-documents/...` + `GET /api/files/...`. |
+| Add a new document-retrieval scope tier | Spec amendment first. Then: extend the CHECK constraint in a corrective migration that names the new FK column explicitly (per § Five-tier scope model in Document Retrieval Pipeline). Update `reference_document_data_sources` schema, RLS policy, indexes, and the scope-precedence comparator in `retrievalServicePure.ts`. The polymorphic `scope_type`/`scope_id` shape is explicitly rejected — keep the named-FK pattern. |
+| Promote a file to a Knowledge document | `server/services/documentPromotionService.ts` (transaction: file → document row + link rows + `document_promotion_audit` row inside one tx) + `server/jobs/documentPromotionFinaliseJob.ts` (post-commit side effects: flip `execution_files.expiresAt` to NULL, emit telemetry). The `document_promotion_audit` row with `UNIQUE (file_id) WHERE deleted_at IS NULL` is the idempotency anchor — it prevents the promotion path from re-running if expiry races finalise. UI: `client/src/pages/govern/components/KnowledgeFilesTab.tsx` "Add to Knowledge" action. |
 | Add a new agent execution log event type | Extend the union in `shared/types/agentExecutionLog.ts` (AgentExecutionEventType + AgentExecutionEventPayload + AGENT_EXECUTION_EVENT_CRITICALITY) and add a validator branch in `server/services/agentExecutionEventServicePure.ts::validateEventPayload`. Emit via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. If the new type links to a new entity kind, extend `LinkedEntityType` + the mask branch in `server/lib/agentRunEditPermissionMaskPure.ts` + the batched label resolver in `server/lib/agentRunEditPermissionMask.ts`. Pure tests under `server/services/__tests__/agentExecutionEventServicePure.test.ts`. Spec: `tasks/live-agent-execution-log-spec.md` §5.3a. |
 | Modify the Live Agent Execution Log read path | `server/routes/agentExecutionLog.ts` (3 GETs) + `server/services/agentExecutionEventService.ts` (`streamEvents` / `getPrompt` / `getLlmPayload`) + `server/lib/agentRunVisibility.ts` (canView / canViewPayload rules) + `server/lib/agentRunPermissionContext.ts` (user-context hydration). Migration 0192 carries the three new tables (`agent_execution_events`, `agent_run_prompts`, `agent_run_llm_payloads`) + adds `next_event_seq` + `event_limit_reached_emitted` to `agent_runs`. |
 | Modify the Live Agent Execution Log payload writer | `server/services/agentRunPayloadWriter.ts::buildPayloadRow` — redaction → tool-policy → greatest-first truncation pipeline. Patterns in `server/lib/redaction.ts` (bearer / openai / anthropic / github / slack / aws / google). Per-tool opt-in via `payloadPersistencePolicy: 'full' \| 'args-redacted' \| 'args-never-persisted'`. Size cap: `AGENT_EXECUTION_LOG_MAX_PAYLOAD_BYTES` (default 1 MB). `response` input is nullable (`null` = no usable provider output; partial object = usage-only/refusal data). Pure tests in `server/services/__tests__/agentRunPayloadWriterPure.test.ts` + `agentRunPayloadWriterFailurePathPure.test.ts`. Modifications recorded in `agent_run_llm_payloads.modifications` + `redacted_fields` (separate columns — never overloaded). |
 | Modify the Live Agent Execution Log client timeline | `client/src/pages/AgentRunLivePage.tsx` (snapshot+live merge, sliding-window cap `TIMELINE_WINDOW_SIZE = 2000`, cap-reached banner, sequence-gap + collision counters via `getAgentRunLiveClientMetrics()`) + `client/src/components/agentRunLog/{Timeline,EventRow,EventDetailDrawer}.tsx`. Socket hookup via `useSocketRoom('agent-run', runId, ...)`; server emitter `emitAgentExecutionEvent` in `server/websocket/emitters.ts`; room-join gate in `server/websocket/rooms.ts` runs the full `resolveAgentRunVisibility` AGENTS_VIEW check. |
 | Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
-| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
+| Modify the Operate — Home page | `client/src/pages/operate/HomePage.tsx` — dashboard reactivity (coalescing + last-write-wins), `applyIfNewer` / `markFresh` / `EVENT_TO_GROUP` primitives. Routes: `/` (org home). Receives WebSocket topics `dashboard.approval.changed`, `dashboard.activity.updated`, `dashboard.client.health.changed`, `dashboard.queue.changed` as refetch signals; REST is source of truth. |
+| Modify the Operate — Inbox page | `client/src/pages/operate/InboxPage.tsx` — unified inbox over `tasks + review_items + agent_runs` union with `inbox_read_states`. Route: `/inbox`. Server service: `server/services/inboxServicePure.ts` (pure band derivation + kind resolution — see KNOWLEDGE.md [2026-05-07] inbox naming note). |
+| Modify the Operate — Activity page | `client/src/pages/operate/ActivityPage.tsx` — filter-bar + ColHeader table, 10s polling. Routes: `/activity` (org), `/system/activity`, `/admin/subaccounts/:subaccountId/activity`. Server: `server/services/activityServicePure.ts` (filter options aggregation runs pre-pagination — do not move post-slice). |
+| Modify the Operate — Run-trace page | `client/src/pages/operate/RunTracePage.tsx` — agent-run detail with session log, execution plan pane, cost panel, handoff card. Route: `/run-trace/:id`. Socket room `agent-run:{runId}`. Role-scoped message masking via `server/services/agentRunMessageServicePure.ts::projectForRole` (read path only — never on write). |
+| Modify Operate shared types | `shared/types/operate.ts` — canonical types for Inbox (`InboxItem`, `InboxBand`), Activity (`ActivityItem`, `triggerSource` enum), and Run-trace (`TraceEvent`) used by both server services and client pages. |
+| Add Operate API wrappers (client) | `client/src/lib/api.ts` — contains new typed wrappers for `/api/inbox`, `/api/activity`, `/api/agent-runs/:id/trace-events`. |
+| Modify Inbox service (server pure) | `server/services/inboxServicePure.ts` — pure helpers for the inbox union query (band derivation, kind mapping, read-state merge). No DB access — called from `server/routes/inbox.ts`. |
+| Modify Activity service (server pure) | `server/services/activityServicePure.ts` — `aggregateFilterOptions` runs over the full merged set before cursor slice; cursor walk is always `createdAt DESC, id ASC` regardless of display `sortDir`. |
+| Modify Run-trace masking (server pure) | `server/services/agentRunMessageServicePure.ts` — `projectForRole(messages, role)` masks fields per §4.8 projection. Called ONLY from `GET /api/agent-runs/:id/trace-events` read endpoint; never from `appendMessage` write path. |
+| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx`. Wrap the page body in `<PageShell>` (`client/src/components/PageShell.tsx`) — canonical layout surface for new pages (provides `.page-shell` / `.page-content` / `.page-body` structure). Register the path constant in `client/src/config/routes.ts` (`APP_ROUTE_PATTERNS` literal-tuple + `buildRoute`/`staticRoute` helpers) and add a nav entry via `client/src/config/sidebar.ts` (`buildNavItems` factory). |
+| Add or modify a UI table (sortable/filterable) | `client/src/components/SortableTable.tsx` (React wrapper) + `client/src/components/sortableTablePure.ts` (pure sort/filter logic, unit-testable). |
+| Add a form page with a fixed footer | Wrap action buttons in `<FormFooter>` (`client/src/components/FormFooter.tsx`) — renders `.form-footer` / `.form-footer-inner` layout via `index.css`. |
+| Add a side drawer / slide-over panel | `client/src/components/Drawer.tsx` — portal-rendered, focus-trapped, scroll-locked (via `client/src/components/overlayScrollLock.ts` reference-counted helper). Modal (`client/src/components/Modal.tsx`) uses the same scroll-lock helper. |
+| Show workspace identity | `client/src/components/WorkspaceBadge.tsx` — workspace identity pill; colour derived via `client/src/lib/colorHash.ts` (deterministic FNV-1a palette hash). |
+| Switch workspace programmatically | `client/src/lib/workspace.ts::switchWorkspace` — the ONLY allowed call site for workspace-switch reloads. Do not call `window.location.reload()` directly. |
+| Toggle between list / table / card views | `client/src/components/ViewModeSwitcher.tsx` (three-segment pill UI) + `client/src/hooks/useViewMode.ts` (derives `ViewMode` from identity state) + `client/src/hooks/useViewModePure.ts` (pure derivation helpers). |
+| Add a search input (debounced, controlled) | `client/src/components/SearchBox.tsx` — debounced controlled input; drop this in place of a raw `<input>` for any list-filter surface. |
+| Show a zero-results state | `client/src/components/EmptyState.tsx` — standardised zero-results panel. |
+| Show a fetch-error state | `client/src/components/ErrorState.tsx` — standardised fetch-error panel. |
 | Add a new permission key | `server/lib/permissions.ts` |
+| Add or modify a runtime check definition | `server/db/schema/runtimeCheckDefinitions.ts` (table shape) + `server/services/runtimeCheckService.ts` (CRUD) + `server/services/runtimeCheckServicePure.ts` (pure validators) + `server/routes/runtimeChecks.ts` (routes) |
+| Add or modify a scorecard or scorecard attachment | `server/db/schema/scorecards.ts` + `server/db/schema/agentScorecardAttachments.ts` + `server/services/scorecardService.ts` + `server/services/scorecardServicePure.ts` (authority resolution, source-pill compression) + `server/routes/scorecards.ts` + `server/routes/agentScorecards.ts` |
+| Modify the scorecard judge runner | `server/services/scorecardJudgeRunner.ts` (orchestration) + `server/services/scorecardJudgeRunnerPure.ts` (sampling, verdict) + `server/jobs/scorecardJudgeJob.ts` (pg-boss worker) + `server/jobs/scorecardJudgeForcedJob.ts` (forced path) |
+| Trigger or modify a bench run | `server/services/benchService.ts` + `server/services/benchServicePure.ts` + `server/routes/benchRuns.ts` + `server/jobs/benchExecuteJob.ts` |
+| Modify operator correction capture | `server/services/correctionCaptureService.ts` + `server/routes/corrections.ts` (POST /api/runs/:runId/steps/:eventId/correct) + `shared/types/correction.ts` |
+| Modify correction pattern detection | `server/services/correctionPatternDetectorPure.ts` (cosine clustering, pure) + `server/jobs/correctionPatternDetectorJob.ts` (daily sweep, cluster → pending_review promotion) |
+| Modify the Govern Quality page | `client/src/pages/govern/GovernQualityPage.tsx` + `client/src/pages/govern/components/ScorecardCard.tsx` + `server/routes/governQuality.ts` + `client/src/lib/api/scorecards.ts` |
+| Add a source filter or provenance field to the Knowledge page | `server/services/knowledgeService.ts` (`listEntries` source param) + `server/routes/knowledge.ts` (schema) + `shared/types/govern.ts` (`KnowledgeSourceFilter`) + `client/src/pages/govern/KnowledgePage.tsx` + `client/src/components/knowledge/SourcePillKnowledge.tsx` |
 | Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
 | Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
@@ -3452,7 +3594,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify a ClientPulse live-data picker | `server/services/crmLiveDataService.ts` (60s in-memory cache, MAX_CACHE_ENTRIES=500) + `server/services/adapters/ghlReadHelpers.ts` (scoped GHL calls) + `client/src/components/clientpulse/pickers/LiveDataPicker.tsx` (debounce + keyboard + 429 backoff) |
 | Modify notify_operator fan-out | `server/services/notifyOperatorFanoutService.ts` (orchestrator) + `server/services/notifyOperatorChannels/*.ts` (in-app/email/slack) + pure `availabilityPure.ts` + `server/services/skillExecutor.ts` notify_operator case |
 | Modify the Agent Recommendations surface | `server/services/agentRecommendationsService.ts` (single-writer — advisory_xact_lock + cooldown + open-match update + cap+eviction + 23505 catch) + `server/services/agentRecommendationsServicePure.ts` (`comparePriority`) + `server/services/optimiser/renderVersion.ts` (`RENDER_VERSION` constant — bump on prompt/evidence/output-shape change) + `server/routes/agentRecommendations.ts` + `server/db/schema/agentRecommendations.ts` + `shared/types/agentRecommendations.ts` (discriminated-union evidence types per category, `materialDelta`, `evidenceHash`, `COOLDOWN_HOURS_BY_SEVERITY`) + `client/src/components/recommendations/AgentRecommendationsList.tsx` + `client/src/hooks/useAgentRecommendations.ts`. Migration 0267 + `subaccounts.optimiser_enabled`. Single-writer enforcement: `agentRecommendations.singleWriter.test.ts` static-analysis test. See §Agent Recommendations Surface. |
-| Modify the Sub-account Optimiser scan | Entry points: `server/services/optimiser/runOptimiserScan.ts` (orchestration, circuit breaker, pre-sort, sequential recommend loop) + `server/services/optimiser/queries/` (8 query modules — one per category) + `server/services/optimiser/recommendations/` (8 pure evaluators) + `server/services/optimiser/renderRecommendation.ts` (LLM copy with render-version cache) + `server/services/optimiser/renderVersion.ts` (bump on prompt/evidence/format change). Pg-boss handler: `server/jobs/runOptimiserScanJob.ts` on the dedicated `optimiser-scan` queue (see `server/config/jobConfig.ts`); kept off `agent-scheduled-run` so optimiser SAs are not double-executed by the generic scheduler. Schedule registration: `server/services/agentScheduleService.ts::registerOptimiserSchedule` (also exposes `registerAllOptimiserSchedules` for boot-time self-heal). Backfill script: `scripts/backfill-optimiser-schedules.ts`. Peer-medians view: migration 0277, refresh job `server/jobs/refreshOptimiserPeerMedians.ts`, listed in `server/db/rlsExclusions.ts`. Dashboard wiring: `client/src/hooks/useAgentRecommendationsTotal.ts` + `client/src/pages/DashboardPage.tsx`. See §Agent Recommendations Surface — Sub-account Optimiser service layer. |
+| Modify the Sub-account Optimiser scan | Entry points: `server/services/optimiser/runOptimiserScan.ts` (orchestration, circuit breaker, pre-sort, sequential recommend loop) + `server/services/optimiser/queries/` (8 query modules — one per category) + `server/services/optimiser/recommendations/` (8 pure evaluators) + `server/services/optimiser/renderRecommendation.ts` (LLM copy with render-version cache) + `server/services/optimiser/renderVersion.ts` (bump on prompt/evidence/format change). Pg-boss handler: `server/jobs/runOptimiserScanJob.ts` on the dedicated `optimiser-scan` queue (see `server/config/jobConfig.ts`); kept off `agent-scheduled-run` so optimiser SAs are not double-executed by the generic scheduler. Schedule registration: `server/services/agentScheduleService.ts::registerOptimiserSchedule` (also exposes `registerAllOptimiserSchedules` for boot-time self-heal). Backfill script: `scripts/backfill-optimiser-schedules.ts`. Peer-medians view: migration 0277, refresh job `server/jobs/refreshOptimiserPeerMedians.ts`, listed in `server/db/rlsExclusions.ts`. Dashboard wiring: `client/src/hooks/useAgentRecommendationsTotal.ts` + `client/src/pages/operate/HomePage.tsx`. See §Agent Recommendations Surface — Sub-account Optimiser service layer. |
 | Modify the charge router (agent spending) | `server/services/chargeRouterService.ts` (proposeCharge / executeApproved / resolveApproval — single entry point for all money movement) + `server/services/chargeRouterServicePure.ts` (pure policy evaluation, key building, error classification) + `server/adapters/stripeAdapter.ts` (chargeViaSpt) + `server/jobs/executionWindowTimeoutJob.ts` (sweeps approved rows past expires_at → blocked) + `server/jobs/executionWindowTimeoutJobPure.ts` (pure cutoff + decideTimeout) + `server/jobs/approvalExpiryJob.ts` (sweeps pending_approval rows past approval_expires_at → expired) + `server/jobs/approvalExpiryJobPure.ts` (pure cutoff + decideApprovalExpiry). Invariants: 1 (ledger before charge), 2 (policy before execution), 11 (executed rows never timed out), 12 (approval_expires_at inert outside pending_approval), 25 (capacity reads inside advisory lock), 35 (Stripe call outside lock). Jobs registered in `queueService.ts` as `maintenance:execution-window-timeout` and `maintenance:approval-expiry` (per-minute). |
 | Manage Spending Budgets and policies (agent spending) | `server/routes/spendingBudgets.ts` (CRUD + promote-to-live stub) + `server/routes/spendingPolicies.ts` (GET/PATCH policy) + `server/services/spendingBudgetService.ts` (create/update/get/list + default spend_approver grant + allowlist validation) + `server/services/spendingBudgetServicePure.ts` (validateMerchantAllowlist, incrementPolicyVersion, resolvePromotionTransition, computeDefaultGrantScope). Allowlist cap: `MERCHANT_ALLOWLIST_MAX_ENTRIES = 250` (spendConstants.ts). Default-grant runs atomically inside the budget INSERT transaction. |
 | Query agent-charge ledger (spend ledger reads) | `server/routes/agentCharges.ts` — `GET /api/agent-charges` (list + filters), `GET /api/agent-charges/:id`, `GET /api/agent-charges/aggregates?dimension=agent_spend_subaccount\|agent_spend_org\|agent_spend_run`. Aggregates endpoint returns settled spend from cost_aggregates + live in-flight reserved figure. Spec §7.6 settled-vs-in-flight rule enforced. |
@@ -3470,6 +3612,81 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify sub-account baseline artefacts (F1) | `server/services/memoryBlockService.ts` (tier loaders: `getTier1Blocks`, `getBlocksForInjection`, `getBaselineVoiceTone`) + `server/workflows/baseline-artefacts-capture.workflow.ts` (capture workflow) + `shared/constants/baselineArtefacts.ts` (reserved-slug registry). Status JSONB shape: `shared/schemas/subaccount.ts::baselineArtefactsStatusSchema`. Status service: `server/services/subaccountOnboardingService.ts` (`markArtefactCaptured` / `markArtefactSkipped` / `markArtefactEdited` / `recordArtefactStarted`). Routes: `server/routes/subaccounts.ts` (`GET/POST .../baseline-artefacts-status`, `POST .../baseline-artefacts/started`, `POST .../baseline-artefacts/:slug/skip`, `PATCH .../baseline-artefacts/:slug`). UI: `OnboardingWizardPage.tsx` (step 4), `EditArtefactDrawer`, `BaselineArtefactsStatusBadge`, `SubaccountKnowledgePage`. |
 | Modify sub-account baseline capture (F3) | Spec: `docs/baseline-capture-spec.md`. Service: `server/services/captureBaselineService.ts` (single-writer; `run` for auto-capture, `runManual` for HTTP-driven manual entry, `adminReset` for sysadmin reset under `withAdminConnection` + `SET LOCAL ROLE admin_role`). Readiness: `server/services/baselineReadinessService.ts` + pure `baselineReadinessPure.ts` (4-condition predicate). Subscriber: `server/services/baselineSubscriberService.ts` (single enqueue path; pg-boss `singletonKey: baseline:${baselineId}`). Pure layer: `baselineRetryClassifierPure.ts` (aggregate outcome + retry budget; backoff: 1h then 4h then fail), `baselineStateMachinePure.ts`, `baselineSubscriberPure.ts`. Metric readers: `server/services/baselineMetricReaders/{getLeadCount,getOpenOpportunityCount,getPipelineValue,getRevenueLast30d,getConversationEngagement}.ts` registered in `registry.ts`. Jobs: `server/jobs/captureBaselineJob.ts` (per-baseline handler) + `server/jobs/evaluateAllPendingBaselines.ts` (daily fallback, `LIMIT 1000` FIFO). Schema: migrations 0280 (`subaccount_baselines` + partial UNIQUE `subaccount_baselines_active_uniq` enforcing one-active-per-subaccount + retry index), 0283 (`subaccount_baseline_metrics` PK on `(baseline_id, metric_slug)` + `ON DELETE CASCADE`), 0284 (FORCE-RLS on both tables). Drizzle: `server/db/schema/subaccountBaselines.ts` + `subaccountBaselineMetrics.ts`. Trigger sources (4): `subscriber` (post-poll readiness), `fallback` (daily cron), `manual` (HTTP), `admin_reset` (sysadmin). Routes: `server/routes/baselines.ts`. Observability: 9 events registered in `server/lib/tracing.ts EVENT_NAMES` with `value_summary` projection (never raw values). Connector hook: `connectorPollingService.ts` lines 292-314 bumps `connector_configs.successful_poll_count_total` + stamps `first_qualifying_poll_at` on first successful sync, then calls `baselineSubscriberService.onSyncCompleteEvaluateReadiness`. Helper: `server/services/reportingAgent/baselineHelper.ts` for downstream consumers. UI: `client/src/components/baseline/{BaselineStatusBadge,ManualBaselineForm,AdminBaselineResetButton}.tsx` hosted on `AdminSubaccountDetailPage.tsx`. |
 | Modify the CRM Query Planner | Spec: `tasks/builds/crm-query-planner/spec.md`. Orchestration: `server/services/crmQueryPlanner/crmQueryPlannerService.ts` (§3 / §19; wraps pipeline in `withPrincipalContext` per §16.4 when outer `withOrgTx` is active; `runLlmStage3` seam on `RunQueryDeps` for test stubbing). Pure layer: `normaliseIntentPure.ts`, `registryMatcherPure.ts`, `validatePlanPure.ts` (10-rule validator + three-case canonical-precedence — case b uses `isLiveOnlyField` from `liveExecutorPure.ts`), `planCachePure.ts`, `approvalCardGeneratorPure.ts`, `plannerCostPure.ts`, `resultNormaliserPure.ts`, `schemaContextPure.ts`, `llmPlannerPromptPure.ts`. Executors: `executors/canonicalExecutor.ts` (skip-unknown-capability rule §12.1 + debug `canonical.capability_skipped`), `executors/liveExecutor.ts` + `liveExecutorPure.ts` (rate-limiter keyed on real GHL `locationId` from `resolveGhlContext`, NOT `context.subaccountLocationId`), `executors/hybridExecutor.ts` + `hybridExecutorPure.ts` (row-count guard before live dispatch), `executors/canonicalQueryRegistry.ts` + `canonicalQueryRegistryMeta.ts`. LLM fallback: `llmPlanner.ts` (single-escalation retry; passes `wasEscalated: true` + `escalationReason` on router context so `getPlannerMetrics.escalationRate` populates). Cache: `planCache.ts` (LRU with discriminated `{ hit, plan, entry } \| { hit: false, reason }` result). Events: `plannerEvents.ts` (forwards ONLY `planner.result_emitted` / `planner.error_emitted` to agent execution log — exactly one `skill.completed` per planner run). Budget classification: `isBudgetExceededError` helper discriminates `{statusCode: 402, code: 'BUDGET_EXCEEDED'}` vs `RATE_LIMITED`; `classifyStage3FallbackSubcategory` splits `parse_failure` / `rate_limited` / `planner_internal_error` / `validation_failed` on `errorSubcategory` (external `ambiguous_intent` unchanged). Route: `server/routes/crmQueryPlanner.ts` (authenticate → `resolveSubaccount` → `listAgentCapabilityMaps` union for `crm.query` gate). Skill surface: `'crm.query'` handler in `server/services/skillExecutor.ts` with `allowedSubaccountIds` enforcement mirroring `executeQuerySubaccountCohort`. Observability: `getPlannerMetrics` in `server/services/systemPnlService.ts` + route in `server/routes/systemPnl.ts` + `SystemPnlPage.tsx` panel. Trace: `PlannerTrace` accumulator threaded through pipeline with top-level `executionMode: 'stage1' \| 'stage2_cache' \| 'stage3_live'` + deep-frozen at terminal emission. CI guard: `scripts/verify-crm-query-planner-read-only.sh` (import-restriction enforcement; read-only is structural). |
+| Modify Build stream agent list or agent edit page | `client/src/pages/build/AgentsListPage.tsx` (consolidated agents list with ETag-gated inline actions) + `client/src/pages/build/AgentEditPage.tsx` (multi-tab edit: identity / skills / schedule / budget; ETag-based tab writes via `WRITE_ORDER`). Typed API client: `client/src/lib/api/build.ts`. Wire types: `shared/types/build.ts` (`AgentFull`, `AgentListItem`, `RecurringTask`, `ProjectWithGoals`, etc.). Server routes: `server/routes/agents/agentTabs.ts` (tab-scoped PATCH/PUT endpoints + `GET /:id/full`). ETag helpers: `server/lib/agentEtag.ts` (`computeAgentEtag` + `canonicalStringify`). Note: `schedule` and `budget` tabs are excluded from `WRITE_ORDER` — trigger editing is done via the existing per-workspace override page; budget cap fields are Phase 1 placeholders (always null, writes accepted but not persisted). |
+| Modify Build stream recurring tasks view | `client/src/pages/build/RecurringTasksPage.tsx` (aggregator UI across all workspaces for the current org). Server: `server/services/recurringTasksService.ts` (impure aggregator) + `server/services/recurringTasksServicePure.ts` (union/sort/filter/cursor pure helpers). Note: `formatFireCondition` handles only FREQ + BYDAY + BYMONTHDAY + INTERVAL from the RRULE spec; unknown patterns fall back to the literal RRULE string. |
+| Modify Build stream project edit page | `client/src/pages/build/ProjectEditPage.tsx` (consolidated project edit, includes migrated goal management). Server: `server/services/projectService.ts` (project CRUD with `toApiProject` / `fromApiPatch` mappers). |
+| Modify Build stream identity-key diff helper | `server/lib/identityKeyDiff.ts` — safe full-replacement diff for arrays of objects with a stable identity key (e.g. skill slug arrays). Used by `agentTabs.ts` to compute add/remove deltas for agent skill attachment writes. |
+
+#### Agent Workspace (Persistent Embodiment Layer, 2026-05)
+
+| Concern | Files |
+|---|---|
+| Overview payload builder | `server/services/agentOverviewAggregator.ts` — lazy-load delegations to 8 endpoints |
+| Overview REST endpoints | `server/routes/agentOverview.ts` — 8 `GET /api/agents/:id/...` routes |
+| Overview composition root | `client/src/components/agent-workspace/AgentOverviewTab.tsx` |
+| SSE fan-out, ring buffer, payload cap | `server/services/agentPresenceStreamPublisher.ts` — single-node publisher; 300-event ring buffer per scope; 32KB per-event cap |
+| SSE stream endpoints | `server/routes/agentPresenceStream.ts` — agent-scope + workspace-scope SSE |
+| SSE + snapshot client hook | `client/src/hooks/useAgentPresence.ts` — server-authoritative; header `Last-Event-ID` supersedes query param |
+| IEE session lifecycle | `server/services/ieeSessionService.ts` — `tearDown` / `markFailed` / `recordSummary`; container release AFTER tx commit |
+| Working time accumulator | `server/services/agentWorkingTimeService.ts` — monotonic-clock (`process.hrtime.bigint()`); UTC half-open intervals; per-run buckets |
+| Presence operations | `server/services/agentPresenceService.ts` — tenant-aware presence state writes/reads |
+| Observation operations | `server/services/agentObservationService.ts` — tenant-aware; immutability enforced by DB trigger |
+| Retention prune job | `server/jobs/agentObservationsPruneJob.ts` — 90-day TTL; 1000-row batches; GUC bypass for immutability trigger |
+| Working time compact job | `server/jobs/workingTimeRollupCompactJob.ts` — keeps per-day for 1 year, then collapses to monthly |
+| IEE session orphan cleanup | `server/jobs/ieeSessionOrphanCleanup.ts` |
+
+#### Govern (consolidation-govern, 2026-05)
+
+| Concern | Files |
+|---|---|
+| Knowledge list + override | `server/routes/knowledge.ts`, `server/services/knowledgeService.ts`, `server/services/knowledgeOverridePure.ts`, `client/src/pages/govern/KnowledgePage.tsx`, `client/src/pages/govern/components/KnowledgeRow.tsx`, `client/src/pages/govern/components/KnowledgeOverrideDialog.tsx` |
+| Auto-extraction gate | `server/services/memoryBlockGatePure.ts`, `server/services/memoryBlockService.ts` (gate call site) |
+| Spend ledger | `server/routes/agentCharges.ts` (`GET /api/spend/ledger`), `server/services/spendLedgerService.ts`, `server/services/spendLedgerServicePure.ts`, `client/src/pages/govern/SpendingPage.tsx` (LedgerTab) |
+| Spend insights / trends | `server/services/spendInsightsService.ts`, `server/services/spendInsightsServicePure.ts`, `server/services/spendTrendsService.ts`, `server/services/spendTrendsServicePure.ts`, `client/src/pages/govern/components/SpendInsightsRow.tsx`, `client/src/pages/govern/components/SpendBarChart.tsx`, `client/src/pages/govern/components/SpendTrendChart.tsx`, `client/src/pages/govern/components/CapUtilisationChart.tsx` |
+| Caps + pace | `server/services/computeBudgetService.ts` (extended), `server/services/computeBudgetServicePure.ts` (pace projector), `client/src/pages/govern/SpendingPage.tsx` (CapsTab) |
+| Connections list / usage / test / disconnect | `server/routes/integrationConnections.ts` (`GET /api/connections`, `GET /:id/usage`, `POST /:id/test`, `POST /:id/disconnect`), `server/services/connectionsService.ts` (incl. `disconnectConnection`), `server/services/connectionsListPure.ts`, `server/services/connectionTokenService.ts` (testConnection dispatcher with closed-enum error.code mapping), `client/src/pages/govern/ConnectionsPage.tsx`, `client/src/pages/govern/components/ConnectionTestButton.tsx`, `client/src/pages/govern/components/DisconnectConfirmDialog.tsx` |
+| Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
+| Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
+
+#### Trust & Verification Layer (trust-verification-layer, 2026-05)
+
+Three-stage quality layer: runtime skill checks (Stage 1), scoring + bench evaluation (Stage 2), operator correction memory (Stage 3). Spec: `tasks/builds/trust-verification-layer/spec.md`.
+
+| Concern | Files |
+|---|---|
+| Stage 1 — runtime check definitions | `server/db/schema/runtimeCheckDefinitions.ts`, `server/db/schema/runtimeCheckResults.ts`, `server/services/runtimeCheckService.ts`, `server/services/runtimeCheckServicePure.ts`, `server/routes/runtimeChecks.ts`, `client/src/lib/api/runtimeChecks.ts` |
+| Stage 2 — scorecards | `server/db/schema/scorecards.ts`, `server/db/schema/agentScorecardAttachments.ts`, `server/db/schema/scorecardJudgements.ts`, `server/services/scorecardService.ts`, `server/services/scorecardServicePure.ts`, `server/routes/scorecards.ts`, `server/routes/agentScorecards.ts` |
+| Stage 2 — bench | `server/db/schema/benchRuns.ts`, `server/db/schema/benchResults.ts`, `server/services/benchService.ts`, `server/services/benchServicePure.ts`, `server/routes/benchRuns.ts`, `server/jobs/benchExecuteJob.ts`, `client/src/lib/api/benchRuns.ts` |
+| Stage 2 — scorecard judge runner | `server/services/scorecardJudgeRunner.ts`, `server/services/scorecardJudgeRunnerPure.ts`, `server/jobs/scorecardJudgeJob.ts`, `server/jobs/scorecardJudgeForcedJob.ts` |
+| Stage 2 — Govern Quality page | `client/src/pages/govern/GovernQualityPage.tsx`, `client/src/pages/govern/components/ScorecardCard.tsx`, `server/routes/governQuality.ts` |
+| Stage 3 — correction capture | `shared/types/correction.ts`, `server/services/correctionCaptureService.ts`, `server/routes/corrections.ts`, `client/src/lib/api/corrections.ts` |
+| Stage 3 — correction pattern detector | `server/services/correctionPatternDetectorPure.ts`, `server/jobs/correctionPatternDetectorJob.ts` |
+| Stage 3 — Knowledge page integration | `client/src/pages/govern/KnowledgePage.tsx`, `client/src/components/knowledge/SourcePillKnowledge.tsx`, `client/src/lib/api/memoryBlocks.ts` (source filter) |
+| Stage 3 — Run-trace correction UI | `client/src/pages/operate/RunTracePage.tsx`, `client/src/pages/operate/components/RunTraceEventRenderer.tsx`, `client/src/components/correction/CorrectDialog.tsx` |
+| Schema migrations | Trust & Verification Layer ships ten migrations across the 0295–0304 range (renumbered from the original 0288–0297 plan after PR #274 took 0288–0294): `0295_skills_runtime_check_columns.sql` (skills runtime-check columns), `0296_runtime_check_results.sql`, `0297_scorecards.sql`, `0298_agent_scorecard_attachments.sql`, `0299_scorecard_judgements.sql`, `0300_bench_runs.sql` (bench_runs + bench_results), `0301_system_agents_scorecard_defaults.sql`, `0302_memory_blocks_operator_correction.sql`, `0303_bench_runs_approved_model.sql`, `0304_bench_runs_state_awaiting.sql` |
+| Shared contracts | `shared/types/agentExecutionLog.ts` (`correction.captured` event), `shared/types/correction.ts`, `shared/types/govern.ts` (`KnowledgeSourceFilter`, `capturedVia`) |
+
+##### Permissions
+
+Six new permission keys (migration 0297):
+
+| Key | Scope | Granted action | Default roles |
+|-----|-------|---------------|---------------|
+| `org.scorecards.view` | Org | List org, system, and subaccount-visible scorecards | org_admin (bypass), org_user (explicit grant) |
+| `org.scorecards.manage` | Org | Create, edit, and delete org-scope scorecards; set mandatory slugs | org_admin (bypass) |
+| `org.scorecards.bench_run` | Org | Trigger a model bench run for agent or skill evaluation | org_admin (bypass) |
+| `subaccount.scorecards.view` | Subaccount | List subaccount-visible scorecards | subaccount_admin (bypass) |
+| `subaccount.scorecards.manage` | Subaccount | Create, edit, and delete subaccount-scope scorecards; attach/detach suggested scorecards | subaccount_admin (bypass) |
+| `subaccount.corrections.create` | Subaccount | Use the Correct action on Run-trace to submit an operator correction | subaccount_admin (bypass) |
+
+##### pg-boss queues
+
+| Queue name | Schedule | Worker config | Purpose |
+|------------|----------|---------------|---------|
+| `scorecard:judge` | Event-driven (enqueued per run) | teamSize 4, teamConcurrency 1 | Sampled scorecard judgement |
+| `scorecard:judge:forced` | Event-driven (enqueued on correction) | teamSize 4, teamConcurrency 1 | Forced judgement triggered by operator correction |
+| `bench:execute` | Event-driven (enqueued by POST /bench-runs/:id/run) | teamSize 2, teamConcurrency 1 | Execute a bench run against all bench items |
+| `correction:pattern-detect` | Daily 05:00 UTC | teamSize 1, teamConcurrency 1 | Cluster operator corrections; promote patterns to pending_review memory blocks |
 
 ---
 
@@ -3566,7 +3783,7 @@ Idempotency: the insert is guarded by a partial unique index `delegation_outcome
 
 ### Run-trace delegation graph
 
-`GET /api/agent-runs/:id/delegation-graph` returns a DAG (not a tree): nodes are runs, spawn edges come from `parentRunId + isSubAgent = true`, handoff edges come from `handoffSourceRunId`. A single run can have both a spawn parent and a handoff parent. Implemented in `server/services/delegationGraphService.ts` (impure BFS walker) and `server/services/delegationGraphServicePure.ts` (pure assembly). The UI renders the graph as a collapsible tree in `client/src/components/run-trace/DelegationGraphView.tsx` under the "Delegation Graph" tab of `RunTraceViewerPage`.
+`GET /api/agent-runs/:id/delegation-graph` returns a DAG (not a tree): nodes are runs, spawn edges come from `parentRunId + isSubAgent = true`, handoff edges come from `handoffSourceRunId`. A single run can have both a spawn parent and a handoff parent. Implemented in `server/services/delegationGraphService.ts` (impure BFS walker) and `server/services/delegationGraphServicePure.ts` (pure assembly). The UI renders the graph as a collapsible tree in `client/src/components/run-trace/DelegationGraphView.tsx` under the "Delegation Graph" tab of `client/src/pages/operate/RunTracePage.tsx`.
 
 ### Composition with capability-aware routing
 
@@ -3689,3 +3906,66 @@ The counter is process-local — multi-instance deployments under-count globally
 ### Admin UI
 
 `/system/incidents` — `SystemIncidentsPage.tsx` with sortable/filterable table, inline detail drawer (ack/resolve/suppress/escalate), WebSocket-updated nav badge.
+
+---
+
+<a id="agent-workspace"></a>
+## Agent Workspace
+
+Persistent Embodiment Layer — surfaces an agent's ongoing state (presence, working time, observations, active goals, files, knowledge in use) as a first-class tab on the agent detail page. Spec: `tasks/builds/agent-workspace/spec.md`. Migrations 0305 (`agent_workspace_presence_and_sessions`) and 0306 (`agent_default_landing_tab`) — renumbered from the original 0295/0296 plan after PR #275 (Trust & Verification Layer) absorbed 0295–0304.
+
+### Overview tab
+
+Composition root: `client/src/components/agent-workspace/AgentOverviewTab.tsx`. Eleven components in layout order, each wired to a dedicated REST endpoint via `useAgentOverview` hook; server-side payload built by `server/services/agentOverviewAggregator.ts` — lazy-load delegations to 8 `GET /api/agents/:id/...` endpoints so cards load in parallel. Routes: `server/routes/agentOverview.ts`.
+
+Components: `IdentityCard`, `PresenceHero`, `ActiveGoalsCard` (conditional), `RecentObservationsCard`, `KnowledgeInUseCard`, `FilesSnapshotCard`, `WorkingTimeChart`, `ActivityFeedCard`, `ToolsUsageBandsCard`, `ConnectionsHealthCard`, `SchedulePeekCard`. Zero-data state rendered by `FirstRunOverview`.
+
+### Presence stream topology
+
+Single-node SSE publisher at `server/services/agentPresenceStreamPublisher.ts`. In-process singleton `Map` keyed by scope (agent or workspace). Each scope holds a sorted ring buffer (300 events max) with canonical order `(eventTimestamp ASC, eventId ASC)`. Per-event hard cap: 32KB (`Buffer.byteLength(JSON.stringify(event.data), 'utf8')`); over-limit events replaced with `{ truncated: true, byteLength }` — truncation logged once per 24h per event-type to suppress storms.
+
+On reconnect: the SSE route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer from the last seen event. `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; conflicts logged at DEBUG.
+
+**No Redis or message bus.** Single-node only in v1. Multi-node fan-out broker is an explicitly deferred concern (see spec §18).
+
+Routes: `server/routes/agentPresenceStream.ts`
+- `GET /api/agent-presence/stream/:agentId` — agent-scope SSE; verifies agent ownership (`resolveAgent`) before `res.flushHeaders()`.
+- `GET /api/agent-presence/stream/workspace/:subaccountId` — workspace-scope SSE; verifies subaccount ownership (`resolveSubaccount`) before `res.flushHeaders()`.
+
+**SSE auth:** Both SSE routes (`GET /api/agent-presence/stream/:agentId` and `GET /api/agent-presence/stream/workspace/:subaccountId`) use the `authenticateStreamToken` middleware. `EventSource` cannot set custom headers, so the SSE handshake uses a short-lived signed stream-token issued by `POST /api/agent-presence/stream-token`. The token is a JWT signed with `JWT_SECRET`, audience-bound to `agent-presence-stream`, with a 120-second TTL and claims for `(userId, orgId, scope, agentId|subaccountId)`. The browser fetches the stream-token using its long-lived JWT for that single request, holds the stream-token in memory only (never localStorage), and passes it as `?token=<stream-token>` on the SSE GET URL. `authenticateStreamToken` verifies the token, populates `req.user` / `req.orgId` / `req.streamTokenScope`, and strips `?token=` from `req.url` before any logger or downstream middleware sees it.
+
+Client hook: `client/src/hooks/useAgentPresence.ts` — SSE + snapshot; server-authoritative only; elapsed timer may tick client-side for visual smoothness but is never persisted or sent back.
+
+### Working time accounting
+
+Service: `server/services/agentWorkingTimeService.ts` (tenant-aware) + `server/services/agentWorkingTimeServicePure.ts` (pure helpers).
+
+- Uses `process.hrtime.bigint()` for monotonic elapsed measurement — NOT `Date.now()`, which is subject to wall-clock drift and NTP adjustments.
+- Intervals are UTC half-open `[start, end)` so midnight crossings are handled by splitting into two buckets rather than spanning the boundary. Double-counting at midnight is prevented by the half-open semantics.
+- Per-day rollup row in `agent_working_time_rollups` (migration 0305) — one row per `(organisation_id, agent_id, bucket_date)` accumulating `working_time_seconds`, `successful_runs`, `failed_runs`, `partial_runs`, `total_run_count`. Idempotency is enforced by `agent_working_time_event_ledger` (migration 0305) — every applied event is recorded once; replays are no-ops.
+- Step pairing keyed by stable step identity. `step_started` and `step_completed` events carry a shared `payload.stepId` (or workflow `(taskId, taskSequence)` when present) — the writer pairs ends to starts by that identity, never by "latest prior start in same run". Concurrent or retried steps in the same run pair correctly because each carries its own id.
+- Monthly compact job (`server/jobs/workingTimeRollupCompactJob.ts`): keeps per-day rows for 1 year, then collapses to monthly resolution.
+
+### IEE session lifecycle
+
+Service: `server/services/ieeSessionService.ts` (tenant-aware) + `server/services/ieeSessionServicePure.ts` (pure helpers). Manages `iee_sessions` rows (migration 0305 — `agent_workspace_presence_and_sessions`) — distinct from the legacy `ieeRuns` table in the IEE section above.
+
+Three lifecycle methods:
+
+- `tearDown(sessionId, orgId)` — uses `withOrgTx`. **External container release MUST happen AFTER the `await withOrgTx(...)` call returns, never inside the transaction callback.** Pattern: commit first, side-effect after. Placing the container release inside the callback violates atomicity if the release throws before the implicit commit.
+- `markFailed(sessionId, reason, orgId)` — uses `getOrgScopedDb`. Does not need a full transaction because a single UPDATE is sufficient.
+- `recordSummary(sessionId, summary, orgId)` — uses `getOrgScopedDb`.
+
+### Retention policy
+
+`agent_observations` rows are immutable by default (DB-level trigger). Non-pinned rows have a 90-day TTL enforced by `server/jobs/agentObservationsPruneJob.ts`:
+
+- Batched DELETE: 1000 rows per batch, ordered `(created_at ASC, id ASC)`, with `FOR UPDATE SKIP LOCKED` to tolerate concurrent job overlap.
+- The immutability trigger is bypassed within the DELETE transaction via `set_config('app.allow_observation_mutation', 'retention_prune', true)` (GUC scoped to that transaction only).
+- Every prune cycle emits a `recordSecurityEvent` with action `agent.observations.retention_prune` — the only authorised mutation path for non-pinned rows.
+
+### Knowledge In Use surface
+
+`KnowledgeInUseCard` reads `retrieval.summary` events from `agent_execution_events`. These events are written by `server/services/retrievalObservabilityService.ts` (PR #274). The agent-workspace surface composes with the Document Retrieval Pipeline rather than duplicating it.
+
+Cross-reference: see § *Document Retrieval Pipeline* above for chunk ranking, mode handling, scope precedence, and the observability service contract.

@@ -16,6 +16,7 @@ import {
   AGENT_EXECUTION_EVENT_CRITICALITY,
   isCriticalEventType,
 } from '../../shared/types/agentExecutionLog.js';
+import { OBSERVATION_TYPES, OBSERVATION_SOURCE_KINDS } from '../../shared/types/agentObservations.js';
 
 // ---------------------------------------------------------------------------
 // Event-cap predicate
@@ -125,6 +126,7 @@ const SOURCE_SERVICES: ReadonlyArray<AgentExecutionSourceService> = [
   'runContextLoader',
   'orchestratorFromTaskJob',
   'requestClarification',
+  'retrievalService',
 ];
 
 export function isValidSourceService(value: unknown): value is AgentExecutionSourceService {
@@ -366,6 +368,72 @@ export function validateEventPayload(
 
     case 'run.terminal.extracted_with_errorMessage':
       if (!isNonNegInt(p.errorMessageLength)) return { ok: false, reason: 'run.terminal.extracted_with_errorMessage_missing_fields' };
+      return { ok: true };
+
+    case 'runtime_check.completed': {
+      if (!isStr(p.runId) || (p.eventId !== null && p.eventId !== undefined && !isStr(p.eventId)) || !isNonNegInt(p.sequenceNumber) || !isStr(p.skillSlug)) {
+        return { ok: false, reason: 'runtime_check.completed_missing_id_fields' };
+      }
+      if (!isStr(p.state) || !['pass', 'fail', 'inconclusive', 'pending', 'not_applicable'].includes(p.state)) {
+        return { ok: false, reason: 'runtime_check.completed_bad_state' };
+      }
+      if (!isStr(p.reasonCode) || !isStr(p.reasonText)) {
+        return { ok: false, reason: 'runtime_check.completed_missing_reason_fields' };
+      }
+      if (!isStr(p.impact) || !['blocking', 'informational'].includes(p.impact)) {
+        return { ok: false, reason: 'runtime_check.completed_bad_impact' };
+      }
+      if (!isStr(p.blastRadius) || !['self', 'tenant', 'external'].includes(p.blastRadius)) {
+        return { ok: false, reason: 'runtime_check.completed_bad_blast_radius' };
+      }
+      if (!isBool(p.reversible)) {
+        return { ok: false, reason: 'runtime_check.completed_missing_reversible' };
+      }
+      if (p.suggestedFix !== null && !isStr(p.suggestedFix)) {
+        return { ok: false, reason: 'runtime_check.completed_bad_suggested_fix' };
+      }
+      return { ok: true };
+    }
+
+    case 'correction.captured': {
+      if (!isStr(p.sourceRunId) || !isStr(p.sourceEventId) || !isStr(p.skillSlug) || !isStr(p.memoryBlockId)) {
+        return { ok: false, reason: 'correction.captured_missing_fields' };
+      }
+      if (!isBool(p.forcedGradeEnqueued)) {
+        return { ok: false, reason: 'correction.captured_missing_forced_grade_flag' };
+      }
+      return { ok: true };
+    }
+
+    case 'retrieval.summary':
+      if (!isRecord(p.result) || !isRecord(p.chunkConfig)) {
+        return { ok: false, reason: 'retrieval.summary_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'retrieval.always_available.mode_changed':
+      if (
+        !isStr(p.organisationId) ||
+        !isStr(p.documentId) ||
+        !isStr(p.oldMode) ||
+        !isStr(p.newMode) ||
+        !isStr(p.actorUserId) ||
+        !isStr(p.occurredAt)
+      ) {
+        return { ok: false, reason: 'retrieval.always_available.mode_changed_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'observation_emitted':
+      if (!isStr(p.observationId) || !isStr(p.observationType) || !isStr(p.agentId) || !isStr(p.sourceKind)) {
+        return { ok: false, reason: 'observation_emitted_missing_fields' };
+      }
+      if (!(OBSERVATION_TYPES as ReadonlyArray<string>).includes(p.observationType)) {
+        return { ok: false, reason: 'observation_emitted_invalid_observation_type' };
+      }
+      if (!(OBSERVATION_SOURCE_KINDS as ReadonlyArray<string>).includes(p.sourceKind)) {
+        return { ok: false, reason: 'observation_emitted_invalid_source_kind' };
+      }
       return { ok: true };
 
     default: {

@@ -5,6 +5,19 @@ tools: Read, Glob, Grep, Bash, Edit, Write, Agent, TodoWrite
 model: opus
 ---
 
+## Invocation
+
+This coordinator runs INLINE in the main Claude Code session. When the operator types `launch feature coordinator`, the main session reads this file and executes the steps below directly.
+
+**Do NOT dispatch via `Agent({subagent_type: "feature-coordinator", ...})`.** The runtime does not allow dispatched sub-agents to dispatch further sub-agents (`No such tool available: Task. Task is not available inside subagents.`), and this playbook requires sub-agent dispatch for `architect`, `builder`, `chatgpt-plan-review`, `spec-conformance`, `adversarial-reviewer`, `pr-reviewer`, and `dual-reviewer`. Nesting this coordinator as a sub-agent breaks the entire pipeline at Step 3 (architect invocation).
+
+Two valid entry paths:
+
+1. **Fresh session** (preferred): start a new Claude Code session and type `launch feature coordinator` as the first message. The main session adopts this playbook.
+2. **In-flight adoption** (fallback): if the operator types `launch feature coordinator` mid-session, the current main session reads this file and follows the playbook directly. Same outcome — the main session executes the steps.
+
+Either way, the steps below run in the main session. The `Agent` tool dispatches inside the playbook (Step 3 `architect`, Step 4 `chatgpt-plan-review`, Step 6 `builder`, Step 8 reviewers) issue from the main session and work normally because the main session has top-level access to `Agent`.
+
 ## Context Loading (Step 0)
 
 Read in this order before doing anything else:

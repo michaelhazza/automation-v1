@@ -15,6 +15,8 @@ export default defineConfig({
   test: {
     include: [
       '**/__tests__/**/*.test.ts',
+      'server/services/*.test.ts',
+      'client/src/lib/*.test.ts',
     ],
     exclude: [
       '**/node_modules/**',

@@ -227,7 +227,7 @@ For each round:
    the CLI has already done that work.
 
    Edge cases:
-   - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and ask the user whether to finalise or run another round.
+   - Empty findings array AND verdict `APPROVED` → log "Round N — no findings; ChatGPT verdict: APPROVED" and proceed to the standard round summary (step 9). **Do NOT pose a question, AskUserQuestion prompt, or any other variant of "do you want another round / finalise" to the operator** — even a polite check-in. The default behaviour at every round end is identical regardless of verdict: emit the round-N+1 diff link and wait silently for the next paste. Finalisation triggers only on the operator's explicit "done" / "finished" / equivalent signal (per the WAIT contract at the bottom of this section). An inferred answer to a coordinator-posed question is NOT a valid finalisation trigger.
    - Verdict `NEEDS_DISCUSSION` → surface the `raw_response` to the user and ask how they want to proceed (no auto-actions on NEEDS_DISCUSSION).
 
 1a. **Duplicate detection (rounds 2+).** Before triage, check whether each finding is a substantive duplicate of a decided finding from a prior round in this session. Substantive duplicate = same `finding_type` AND same file/code area (or same global concern), no new evidence — even when rephrased with stronger language ("must-fix", "not optional", "blocking"). For duplicates: auto-apply the prior round's decision regardless of triage; log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT proceed to step 2 (triage) and do NOT escalate to step 3b for this finding even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: KNOWLEDGE.md `[2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision`.
@@ -434,9 +434,18 @@ For each round:
     <git diff origin/main...HEAD output>
 
   **[MANUAL — MANDATORY, NO EXCEPTIONS]** Generate the round N+1 code-only diff
-  immediately after the commit in step 8. Do not print the round summary until
-  the diff file exists on disk. Rounds 2+ skip the full diff — spec / plan / log
-  files were reviewed in round 1:
+  at the end of every round, **regardless of whether step 8 ran**. If step 8
+  ran (the round produced code changes and was committed), generate the diff
+  immediately after the commit. If step 8 was skipped (zero code changes — e.g.
+  a strategic / framing-only round, or all items rejected/deferred), generate
+  the diff anyway. The output may be byte-identical to the previous round's
+  file, but regenerating it (a) proves the loop is fresh, (b) reflects any
+  out-of-loop fix commits the operator landed between rounds (CI fixes, hotfixes,
+  upstream merges), and (c) gives the operator a single canonical link to copy
+  rather than tracking which prior round's diff is current.
+
+  Do not print the round summary until the diff file exists on disk. Rounds 2+
+  skip the full diff — spec / plan / log files were reviewed in round 1:
 
     ```bash
     git diff origin/main...HEAD -- . \
@@ -986,7 +995,7 @@ finalisation. A bare `no` (no rationale) is treated as missing.
   `scripts/gates/*.sh`, or `scripts/run-all-*.sh` per round, between rounds,
   or at finalization. Continuous integration runs the complete suite as a
   pre-merge gate on the PR. If a round authored a single new test file,
-  running only that file via `npx tsx <path-to-test>` to confirm it passes
+  running only that file via `npx vitest run <path-to-test>` to confirm it passes
   is allowed; running the rest of the suite is not. If ChatGPT recommends
   running gates locally, classify the finding as `defer` with reason
   "test gates are CI-only per CLAUDE.md" and log accordingly. See

@@ -59,6 +59,7 @@ import systemAgentsRouter from './routes/systemAgents.js';
 import systemSkillsRouter from './routes/systemSkills.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
+import agentOverviewRouter from './routes/agentOverview.js';
 import memoryBlocksRouter from './routes/memoryBlocks.js';
 import workspaceMemoryRouter from './routes/workspaceMemory.js';
 import knowledgeRouter from './routes/knowledge.js';
@@ -198,6 +199,17 @@ import workflowDraftsRouter from './routes/workflowDrafts.js';
 import clientErrorsRouter from './routes/clientErrors.js';
 // F3 Baseline Capture — baseline status, manual entry, admin reset (Chunks 4A/4B)
 import baselinesRouter from './routes/baselines.js';
+// Consolidation Build C3 — recurring tasks aggregator
+import recurringTasksRouter from './routes/recurringTasks.js';
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach + bench
+import scorecardsRouter from './routes/scorecards.js';
+import agentScorecardsRouter from './routes/agentScorecards.js';
+import benchRunsRouter from './routes/benchRuns.js';
+import governQualityRouter from './routes/governQuality.js';
+// Trust & Verification Layer Stage 3 — operator corrections
+import correctionsRouter from './routes/corrections.js';
+// Agent Workspace — presence SSE stream (Chunk 9)
+import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -330,6 +342,7 @@ app.use(systemAgentsRouter);
 app.use(systemSkillsRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
+app.use(agentOverviewRouter);
 app.use(memoryBlocksRouter);
 app.use(workspaceMemoryRouter);
 app.use(deliveryChannelsRouter);
@@ -442,6 +455,16 @@ app.use(fileRevertRouter);
 app.use(workflowDraftsRouter);
 app.use(clientErrorsRouter);
 app.use(baselinesRouter);
+// Consolidation Build C3 — recurring tasks aggregator
+app.use(recurringTasksRouter);
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach + bench
+app.use(scorecardsRouter);
+app.use(agentScorecardsRouter);
+app.use(benchRunsRouter);
+app.use(governQualityRouter);
+app.use(correctionsRouter);
+// Agent Workspace — presence SSE stream (Chunk 9)
+app.use(agentPresenceStreamRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -643,6 +666,46 @@ async function start() {
       console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
     }
   }
+  // Document summarise worker (auto-knowledge-retrieval)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentSummariseWorker } = await import('./jobs/documentSummariseJob.js');
+      registerDocumentSummariseWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-summarise worker', err);
+    }
+  }
+  // Document chunk-embed worker (auto-knowledge-retrieval)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentChunkEmbedWorker } = await import('./jobs/documentChunkEmbedJob.js');
+      registerDocumentChunkEmbedWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-chunk-embed worker', err);
+    }
+  }
+  // Document re-embed worker (auto-knowledge-retrieval — embedding-model upgrade sweep)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentReembedWorker } = await import('./jobs/documentReembedJob.js');
+      registerDocumentReembedWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-reembed worker', err);
+    }
+  }
+  // Document promotion-finalise worker (auto-knowledge-retrieval — deferred file durability flip)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentPromotionFinaliseWorker } = await import('./jobs/documentPromotionFinaliseJob.js');
+      registerDocumentPromotionFinaliseWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-promotion-finalise worker', err);
+    }
+  }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
   // Only runs if migration_states records BOTH config and memory as completed.
   try {
@@ -698,6 +761,10 @@ async function start() {
   } catch (err) {
     console.warn('[boot] system-agent registry drift check could not run:', err);
   }
+
+  // Agent Workspace — files-snapshot cache invalidation subscribers (Chunk 5)
+  const { subscribeFilesSnapshotInvalidators } = await import('./services/agentOverviewAggregator.js');
+  subscribeFilesSnapshotInvalidators();
 
   initWebSocket(httpServer);
 

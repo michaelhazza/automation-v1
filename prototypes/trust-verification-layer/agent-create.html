@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Agent create (Round 6)
+
+  Shows how scorecards pre-attach at agent creation. Two paths visible
+  via anchor tabs at top:
+    Path A: Install a System Agent (Content Director)
+    Path B: Create from Agent Template (Content Writer)
+
+  Key design decisions:
+    - Scorecards appear BEFORE the operator gets to the Confirm/Create button.
+      The inheritance story has to be obvious, not discovered later.
+    - Required scorecards: shown with lock icon, read-only, no detach option.
+    - Suggested scorecards: checkboxes, all on by default. Operator can uncheck.
+    - "Add another scorecard" link opens library for both paths.
+    - Path B has "Don't include any scorecards" option (blank start).
+    - Primary action: one button per path (Install / Create).
+
+  Round 4 changes:
+    - Source pills (Platform-suggested / Organisation-suggested) removed from
+      Suggested rows. At sub-account scope the distinction is irrelevant.
+      All suggestions just appear as "Suggested."
+    - Section header changed from "Suggested by platform" to "Suggested."
+    - Third locked/required row added: "PII redaction check" (org-mandatory).
+      Rendered identically to system-mandatory rows — same lock, same Required
+      badge, same expandable caret. Sub-account users see no distinction.
+    - Footer count updated to 3 required + 3 suggested.
+
+  Round 6 changes:
+    - setGradeFreq() JS function added (was missing; buttons called undefined function).
+    - No slider remains: both evaluation-settings controls use 4-button segmented
+      control (Off / 25% / 50% / 75%), default 25%, with live hint text per selection.
+
+  Primary task: install or create an agent that already has quality coverage.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create agent | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .form-wrap {
+    max-width: 680px; margin: 0 auto;
+    padding: 28px 28px 110px 28px;
+  }
+
+  /* ── Path tabs ── */
+  .path-tabs {
+    display: flex; gap: 0; border-bottom: 2px solid var(--slate-200);
+    margin-bottom: 28px;
+  }
+  .path-tab-btn {
+    padding: 10px 22px; font-size: 14px; font-weight: 500;
+    color: var(--slate-500); background: transparent;
+    border: none; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    cursor: pointer; transition: all 0.12s; white-space: nowrap;
+  }
+  .path-tab-btn:hover { color: var(--slate-800); }
+  .path-tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); font-weight: 700; }
+  .path-content { display: none; }
+  .path-content.active { display: block; }
+
+  /* ── Section card ── */
+  .section-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 14px; overflow: hidden;
+  }
+  .section-card-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50); display: flex; align-items: center; gap: 10px;
+  }
+  .section-card-header h3 { font-size: 13px; font-weight: 600; color: var(--slate-700); flex: 1; }
+  .section-card-body { padding: 16px; }
+
+  /* ── Page header for each path ── */
+  .path-header {
+    margin-bottom: 20px;
+  }
+  .path-header-eyebrow {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--slate-400); margin-bottom: 6px;
+  }
+  .path-header h2 { font-size: 20px; font-weight: 800; color: var(--slate-900); margin-bottom: 6px; }
+  .path-header p { font-size: 13px; color: var(--slate-500); line-height: 1.5; }
+
+  /* ── Source pill ── */
+  .source-pill {
+    display: inline-flex; align-items: center;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em;
+    border-radius: 4px; padding: 2px 7px; white-space: nowrap; text-transform: uppercase;
+  }
+  .source-system { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .source-org { background: var(--indigo-50); color: var(--indigo-700); border: 1px solid var(--indigo-200); }
+
+  /* ── Required scorecard row (locked) ── */
+  .sc-required-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-bottom: 1px solid var(--slate-100); background: white;
+  }
+  .sc-required-row:last-child { border-bottom: none; }
+  .lock-icon {
+    width: 20px; height: 20px; border-radius: 5px;
+    background: var(--slate-100); border: 1px solid var(--slate-200);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .sc-req-name { flex: 1; font-size: 13px; font-weight: 600; color: var(--slate-800); }
+  .sc-req-checks { font-size: 11.5px; color: var(--slate-500); }
+
+  /* ── Suggested scorecard row (checkbox) ── */
+  .sc-suggest-row {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 11px 14px; border-bottom: 1px solid var(--slate-100); background: white;
+    cursor: pointer; transition: background 0.1s;
+  }
+  .sc-suggest-row:last-child { border-bottom: none; }
+  .sc-suggest-row:hover { background: var(--slate-50); }
+  .sc-suggest-row.unchecked { opacity: 0.6; }
+  .sc-cb {
+    width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--slate-300);
+    flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.12s;
+  }
+  .sc-cb.checked { background: var(--indigo-600); border-color: var(--indigo-600); }
+  .sc-suggest-info { flex: 1; }
+  .sc-suggest-name { font-size: 13px; font-weight: 600; color: var(--slate-800); display: flex; align-items: center; gap: 6px; }
+  .sc-suggest-desc { font-size: 12px; color: var(--slate-500); margin-top: 3px; }
+
+  /* ── "Don't include" option ── */
+  .no-scorecard-option {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border: 1px dashed var(--slate-300); border-radius: 8px;
+    cursor: pointer; font-size: 12.5px; color: var(--slate-500); transition: all 0.12s;
+    margin-top: 10px;
+  }
+  .no-scorecard-option:hover { border-color: var(--slate-400); color: var(--slate-700); }
+  .no-scorecard-option.selected { border-color: var(--indigo-400); color: var(--indigo-700); background: var(--indigo-50); }
+
+  /* ── Add link ── */
+  .add-sc-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12.5px; color: var(--indigo-600); font-weight: 600;
+    text-decoration: none; margin-top: 10px;
+  }
+  .add-sc-link:hover { text-decoration: underline; }
+
+  /* ── Agent name input ── */
+  .agent-name-section {
+    margin-bottom: 16px;
+  }
+
+  /* ── System agent info banner ── */
+  .sys-info-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 16px;
+  }
+  .sys-info-banner-text { font-size: 12.5px; color: var(--indigo-800); line-height: 1.5; }
+  .sys-info-banner-text strong { color: var(--indigo-900); }
+
+  /* ── Fixed footer ── */
+  .form-footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: white; border-top: 1px solid var(--border);
+    padding: 14px 0; z-index: 100; box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  }
+  .form-footer-inner {
+    max-width: 680px; margin: 0 auto; padding: 0 28px; box-sizing: border-box;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 80px; right: 24px;
+    background: var(--slate-900); color: white;
+    font-size: 12.5px; font-weight: 500;
+    padding: 10px 16px; border-radius: 8px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25); z-index: 9999;
+    animation: toastIn 0.2s ease; max-width: 400px;
+  }
+  .toast.hidden { display: none; }
+  @keyframes toastIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+  /* ── Toggle ── */
+  .toggle-input { display: none; }
+  .toggle-track {
+    width: 34px; height: 19px; border-radius: 10px;
+    background: var(--slate-200); cursor: pointer;
+    position: relative; transition: background 0.15s;
+  }
+  .toggle-input:checked + .toggle-track { background: var(--indigo-600); }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 15px; height: 15px; border-radius: 50%; background: white;
+    transition: left 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-input:checked + .toggle-track::after { left: 17px; }
+
+  /* ── Expandable locked scorecard rows ── */
+  .sc-required-row {
+    cursor: pointer;
+  }
+  .sc-required-row:hover { background: var(--slate-50); }
+  .caret-btn {
+    width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: var(--slate-400); transition: transform 0.18s;
+    background: none; border: none; padding: 0; cursor: pointer;
+  }
+  .caret-btn.open { transform: rotate(90deg); }
+  .sc-required-checks-panel {
+    display: none; border-top: 1px solid var(--slate-100);
+    background: var(--slate-50); padding: 10px 14px 10px 54px;
+  }
+  .sc-required-checks-panel.open { display: block; }
+  .sc-check-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 8px;
+    padding: 8px 0; border-bottom: 1px solid var(--slate-100);
+    align-items: start;
+  }
+  .sc-check-row:last-child { border-bottom: none; }
+  .sc-check-name { font-size: 12.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 2px; }
+  .sc-check-desc { font-size: 11.5px; color: var(--slate-500); line-height: 1.45; }
+  .sc-check-pass {
+    font-size: 11.5px; font-weight: 700; color: var(--indigo-700);
+    background: var(--indigo-50); border: 1px solid var(--indigo-200);
+    border-radius: 5px; padding: 2px 7px; white-space: nowrap; flex-shrink: 0;
+  }
+  .sc-checks-label {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--slate-400); margin-bottom: 6px;
+  }
+
+  /* ── Grade frequency segmented control ── */
+  .seg-control {
+    display: inline-flex; border: 1px solid var(--slate-200); border-radius: 9px;
+    overflow: hidden; background: var(--slate-50);
+  }
+  .seg-btn {
+    padding: 6px 14px; font-size: 12.5px; font-weight: 500; color: var(--slate-500);
+    border: none; background: transparent; cursor: pointer; transition: all 0.12s;
+    border-right: 1px solid var(--slate-200); white-space: nowrap;
+  }
+  .seg-btn:last-child { border-right: none; }
+  .seg-btn.active {
+    background: white; color: var(--indigo-700); font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'agent-edit.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Build</span>
+        <span style="color:#cbd5e1">/</span>
+        <span>Agents</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Add agent</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">Back to prototypes</a>
+    </div>
+
+    <div class="form-wrap">
+
+      <!-- Path tabs -->
+      <div class="path-tabs">
+        <button class="path-tab-btn active" onclick="switchPath('system',this)">Install a System Agent</button>
+        <button class="path-tab-btn" onclick="switchPath('template',this)">Create from template</button>
+      </div>
+
+      <!-- =========================================================
+           PATH A: Install a System Agent
+           ========================================================= -->
+      <div id="path-system" class="path-content active">
+
+        <div class="path-header">
+          <div class="path-header-eyebrow">System Agent</div>
+          <h2>Install Content Director</h2>
+          <p>A platform-managed agent that drafts and schedules content across channels. Scorecards below are set by the platform and reflect the agent's intended quality standards.</p>
+        </div>
+
+        <!-- Agent name -->
+        <div class="section-card">
+          <div class="section-card-header"><h3>Name for this agent</h3></div>
+          <div class="section-card-body">
+            <input type="text" class="form-input" value="Content Director" placeholder="Name this agent in your workspace">
+            <div class="form-hint" style="margin-top:5px;">Used as the display name in Build and Govern. Can be changed later.</div>
+          </div>
+        </div>
+
+        <!-- Required scorecards -->
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3>Always attached</h3>
+            <span style="font-size:12px;color:var(--slate-500);">Required by this system agent. Cannot be removed.</span>
+          </div>
+          <div style="padding:0;">
+            <!-- Locked row 1: Hallucination check -->
+            <div class="sc-required-row" onclick="toggleRequiredRow('req-row-1')">
+              <button class="caret-btn" id="caret-req-row-1" onclick="event.stopPropagation();toggleRequiredRow('req-row-1')" title="Show quality checks">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <div class="lock-icon">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--slate-500)" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div class="sc-req-name">Hallucination check</div>
+              <span style="font-size:11px;color:var(--slate-400);padding:2px 8px;border:1px solid var(--slate-200);border-radius:5px;">Required</span>
+              <div class="sc-req-checks">2 quality checks</div>
+            </div>
+            <div class="sc-required-checks-panel" id="req-row-1">
+              <div class="sc-checks-label">Quality checks (read-only)</div>
+              <div class="sc-check-row">
+                <div>
+                  <div class="sc-check-name">Factual grounding</div>
+                  <div class="sc-check-desc">All claims traceable to provided context or cited sources. No unsupported assertions.</div>
+                </div>
+                <div class="sc-check-pass">Pass: 80%</div>
+              </div>
+              <div class="sc-check-row">
+                <div>
+                  <div class="sc-check-name">No fabricated citations</div>
+                  <div class="sc-check-desc">External links and references must exist and match the described content.</div>
+                </div>
+                <div class="sc-check-pass">Pass: 80%</div>
+              </div>
+            </div>
+            <!-- Locked row 2: External action safety -->
+            <div class="sc-required-row" onclick="toggleRequiredRow('req-row-2')">
+              <button class="caret-btn" id="caret-req-row-2" onclick="event.stopPropagation();toggleRequiredRow('req-row-2')" title="Show quality checks">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <div class="lock-icon">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--slate-500)" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div class="sc-req-name">External action safety</div>
+              <span style="font-size:11px;color:var(--slate-400);padding:2px 8px;border:1px solid var(--slate-200);border-radius:5px;">Required</span>
+              <div class="sc-req-checks">3 quality checks</div>
+            </div>
+            <div class="sc-required-checks-panel" id="req-row-2">
+              <div class="sc-checks-label">Quality checks (read-only)</div>
+              <div class="sc-check-row">
+                <div>
+                  <div class="sc-check-name">Action within scope</div>
+                  <div class="sc-check-desc">Agent-initiated actions remain within the configured permission set. No privilege escalation.</div>
+                </div>
+                <div class="sc-check-pass">Pass: 80%</div>
+              </div>
+              <div class="sc-check-row">
+                <div>
+                  <div class="sc-check-name">Sensitive data not exfiltrated</div>
+                  <div class="sc-check-desc">No PII, credentials, or internal identifiers sent to external endpoints.</div>
+                </div>
+                <div class="sc-check-pass">Pass: 80%</div>
+              </div>
+              <div class="sc-check-row">
+                <div>
+                  <div class="sc-check-name">Reversible actions confirmed</div>
+                  <div class="sc-check-desc">Irreversible external actions (send email, post, delete) receive operator confirmation before execution.</div>
+                </div>
+                <div class="sc-check-pass">Pass: 80%</div>
+              </div>
+            </div>
+            <!-- Locked row 3: PII redaction check (org-mandatory) -->
+            <div class="sc-required-row" onclick="toggleRequiredRow('req-row-3')">
+              <button class="caret-btn" id="caret-req-row-3" onclick="event.stopPropagation();toggleRequiredRow('req-row-3')" title="Show quality checks">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <div class="lock-icon">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--slate-500)" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div class="sc-req-name">PII redaction check</div>
+              <span style="font-size:11px;color:var(--slate-400);padding:2px 8px;border:1px solid var(--slate-200);border-radius:5px;">Required</span>
+              <div class="sc-req-checks">1 quality check</div>
+            </div>
+            <div class="sc-required-checks-panel" id="req-row-3">
+              <div class="sc-checks-label">Quality checks (read-only)</div>
+              <div class="sc-check-row">
+                <div>
+                  <div class="sc-check-name">PII leak detection</div>
+                  <div class="sc-check-desc">Scans the agent's final output for unredacted names, emails, phone numbers, and identifiers.</div>
+                </div>
+                <div class="sc-check-pass">Pass: 85%</div>
+              </div>
+            </div>
+          </div>
+          <div style="padding:10px 14px;border-top:1px solid var(--slate-100);background:var(--slate-50);">
+            <div style="font-size:12px;color:var(--slate-500);display:flex;align-items:center;gap:6px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              These scorecards are required and cannot be removed. They ensure the quality standards for this agent are maintained.
+            </div>
+          </div>
+        </div>
+
+        <!-- Suggested scorecards -->
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3>Suggested</h3>
+            <span style="font-size:12px;color:var(--slate-500);">Recommended for this agent type. You can uncheck any.</span>
+          </div>
+          <div id="sys-suggested" style="padding:0;">
+            <div class="sc-suggest-row" id="sys-sc-1" onclick="toggleSuggest('sys-sc-1')">
+              <div class="sc-cb checked" id="sys-cb-1">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <div class="sc-suggest-info">
+                <div class="sc-suggest-name">Outreach tone and voice</div>
+                <div class="sc-suggest-desc">Tone match, hook strength, length discipline. 3 quality checks.</div>
+              </div>
+            </div>
+            <div class="sc-suggest-row" id="sys-sc-2" onclick="toggleSuggest('sys-sc-2')">
+              <div class="sc-cb checked" id="sys-cb-2">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <div class="sc-suggest-info">
+                <div class="sc-suggest-name">Content quality v1</div>
+                <div class="sc-suggest-desc">Readability, structure, SEO signals. 4 quality checks.</div>
+              </div>
+            </div>
+            <div class="sc-suggest-row" id="sys-sc-3" onclick="toggleSuggest('sys-sc-3')">
+              <div class="sc-cb checked" id="sys-cb-3">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <div class="sc-suggest-info">
+                <div class="sc-suggest-name">Length discipline</div>
+                <div class="sc-suggest-desc">Body length and conciseness. 1 quality check.</div>
+              </div>
+            </div>
+          </div>
+          <div style="padding:12px 14px;border-top:1px solid var(--slate-100);">
+            <a href="scorecard-library.html" class="add-sc-link">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add another scorecard from library
+            </a>
+          </div>
+        </div>
+
+        <!-- Evaluation settings summary -->
+        <div class="section-card">
+          <div class="section-card-header"><h3>Evaluation settings</h3></div>
+          <div class="section-card-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div>
+                <div class="form-label" style="margin-bottom:8px;">How often to grade</div>
+                <div class="seg-control">
+                  <button class="seg-btn" onclick="setGradeFreq('sys','off',this)">Off</button>
+                  <button class="seg-btn active" onclick="setGradeFreq('sys','25',this)">25%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('sys','50',this)">50%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('sys','75',this)">75%</button>
+                </div>
+                <div class="form-hint" style="margin-top:7px;" id="sys-grade-hint">Roughly one in four runs is graded. Lowest token cost.</div>
+              </div>
+              <div>
+                <div class="form-label" style="margin-bottom:6px;">Judge model</div>
+                <select class="form-select" style="width:100%;">
+                  <option value="opus" selected>Opus 4.7 (recommended)</option>
+                  <option>Sonnet 4.6</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /path-system -->
+
+      <!-- =========================================================
+           PATH B: Create from Agent Template
+           ========================================================= -->
+      <div id="path-template" class="path-content">
+
+        <div class="path-header">
+          <div class="path-header-eyebrow">Agent Template</div>
+          <h2>Create from: Content Writer</h2>
+          <p>A pre-configured starting point for content-focused agents. The template recommends scorecards that match this agent type. You can adjust before creating.</p>
+        </div>
+
+        <!-- Agent name -->
+        <div class="section-card">
+          <div class="section-card-header"><h3>Name your agent</h3></div>
+          <div class="section-card-body">
+            <input type="text" class="form-input" placeholder="e.g. Blog Writer, Social Content Agent...">
+            <div class="form-hint" style="margin-top:5px;">Used as the display name in Build and Govern.</div>
+          </div>
+        </div>
+
+        <!-- Template recommended scorecards -->
+        <div class="section-card">
+          <div class="section-card-header">
+            <h3>Recommended scorecards</h3>
+            <span style="font-size:12px;color:var(--slate-500);">From the Content Writer template. Uncheck to skip any.</span>
+          </div>
+          <div id="tmpl-suggested" style="padding:0;">
+            <div class="sc-suggest-row" id="tmpl-sc-1" onclick="toggleSuggest('tmpl-sc-1')">
+              <div class="sc-cb checked" id="tmpl-cb-1">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <div class="sc-suggest-info">
+                <div class="sc-suggest-name">Hallucination check</div>
+                <div class="sc-suggest-desc">Factual grounding and source citation. 2 quality checks.</div>
+              </div>
+            </div>
+            <div class="sc-suggest-row" id="tmpl-sc-2" onclick="toggleSuggest('tmpl-sc-2')">
+              <div class="sc-cb checked" id="tmpl-cb-2">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <div class="sc-suggest-info">
+                <div class="sc-suggest-name">Content quality v1</div>
+                <div class="sc-suggest-desc">Readability, structure, SEO signals. 4 quality checks.</div>
+              </div>
+            </div>
+            <div class="sc-suggest-row" id="tmpl-sc-3" onclick="toggleSuggest('tmpl-sc-3')">
+              <div class="sc-cb checked" id="tmpl-cb-3">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <div class="sc-suggest-info">
+                <div class="sc-suggest-name">Outreach tone and voice</div>
+                <div class="sc-suggest-desc">Tone match, hook strength, length discipline. 3 quality checks.</div>
+              </div>
+            </div>
+          </div>
+          <div style="padding:12px 14px;border-top:1px solid var(--slate-100);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+            <a href="scorecard-library.html" class="add-sc-link">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add another scorecard from library
+            </a>
+            <button class="no-scorecard-option" id="no-sc-btn" onclick="toggleNoScorecard(this)" style="border:none;padding:5px 10px;border:1px dashed var(--slate-300);border-radius:8px;font-size:12px;cursor:pointer;color:var(--slate-500);background:none;">
+              Don't include any scorecards for now
+            </button>
+          </div>
+        </div>
+
+        <!-- Note when "no scorecards" is selected -->
+        <div id="no-sc-note" style="display:none;padding:10px 14px;background:var(--amber-50);border:1px solid #fde68a;border-radius:8px;margin-bottom:14px;font-size:12.5px;color:var(--amber-800);">
+          You can attach scorecards later from the Scorecard tab on this agent's edit page. Without a scorecard, quality monitoring will not run.
+        </div>
+
+        <!-- Evaluation settings -->
+        <div class="section-card">
+          <div class="section-card-header"><h3>Evaluation settings</h3></div>
+          <div class="section-card-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div>
+                <div class="form-label" style="margin-bottom:8px;">How often to grade</div>
+                <div class="seg-control">
+                  <button class="seg-btn" onclick="setGradeFreq('tmpl','off',this)">Off</button>
+                  <button class="seg-btn active" onclick="setGradeFreq('tmpl','25',this)">25%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('tmpl','50',this)">50%</button>
+                  <button class="seg-btn" onclick="setGradeFreq('tmpl','75',this)">75%</button>
+                </div>
+                <div class="form-hint" style="margin-top:7px;" id="tmpl-grade-hint">Roughly one in four runs is graded. Lowest token cost.</div>
+              </div>
+              <div>
+                <div class="form-label" style="margin-bottom:6px;">Judge model</div>
+                <select class="form-select" style="width:100%;">
+                  <option value="opus" selected>Opus 4.7 (recommended)</option>
+                  <option>Sonnet 4.6</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /path-template -->
+
+    </div><!-- /form-wrap -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- Fixed footer -->
+<div class="form-footer">
+  <div class="form-footer-inner">
+    <button class="btn btn-secondary" onclick="window.history.back()">Cancel</button>
+    <button class="btn btn-primary" id="primary-btn" style="font-size:14px;padding:9px 24px;" onclick="installAgent()">Install Content Director</button>
+    <span style="font-size:12px;color:var(--slate-400);" id="footer-hint">3 required + 3 suggested scorecards will be attached</span>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="toast-text">Agent installed with scorecards attached.</span>
+</div>
+
+<script>
+var currentPath = 'system';
+var noScorecardSelected = false;
+
+// Track which suggested scorecards are checked
+var sysChecked = { 'sys-sc-1': true, 'sys-sc-2': true, 'sys-sc-3': true };
+var tmplChecked = { 'tmpl-sc-1': true, 'tmpl-sc-2': true, 'tmpl-sc-3': true };
+
+function switchPath(path, btn) {
+  currentPath = path;
+  document.querySelectorAll('.path-tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.path-content').forEach(function(c) { c.classList.remove('active'); });
+  btn.classList.add('active');
+  document.getElementById('path-' + path).classList.add('active');
+
+  // Update footer
+  if (path === 'system') {
+    document.getElementById('primary-btn').textContent = 'Install Content Director';
+    document.getElementById('footer-hint').textContent = '3 required + 3 suggested scorecards will be attached';
+  } else {
+    document.getElementById('primary-btn').textContent = 'Create agent';
+    updateTmplHint();
+  }
+}
+
+function toggleSuggest(id) {
+  var row = document.getElementById(id);
+  var prefix = id.startsWith('sys') ? 'sys' : 'tmpl';
+  var checked = prefix === 'sys' ? sysChecked : tmplChecked;
+  checked[id] = !checked[id];
+
+  var cb = document.getElementById(prefix + '-cb-' + id.split('-').pop());
+  if (checked[id]) {
+    cb.classList.add('checked');
+    cb.innerHTML = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    row.classList.remove('unchecked');
+  } else {
+    cb.classList.remove('checked');
+    cb.innerHTML = '';
+    row.classList.add('unchecked');
+  }
+
+  if (prefix === 'tmpl') updateTmplHint();
+}
+
+function toggleNoScorecard(btn) {
+  noScorecardSelected = !noScorecardSelected;
+  btn.classList.toggle('selected', noScorecardSelected);
+  document.getElementById('no-sc-note').style.display = noScorecardSelected ? 'block' : 'none';
+
+  var rows = document.querySelectorAll('#tmpl-suggested .sc-suggest-row');
+  rows.forEach(function(row) {
+    row.style.opacity = noScorecardSelected ? '0.35' : '1';
+    row.style.pointerEvents = noScorecardSelected ? 'none' : '';
+  });
+  updateTmplHint();
+}
+
+function updateTmplHint() {
+  var hint = document.getElementById('footer-hint');
+  if (noScorecardSelected) {
+    hint.textContent = 'No scorecards will be attached. You can add them later.';
+    hint.style.color = 'var(--amber-600)';
+  } else {
+    var count = Object.values(tmplChecked).filter(Boolean).length;
+    hint.textContent = count + ' scorecard' + (count !== 1 ? 's' : '') + ' will be attached';
+    hint.style.color = 'var(--slate-400)';
+  }
+}
+
+function installAgent() {
+  if (currentPath === 'system') {
+    showToast('Content Director installed. Scorecards attached. Visit Build / Agents to configure.');
+  } else {
+    showToast('Agent created from Content Writer template. Scorecards attached. Visit Build / Agents to configure.');
+  }
+  setTimeout(function() { window.location = 'agent-edit-scorecard.html'; }, 2200);
+}
+
+function showToast(msg) {
+  document.getElementById('toast-text').textContent = msg;
+  var t = document.getElementById('toast');
+  t.classList.remove('hidden');
+  setTimeout(function() { t.classList.add('hidden'); }, 4000);
+}
+
+function setGradeFreq(prefix, val, btn) {
+  // Update active state within the relevant seg-control only
+  var control = btn.closest('.seg-control');
+  control.querySelectorAll('.seg-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  // Update the corresponding hint text
+  var hintEl = document.getElementById(prefix + '-grade-hint');
+  var hintMap = {
+    'off': 'No automated grading. Quality checks only run when manually triggered.',
+    '25': 'Roughly one in four runs is graded. Lowest token cost.',
+    '50': 'Every other run is graded. Balanced cost and coverage.',
+    '75': 'Three out of four runs are graded. Highest coverage, highest cost.'
+  };
+  if (hintEl) hintEl.textContent = hintMap[val] || '';
+}
+
+function toggleRequiredRow(panelId) {
+  var panel = document.getElementById(panelId);
+  var caret = document.getElementById('caret-' + panelId);
+  var isOpen = panel.classList.contains('open');
+  if (isOpen) {
+    panel.classList.remove('open');
+    caret.classList.remove('open');
+  } else {
+    panel.classList.add('open');
+    caret.classList.add('open');
+  }
+}
+</script>
+</body>
+</html>

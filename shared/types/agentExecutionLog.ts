@@ -7,6 +7,21 @@
 // Import and re-export EventOrigin for use within this file and by callers.
 import type { EventOrigin } from './workflowStepGate.js';
 export type { EventOrigin };
+import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.js';
+
+import type { RetrievalResult } from './retrieval.js';
+import type { ObservationType } from './agentObservations.js';
+
+/**
+ * Typed-observation payload embedded in run-step terminal events (spec §847).
+ * Optional field on `skill.completed` and `llm.completed` payloads.
+ * No producer populates this today; the hook fires only when present.
+ */
+export interface RunStepObservation {
+  type: ObservationType;
+  body: string;
+  metadata?: Record<string, unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Source-service tag
@@ -21,7 +36,9 @@ export type AgentExecutionSourceService =
   | 'llmRouter'
   | 'runContextLoader'
   | 'orchestratorFromTaskJob'
-  | 'requestClarification';
+  | 'requestClarification'
+  | 'correctionCaptureService'
+  | 'retrievalService';
 
 // ---------------------------------------------------------------------------
 // Linked-entity taxonomy
@@ -83,7 +100,12 @@ export type AgentExecutionEventType =
   | 'run.completed'
   | 'tool.error'
   | 'run.terminal.summary_missing'
-  | 'run.terminal.extracted_with_errorMessage';
+  | 'run.terminal.extracted_with_errorMessage'
+  | 'runtime_check.completed'
+  | 'correction.captured'
+  | 'retrieval.summary'
+  | 'retrieval.always_available.mode_changed'
+  | 'observation_emitted';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -180,6 +202,8 @@ export type AgentExecutionEventPayload =
       // Idempotency flag from automations.idempotent. When false, the UI must
       // confirm before retry (since the side effect may have already occurred).
       idempotent?: boolean;
+      /** Run-step typed observation (spec §847). No producer populates this today; hook fires when present. */
+      observation?: RunStepObservation;
     }
   | {
       eventType: 'llm.requested';
@@ -202,6 +226,8 @@ export type AgentExecutionEventPayload =
       durationMs: number;
       payloadInsertStatus: 'ok' | 'failed';
       payloadRowId: string | null;
+      /** Run-step typed observation (spec §847). No producer populates this today; hook fires when present. */
+      observation?: RunStepObservation;
     }
   | {
       eventType: 'handoff.decided';
@@ -253,6 +279,59 @@ export type AgentExecutionEventPayload =
       eventType: 'run.terminal.extracted_with_errorMessage';
       critical: false;
       errorMessageLength: number;
+    }
+  | {
+      /** Trust & Verification Layer §11: per-step deterministic verification result. */
+      eventType: 'runtime_check.completed';
+      critical: false;
+      runId: string;
+      eventId?: string | null;
+      sequenceNumber: number;
+      skillSlug: string;
+      state: RuntimeCheckState;
+      reasonCode: string;
+      reasonText: string;
+      impact: 'blocking' | 'informational';
+      blastRadius: RuntimeCheckBlastRadius;
+      reversible: boolean;
+      suggestedFix: string | null;
+    }
+  | {
+      /** Trust & Verification Layer §13: operator correction captured to memory. */
+      eventType: 'correction.captured';
+      critical: false;
+      sourceRunId: string;
+      sourceEventId: string;
+      skillSlug: string;
+      memoryBlockId: string;
+      forcedGradeEnqueued: boolean;
+    }
+  | {
+      /** Auto Knowledge Retrieval — exactly one per run (spec §10.4, §1.5 #7). */
+      eventType: 'retrieval.summary';
+      critical: false;
+      result: RetrievalResult;
+      chunkConfig: { targetTokens: number; overlapTokens: number };
+    }
+  | {
+      /** Auto Knowledge Retrieval — emitted when a document's mode changes to/from always_available. */
+      eventType: 'retrieval.always_available.mode_changed';
+      critical: false;
+      organisationId: string;
+      documentId: string;
+      oldMode: string;
+      newMode: string;
+      actorUserId: string;
+      occurredAt: string;
+    }
+  | {
+      /** Agent Workspace — emitted after an observation row is successfully written (spec §7.3). */
+      eventType: 'observation_emitted';
+      critical: false;
+      observationId: string;
+      observationType: 'learned' | 'detected' | 'decided' | 'flagged' | 'produced';
+      agentId: string;
+      sourceKind: 'run_step' | 'retrieval_summary' | 'tool_result' | 'memory_block_insert';
     };
 
 // ---------------------------------------------------------------------------
@@ -283,6 +362,11 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'tool.error': false,
   'run.terminal.summary_missing': false,
   'run.terminal.extracted_with_errorMessage': false,
+  'runtime_check.completed': false,
+  'correction.captured': false,
+  'retrieval.summary': false,
+  'retrieval.always_available.mode_changed': false,
+  'observation_emitted': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

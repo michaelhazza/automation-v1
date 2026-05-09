@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { fileService } from '../services/fileService.js';
 import { validateMultipart } from '../middleware/validate.js';
 import { systemSettingsService } from '../services/systemSettingsService.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
@@ -67,5 +68,38 @@ router.get('/api/files/:fileId/download', authenticate, asyncHandler(async (req,
   const result = await fileService.downloadFile(req.params.fileId, req.user!.id, req.orgId!, req.user!.role);
   res.json(result);
 }));
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+router.get(
+  '/api/files',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, linkedToKnowledge, cursor, limit: limitParam } = req.query as Record<string, string | undefined>;
+    const rawLimit = parseInt(limitParam ?? String(DEFAULT_LIMIT), 10);
+    const limit = isNaN(rawLimit) || rawLimit < 1 ? DEFAULT_LIMIT : Math.min(rawLimit, MAX_LIMIT);
+
+    let cursorDate: Date | undefined;
+    if (cursor) {
+      const parsed = new Date(cursor);
+      if (isNaN(parsed.getTime())) {
+        res.status(400).json({ error: 'Invalid cursor' });
+        return;
+      }
+      cursorDate = parsed;
+    }
+
+    const result = await fileService.listFiles(req.orgId!, {
+      subaccountId,
+      linkedToKnowledge: linkedToKnowledge === 'true' || linkedToKnowledge === 'false' ? linkedToKnowledge : undefined,
+      cursor: cursorDate,
+      limit,
+    });
+
+    res.json(result);
+  }),
+);
 
 export default router;

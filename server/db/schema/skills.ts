@@ -40,6 +40,16 @@ export const skills = pgTable(
     // Defaults to 'none' so skills must be explicitly opted in.
     // Migration 0074 / spec round 4.
     visibility: text('visibility').notNull().default('none').$type<'none' | 'basic' | 'full'>(),
+    // Trust & Verification Layer (migration 0295) — spec §6.1
+    // verify: JSONB descriptor for runtime check; null = no check configured.
+    // Will be typed as RuntimeCheckKind in Chunk 2; stored as raw jsonb here.
+    verify: jsonb('verify'),
+    // Required when verify IS NULL — documents why the skill has no runtime check.
+    verifyNullJustification: text('verify_null_justification'),
+    // Whether the skill's side-effects can be undone.
+    reversible: boolean('reversible').notNull().default(false),
+    // Scope of impact. CHECK constraint lives in migration 0295.
+    blastRadius: text('blast_radius').notNull().default('self').$type<'self' | 'tenant' | 'external'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

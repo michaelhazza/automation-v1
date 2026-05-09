@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -22,6 +23,10 @@ import {
   getChargeById,
   getChargeAggregates,
 } from '../services/chargeRouterService.js';
+import { listLedger } from '../services/spendLedgerService.js';
+import { getCapsResponse } from '../services/computeBudgetService.js';
+import { getSpendInsights } from '../services/spendInsightsService.js';
+import { getSpendTrends } from '../services/spendTrendsService.js';
 import type { AgentChargeStatus } from '../../shared/stateMachineGuards.js';
 
 const router = Router();
@@ -116,6 +121,117 @@ router.get(
     }
 
     res.json(charge);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/spend/ledger — paged ledger list with single-CTE filterOptions
+// Spec: §4.0, §4.2, §6
+// ---------------------------------------------------------------------------
+
+const ledgerQuery = z.object({
+  scope: z.enum(['workspace', 'org']).optional().default('workspace'),
+  subaccountId: z.string().uuid().optional(),
+  workspace: z.union([z.string(), z.array(z.string())]).optional(),
+  agent: z.union([z.string(), z.array(z.string())]).optional(),
+  type: z.union([
+    z.enum(['llm', 'embedding', 'tool_call', 'storage', 'other']),
+    z.array(z.enum(['llm', 'embedding', 'tool_call', 'storage', 'other'])),
+  ]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  q: z.string().trim().min(1).max(200).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(25),
+  sortKey: z.enum(['timestamp', 'workspace', 'agent', 'type', 'tokens', 'cost']).optional().default('timestamp'),
+  sortDir: z.enum(['asc', 'desc']).optional().default('desc'),
+}).refine(
+  (q) => q.scope !== 'workspace' || !!q.subaccountId,
+  { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+);
+
+router.get(
+  '/api/spend/ledger',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SPEND_APPROVER),
+  asyncHandler(async (req, res) => {
+    const q = ledgerQuery.parse(req.query);
+    const result = await listLedger({
+      organisationId: req.orgId!,
+      scope: q.scope,
+      subaccountId: q.subaccountId,
+      workspace: arrayify(q.workspace),
+      agent: arrayify(q.agent),
+      type: arrayify(q.type),
+      from: q.from ? new Date(q.from) : undefined,
+      to: q.to ? new Date(q.to) : undefined,
+      q: q.q,
+      cursor: q.cursor ?? null,
+      limit: q.limit,
+      sortKey: q.sortKey,
+      sortDir: q.sortDir,
+    });
+    res.json(result);
+  }),
+);
+
+function arrayify<T>(v: T | T[] | undefined): T[] | undefined {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? v : [v];
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/spend/caps — caps + pace (spec §4.3, §4.11)
+// ---------------------------------------------------------------------------
+
+const capsQuery = z.object({
+  scope: z.enum(['workspace', 'org']).optional().default('org'),
+  subaccountId: z.string().uuid().optional(),
+}).refine(
+  (q) => q.scope !== 'workspace' || !!q.subaccountId,
+  { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+);
+
+router.get(
+  '/api/spend/caps',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SPEND_APPROVER),
+  asyncHandler(async (req, res) => {
+    const q = capsQuery.parse(req.query);
+    const result = await getCapsResponse({
+      organisationId: req.orgId!,
+      scope: q.scope,
+      subaccountId: q.scope === 'workspace' ? q.subaccountId : undefined,
+    });
+    res.json(result);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/spend/insights — org-scope spend insights tiles (spec §4.4)
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/spend/insights',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SPEND_APPROVER),
+  asyncHandler(async (req, res) => {
+    const result = await getSpendInsights({ organisationId: req.orgId! });
+    res.json(result);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/spend/trends — 6-month spend trends + cap classification (spec §4.5)
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/spend/trends',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SPEND_APPROVER),
+  asyncHandler(async (req, res) => {
+    const result = await getSpendTrends({ organisationId: req.orgId! });
+    res.json(result);
   }),
 );
 

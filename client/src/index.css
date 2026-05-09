@@ -56,6 +56,23 @@ body {
   100% { opacity: 1; }
 }
 
+/* Drawer overlay animations — shared so each Drawer instance does not
+   inject a duplicate <style> block into the DOM. */
+@keyframes drawer-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes drawer-slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes drawer-slide-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
 .freshness-pulse {
   animation: freshness-pulse 0.6s ease-in-out;
 }
@@ -76,6 +93,13 @@ body {
   outline-offset: 2px;
 }
 :focus:not(:focus-visible) { outline: none; }
+
+/* WorkspaceBadge clickable variant — explicit focus ring so keyboard users
+   see feedback regardless of browser :focus-visible support level. */
+.workspace-badge--clickable:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
 
 /* ── Page animations ─────────────────────────────────────────────────────── */
 .page-enter {
@@ -571,4 +595,28 @@ body {
     min-width: 240px !important;
     max-width: 240px !important;
   }
+}
+
+/* ── Page shell layout ───────────────────────────────────────────────────── */
+.page-shell { display: flex; flex-direction: column; min-height: 100%; }
+.page-content { max-width: 1280px; margin: 0 auto; padding: 28px 28px; width: 100%; }
+.page-body { padding: 28px 32px; flex: 1; }
+
+/* ── Form footer (fixed bottom bar) ─────────────────────────────────────── */
+.form-footer {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: white;
+  border-top: 1px solid var(--border, #e2e8f0);
+  padding: 14px 0;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+  z-index: 100;
+}
+.form-footer-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 28px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }

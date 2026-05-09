@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Knowledge (extended)
+  Based on: prototypes/consolidation-2026-05-06/knowledge.html
+
+  Trust additions in this file (Round 1):
+    1. "Source" filter chip alongside status / agent / tag filters.
+       Options: All | From runs | From corrections | Manual.
+    2. Source column in the entry table/card showing the label per row.
+    3. Two example "from corrections" rows in Auto-memory seed data.
+       They use the same card structure; the source label is the only
+       visual difference. Approve / Reject / Edit-and-override actions
+       apply the same way.
+
+  Design decisions:
+    - Source filter lives in the Auto-memory toolbar (that's where correction-
+      sourced entries land). Authored memory tab is manual-only by definition
+      so the filter there is redundant — not added.
+    - Source badge is a small pill after the category chip in entry-meta.
+      Same chip geometry as category chips.
+    - No new actions, no new dialogs.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ---- Filter chips ---- */
+  .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .filter-chip {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600);
+    background: white; cursor: pointer; transition: all 0.12s;
+  }
+  .filter-chip:hover { border-color: var(--indigo-300); color: var(--indigo-600); }
+  .filter-chip.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+  .filter-chip.amber-active { background: #b45309; color: white; border-color: #b45309; }
+  .filter-chip.violet-active { background: #6d28d9; color: white; border-color: #6d28d9; }
+
+  /* ---- Filter group separator ---- */
+  .filter-sep {
+    width: 1px; height: 18px; background: var(--slate-200); flex-shrink: 0; margin: 0 2px;
+  }
+  .filter-group-label {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--slate-400); white-space: nowrap;
+  }
+
+  /* ---- Status chips ---- */
+  .chip-base {
+    display: inline-flex; align-items: center; gap: 4px;
+    border-radius: 20px; padding: 2px 8px; font-size: 10.5px; font-weight: 600;
+  }
+  .chip-pending   { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+  .chip-in-use    { background: var(--emerald-50); color: var(--emerald-600); border: 1px solid #a7f3d0; }
+
+  /* Category chips */
+  .chip-cat-identity   { background: #fdf4ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+  .chip-cat-voice      { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .chip-cat-positioning{ background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+  .chip-cat-audience   { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .chip-cat-constraints{ background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200); }
+  .chip-cat-proof      { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+
+  /* Source chips */
+  .chip-src-runs        { background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+  .chip-src-corrections { background: #fdf4ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+  .chip-src-manual      { background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200); }
+
+  /* ---- Entry cards ---- */
+  .entry-list { display: flex; flex-direction: column; gap: 0; }
+  .entry-card {
+    padding: 16px; border: 1px solid var(--slate-200); border-radius: 8px;
+    display: flex; align-items: flex-start; gap: 12px;
+    cursor: pointer; transition: background 0.1s; margin-bottom: 6px;
+    background: white;
+  }
+  .entry-card:hover { background: var(--slate-50); border-color: var(--slate-300); }
+  .entry-card.pending-review { border-left: 4px solid #f59e0b; }
+  .entry-body { flex: 1; min-width: 0; }
+  .entry-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; line-height: 1.4; }
+  .entry-preview {
+    font-size: 12.5px; color: var(--slate-500); line-height: 1.5; margin-bottom: 8px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .entry-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate-400); }
+  .entry-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+  .entry-action-btn {
+    padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--slate-200); background: white; color: var(--slate-600);
+    cursor: pointer; transition: all 0.12s; white-space: nowrap;
+  }
+  .entry-action-btn:hover { border-color: var(--indigo-300); color: var(--indigo-600); background: var(--indigo-50); }
+  .entry-action-btn.primary { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+  .entry-action-btn.primary:hover { background: var(--indigo-700); }
+  .entry-action-btn.danger:hover { border-color: #fca5a5; color: #dc2626; background: #fef2f2; }
+  .overflow-menu-wrap { position: relative; }
+  .overflow-dot-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--slate-400);
+  }
+  .overflow-dot-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+  .overflow-panel {
+    position: absolute; right: 0; top: 34px; z-index: 20;
+    background: white; border: 1px solid var(--slate-200); border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1); min-width: 180px; display: none;
+  }
+  .overflow-panel.open { display: block; }
+  .overflow-item {
+    padding: 8px 14px; font-size: 13px; color: var(--slate-700); cursor: pointer;
+    display: block; transition: background 0.1s; white-space: nowrap;
+  }
+  .overflow-item:hover { background: var(--slate-50); }
+  .overflow-item.danger { color: #dc2626; }
+  .overflow-item.danger:hover { background: #fef2f2; }
+
+  /* ---- Confidence bar ---- */
+  .conf-bar-wrap { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .conf-bar-bg { width: 52px; height: 4px; background: var(--slate-200); border-radius: 3px; }
+  .conf-bar-fill { height: 100%; border-radius: 3px; }
+  .conf-label { font-size: 11px; color: var(--slate-500); white-space: nowrap; }
+
+  /* ---- Tab toolbar ---- */
+  .tab-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tab-toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .search-input {
+    padding: 6px 12px; border-radius: 8px; border: 1px solid var(--slate-200);
+    font-size: 13px; color: var(--slate-700); outline: none; width: 200px;
+  }
+  .search-input:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
+
+  /* ---- Correction-source callout bar ---- */
+  .correction-note {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: #fdf4ff; border: 1px solid #ddd6fe;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 12px; color: #5b21b6;
+    margin-bottom: 12px;
+  }
+  .correction-note-icon { flex-shrink: 0; margin-top: 1px; }
+
+  /* ---- Tab panel ---- */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ---- Ignored chip ---- */
+  .ignored-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 13px; font-weight: 500; color: var(--slate-700); cursor: pointer;
+    border: 1px solid var(--slate-300); background: white;
+    padding: 5px 12px; border-radius: 20px; transition: all 0.1s;
+    text-decoration: none;
+  }
+  .ignored-chip:hover { border-color: var(--slate-400); background: var(--slate-50); }
+
+  /* ---- Suggestion card ---- */
+  .suggestion-card {
+    border: 1px solid var(--indigo-200); border-radius: 10px; padding: 14px 16px;
+    background: var(--indigo-50); margin-bottom: 8px;
+  }
+  .suggestion-label { font-size: 11px; font-weight: 600; color: var(--indigo-600); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .suggestion-title { font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 4px; }
+  .suggestion-body { font-size: 12.5px; color: var(--slate-600); margin-bottom: 10px; line-height: 1.5; }
+  .suggestion-actions { display: flex; gap: 8px; }
+
+  /* ---- Bundle / document items (minimal, placeholders) ---- */
+  .sub-tab-strip { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 16px; }
+  .sub-tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.12s; }
+  .sub-tab:hover { color: var(--indigo-600); }
+  .sub-tab.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+
+  /* Tab strip (top level) */
+  .tab-strip { display: flex; border-bottom: 1px solid var(--slate-200); margin-bottom: 0; gap: 0; }
+  .tab-strip .tab-btn { padding: 9px 16px; font-size: 13.5px; font-weight: 500; color: var(--slate-500); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.12s; }
+  .tab-strip .tab-btn:hover { color: var(--slate-800); }
+  .tab-strip .tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'knowledge.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Knowledge</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="ignored-chip">Ignored (12)</button>
+      <button class="btn btn-primary" style="margin-left:8px;">+ New entry</button>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <h1>Knowledge</h1>
+        <p>What agents know about your workspace, clients, and business.</p>
+      </div>
+
+      <!-- Top-level tab strip -->
+      <div class="tab-strip">
+        <button class="tab-btn active" onclick="switchTab('tab-authored', this)">Authored memory</button>
+        <button class="tab-btn" onclick="switchTab('tab-auto-memory', this)">Auto-memory</button>
+        <button class="tab-btn" onclick="switchTab('tab-documents', this)">Documents</button>
+      </div>
+
+      <!-- ====================================================
+           TAB: Authored memory
+           ==================================================== -->
+      <div id="tab-authored" class="tab-panel active" style="padding-top:16px;">
+        <div class="tab-toolbar">
+          <div class="filter-chips">
+            <button class="filter-chip active">All (10)</button>
+            <button class="filter-chip">Pending review (2)</button>
+            <button class="filter-chip">Identity</button>
+            <button class="filter-chip">Voice</button>
+            <button class="filter-chip">Positioning</button>
+            <button class="filter-chip">Audience</button>
+            <button class="filter-chip">Constraints</button>
+            <button class="filter-chip">Proof</button>
+          </div>
+          <div class="tab-toolbar-right">
+            <input class="search-input" type="text" placeholder="Search memory...">
+          </div>
+        </div>
+        <div class="entry-list">
+          <!-- Entry 1 -->
+          <div class="entry-card">
+            <div class="entry-body">
+              <div class="entry-title">Brand voice: confident but not cocky</div>
+              <div class="entry-preview">Our communications lead with capability and results. Avoid superlatives. Never trash competitors. Tone is direct and warm, not corporate.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-cat-voice">Voice</span>
+                <span class="chip-base chip-src-manual">Manual</span>
+                <span>You</span><span>·</span><span>3 days ago</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <div class="overflow-menu-wrap">
+                <button class="overflow-dot-btn" onclick="toggleOverflow(event,'aom1')">&#8942;</button>
+                <div class="overflow-panel" id="aom1">
+                  <span class="overflow-item">Edit</span>
+                  <span class="overflow-item danger">Delete</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Entry 2 -->
+          <div class="entry-card">
+            <div class="entry-body">
+              <div class="entry-title">ICP: mid-market SaaS, 50-500 employees, US/EU</div>
+              <div class="entry-preview">Primary buyer persona is VP of Operations or Head of RevOps. Secondary buyer: IT director where compliance is a gating factor. Avoid SMB deals under 50 seats.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-cat-audience">Audience</span>
+                <span class="chip-base chip-src-manual">Manual</span>
+                <span>Mike Liu</span><span>·</span><span>Yesterday</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <div class="overflow-menu-wrap">
+                <button class="overflow-dot-btn" onclick="toggleOverflow(event,'aom2')">&#8942;</button>
+                <div class="overflow-panel" id="aom2">
+                  <span class="overflow-item">Edit</span>
+                  <span class="overflow-item danger">Delete</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Entry 3 -->
+          <div class="entry-card">
+            <div class="entry-body">
+              <div class="entry-title">Standard demo flow: 30 min, technical buyer focus</div>
+              <div class="entry-preview">Open with the agent creation demo, not the dashboard. Show a live run within 5 minutes. Reserve 10 minutes for Q+A. Skip billing UI unless asked.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-cat-positioning">Positioning</span>
+                <span class="chip-base chip-src-manual">Manual</span>
+                <span>You</span><span>·</span><span>2 weeks ago</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <div class="overflow-menu-wrap">
+                <button class="overflow-dot-btn" onclick="toggleOverflow(event,'aom3')">&#8942;</button>
+                <div class="overflow-panel" id="aom3">
+                  <span class="overflow-item">Edit</span>
+                  <span class="overflow-item danger">Delete</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-authored -->
+
+      <!-- ====================================================
+           TAB: Auto-memory
+           ==================================================== -->
+      <div id="tab-auto-memory" class="tab-panel" style="padding-top:16px;">
+
+        <!-- Suggestion card -->
+        <div class="suggestion-card" style="margin-bottom:16px;">
+          <div class="suggestion-label">Suggested grouping</div>
+          <div class="suggestion-title">3 tone corrections cluster around "Outreach Agent"</div>
+          <div class="suggestion-body">Corrections from 3 separate runs suggest the agent's default tone is too formal for key contacts. Consider tightening the <code style="background:white;padding:1px 4px;border-radius:3px;font-size:11.5px;">tone_match</code> scorecard floor or promoting this to an authored memory entry.</div>
+          <div class="suggestion-actions">
+            <button class="btn btn-sm btn-primary">Promote to authored memory</button>
+            <button class="btn btn-sm btn-secondary">Dismiss</button>
+          </div>
+        </div>
+
+        <!-- Toolbar with Source filter -->
+        <div class="tab-toolbar">
+          <div class="filter-chips">
+            <!-- Status filter -->
+            <button class="filter-chip active" onclick="filterAutoMemory('all',this)">All (14)</button>
+            <button class="filter-chip" onclick="filterAutoMemory('pending',this)">Pending review (4)</button>
+            <button class="filter-chip" onclick="filterAutoMemory('in-use',this)">In use (10)</button>
+
+            <!-- Divider -->
+            <div class="filter-sep"></div>
+            <span class="filter-group-label">Source:</span>
+
+            <!-- Source filter -->
+            <button class="filter-chip" onclick="filterAutoMemory('from-runs',this)">From runs</button>
+            <button class="filter-chip" onclick="filterAutoMemory('from-corrections',this)">From corrections</button>
+            <button class="filter-chip" onclick="filterAutoMemory('manual',this)">Manual</button>
+          </div>
+          <div class="tab-toolbar-right">
+            <input class="search-input" type="text" placeholder="Search auto-memory...">
+          </div>
+        </div>
+
+        <div class="entry-list" id="auto-memory-list">
+
+          <!-- Correction entry 1 (pending review) -->
+          <div class="entry-card pending-review" data-src="from-corrections" data-status="pending">
+            <div class="entry-body">
+              <div class="entry-title">Use first-name only in email greetings to enterprise contacts</div>
+              <div class="entry-preview">Operator corrected: "Hi Sarah Chen" to "Hi Sarah". Pattern observed in 3 separate outreach runs. Prefer first-name-only greetings unless the contact's title is VP or above and the relationship is new.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-pending">Pending review</span>
+                <span class="chip-base chip-cat-voice">Voice</span>
+                <span class="chip-base chip-src-corrections">From corrections</span>
+                <div class="conf-bar-wrap">
+                  <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:72%;background:var(--indigo-400);"></div></div>
+                  <span class="conf-label">72% confidence</span>
+                </div>
+                <span>Outreach Agent</span><span>·</span><span>2 hours ago</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <button class="entry-action-btn primary">Approve</button>
+              <button class="entry-action-btn">Edit and override</button>
+              <button class="entry-action-btn danger">Reject</button>
+            </div>
+          </div>
+
+          <!-- Correction entry 2 (pending review) -->
+          <div class="entry-card pending-review" data-src="from-corrections" data-status="pending">
+            <div class="entry-body">
+              <div class="entry-title">Reference Q2 renewal deadline, not "the proposal" in follow-up subject lines</div>
+              <div class="entry-preview">Operator corrected 2 separate subject lines from "Following up on our proposal" to "Following up on your Q2 renewal". More specific subject lines increase open rates with enterprise contacts at this stage.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-pending">Pending review</span>
+                <span class="chip-base chip-cat-constraints">Constraints</span>
+                <span class="chip-base chip-src-corrections">From corrections</span>
+                <div class="conf-bar-wrap">
+                  <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:58%;background:var(--amber-500);"></div></div>
+                  <span class="conf-label">58% confidence</span>
+                </div>
+                <span>Outreach Agent</span><span>·</span><span>Yesterday</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <button class="entry-action-btn primary">Approve</button>
+              <button class="entry-action-btn">Edit and override</button>
+              <button class="entry-action-btn danger">Reject</button>
+            </div>
+          </div>
+
+          <!-- From runs entry 1 (in use) -->
+          <div class="entry-card" data-src="from-runs" data-status="in-use">
+            <div class="entry-body">
+              <div class="entry-title">Acme Corp renewal decision timeline: Q2 close expected</div>
+              <div class="entry-preview">Synthesised from 4 CRM query results across 3 runs. Sarah Chen flagged that board approval is needed; earliest close date is June 30. Renewal amount: $180k ARR.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-in-use">In use</span>
+                <span class="chip-base chip-cat-proof">Proof</span>
+                <span class="chip-base chip-src-runs">From runs</span>
+                <div class="conf-bar-wrap">
+                  <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:89%;background:var(--emerald-500);"></div></div>
+                  <span class="conf-label">89% confidence</span>
+                </div>
+                <span>4 days ago</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <div class="overflow-menu-wrap">
+                <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-r1')">&#8942;</button>
+                <div class="overflow-panel" id="om-r1">
+                  <span class="overflow-item">Edit and override</span>
+                  <span class="overflow-item danger">Reject</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- From runs entry 2 (in use) -->
+          <div class="entry-card" data-src="from-runs" data-status="in-use">
+            <div class="entry-body">
+              <div class="entry-title">Preferred contact window for Sarah Chen: Tuesday and Thursday mornings</div>
+              <div class="entry-preview">Synthesised from 6 email open events across 8 weeks. Emails sent Tuesday 9-11am and Thursday 8-10am have 91% open rate vs 34% at other times.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-in-use">In use</span>
+                <span class="chip-base chip-cat-audience">Audience</span>
+                <span class="chip-base chip-src-runs">From runs</span>
+                <div class="conf-bar-wrap">
+                  <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:91%;background:var(--emerald-500);"></div></div>
+                  <span class="conf-label">91% confidence</span>
+                </div>
+                <span>1 week ago</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <div class="overflow-menu-wrap">
+                <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-r2')">&#8942;</button>
+                <div class="overflow-panel" id="om-r2">
+                  <span class="overflow-item">Edit and override</span>
+                  <span class="overflow-item danger">Reject</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Manual auto-memory entry (in use) -->
+          <div class="entry-card" data-src="manual" data-status="in-use">
+            <div class="entry-body">
+              <div class="entry-title">Never mention competitor pricing in first contact</div>
+              <div class="entry-preview">Internal policy: do not reference competitor pricing in cold outreach or first-touch follow-ups. Discuss only if the prospect raises it first.</div>
+              <div class="entry-meta">
+                <span class="chip-base chip-in-use">In use</span>
+                <span class="chip-base chip-cat-constraints">Constraints</span>
+                <span class="chip-base chip-src-manual">Manual</span>
+                <span>You</span><span>·</span><span>3 weeks ago</span>
+              </div>
+            </div>
+            <div class="entry-actions">
+              <div class="overflow-menu-wrap">
+                <button class="overflow-dot-btn" onclick="toggleOverflow(event,'om-m1')">&#8942;</button>
+                <div class="overflow-panel" id="om-m1">
+                  <span class="overflow-item">Edit and override</span>
+                  <span class="overflow-item danger">Reject</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /auto-memory-list -->
+      </div><!-- /tab-auto-memory -->
+
+      <!-- ====================================================
+           TAB: Documents (minimal placeholder)
+           ==================================================== -->
+      <div id="tab-documents" class="tab-panel" style="padding-top:16px;">
+        <div class="sub-tab-strip">
+          <div class="sub-tab active">Documents</div>
+          <div class="sub-tab">Bundles</div>
+        </div>
+        <div style="padding:48px 24px;text-align:center;color:var(--slate-400);">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3;margin:0 auto 12px;display:block;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div style="font-size:14px;font-weight:600;color:var(--slate-600);margin-bottom:6px;">Documents</div>
+          <div style="font-size:13px;max-width:280px;margin:0 auto;">Upload documents and link them to agents as data sources. This view is unchanged from the foundation prototype.</div>
+        </div>
+      </div>
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<script>
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-strip .tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function toggleOverflow(evt, id) {
+  evt.stopPropagation();
+  document.querySelectorAll('.overflow-panel.open').forEach(p => { if (p.id !== id) p.classList.remove('open'); });
+  document.getElementById(id).classList.toggle('open');
+}
+document.addEventListener('click', function() {
+  document.querySelectorAll('.overflow-panel.open').forEach(p => p.classList.remove('open'));
+});
+
+function filterAutoMemory(filter, btn) {
+  // Update active chip
+  const chips = btn.closest('.filter-chips').querySelectorAll('.filter-chip');
+  chips.forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+
+  const rows = document.querySelectorAll('#auto-memory-list .entry-card');
+  rows.forEach(row => {
+    const src = row.dataset.src;
+    const status = row.dataset.status;
+    let show = true;
+    if (filter === 'from-runs') show = src === 'from-runs';
+    else if (filter === 'from-corrections') show = src === 'from-corrections';
+    else if (filter === 'manual') show = src === 'manual';
+    else if (filter === 'pending') show = status === 'pending';
+    else if (filter === 'in-use') show = status === 'in-use';
+    row.style.display = show ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>

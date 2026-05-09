@@ -64,6 +64,20 @@ Rules:
 - **No error handling for impossible scenarios.** Trust internal contracts; only validate at system boundaries.
 - **Never create stubs or placeholders** for a missing forward dependency. Return PLAN_GAP immediately instead.
 
+### CI-gate pre-flight (apply WHILE writing — these gates are CI-only, not in G1)
+
+The G1 gate (lint + typecheck) does NOT exercise the static-gate scripts that run in CI. The four most common Phase-3 failure modes that G1 misses — and that you must satisfy WHILE writing the chunk:
+
+1. **Test-file location AND `.js` extension on relative imports.** Every `*.test.ts` / `*.test.tsx` MUST live under a `__tests__/` directory next to the module being tested. Path-only inline locations (`server/services/foo.test.ts`) are silently invisible to Vitest's discovery glob and rejected by `verify-test-quality.sh`. Correct shape: `server/services/__tests__/foo.test.ts` AND the relative import must end in `.js` (e.g. `from '../fooPure.js'` — NOT `from '../fooPure'` and NOT `from './fooPure'`). The `.js` extension is required by both the project's TypeScript-ESM `nodenext` resolution AND `verify-pure-helper-convention.sh` (its regex is `from\s+'(\.\./|\./)[^']+\.js'`). Same rules for `client/src/**/*.test.ts`. See `docs/testing-conventions.md § Test discovery`.
+
+2. **CREATE POLICY one-liner in migrations.** `verify-rls-coverage.sh` is line-oriented grep. Write `CREATE POLICY <name> ON <table>` on a single line — never split `CREATE POLICY <name>\n  ON <table>` across two lines. The body (`USING (...)`/`WITH CHECK (...)`) can wrap normally; only the `CREATE POLICY ... ON <table>` opener must be on one line.
+
+3. **No raw `db` import outside `server/services/**`.** `verify-rls-contract-compliance.sh` enforces "queries live in services". If a chunk needs a tiny lib helper (e.g. a route-side ownership check), either use `getOrgScopedDb` (allowed in `server/lib/orgScopedDb.ts` callers anywhere) OR add the helper to a `server/services/` file. New `server/lib/*.ts` files that import `db` directly are blocked unless added to the gate's `ALLOWLIST_DIRS` array — note the precedent (`resolveSubaccount.ts`, `resolveAgent.ts`) but extending the allowlist is a deliberate decision, not the default path.
+
+4. **FK references to `agent_execution_events(id)` in new migrations.** Default `ON DELETE NO ACTION` blocks integration-test cleanup that deletes events. For pointer columns (nullable: "last seen", "current focus") use `ON DELETE SET NULL`. For dependent rows (NOT NULL: "this row was generated from this event") use `ON DELETE CASCADE` — but think about retention: if events are pruned by a job, do you want the dependent row pruned too? If yes, CASCADE; if no, design the row to outlive the event with a separate retention policy.
+
+These four are the gates that bit `agent-workspace` Phase 3 (PR #276) hardest. Each is mechanical: it costs ~30 seconds to comply while writing the chunk and ~30 minutes to fix retroactively after CI red.
+
 ## Step 4 — G1 gate
 
 After implementation, run all applicable checks. Cap at 3 attempts per check.
@@ -82,7 +96,8 @@ npm run build:server
 npm run build:client
 
 # Targeted unit tests (ONLY for new pure functions with no DB/network/filesystem side effects)
-npx tsx <path-to-new-test-file>
+# Runner is Vitest — see docs/testing-conventions.md. Never `npx tsx`, `node:test`, or handwritten harnesses.
+npx vitest run <path-to-new-test-file>
 ```
 
 On each failure: read the diagnostic, fix the specific issue, re-run.

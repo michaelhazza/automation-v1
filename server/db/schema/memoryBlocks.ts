@@ -4,6 +4,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { workspaceMemoryEntries } from './workspaceMemories';
+import { scheduledTasks } from './scheduledTasks';
 
 // pgvector custom type — mirrors the convention in workspaceMemories.ts and
 // agentEmbeddings.ts.  Nullable here: embedding is populated asynchronously
@@ -28,7 +29,8 @@ export type MemoryBlockStatus = 'active' | 'draft' | 'pending_review' | 'rejecte
 export type MemoryBlockSource = 'manual' | 'auto_synthesised';
 // Phase 5 / W3a types
 export type MemoryBlockPriority = 'low' | 'medium' | 'high';
-export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion';
+// 'operator_correction' added in migration 0302 (Trust & Verification Layer Stage 3).
+export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion' | 'operator_correction';
 export type MemoryBlockDeprecationReason = 'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted';
 
 // ---------------------------------------------------------------------------
@@ -116,6 +118,16 @@ export const memoryBlocks = pgTable(
     tier: smallint('tier').$type<1 | 2>(),
     appliesToDomains: text('applies_to_domains').array(),
 
+    // Consolidation C — Govern (migration 0286, spec §4.1, §6) — Edit-and-override
+    // marker. Auto-extraction pipeline skips BOTH the UPDATE and the version INSERT
+    // when true. Set by the manual override path; never touched by auto-extraction.
+    autoUpdateDisabled: boolean('auto_update_disabled').notNull().default(false),
+
+    // Auto Knowledge Retrieval Phase 1D (migration 0291, spec §4.2) — recurring-task
+    // scoped memory block. ON DELETE SET NULL so deleting the scheduled task does
+    // not cascade the block.
+    scheduledTaskId: uuid('scheduled_task_id').references(() => scheduledTasks.id, { onDelete: 'set null' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -140,6 +152,10 @@ export const memoryBlocks = pgTable(
     tierIdx: index('memory_blocks_tier_idx')
       .on(table.organisationId, table.subaccountId, table.tier)
       .where(sql`${table.tier} IS NOT NULL`),
+    // Auto Knowledge Retrieval Phase 1D (migration 0291) — recurring-task scope lookup.
+    scheduledTaskIdx: index('memory_blocks_scheduled_task_idx')
+      .on(table.scheduledTaskId)
+      .where(sql`${table.scheduledTaskId} IS NOT NULL`),
   })
 );
 

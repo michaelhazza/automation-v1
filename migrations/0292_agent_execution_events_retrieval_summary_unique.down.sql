@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS agent_execution_events_retrieval_summary_run_uq;

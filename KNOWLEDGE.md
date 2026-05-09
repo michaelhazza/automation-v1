@@ -2329,6 +2329,47 @@ Adjudication shape for these rounds: each "concern" is a verification request, n
 
 Worked example: `tasks/review-logs/chatgpt-pr-review-baseline-capture-2026-05-05T10-17-27Z.md` — 3 rounds, 15 rejections, 0 code changes, APPROVED verdict. Round 1 raised 6 generic concerns; Round 2 sharpened to 5 (3 new, 2 duplicates of R1); Round 3 dropped to 4 paranoia-level concerns. The verification trail in the log is the audit artifact, not the (empty) implementation diff.
 
+### [2026-05-06] Correction — Calendar period navigation: keep nav controls inline with the period label, not clumped with view switchers
+
+In `prototypes/consolidation-2026-05-06/calendar.html` Round 6, I placed the previous/next chevrons in the same top-right cluster as the period view selector (Week/Fortnight/Month). User flagged this as non-conventional. Standard practice (Google Calendar, Outlook, every well-designed calendar): `[Today] < period-label >` is one cluster on the LEFT inline with the calendar content, and the view switcher (Week/Fortnight/Month) is a separate cluster on the RIGHT. Period nav belongs WITH the period label it controls, not with the view selector. Lesson: when designing dense control bars, group controls by what they ACT on, not by physical proximity. View switcher acts on which view; period nav acts on the period label — different concerns, different clusters.
+
+### [2026-05-07] Pattern — Phase-0 cross-cutting frontend-primitive specs: lock contracts at the start, not during build
+
+**Date:** 2026-05-07
+**Source:** chatgpt-spec-review on `tasks/builds/consolidation-foundation/spec.md` (3 rounds, APPROVED verdict).
+
+When a programme decomposes into N parallel feature specs (here: A/B/C consuming the same primitives), a Phase-0 spec that ships the cross-cutting primitives MUST lock the contract surface BEFORE downstream specs draft. The natural lock surfaces, learned across this review:
+
+1. **Sort comparator semantics** — comparator algorithm per type (`localeCompare { sensitivity: 'base' }`, numeric subtraction, NaN→string fallback), null handling (always bottom regardless of direction), mixed-type fallback rules, stability as a contract (not implementation detail).
+2. **Filter identity** — deterministic key derivation (`String(getValue(row) ?? '__NULL__::${column.key}')`), with a column-scoped sentinel to avoid both real-data collision and cross-column option overlap.
+3. **Persistence-key versioning** — namespaced + versioned prefix (`<scope>:v1:<key>`); component owns the version, callers pass the unversioned identifier.
+4. **Overlay z-index ladder** — layer constants (Modal 1000, Drawer 900, backdrop -1, nested +10) so stacking is predictable.
+5. **Scroll-lock ownership** — mount-counter + deferred restore so closing one of two stacked overlays does not leak `overflow: auto` while the other is still mounted.
+6. **Hook-owned illegal-transition handling** — when N consumers would each implement the same edge case (e.g. `setViewMode('workspace')` with no active client), the hook returns `boolean` + an optional callback (`onRequireClientSelection`); consumers do not detect rejection by reading state.
+7. **Spacing contract at the page-shell level** — `<PageShell bottomPadding={N}>` instead of relying on per-page bottom-padding comments; the primitive that USES the contract (FormFooter) does NOT inject its own spacer.
+
+**The shape of a good Phase-0 review:** ChatGPT round 1 surfaced 9 of these 7 surfaces; rounds 2-3 tightened the rest (NaN guard, sentinel collision, padding default, persistence versioning, sort stability, scroll-lock ownership). Each round was APPROVED with tightenings — meaning every surface was a real ambiguity, not a stylistic preference. **If a Phase-0 spec for cross-cutting primitives does not surface findings on these areas, the review is not done.**
+
+### [2026-05-07] Pattern — Versioned localStorage key prefix for component-owned persistence
+
+**Date:** 2026-05-07
+**Source:** Same review session, finding F18 (round 3).
+
+Format: `<scope>:v<N>:<key>` (e.g. `table:v1:spending-ledger`). The version segment is owned by the component, not the caller. Callers pass an unversioned, unscoped identifier; the component prepends both. When the persisted shape (e.g. sort tuple, filter selections, column-key set) changes incompatibly, bump `v1` → `v2`; the old keys become absent rather than corrupted state. Zero migration cost; zero risk of de-serialisation crashes when an old client meets a new schema.
+
+The pattern generalises to any component that owns localStorage state with a non-trivial shape: list-view toggles, column-visibility prefs, collapsed-section state, draft autosave. Without versioning, the first incompatible shape change either corrupts state silently or forces consumer migrations.
+
+### [2026-05-07] Pattern — Hook-owned illegal-transition handling instead of consumer-side guards
+
+**Date:** 2026-05-07
+**Source:** Same review session, finding F3 (round 1) + F15 (round 2).
+
+When a state-transition hook serves multiple consumers, illegal-transition handling MUST live in the hook, not in each consumer. Shape: `setViewMode(next): boolean` returns `true`/`false` for the transition outcome, with an optional `onRequireClientSelection` callback (configured at hook construction) invoked for the specific failure case (`'workspace'` with no `activeClient`). The hook also publishes a locked side-effect table (`'org'` clears `activeClient`; `'system'` enables override flag; etc.) as a refactor invariant.
+
+Before: each of three consumers (Layout, sidebar, badge) would implement the same "no active client → open picker" branch. After: one consumer (Layout) wires `onRequireClientSelection`; the others consume `setViewMode` and react to the boolean. The pattern prevents 3 divergent implementations and centralises the rule for future maintainers.
+
+Generalises to any state-transition hook with N>1 consumers: workspace switching, mode switches, draft saves with conflict resolution, optimistic-update rollbacks. The signal that you need it: when the same edge-case branch starts appearing in multiple consumers, the hook is the right owner.
+
 ### 2026-05-05 Pattern — Branded type with single-constructor invariant beats grep gates for input-normalisation enforcement
 
 **Date:** 2026-05-05
@@ -2593,3 +2634,596 @@ The aliased variable carries no semantic signal that grep can latch onto. A grep
 3. Convention + code review covers the residual aliasing class — it cannot be automated reliably.
 
 Don't over-engineer a grep gate to chase aliasing. Document, review, and accept that the type system + grep gates already shut down the worse-cost bypass classes. Rejecting an alias at PR review is cheap; building a static-analysis tool to catch them is not.
+
+### [2026-05-06] Correction — Synthetos is not agency-only; sub-account is a standalone product surface
+When framing product strategy or recommendations, do not default to "agency operator looking down at clients." The three-tier structure (system / org / sub-account) is deliberate: a sub-account can be sold standalone to an end-client (SMB, solo operator) with no agency above them, and the product must self-contain at that level. Agency-resold sub-accounts are one go-to-market, not the only one. When discussing operator-facing surfaces (Pulse, supervision home, watchers, proactive nudges, calibration), cover both lenses: (a) the agency operator managing many sub-accounts and (b) the end operator running their own business directly inside one sub-account. The video's "my mom" archetype maps to lens (b), not (a).
+
+
+### [2026-05-07] Spec authoring — cursor pagination contract (4 invariants every paginated API spec must state) (seen 2 times)
+
+When speccing a cursor-paginated endpoint, always state four things explicitly or ChatGPT/reviewers will flag it:
+
+1. **Encoding:** cursor encodes `(sortKeyValue, id)` in the **effective sort order** (see #4) — the id tiebreaker makes ordering deterministic. SQL: `ORDER BY <sortKey> <dir>, id <dir>`.
+2. **Invalidation:** cursor is invalidated when `sortKey`, `sortDir`, or any filter changes between pages. Server ignores/resets on mismatch.
+3. **Stability:** every sort order must include `id` as a secondary key (prevents row flickering across pages).
+4. **Tiebreaker direction symmetry:** the `id` tiebreaker direction MUST follow the primary sort direction (`ORDER BY confidence ASC, id ASC` — never `ASC, id DESC`). Mixing directions produces skip/duplicate rows when paginating ASC. (Added in consolidation-govern round 2 — round 1 spec said "always end with id DESC" which was wrong for ASC sorts.)
+
+Missing any one of these causes non-deterministic pagination (duplicate rows or skipped rows under concurrent writes, sort/filter changes, or ASC overrides).
+
+### [2026-05-07] Spec authoring — filterOptions count semantics (faceted search rule) (seen 2 times)
+
+For APIs that return `filterOptions` alongside paginated results: always state that counts are computed against the **full result set** (current scope + q), **ignoring pagination**, but **respecting active filters except the dimension being counted**. This is the standard "faceted search" rule. Without it, a user filtering by `type=email.sent` would see 0 counts on the `type` dimension — which is misleading.
+
+Two operational invariants to add (consolidation-govern rounds 2 + 3):
+
+- **Same-snapshot:** counts MUST be computed from the same base-query snapshot as the row results (single SQL statement / CTE) so counts and rows cannot diverge under concurrent writes.
+- **SQL ordering:** sort `filterOptions` (typically `count DESC, value ASC`) in SQL, not via post-query JavaScript. Same-snapshot ordering avoids drift if the route ever splits the query and JS orders separately.
+
+### [2026-05-07] Spec authoring — masking/redaction token contract
+
+When speccing role-aware masking on a backend projection:
+
+1. Lock the exact redaction token as a string constant: `"<redacted>"` — never `null`, never omit the field.
+2. Truncated fields (e.g. first 200 chars of a result body) must include `truncated: true` so the renderer knows without inspecting string length.
+3. These two rules prevent frontend branching creep (renderer never needs to branch on field presence or null-check mask values).
+
+### [2026-05-07] Spec authoring — per-user localStorage key scoping
+
+When a dismissal/seen flag is stored in localStorage (e.g. `somethingSeen=1`), add a userId prefix: `somethingSeen:{userId}`. Without it, the flag is shared across users in a shared-browser environment (kiosk, shared login), silently suppressing the UI for subsequent users.
+
+### [2026-05-07] Gotcha — PostgreSQL `READ COMMITTED` snapshot is **per-statement**, not transaction-scoped
+
+Common mis-citation in specs and code: "we use a single transaction so counts are snapshot-consistent under READ COMMITTED". Wrong. PostgreSQL's `READ COMMITTED` (the default) takes a fresh snapshot at the start of each statement — multiple statements in the same transaction can each see a different snapshot if other writers commit between them. Transaction-scoped snapshot consistency requires `REPEATABLE READ` (or `SERIALIZABLE`).
+
+Practical rule for cross-table aggregators that want mutual count consistency:
+
+- **Preferred:** issue a single SQL statement (a CTE that joins / unions the sources). Default `READ COMMITTED` is sufficient because the per-statement snapshot covers all sources in one shot.
+- **Acceptable:** if multiple statements are required, escalate isolation to `REPEATABLE READ` and accept the extra overhead (no concurrent updates can change the view between statements).
+- **Wrong:** "use a transaction with READ COMMITTED" — provides no extra consistency over not-using-a-transaction.
+
+Caught in consolidation-govern round 2 — round 1 wording mis-cited READ COMMITTED as transaction-scoped.
+
+### [2026-05-07] Spec authoring — external-call timeout determinism (3 invariants)
+
+When a backend route makes an outbound network call with a stated timeout, the spec MUST lock three things or implementations will silently honour the timeout symbolically while violating it operationally:
+
+1. **Monotonic clock:** measure the budget against a monotonic clock (`process.hrtime.bigint()` in Node) — never wall clock. NTP jumps and clock skew must NOT extend or shorten the window.
+2. **Inclusive scope:** the clock starts immediately before the outbound call — DNS, TCP, TLS, and HTTP all count against the budget, not just the HTTP response wait.
+3. **Bounded SDK retries:** any HTTP client, OAuth SDK, or provider SDK on the call path MUST disable internal retries (or bound them within the same envelope). A 10s spec-stated timeout that hides 60s of internal SDK retry storms violates the contract while technically "respecting" it.
+
+Caught in consolidation-govern round 2 (connection-test endpoint).
+
+### [2026-05-07] Spec authoring — body hash canonicalisation must include Unicode NFC
+
+When using a body hash for idempotency keys (`UNIQUE(parent_id, body_hash)`), canonicalise in this order before hashing:
+
+1. **Unicode NFC normalisation** — visually-identical strings can have different byte representations (composed vs decomposed accents, ligatures). Without NFC, a user pasting the same text from two sources can produce two different hashes.
+2. Whitespace canonicalisation: trim ends, collapse internal runs to single spaces.
+3. Decide and document case-sensitivity (case-sensitive for human-authored override text in our spec; case-insensitive for canonical identifiers).
+4. Hash function: SHA-256, hex-encoded, lower-case (deterministic encoding).
+
+Skipping NFC produces long-tail duplicate revision bugs that are nearly impossible to reproduce. Caught in consolidation-govern round 2.
+
+### [2026-05-07] Pattern — Drawer / Modal focus-trap escape recovery
+
+**Date:** 2026-05-07
+**Source:** finalisation-coordinator finalisation pass on PR #270 (slug: consolidation-foundation), chatgpt-pr-review Round 1 finding F1.
+**Pattern:** A standard Tab-cycle focus trap (first ↔ last focusable inside the panel) handles the "Tab past last" and "Shift+Tab before first" cases — but it misses the case where focus has already escaped the panel entirely (devtools, programmatic focus calls into a different region, browser chrome handing focus back to the document body). On the next Tab inside the panel handler, `document.activeElement` is neither the first nor the last focusable, so the standard branches do not match and the trap is a no-op. Add a guard before the first/last comparisons: if `document.activeElement` is not contained in the panel ref, pull focus back to the first focusable. Three-line addition; closes the only realistic escape route.
+**Why it matters:** Accessibility-grade overlay components are expected to keep keyboard focus inside the overlay until it closes. The "trap" is incomplete without the escape-recovery branch — and the failure is invisible in normal manual testing because escape requires a side-channel focus shift.
+
+### [2026-05-07] Pattern — Visibility helper: `offsetWidth || offsetHeight || getClientRects().length`, not `offsetParent !== null`
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F2.
+**Pattern:** When determining "is this element visible enough to receive focus" inside a focus-trap or any DOM walker that filters out hidden nodes, do NOT use `offsetParent !== null`. That predicate returns `null` for any `position: fixed` element regardless of visibility — meaning fixed-position focusable elements (sticky toolbars inside drawers, floating action buttons) are silently excluded from the trap and the visible-focusables walker. Use the jQuery-style `el.offsetWidth || el.offsetHeight || el.getClientRects().length > 0` instead — visible iff any of width/height/client-rect exists. Standard a11y-library shape.
+**Why it matters:** Common a11y trap. Modal/Drawer code that uses `offsetParent` will skip fixed-position children, so Tab order silently drops them and screen-reader walks of "focusable elements in this region" exclude them. The bug surfaces only when fixed-position content is added inside an overlay months after the trap shipped.
+
+### [2026-05-07] Pattern — Shared CSS keyframes belong in `index.css`, not inline `<style>` blocks per component instance
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F3 (also flagged by pr-reviewer N3).
+**Pattern:** When a component injects its own animation via `<style>{`@keyframes drawer-fade-in {...}`}</style>` inside its render output, every mounted instance writes a duplicate `<style>` element into `<head>` (or inline). For an overlay primitive that may render multiple times across a page (open/close cycles, unmounted-then-remounted nested overlays), this leaks duplicate keyframe definitions and pays parse cost on every render. Move shared keyframes to `client/src/index.css` once, reference by name from the component. Trade-off: the keyframe name becomes a global contract, so prefix it with the owning-primitive name (`drawer-fade-in`, `drawer-slide-in-right`) to prevent cross-component collisions.
+**Why it matters:** DOM hygiene. The pattern is invisible in dev — animations work fine — but `<head>` accumulates `<style>` duplicates over a long-running session. Lighthouse a11y/CSS audits flag it; production performance audits flag it.
+
+### [2026-05-07] Pattern — `import.meta.env.DEV` for Vite client code (NOT `process.env.NODE_ENV`); requires `client/src/vite-env.d.ts`
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F4.
+**Pattern:** Inside any code that ships through Vite to the browser bundle, gate dev-only branches with `import.meta.env.DEV` (boolean, true in dev / false in production). Do NOT use `process.env.NODE_ENV === 'development'` — `process` is a Node.js global, not present in the browser, and Vite doesn't shim it; the comparison silently returns `false` in production AND in dev (because `process.env.NODE_ENV` is `undefined`), so the dev-only branch never fires. For TypeScript to resolve `import.meta.env`, the project must include a triple-slash reference: create `client/src/vite-env.d.ts` containing `/// <reference types="vite/client" />`. One-time setup; thereafter every `.tsx`/`.ts` file in `client/src` resolves the type without further imports.
+**Why it matters:** Dev-only code paths (extra logging, prop-validation warnings, "this should never happen" assertions, error-state stack traces) are a primary debugging surface. If they silently never fire because the gate is `process.env.NODE_ENV`-shaped, you ship blind. The fix is mechanical, but the verification — actually confirm the dev branch fires in dev and is dead-code-eliminated in production — is not, so it usually slips past.
+
+### [2026-05-07] Pattern — `aria-labelledby` + `useId` for dialog/drawer accessible names when a visible title exists
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F5.
+**Pattern:** When an overlay (Modal, Drawer) renders a visible title, the accessible name should come from `aria-labelledby={titleId}` (pointing at the rendered heading), NOT a hand-typed `aria-label="Drawer"`. Screen readers announce the actual visible heading rather than a generic role. Generate the id with React's `useId()` so it's stable across renders and unique per instance. Fall back to `aria-label` only when no visible title is rendered. Apply both attributes pattern: `{title ? { 'aria-labelledby': titleId } : { 'aria-label': fallback }}`.
+**Why it matters:** WCAG 2.1 AA expects the accessible name to match the visible label when one exists. A static `aria-label="Drawer"` overrides the visible heading for screen-reader users — they hear "Drawer" instead of "Edit Client" — and fails name-from-content auditing.
+
+### [2026-05-07] Pattern — Document JS-engine assumptions when pure helpers depend on ES spec guarantees
+
+**Date:** 2026-05-07
+**Source:** Same review session, chatgpt-pr-review Round 1 finding F7.
+**Pattern:** When a pure helper relies on a JS-engine guarantee that is technically a runtime-environment assumption (e.g. `Array.prototype.sort` is stable per ES2019+, all modern engines comply), document it in the file-level JSDoc as a "Runtime invariant" paragraph. Note the assumption (stable sort), the path forward if the helper is ever ported to a non-compliant engine (add an explicit insertion-index tiebreaker to the comparator), and the pure tests that pin the invariant. Tests alone do NOT communicate the assumption to the next author — the JSDoc does.
+**Why it matters:** Stability of sort is an unspoken default assumption. A future port to a constrained runtime (an embedded engine, a polyfilled environment, an old node target) will silently violate the assumption — sort still works, but tiebreaker order changes, and any consumer relying on insertion order for equal keys gets nondeterministic UI. The JSDoc is the only place this assumption surfaces in time to prevent the regression.
+
+### [2026-05-07] Pattern — Reference-counted scroll-lock singleton with `Symbol.for(...)` HMR-safe key
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern from build (chunks involving Modal + Drawer overlay coordination, encoded in `client/src/components/overlayScrollLock.ts`).
+**Pattern:** When two overlay primitives (Modal, Drawer) both want to lock body scroll while open, naive per-component `useEffect(() => { document.body.style.overflow = 'hidden'; return () => { ... = ''; } }, [open])` produces a leak: closing one overlay restores `overflow: ''` even though the other is still mounted. Solution: a reference-counted singleton helper (`acquireScrollLock()` / `releaseScrollLock()`) that increments a shared mount counter and only restores the original `overflow` value when the counter returns to zero. The original value is captured on first acquire (deferred restore). To survive HMR (hot module reload during dev — multiple module copies attaching their own counter), key the singleton with `Symbol.for('app.overlay.scroll-lock')` on `globalThis` so all module copies converge on the same counter object.
+**Why it matters:** Cross-overlay scroll-state coordination is a well-known overlay-system trap. The reference count handles concurrent stacked overlays (Modal opens, then Drawer opens on top, then Modal closes underneath — body must stay locked). The `Symbol.for` key handles HMR. Without both, dev shows phantom scroll-restore mid-flow that production never reproduces (or vice-versa, depending on which copy wins).
+
+### [2026-05-07] Pattern — Branded route-pattern type with `buildRoute` regex using negative lookahead `(?![A-Za-z0-9_])`
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern in `client/src/config/routes.ts`.
+**Pattern:** Centralise app-route patterns in a literal-tuple constant (`APP_ROUTE_PATTERNS = ['/agents/:id', '/agents/:idFoo/edit', ...] as const`), brand the resulting union type as `AppRoute`, and provide `buildRoute(pattern: AppRoute, params: Record<string, string>)` and `staticRoute(pattern: AppRoute)` helpers. Inside `buildRoute`, replace `:name` placeholders using a regex with a negative lookahead: `new RegExp(\`:\${param}(?![A-Za-z0-9_])\`, 'g')` — NOT `:${param}`. Without the lookahead, `:id` matches inside `:idFoo` and corrupts unrelated placeholders. The negative-lookahead version requires the placeholder to be terminated by a non-identifier character (a slash, end-of-string, etc.).
+**Why it matters:** Hand-rolled string substitution for path params is a recurring source of silent corruption. The brand type prevents path strings from leaking into `<Link to="...">` / `useNavigate(...)` outside the registry; the lookahead-regex prevents the substitution itself from corrupting prefix-overlap cases. The bug surfaces months after deployment when someone adds a new param like `:idType` next to existing `:id`.
+
+### [2026-05-07] Pattern — Co-locate React-wrapper component with pure-helper module; test the pure half via `npx tsx`
+
+**Date:** 2026-05-07
+**Source:** Same finalisation pass — design pattern from `SortableTable.tsx` + `sortableTablePure.ts` (and `useViewMode.ts` + `useViewModePure.ts`).
+**Pattern:** When a UI primitive contains non-trivial logic (sorting, filtering, mode-derivation, transition rules), split into two files: `Foo.tsx` (the React wrapper — hooks, state, event handlers, render) and `fooPure.ts` (the deterministic helpers — sort comparators, filter predicates, derivation rules, transition guards). The pure module exports plain functions with explicit input/output types and zero React dependency. Tests live next to the pure module under `__tests__/fooPure.test.ts` using the existing convention: `npx tsx <test-path>` runs them in isolation, no test runner setup, fast feedback. The React wrapper's behaviour is verified by integration of the pure module's contract — the wrapper itself does not need its own unit suite if the pure module is fully covered.
+**Why it matters:** UI logic is normally locked behind component-render machinery and is hard to test deterministically. The split moves the testable surface out from under React, eliminates jsdom setup, runs in milliseconds, and produces a stable contract surface that downstream specs (Specs A/B/C consuming the same primitives) can rely on without rebuilding test infrastructure. Locks in the existing repo convention (`*Pure.ts` + `*Pure.test.ts` as the unit-test surface).
+
+### [2026-05-07] Gotcha — `agentTriggers` has no `agentId` FK; triggers are scoped through `subaccountAgents`
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`GET /api/agents/:id/full` (in `server/routes/agents/agentTabs.ts`) joins through `subaccountAgents` to get agent-scoped triggers — NOT through a direct `agentId` on `agentTriggers`. The `agentTriggers` table does not have an `agentId` foreign key; trigger rows are linked to a sub-account agent via the `subaccountAgents.agentId` join. Any query that tries to filter `agentTriggers` directly by `agentId` will return nothing silently.
+
+### [2026-05-07] Gotcha — `AgentFull.budget` fields are Phase 1 placeholders; writes accepted but not persisted
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentFull.budget` (`dailyCapUsd`, `monthlyCapUsd`, `warnThresholdPct`) are always null/zero. The `spendingBudgets` table is for agentic commerce spend (external transactions), NOT for LLM cost caps. Budget cap fields on agents have no backing schema yet — writes to the budget tab in `AgentEditPage` are accepted by the server but not persisted. This is an explicit Phase 2 deferral. Do not build features that assume these fields are live without first checking whether the backing schema has landed.
+
+### [2026-05-07] Gotcha — `WRITE_ORDER` in `AgentEditPage` intentionally excludes `schedule` and `budget` tabs
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`AgentEditPage.tsx` defines a `WRITE_ORDER` constant that controls which tabs participate in ETag-gated saves. The `schedule` and `budget` tabs are excluded from this list. Trigger editing is done via the existing per-workspace override page (not consolidated into `AgentEditPage`). Budget caps have no backing schema yet. A future developer who sees the missing tabs should consult the ADR `docs/decisions/0007-consolidation-build-page-retirement.md` before assuming the omission is a bug.
+
+### [2026-05-07] Gotcha — `startRunAsync` in `agentExecutionService.ts` uses bare fire-and-forget (non-durable)
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`startRunAsync` is a fire-and-forget invocation — if the process crashes after the call site returns but before the run completes, the run is not recovered. This is a known PLAN_GAP documented in `tasks/builds/consolidation-build/migration-gaps.md`. Do not rely on this path for durable task execution. The durable path is through the pg-boss job queue.
+
+### [2026-05-07] Gotcha — `formatFireCondition` in `recurringTasksServicePure.ts` handles a subset of the RRULE spec
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build C11 doc-sync pass.
+`formatFireCondition` parses FREQ, BYDAY, BYMONTHDAY, and INTERVAL from RRULE strings and returns a human-readable label. Any RRULE pattern using other components (BYSETPOS, BYHOUR, COUNT, UNTIL, WKST, etc.) falls back to returning the literal RRULE string unchanged. This is intentional for Phase 1 — do not add a full RRULE parser unless the product requirement explicitly calls for it.
+
+### [2026-05-07] Gotcha — `PUT /api/agents/:id/triggers` rejects added triggers with 501 in Phase 1
+
+**Date:** 2026-05-07
+**Source:** Consolidation-build dual-reviewer Codex finding F4.
+`agentService.replaceTriggers` accepts updates and soft-deletes of existing triggers but throws `{ statusCode: 501, errorCode: 'TRIGGER_ADD_NOT_SUPPORTED' }` if any new triggers are in the diff. Reason: triggers are subaccount-scoped (`subaccountAgentId` FK, not `agentId`) so an org-level insert via this route would be orphaned — the row would not appear in `getFull` (which filters by `subaccountAgentId`) and would not fire (the trigger service fires by `subaccountId`). The new tab-scoped UI Schedule tab is `readOnly={true}` in Phase 1 and `WRITE_ORDER` excludes `'schedule'`, so no caller exercises this path today. Phase 2 should resolve a default `subaccountAgentId` (e.g. via the org subaccount) and remove the 501 guard. See `tasks/builds/consolidation-build/migration-gaps.md` § "Triggers schema — no direct agentId column".
+
+### [2026-05-08] Pattern — Legacy route telemetry and deprecation tracking
+
+**Date:** 2026-05-08
+**Source:** Consolidation-build Round 2 ChatGPT tightening (task 4).
+Legacy routes from the pre-consolidation UI (`/admin/agents`, `/admin/skills`, `/admin/skill-studio`, `/system/skill-analyser`, etc.) are consolidated into `/agents`, `/recurring-tasks`, and `/projects`. Today, client-side `<Navigate>` components in `client/src/App.tsx:401-511` redirect old bookmarks silently. Future telemetry: add a middleware or custom Navigate wrapper to emit structured logs with `sourceRoute`, `destinationRoute`, `userAgent`, and `timestamp`. Monitor redirect volumes in logs; after traffic drops below a threshold for N days, routes can be retired entirely. See `docs/doc-sync.md` § Legacy Route Deprecation for the tracking process. (Phase 1: redirects active, no telemetry. Phase 2: add telemetry emit. Phase 3+: retire routes.)
+
+### [2026-05-08] Pattern — Skill Studio iframe recursion protection pattern
+
+**Date:** 2026-05-08
+**Source:** Consolidation-build Round 2 ChatGPT tightening (task 7).
+Skill Studio is no longer embedded as an iframe in the consolidation-build UI. If a future phase embeds Skill Studio (or similar recursive-openable components), apply the `embedded` prop pattern: pages accept an optional `embedded?: boolean` prop; when true, suppress recursive-open affordances (e.g., "Edit in modal", "Open in new window", "Open Skill Studio"). Example in existing codebase: `client/src/pages/AdminBoardConfigPage.tsx` and `AdminCategoriesPage.tsx` check `!embedded` before rendering navigation affordances. Pattern: wrap recursive-open buttons in `{!embedded && (<button>...</button>)}`. (Phase 1: SkillsTab uses a modal picker, not an embedded Skill Studio, so no protection needed yet. Phase 2+: if embedding is added, apply this pattern.)
+
+### [2026-05-08] Pattern — Closed-enum service-boundary mapping for typed error.code contracts
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); pr-reviewer blocker B-1 (testConnection error.code widening).
+
+When a route returns a typed error.code field whose contract is a tight closed enum (e.g. spec defines `error.code: 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR'`), the service that produces the value MUST map every internal error state — including the catch-all/unknown branch — to one of the four codes at the boundary. SDK-level error codes (`NO_CREDENTIALS`, `TOKEN_EXPIRED`, `SERVER_ERROR`, raw axios codes, etc.) MUST NOT leak into the contract value. The mapper lives in the service (e.g. `connectionTokenService.testConnection`), not in the route handler — so every caller of the service gets the same canonical mapping, and the contract is enforced at one location. Concrete shape:
+
+```ts
+// In connectionTokenService.testConnection
+function mapErrorToCode(err: unknown): 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR' {
+  if (isAbortOrTimeout(err)) return 'TIMEOUT';
+  if (isAuthFailed(err))     return 'AUTH_FAILED';
+  if (isNetworkErr(err))     return 'NETWORK_ERROR';
+  return 'PROVIDER_ERROR'; // catch-all — every unmapped class lands here
+}
+```
+
+Why it matters: the contract enum is a public commitment to the client. If the service leaks new SDK codes the moment a new SDK is added, every consumer's exhaustive switch silently breaks. Pair this rule with §8.30 in DEVELOPMENT_GUIDELINES.md (SQL CASE enum mappers use `ELSE NULL`) — same family of failure mode (unknown values silently coerced past the safety guarantee), same family of fix (force the mapping at the typed boundary, fail-closed on unknown).
+
+### [2026-05-08] Pattern — Targeted `onConflictDoNothing(target)` for partial-unique idempotency
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); pr-reviewer strong-recommendation 2 (overrideEntry onConflictDoNothing scope).
+
+`onConflictDoNothing()` without a `target:` argument silently swallows ANY unique-constraint violation on the row, including constraints unrelated to the idempotency key. For body-hash idempotency on `memory_block_versions` (partial unique on `(memory_block_id, body_hash) WHERE body_hash IS NOT NULL`), the correct shape is:
+
+```ts
+.onConflictDoNothing({ target: [memoryBlockVersions.memoryBlockId, memoryBlockVersions.bodyHash] })
+```
+
+Untargeted `.onConflictDoNothing()` would also swallow a hypothetical version-counter collision (if the schema gained one), letting the buggy state persist silently. Targeted form ensures unrelated constraint violations bubble as errors so the caller can retry. Rule: any `onConflictDoNothing` MUST name the column set whose conflict is the intended dedupe key. A bare `.onConflictDoNothing()` is a code-review blocker.
+
+### [2026-05-08] Pattern — Migration-number collision after S2 sync requires renaming on the feature branch
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); main landed `0286_consolidation_build_schema_additions` while `ui-consolidation-govern` was authoring `0286_govern_auto_update_disabled`.
+
+When the S2 sync surfaces a migration-number collision (same number, different content on both sides of the merge base), the feature branch renames its migration to the next free integer. Renaming is correct because main's migration has already shipped to production (or imminently will via the merge that's already on main); the feature branch is the side that hasn't shipped yet. The rename also cascades to:
+
+1. The migration file itself (header comment + filename)
+2. The down-migration file
+3. `architecture.md` § Key files per domain (any row referencing the migration filename)
+4. NOT plan.md — historical artefact, leave the original number for archaeology
+
+Verification after rename: `grep -rn '<old-number>_<slug>' .` should return only `tasks/builds/*/plan.md` historical references and zero hits in source / docs / migrations. Down migration MUST also be renamed in lockstep so the rollback path tracks the forward path.
+
+### [2026-05-08] Pattern — App.tsx route-handler regression after upstream page deletions during S2 sync
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #273 (slug: consolidation-govern); G4 regression guard caught 10 missing identifiers after S2 merged `consolidation-build` (PR #271) and `operate-stream` (PR #272) which deleted `AdminAgentsPage`, `AdminAgentEditPage`, `AdminSkillsPage`, `AdminSkillEditPage`, `SystemAgentsPage`, `GoalsPage`, `SkillStudioPage`, `SkillAnalyzerPage`, `ScheduledTasksPage`.
+
+When a parallel branch lands a UI consolidation that deletes pages, the feature branch's `client/src/App.tsx` will compile-fail post-S2 because the JSX route declarations still reference the deleted page identifiers — even after the lazy-import lines are dropped (which TypeScript checks at routine compile time). The fix pattern: for each broken route, replace the JSX element with either:
+
+- `<Navigate to="<canonical-new-path>" replace />` — for direct redirect of the old path
+- a small redirect helper (`function RedirectAgentEdit() { const { id } = useParams(); return <Navigate to={\`/agents/${id}/edit\`} replace />; }`) — for parameterised redirects where the path segment must be reshaped
+- the new page component, registered under the new canonical route — for the canonical destination itself
+
+Always cross-check against the consolidating branch's App.tsx (`git show origin/main:client/src/App.tsx`) for the canonical mapping; do not invent route names. After the rewrite, also remove any duplicate redirect elsewhere in the file (e.g. an old `<Route path="/agents" element={<Navigate to="/" />} />` that conflicts with the new canonical `<Route path="/agents" element={<AgentsListPage />} />`).
+
+### [2026-05-08] Pattern — Coordinators run INLINE in the main session, never dispatched as sub-agents
+
+**Date:** 2026-05-08
+**Source:** Phase 2 launch attempt for `trust-verification-layer` build. Operator typed `launch feature coordinator`; main session called `Agent({subagent_type: "feature-coordinator", ...})`; the dispatched coordinator immediately hit `No such tool available: Task. Task is not available inside subagents.` when it tried to invoke `architect` at Step 3. Same constraint applies to `spec-coordinator` (mockup-designer + spec-reviewer + chatgpt-spec-review dispatches) and `finalisation-coordinator` (chatgpt-pr-review + builder dispatches).
+
+**Pattern:** the three coordinators (`spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`) and `audit-runner` run INLINE in the main Claude Code session. The operator's entry phrase (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `audit-runner: <mode>`) signals the main session to ADOPT the playbook — read the agent file at `.claude/agents/<name>.md` and execute its steps directly. It does NOT mean call `Agent({subagent_type: "<coordinator>"})`.
+
+**Why this matters:** the Claude Code runtime returns a hard error when a dispatched sub-agent attempts to dispatch a further sub-agent. The coordinator playbooks are built around sub-agent dispatch (architect, builder, the four reviewers, mockup-designer, chatgpt-pr-review, chatgpt-spec-review). Nesting a coordinator inside an `Agent` call breaks the pipeline at its first dispatch step. The main session has top-level `Agent` access — that's where the dispatches must issue from.
+
+**Two valid entry paths:**
+1. Fresh session: open a new Claude Code session, type the entry phrase as the first message, the main session adopts the playbook.
+2. In-flight adoption: operator types the entry phrase mid-session, the current main session reads the agent file and follows it directly. Same outcome.
+
+The agent definitions at `.claude/agents/feature-coordinator.md`, `.claude/agents/spec-coordinator.md`, and `.claude/agents/finalisation-coordinator.md` each carry an `## Invocation` section with this rule. CLAUDE.md's "Common invocations" section codifies the constraint for all four (three coordinators + audit-runner).
+
+### [2026-05-08] Pattern — Cross-tenant source-pill compression rule
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.8, Chunk 7.
+
+Scorecard source pills compress based on the viewer's scope, not the scorecard's scope. `compressSourcePill(scope, viewerScope)` returns five canonical values: `system`, `organisation`, `this_subaccount`, `platform`, `custom`. The rule: `subaccount`-scoped scorecards always show `this_subaccount`; `system`-scoped show `system` to org_admins and `platform` to workspace viewers; `org`-scoped show `organisation` to org_admins and `custom` to workspace viewers. This compression prevents org-name leakage to subaccount-scope viewers. Pure function in `scorecardServicePure.ts`; mirrored in `ScorecardSourcePill.tsx` for client-side rendering without a round-trip. Permutation test in `server/services/__tests__/scorecardServicePure.test.ts` covers all four `(scope, viewerScope)` combinations.
+
+### [2026-05-08] Pattern — Three-tier authority lock model for scorecards
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.4, Chunk 7.
+
+Scorecard authority resolves in three tiers: system > org > subaccount. When an agent has two attachments for the same scorecard slug — one from a higher tier and one from a lower tier — `resolveAuthority(attachments)` always picks the higher-tier source. Attachments at the same tier conflict only if the same org/subaccount owns two rows for the same slug; that is a data invariant violation, not a normal state. The resolver is a pure function in `scorecardServicePure.ts`, never hits the DB. Any route that surfaces "which scorecard is active" must pass the full attachment list through the resolver before responding.
+
+### [2026-05-08] Pattern — Single-share-toggle visibility primitive
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.3, Chunk 7.
+
+Scorecard visibility is controlled by a single `isShared` boolean. `isShared: true` makes the scorecard visible to all subaccounts under the owning org. `isShared: false` (default) makes it visible only to the owning org admins and the subaccount that created it. There is no per-subaccount sharing list, no ACL, no role-based filter — just one toggle. This keeps the permission surface minimal. Route-level visibility is enforced by `getVisibleScorecards(organisationId, subaccountId?)` in `scorecardService.ts`, which applies the `isShared` predicate in SQL rather than in application code.
+
+### [2026-05-08] Pattern — Idempotent UPSERT on operator correction capture
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §10.1, Chunk 13.
+
+Correction capture uses `onConflictDoUpdate` with a partial unique index target: `(organisation_id, source_run_id) WHERE captured_via = 'operator_correction' AND deleted_at IS NULL`. This means the operator can correct the same run multiple times and each subsequent correction silently updates the existing block (last-write-wins) rather than inserting a duplicate. The `targetWhere` clause in the Drizzle `onConflictDoUpdate` maps to the partial index predicate. Without `targetWhere`, Drizzle cannot locate the partial index and the UPSERT falls through to an error. Always specify both `target` columns and `targetWhere` when the conflict target is a partial index.
+
+### [2026-05-08] Pattern — Runtime check three-state UI collapsed from five internal states
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer spec §6.2, Chunk 5.
+
+Internally, runtime check results carry five states: `pending`, `running`, `pass`, `fail`, `inconclusive`. The UI collapses these to three visual groups: loading (pending + running), pass, not-pass (fail + inconclusive). `inconclusive` is surfaced distinctly from `fail` in the drawer detail — `fail` means the check fired and found a problem; `inconclusive` means the check could not determine a verdict (e.g. model output was ambiguous or the check function threw). Never merge `fail` and `inconclusive` at the data layer — they carry different operator actions. Merge only at the UI summary level, and always expose both labels in the detail view.
+
+### [2026-05-08] Pattern — `verify` shape on actionService-wrapped skills always evaluates inconclusive
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer fix-loop, Codex P1 finding.
+
+`runtimeCheckService.dispatchEvaluation` reads the tool result's top-level `statusCode` / `status` field. Skills that go through `proposeAction` / `executeWithActionAudit` (review-gated AND most auto-gated skills) return the action service envelope `{ status: 'pending_approval' | 'approved' | 'completed', actionId, ... }` — `status` is a STRING, not a numeric HTTP status. So `verify: { kind: 'api_status_2xx' }` declared on these skills will resolve to `inconclusive` every time. With `blastRadius: 'external'` that maps to the same pause/inbox path as `fail` per spec §11.2 — every successful action would pause for inbox review.
+
+**Rule:** before declaring a concrete `verify` shape on an `ACTION_REGISTRY` entry, trace the actual handler path. If the handler routes through `executeWithActionAudit` or any other action service wrapper, declare `verify: null` with a justification ("Review-gated: HITL approval is the verification boundary; actionService wrapper has no comparable post-check shape" or "External read — backfill candidate; current actionService wrapper hides the inner field from the runtime-check dispatcher"). A future follow-on can teach the runtime-check dispatcher to unwrap the actionService envelope before evaluation.
+
+### [2026-05-08] Pattern — Position-match against agent_execution_events.sequence_number is wrong for toolCallsLog
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer fix-loop, Codex P2 finding.
+
+`runAgenticLoop` pushes one entry to `toolCallsLog` per tool dispatch, but does NOT emit `skill.invoked` / `skill.completed` events for every tool call. Those event types are emitted only by special paths (`crmQueryPlanner.plannerEvents`, `chargeRouterService`). A naive position-match — Nth toolCall ↔ Nth skill.completed event ordered by `sequence_number` — produces two failure modes: (a) ordinary tool calls resolve to `null` (they have no matching event), and (b) when special-path events DO exist, an event from one slug may be attached to a tool call from a different slug.
+
+**Rule:** when reconciling toolCallsLog entries to event-log rows, match by `(skillSlug, ordinal-within-slug)`, not by global position. Group events by `payload.skillSlug` and pair the Nth toolCall whose `tool === foo` with the Nth `skill.completed` event whose `payload.skillSlug === foo`. Tool calls without matching events resolve to `null` cleanly. See `linkToolCallsToEventIds` in `server/services/agentRunMessageServicePure.ts`.
+
+### [2026-05-08] Pattern — Cross-subaccount IDOR slips past RLS in agent-scoped routes
+
+**Date:** 2026-05-08
+**Source:** Trust & Verification Layer adversarial-review S-3.
+
+Subaccount-scoped routes that carry both `:subaccountId` and `:agentId` in the URL (e.g. `DELETE /api/subaccounts/:subaccountId/agents/:agentId/scorecards/:id`) are protected by RLS at the org level but NOT at the subaccount level — RLS on the writes-target table (`scorecards`, `agents`, etc.) filters rows to the caller's org via `app.organisation_id`, but does not enforce that the named agent belongs to the named subaccount. A power user with `subaccount.X.manage` on subaccount A could target an agent in subaccount B (same org) and the route would proceed.
+
+**Rule:** for any subaccount-scoped route that carries both `:subaccountId` AND a target-resource id (`:agentId`, `:templateId`, etc.), add an explicit application-layer assertion that the resource has an active link to the named subaccount via `subaccount_agents` (or the relevant join table). Fail-403 not 404 — 404 leaks the resource's existence in another subaccount; 403 is the standard cross-tenant rejection envelope. Pure verdict-shaping helper (`assertAgentSubaccountMembership`) keeps the route → HTTP mapping testable.
+
+### [2026-05-08] Pattern — Workers that opt out of `createWorker` auto-org-tx must wrap FORCE-RLS reads in a short org-scoped tx before any external I/O
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); dual-reviewer iter 1 (3 P1 fixes in `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`).
+
+When a pg-boss handler is built with `createWorker({ resolveOrgContext: () => null, ... })` (because the spec mandates the embedding API call run OUTSIDE any DB tx, e.g. spec §1.5 #9 in auto-knowledge-retrieval), it explicitly opts OUT of the auto-org-tx wrapper. Any `db.select(...)` against a FORCE-RLS table that the worker issues at module-top scope will then run with no `app.organisation_id` GUC — and FORCE-RLS policies that require `current_setting('app.organisation_id', true) <> ''` return **zero rows silently**. The worker then short-circuits with a `version_not_found` warn or similar, and the job is dead in the water for that document forever.
+
+**Pattern:** for workers that opt out of auto-org-tx, every FORCE-RLS read MUST be inside a short org-scoped read tx that explicitly sets the GUC, BEFORE the I/O the spec wants to keep tx-free:
+
+```ts
+const { row } = await db.transaction(async (tx) => {
+  await tx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
+  const [row] = await tx.select(...).from(forceRlsTable).where(...);
+  return { row };
+});
+// embedding API call / external I/O happens HERE, outside any tx.
+```
+
+Combine multiple back-to-back FORCE-RLS reads into one tx where possible — they share the same GUC scope and a single tx is cheaper than multiple short ones. Spec invariants like "embedding API call runs outside any DB tx" are PRESERVED because the read tx ends before the I/O starts.
+
+**Detection heuristic.** Grep the worker for `db.select(` / `db.transaction(` and confirm: (a) the file contains `resolveOrgContext: () => null`, AND (b) every read against a FORCE-RLS table is inside a tx that issues `set_config('app.organisation_id', ...)` as the first statement. If a worker has (a) but a read fails (b), it is the bug. The adversarial-reviewer's "Additional observations" section may flag this without routing it as a tracked finding — promote to a fix anyway.
+
+This is a stricter form of the existing 2026-05-04 (cleanup jobs need `withAdminConnection`) and 2026-05-05 (`db.transaction()` must set the GUC) patterns. The new wrinkle: workers can legitimately opt out of `withOrgTx` (because the spec mandates I/O outside tx), but that opt-out CANNOT extend to reads against FORCE-RLS tables — those still need their own short-lived org-scoped tx.
+
+### [2026-05-08] Pattern — Embedding inputs must NEVER be silently truncated — log when they are
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); pr-reviewer Strong-1 (8192 magic-number truncation in `documentEmbeddingService.embedChunks`).
+
+Embedding services frequently apply a per-call byte cap to avoid provider 4xx errors (OpenAI text-embedding-3 at 8192 tokens, ~32k chars worst case, but the input cap can be set lower for cost). When the chunker produces semantically-coherent chunks but a non-Latin / sentence-resistant chunk hits the byte-window fallback path and exceeds the cap, the embedding represents only the first N chars while the chunk row persists FULL content. Result: vector search returns the chunk's truncated-text similarity, the agent loads the full chunk, and operators have no signal that retrieval quality has silently regressed.
+
+**Pattern:** every embedding-input cap must (a) live as an exported constant (`EMBEDDING_INPUT_BYTE_LIMIT = 8192` etc.), NOT a magic number, AND (b) emit a structured `logger.warn('document.embed.input_truncated', { chunkIndex, originalLength, truncatedLength, embeddingModel })` on every truncation event. Without the log, the regression is invisible. With it, ops can dashboard `truncation_rate_per_org` and tune chunk size before quality degrades.
+
+**Detection heuristic.** Grep `\.slice\(0, \d+\)` and `\.substring\(0, \d+\)` inside any service that emits an embedding call. Every hit is a candidate truncation site — if no `logger.warn` fires alongside, route it as a Strong recommendation.
+
+This generalises beyond embeddings: the same pattern applies to summary inputs, search-query truncation, ranker payloads. Silent truncation is always a quality regression hiding in the metrics.
+
+### [2026-05-08] Pattern — Pure helpers used for their return value MUST have their return value consumed; side-effect-free helpers called for "side effects" are the bug
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); pr-reviewer Blocker B-2 (`groupCandidatesByDocument` called with return value discarded in `retrievalService.ts`).
+
+A frequent bug shape during ranker / pure-helper refactors: a function declared as `(input: T[]) => U[]` is called for what looks like a side effect — but pure helpers HAVE no side effects. If the return value is not assigned, used, or written, the pure helper has done nothing the caller observed. The spec's intended invariant (e.g. "document-level relevance is `MAX(chunk.finalScore)`") is therefore not delivered at runtime, even though the pure helper was implemented correctly and tested correctly.
+
+**Detection heuristic.** During PR review, grep the changed services for `^\s*<helperName>\(` (helper call as a statement, not as an assignment / argument). Every hit needs justification: if the helper's signature shows a non-void return, the call is almost certainly a bug. Pure-helper Convention §8 already says "pure helpers must be deterministic and side-effect-free" — combine that with: "if you call one as a statement, you have written a no-op."
+
+This complements the existing pure-helper-input-mutation entries in KNOWLEDGE.md: the inverse failure mode is **calling a pure helper for side effects that don't exist** (this entry); the dual is **mutating an input expecting it to be returned later** (covered earlier). Both are reviewable mechanically — either no return value is consumed, or an input is mutated.
+
+### [2026-05-08] Pattern — Retrieval-version completeness invariant requires an active production read-path filter, not just a write-side guard
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); pr-reviewer Blocker B-3 (`filterDocumentChunks` exists + tested but not called from `retrievalService`).
+
+When the spec says "X invariant must hold at read time" (e.g. auto-knowledge-retrieval §13.1: "`retrieval_version_id` MUST always reference a version whose full chunk set exists for `active_embedding_model`"), implementing the invariant ONLY in the chunking job's atomic-swap commit path is insufficient. A test that exercises the pure helper that enforces the invariant (e.g. `documentRetrievalServicePure.filterDocumentChunks`) but is never wired into the production read path passes green — and the read path silently does its own inline filter that checks pointer alignment but NOT chunk-count completeness. Result: a partial-write race window or any future invariant deviation goes undetected.
+
+**Pattern:** for any spec invariant that includes "must hold at read time", the doc-conformance check is "find every read site for this data and confirm it routes through the canonical filter." The pure helper having a green test is necessary but not sufficient. PR reviewers should ALWAYS grep the production read path for the canonical filter call — if the test exists but the production call doesn't, the test is dead.
+
+This is closely related to the existing "test coverage that doesn't exercise production paths" anti-pattern, but framed for invariant-enforcement specifically: a write-side guard is fine, a read-side guard is fine, both is best, and a tested-pure-helper-without-production-wiring is the bug.
+
+### [2026-05-08] Pattern — Document-promotion atomicity needs an audit-row idempotency anchor inside the inline transaction
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); architectural pattern from spec §6.5 + adversarial-reviewer AKR-ADV-6 + dual-reviewer §3 (FORCE-RLS reads on `document_promotion_audit`).
+
+When a one-click "promote source X to durable Y" flow has both an inline tx (for the user-visible "marked durable" instant feedback) and a post-commit job (for slow side effects like flipping `expires_at` to NULL or far-future), there is a race window: if the post-commit job runs after the source row's expiry sweep also fires, the source could be pruned before the durability flip lands. The promotion path then re-runs (UI retry, idempotency replay, etc.), and the system either creates a duplicate target row or 23505s.
+
+**Pattern:** write an append-only audit-ledger row inside the inline tx with `UNIQUE (file_id) WHERE deleted_at IS NULL`. The audit row IS the idempotency anchor — its existence proves promotion already started, and the post-commit job reads it under the same RLS context to know whether to flip durability. Auto-knowledge-retrieval's `document_promotion_audit` table (migration 0294) is the canonical implementation: written inside the same tx as the new `reference_documents` row + link rows, then read by `documentPromotionFinaliseJob` (in a short org-scoped read tx — see the worker-opt-out pattern above) to prove the promotion is real before flipping `execution_files.expiresAt`.
+
+**Detection heuristic.** Any "instant durability + post-commit side effects" pattern needs the audit-ledger anchor. If you see `promotionService.promote` followed by a fire-and-forget `enqueueFinaliseJob`, ask: how does the finalise job know the inline tx committed and isn't a phantom retry? The answer should be a row in an audit table, written inline, with a UNIQUE constraint that idempotency-keys the source-id.
+
+### [2026-05-08] Pattern — Retrieval rankers should share a generic core; primitive-specific filters wrap it
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); spec decision §3.3.3 (extract generic ranker, keep block-specific filters).
+
+When a project gains a second knowledge primitive that needs ranking (auto-knowledge-retrieval added document chunks alongside the pre-existing memory blocks), the temptation is to copy the ranker. Don't. Extract the generic ranker into a pure module that operates on a polymorphic `RetrievalCandidate` shape (id, kind, scope-tier columns, embedding, tokenCount, finalScore inputs); leave primitive-specific FILTERS (mode handling, version pinning, owner-agent semantics, divergence flags) in the primitive's own service that wraps the generic ranker.
+
+This is what `retrievalServicePure.ts` (generic ranker) + `documentRetrievalServicePure.ts` (document-specific filter) + `memoryBlockRetrievalServicePure.ts` (block-specific filter) shipped together in PR #274. Future cross-encoder re-ranking, learned thresholds, and new knowledge primitives all benefit from concentrating the algorithm.
+
+**Convention:** any new knowledge-style primitive that needs ranking goes through `retrievalServicePure`. Primitive-specific code lives upstream (pre-ranking filter) or downstream (post-ranking truncation / formatting). The comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` is locked — `id ASC` is the determinism anchor. Tests in `retrievalServicePure.test.ts` pin it; reordering or dropping a column is a spec amendment.
+
+### [2026-05-08] Pattern — Bounded observability payloads with deterministic top-N truncation are the right shape for retrieval traces
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); spec §11.4 + §10.8 (ranking determinism), `retrievalObservabilityService` design.
+
+Retrieval traces tempt unbounded JSON payloads (every candidate, every score component, every rejection reason). Two failure modes:
+1. Storage cost grows linearly with candidate-pool size, which itself grows with org maturity.
+2. Replay determinism fails: a re-emit with `JSON.stringify` of the same candidate set produces a different byte sequence if Map iteration order or floating-point serialisation drifts.
+
+**Pattern:** every retrieval-trace event has a strict byte-bound contract — top-N items per array (sort + slice, fixed N), constants exported from the observability service, and replays MUST be byte-identical given the same candidate set. Tests assert `Buffer.byteLength(emit) === Buffer.byteLength(replay)`. Truncation is silent in the payload (no per-event "5 more truncated" wording — the constant is the contract); a separate truncation-indicator-rate metric tells ops when caps need raising via the documented escalation path (migrate to a dedicated `retrieval_events` table — DON'T raise the inline cap).
+
+This is the spec §11.4 design pinned in `retrievalObservabilityServicePure.test.ts`. Mirror it for any future high-cardinality observability event (rule-firing trace, capability-discovery trace, etc.) — bounded payload + dedicated escalation path beats unbounded inline payload every time.
+
+### [2026-05-08] Pattern — Always-available document budget needs a preventive UI surface, not a runtime safety net
+
+**Date:** 2026-05-08
+**Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); spec §11.5 + chatgpt-spec-review item A (operator chose option a — telemetry-driven preventive surface).
+
+When a feature lets operators flag documents as "always available" (loaded on every run, bypassing relevance ranking), there's a temptation to handle starvation at runtime: degrade gracefully when the always-available block alone exceeds budget. That works mid-run, but it's the WRONG primary surface — operators only learn about the misconfiguration after a degraded run lands, and they have no signal in the configuration UI to tell them they're approaching the cliff.
+
+**Pattern:** the primary surface is preventive, in the configuration tab. Soft warning fires at thresholds well below the runtime cliff (`doc_count >= 30` OR `token_cost >= 30000` for v1) and surfaces in the Documents tab as an inline chip. The runtime degradation path still exists as the last-line-of-defence safety net, but operators see the chip first and reconfigure before any run degrades. Constants live in `retrievalObservabilityService` for v1; per-org overrides explicitly deferred to a post-launch amendment once production telemetry exists to inform tuning.
+
+**Convention.** When designing any "soft cap" feature where operators can over-configure, the question to ask is: *does the operator see the warning before the bad outcome, or only after?* If only after, the design is wrong; redo with a configuration-time surface.
+
+### [2026-05-09] Pattern — Single-node SSE topology with reconnect-snapshot recovery
+
+`agentPresenceStreamPublisher.ts` uses an in-process singleton `Map` keyed by scope (no Redis, no message broker). Each scope holds a sorted ring buffer (300 events, canonical order `(eventTimestamp ASC, eventId ASC)`). On reconnect the route calls `replaySinceLastEventId(lastEventId)` to replay the ring buffer. The `Last-Event-ID` request header always supersedes the `lastEventId` query param when both are present; query param is consulted only when the header is absent. Multi-node fan-out is explicitly deferred (spec §18 Agent Workspace). File: `server/services/agentPresenceStreamPublisher.ts`; routes: `server/routes/agentPresenceStream.ts`.
+
+### [2026-05-09] Pattern — Monotonic-clock hysteresis for working time
+
+`agentWorkingTimeService.ts` uses `process.hrtime.bigint()` for elapsed measurement to avoid `Date.now()` wall-clock drift and NTP adjustments. Elapsed accumulates into a per-run bucket in `agent_working_time_buckets`. UTC half-open intervals `[start, end)` prevent double-counting at midnight: runs that cross midnight are split into two buckets inside the pure helper `splitIntervalAcrossBuckets`. The monthly compact job (`workingTimeRollupCompactJob.ts`) keeps per-day rows for 1 year then collapses to monthly resolution. File: `server/services/agentWorkingTimeService.ts` + `agentWorkingTimeServicePure.ts`.
+
+### [2026-05-09] Pattern — Bounded-payload pattern reuse applied to SSE (KNOWLEDGE.md 2026-05-08 retrieval pattern applied)
+
+`agentPresenceStreamPublisher.ts` applies the same bounded-observability-payload pattern from `retrievalObservabilityService`: per-event hard cap is 32KB measured via `Buffer.byteLength(JSON.stringify(event.data), 'utf8')`. Over-limit events have their `data` replaced with `{ truncated: true, byteLength }` and `truncated: true` set on the envelope. Truncation is logged at most once per 24h per event-type (in-process Map keyed on event-type name, reset at UTC midnight) to prevent log storms on burst traffic. The 24h suppression key is `(eventType, host)` — same pattern as the cache-invalidation log suppression (plan Rev 3 tightening #3).
+
+### [2026-05-09] Pattern — Immutability GUC bypass for retention prune
+
+`agentObservationsPruneJob.ts` bypasses the `agent_observations` DB immutability trigger via `set_config('app.allow_observation_mutation', 'retention_prune', true)` issued as the first statement inside the DELETE transaction. The GUC is transaction-scoped only. Every prune cycle calls `recordSecurityEvent` with action `agent.observations.retention_prune` — this is the ONLY authorised mutation path for non-pinned rows. GUC + audit-log pairing is the canonical pattern for any table that uses a trigger-based immutability guard but needs a maintenance prune path. Delete batches: 1000 rows ordered `(created_at ASC, id ASC)` with `FOR UPDATE SKIP LOCKED`.
+
+### [2026-05-09] Pattern — withOrgTx external side-effect boundary
+
+`ieeSessionService.tearDown()` uses `withOrgTx` for the DB update. The external container release (IEE infra teardown) MUST be placed AFTER the `await withOrgTx(...)` call returns — never inside the transaction callback. Pattern: commit first, then side-effect. Placing the release inside the callback violates atomicity: if the release throws before the implicit commit, the transaction may roll back leaving the DB row in a stale state while the container is already gone. `markFailed()` and `recordSummary()` use `getOrgScopedDb` because a single UPDATE needs no full transaction wrapper. File: `server/services/ieeSessionService.ts`.
+
+### [2026-05-09] Correction — chatgpt-pr-review is iterative until operator says done; never auto-close after a single APPROVED round
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #275 (slug: trust-verification-layer) Phase 3 finalisation. Round 1 was auto-closed by finalisation-coordinator with disposition `APPROVED — round-2 not requested` after a single round, without pausing for operator input. Operator pointed out that the agent contract is iterative.
+
+The `chatgpt-pr-review` agent is **operator-driven on cadence** — there is no auto-finalise on a single APPROVED round, even when the round produces no findings. Per `.claude/agents/chatgpt-pr-review.md` line 230 ("Empty findings array AND verdict APPROVED → log and ask the user whether to finalise or run another round") and `.claude/agents/finalisation-coordinator.md` line 237 ("Coordinator pauses inside this sub-agent for the operators full ChatGPT loop. No time cap. Operator drives cadence."), the coordinator MUST pause after every round and wait for the operator to either:
+
+- paste the next ChatGPT response (round N+1), or
+- say `done` (close the loop and proceed to step 6 doc-sync sweep).
+
+**Why:** even when ChatGPT returns APPROVED with no findings, the operator may want to run a second round at a different prompting angle (strategic risks, security framing, ergonomics). Auto-closing after a single round denies that option and silently truncates the review.
+
+**Detection heuristic.** When running finalisation Step 5, the coordinator must surface BOTH options at the end of every round, regardless of disposition: "say `done` to close the loop, or paste another ChatGPT response to run another round." Never write `APPROVED — round-N+1 not requested` as a self-decided verdict — that field is set only when the operator explicitly says done.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Step 5; `.claude/agents/chatgpt-pr-review.md` per-round loop step 9 (round summary). Both files are correct in their text — this entry exists to lock in the discipline against future drift.
+
+### [2026-05-09] Correction — finalisation-coordinator must auto-monitor CI, auto-fix CI red (with guardrails), and auto-merge
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #275 (slug: trust-verification-layer) Phase 3 finalisation. The prior contract for finalisation-coordinator stopped at Step 11 with "operator drives the merge sequence" — the operator pointed out that this has failed to fire automatically multiple times across recent finalisations. They want the full lifecycle (label → CI watch → CI fix → merge) automated, since they do not review CI logs themselves.
+
+The `finalisation-coordinator` agent now owns the entire post-Step-10 lifecycle:
+
+- **Step 11 (NEW):** CI monitoring + iterative fix loop. Polls `gh pr view {N}` every 90s via `ScheduleWakeup`. State machine: `green` → Step 12; `running` → schedule another poll; `red` → enter fix sub-loop. Bounded at 5 iterations per session.
+- **Step 12 (NEW):** Auto-merge. Update current-focus → NONE, commit + push, run `gh pr merge {N} --squash --delete-branch`, capture squash sha, patch main with the actual sha.
+- **Step 13 (was 11):** End-of-phase prompt — confirms merged.
+
+**Guardrails (mandatory) on the fix sub-loop.** Without these, auto-fix is unsafe — the agent can silently game tests, scope-creep, or mask real bugs. With them, the auto-fix path is bounded to genuinely mechanical CI red:
+
+1. **G1 — Test files off-limits.** Never modify `*.test.ts` / `*.spec.ts` / `tests/` / `__tests__/` / `e2e/` / `fixtures/` / vitest+jest config. Failing tests usually mean the implementation is wrong; the fix belongs in the implementation, never in the assertion. If the test really is outdated, escalate — the operator owns the spec-amendment decision.
+2. **G2 — Diff size cap: 50 lines per iteration.** Bigger fixes almost always indicate the agent is solving the wrong problem. The migration-0300 IMMUTABLE fix (1 line) and the corrections-route service-helper fix (30 lines) both fit comfortably. If a genuine fix needs more than 50 lines, that is a feature-scoped change — spawn `builder`, get pr-reviewer, do not roll it through the auto-fix path.
+3. **G3 — Category allowlist.** Auto-fix is allowed for: SQL/migration syntax, lint, typecheck, missing imports, gate-script bugs, RLS-contract violations, idempotency-index issues. Auto-fix is **escalate-immediately** for: failing unit / integration tests, security-scanner findings, "Workspace Actor Coverage" or similar policy gates, anything whose name does not match the allowlist.
+4. **G4 — Mandatory post-merge audit log.** Every iteration appends to `tasks/review-logs/auto-fix-log-{slug}-{timestamp}.md` with failed check, root cause, category, guardrail status, fix summary, commit sha, and CI re-fire result. The squash-commit preserves the log so post-hoc review of "what did the bot do under my nose" takes 30 seconds.
+
+**Why the guardrails matter.** The operator stated they do not review CI output themselves. That changes the risk profile of auto-fix from "minor inconvenience if the bot is wrong" to "real bug ships with no human gate". The four guardrails preserve the automation while bounding the blast radius — auto-fix handles "obvious mechanical CI red", escalation handles "behaviour might actually be broken".
+
+**Detection heuristic for future drift.** If a future agent edit removes any guardrail (G1–G4), the iteration cap (5), the stuck-detection rule, or the no-`--no-verify` rule, treat it as a contract violation and surface to operator before merging the change. These four guardrails are the difference between automated maintenance and unbounded agentic merge.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Steps 11, 12, 13. Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Pattern — Paired-event accumulators need explicit stable identity, never "latest prior in same scope"
+
+**Date:** 2026-05-09
+**Source:** finalisation-coordinator finalisation pass on PR #276 (slug: agent-workspace); chatgpt-pr-review Round 1 B3 + Round 2 R2-S2 (agentWorkingTimeService.ts step pairing).
+
+Whenever a service pairs `*_started` / `*_completed` (or `*_open` / `*_closed`) events into intervals, the pairing key MUST be a stable identity carried by both ends — `payload.stepId`, `(taskId, taskSequence)`, span_id, observation_correlation_id, etc. The "latest prior `*_started` in the same scope" pattern silently mispairs under three real-world conditions: concurrent intervals in the same scope, retries (a started event re-fires before the previous completed), and nested intervals.
+
+**Pattern (mandatory shape).** Pair end-to-start by exact identity. If the end carries identity but no matching start exists, **drop the pair and warn** (`<service>.identity_missing`) — never cross-fall through to a fallback path that could match a different open. The cross-fallthrough is what destroys correctness: a stepId-bearing end that falls through to an unidentified slot pairs with whichever step happens to be open, not with its actual sibling.
+
+**Strict fallback rule.** A run-level / scope-level fallback (no identity on either side) is allowed ONLY when both ends lack identity AND no identified open exists in that scope. The "no identified open" check is what prevents an unidentified end from cross-pairing to an identified start. Pure-helper invariant: the fallback opens at most ONE slot per scope and never pairs an end to an unrelated start; the worst case is an under-count, never mis-attribution.
+
+**Detection heuristic.** Any service that uses `WHERE event_type = '<X>_started' AND sequenceNumber < <ours> ORDER BY sequenceNumber DESC LIMIT 1` to find a pair is using the broken pattern. Replace with identity-keyed lookup; keep the legacy fallback only if you also count identified opens and refuse to pair when one is in flight. Tests must include: (a) interleaved concurrent intervals in same scope with explicit identity, (b) retry where the same identity re-fires, (c) asymmetric identity (one end carries it, the other does not — must drop), (d) ambiguous unidentified end while an identified open is in flight (must drop). Files: `server/services/agentWorkingTimeService.ts` + `server/services/agentWorkingTimeServicePure.ts` + `server/services/agentWorkingTimeServicePure.test.ts`.
+
+### [2026-05-09] Pattern — Permission-gated UI surfaces must fail closed during async permission load
+
+**Date:** 2026-05-09
+**Source:** finalisation-coordinator finalisation pass on PR #276 (slug: agent-workspace); chatgpt-pr-review Round 2 R2-S1 (AgentEditPage.tsx Overview tab gate).
+
+When a UI surface is permission-gated and the permission set loads asynchronously (e.g. `/api/my-permissions` fetch on mount), the default during the pre-fetch window MUST be "hide everything that has a gate", not "show everything". The opposite default — render the gated affordance, redirect once perms arrive — has two failure modes: (a) UI contract violation (the "tab does not appear" guarantee is broken for the brief flicker window even when the backend rejects the data), and (b) the gated component can mount and fire a protected backend request before the redirect, producing 403s that look like real failures in observability.
+
+**Pattern (mandatory shape).** Treat `permissions === null` as "permission denied" for the purpose of visibility computation, not as "permission unknown, show everything". Hold the page-level loading state until both the resource fetch AND the permission fetch resolve — never render a tab strip / sidebar / button row that includes a gated affordance while permissions are loading. Admin / system_admin paths can short-circuit (always-visible, never gated) if the role flag is locally cached.
+
+**Detection heuristic.** Any `useMemo` / filter that returns the full unfiltered list when the permission state is `null` is using the broken pattern. The correct shape is: `if (perms === null) return false` (per-tab) inside the filter. Pair this with a top-level `if (permsAreLoading) return <Loading/>` so content rendering also waits.
+
+File: `client/src/pages/build/AgentEditPage.tsx`.
+
+
+### [2026-05-09] Correction — finalisation-coordinator must commit Phase 3 BEFORE applying ready-to-merge label
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation. The original `finalisation-coordinator` Step 10 ordered: apply label → write handoff → write current-focus → commit → push. Applying the label fired CI on the pre-Phase-3 HEAD; the Phase 3 commit then landed and re-fired CI from scratch. Operator caught it and pointed out the wasted compute / wasted minutes.
+
+**Rule:** the ready-to-merge label is what triggers CI on this repo. CI must therefore fire against the final post-Phase-3 commit, never against a pre-Phase-3 HEAD that the next push will immediately invalidate. Apply the label LAST in the Phase 3 sequence, AFTER all Phase 3 artefacts (`handoff.md`, `current-focus.md`, `KNOWLEDGE.md`, `tasks/todo.md`) are committed and pushed.
+
+**Required Step 10 order (locked):**
+
+1. Capture `LABEL_TIMESTAMP_PLACEHOLDER` via `date -u`.
+2. Write `tasks/builds/{slug}/handoff.md` Phase 3 section (recording the placeholder timestamp).
+3. Write `tasks/current-focus.md` mission-control + prose for MERGE_READY.
+4. Commit all four files in a single `chore(finalisation-coordinator): Phase 3 complete` commit.
+5. Push to remote. **Wait for push to complete.**
+6. THEN run `gh pr edit {N} --add-label "ready-to-merge"`.
+
+The pre-captured placeholder timestamp is the operator-visible "labelling moment" recorded in the handoff. Drift between the placeholder and the actual `gh` call is at most a few seconds and is acceptable; the alternative (capture timestamp after `gh`, then amend the handoff) requires either an `--amend` (forbidden in this flow) or a second commit (which itself triggers a third CI run).
+
+**Detection heuristic.** If a future `finalisation-coordinator` edit reorders Step 10 such that `gh pr edit ... --add-label "ready-to-merge"` runs before the Phase 3 commit, treat it as a contract violation and surface to the operator before merging the change. The label-after-commit ordering is what makes the auto-CI-watch loop affordable; reverting it doubles every Phase 3's CI cost.
+
+**Applies to:** `.claude/agents/finalisation-coordinator.md` Step 10. Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Correction — four CI-only gates that G1 (lint + typecheck) misses; comply WHILE writing, not after
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation. CI red after `ready-to-merge` label fired surfaced four blocking-gate failures that G1 did not catch. Operator asked: "anything you can add into knowledge or doco to prevent this in the future instead of having to fix it from failing tests".
+
+The G1 gate run inside `builder` only exercises lint + typecheck + targeted vitest. Four static gates run CI-only and routinely catch chunks that G1 cleared. Every one of them is mechanical to satisfy WHILE writing the chunk and 10–30× more expensive to fix retroactively.
+
+**The four gates and their pre-flight rules:**
+
+1. **`verify-test-quality.sh`** — `*.test.ts` MUST live under `__tests__/`. Inline siblings (`server/services/foo.test.ts`) are silently invisible to Vitest's discovery glob. Correct shape: `server/services/__tests__/foo.test.ts` (and the import is `../foo`, not `./foo`). Same rule for `client/src/**/*.test.ts`. PR #276 had 7 violations from chunks that landed tests inline. Reference: `docs/testing-conventions.md § Test discovery`.
+
+2. **`verify-rls-coverage.sh`** — `CREATE POLICY <name> ON <table>` must be on a single line. The gate uses line-oriented grep. Splitting across two lines (`CREATE POLICY <name>\n  ON <table>`) makes the gate fail to match. The body (`USING (...) / WITH CHECK (...)`) can wrap normally. PR #274 + PR #276 both hit this. KNOWLEDGE.md `[2026-05-08]` recorded the PR #274 instance and the rule still got missed in PR #276 — promote it from history to a checklist item every migration writer reads.
+
+3. **`verify-rls-contract-compliance.sh`** — no raw `db` import from `server/db/index.js` outside `server/services/**`. New helpers in `server/lib/*.ts` that need a query either: (a) use `getOrgScopedDb('caller-tag')` from `server/lib/orgScopedDb.ts` (allowed everywhere); (b) move into a `server/services/` file; or (c) deliberately add the path to `ALLOWLIST_DIRS` in `scripts/verify-rls-contract-compliance.sh` (reserved for short bootstrap helpers — `resolveSubaccount.ts`, `resolveAgent.ts` are the precedents).
+
+4. **FK references to `agent_execution_events(id)` need `ON DELETE` clause.** Default `NO ACTION` blocks integration-test cleanup that deletes events for the run. Pointer columns (nullable: "last seen", "current focus") → `ON DELETE SET NULL`. Dependent rows (NOT NULL: "this row was generated from this event") → think about retention before choosing CASCADE vs the default. PR #276's `agent_presence_projections.last_event_id_fkey` was the first integration-test failure; both pointer columns now `SET NULL`.
+
+**Why the rule lives here AND in `builder.md`.** The `builder` agent definition has a "CI-gate pre-flight" subsection in Step 3 — that's the workflow-level reminder. KNOWLEDGE.md is the durable cross-session record so the lesson survives builder agent revisions and so any agent reading project knowledge sees it as a known-tripwire pattern.
+
+**Detection heuristic.** When writing or reviewing a chunk that touches: any new `*.test.ts` (gate 1), any new `migrations/*.sql` (gate 2 + gate 4), any new `server/lib/*.ts` that queries the DB (gate 3) — run the corresponding compliance check by hand before claiming SUCCESS:
+
+- `find <chunk dir> -name '*.test.ts' -not -path '*/__tests__/*' -print` should return zero.
+- `grep -E '^CREATE POLICY[^O]*$' migrations/<new>.sql` should return zero (any line that starts with CREATE POLICY but has no ON before EOL).
+- `grep -l "from '../db/index" server/lib/<new-files>.ts` plus check it's in the gate allowlist.
+- `grep "REFERENCES agent_execution_events" migrations/<new>.sql` should not return entries without an `ON DELETE` clause unless the column is intentionally `NO ACTION`.
+
+**Applies to:** `.claude/agents/builder.md` Step 3 ("CI-gate pre-flight"); `docs/testing-conventions.md § Test discovery` (already names the rule but builder agents missed it). Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Sub-pattern — `verify-pure-helper-convention.sh` requires `.js` extension on relative imports
+
+**Date:** 2026-05-09
+**Source:** Phase 3 finalisation auto-fix iteration 2 on PR #276 (slug: agent-workspace). Iteration 1 fixed test-file location (`./X` → `../X`); iteration 2 caught a follow-on gate failure because the gate's regex requires `.js` on the relative import.
+
+The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test file under `__tests__/` imports something from its parent directory. The grep pattern is `from\s+'(\.\./|\./)[^']+\.js'` — the `.js` extension is required. Without it, a TypeScript-only relative import like `from '../somethingPure'` is invisible to the gate even though TypeScript resolves it correctly.
+
+**Pattern (mandatory shape).** Every relative import in a test file MUST end in `.js` — both the sibling-module import and any deeper relative path (`../../../shared/types/X.js`). This matches the project's TypeScript-ESM `nodenext` resolution mode and the gate's regex.
+
+**Detection heuristic.** Pair this check with the test-file-location check in builder.md Step 3:
+
+- `find <new-test-files> -name '*.test.ts' | xargs grep -E "from '(\.\./|\./)[^']+'$"` should return zero (every relative import should have an extension).
+- If zero, also check `from '(\.\./|\./)[^']+\.ts'` is zero (never `.ts` — always `.js` for ESM resolution).
+
+**Applies to:** `.claude/agents/builder.md` Step 3 "CI-gate pre-flight"; `KNOWLEDGE.md [2026-05-09] Correction — four CI-only gates that G1 misses` (this is sub-rule 1.b — the `.js` extension requirement on relative imports inside `__tests__/`).
+
+
+### [2026-05-09] Correction — finalisation-coordinator merge command must use `--admin --squash --delete-branch`
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation merge step. The original `finalisation-coordinator` Step 12.3 used `gh pr merge {N} --squash --delete-branch`. The post-merge-prep commit in 12.2 (a docs-only `tasks/current-focus.md` edit setting status to NONE + capturing the squash-sha placeholder) triggers a fresh CI run on push. The merge then has to wait for required status checks to pass on a commit that changes nothing CI cares about — pure compute / wall-clock waste.
+
+**Rule.** `gh pr merge` in 12.3 is invoked with `--admin --squash --delete-branch`. The `--admin` flag bypasses the required-status-checks gate and merges immediately. This is safe because:
+
+- The prep commit in 12.2 is pure metadata: `tasks/current-focus.md` only. It cannot break code, schema, RLS, lint, or types.
+- The PREVIOUS commit (the last code-bearing commit on the feature branch) already passed all required checks before Step 12.1 was reached. That's the actual "what shipped" content; the squash-merge bundles the prep commit in but adds no new risk.
+- Required-status-checks is the contract for code changes; `--admin` is the documented operator override for exactly this kind of metadata-only trailing commit.
+
+**Apply to:** `.claude/agents/finalisation-coordinator.md` Step 12.3. Locked in by operator 2026-05-09.
+
+**Detection heuristic.** Any future Phase-3 merge that does NOT use `--admin` either: (a) skips the prep commit entirely (also valid — but loses the bundled `current-focus → NONE` state in the squash), OR (b) wastes a full CI run on a docs-only commit. If the playbook ever drops `--admin`, treat as a contract violation and surface to operator before merging.

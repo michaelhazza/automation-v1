@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, varchar, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, varchar, integer, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -9,7 +9,8 @@ import { users } from './users';
 // Reference Documents — user-uploaded reference documents for cached context
 // ---------------------------------------------------------------------------
 
-export type ReferenceDocumentSourceType = 'manual' | 'external' | 'google_drive';
+export type ReferenceDocumentSourceType = 'manual' | 'external' | 'google_drive' | 'from_file';
+export type ReferenceDocumentMode = 'auto' | 'always_available' | 'reference_only';
 
 export const referenceDocuments = pgTable(
   'reference_documents',
@@ -45,6 +46,25 @@ export const referenceDocuments = pgTable(
     attachedByUserId:     uuid('attached_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     attachmentOrder:      integer('attachment_order').notNull().default(0),
     attachmentState:      varchar('attachment_state', { length: 32 }).$type<AttachmentState>(),
+
+    // Retrieval mode — document-level, not link-level (spec §6.4).
+    mode: text('mode').notNull().default('auto').$type<ReferenceDocumentMode>(),
+
+    // Summary fields.
+    summary: text('summary'),
+    summaryStale: boolean('summary_stale').notNull().default(false),
+    summaryGeneratedAt: timestamp('summary_generated_at', { withTimezone: true }),
+
+    // Three-pointer contract (spec §13.1, §13.3):
+    //   currentVersionId — content pointer, flips on save
+    //   retrievalVersionId — retrieval pointer, flips after chunking commits
+    //   activeEmbeddingModel — embedding-generation pointer, flips after re-embed sweep
+    lastChunkedAt: timestamp('last_chunked_at', { withTimezone: true }),
+    activeEmbeddingModel: text('active_embedding_model'),
+    // Soft FK to reference_document_versions.id — no Drizzle reference() to avoid
+    // circular dependency (referenceDocumentVersions imports referenceDocuments).
+    // DB-level FK constraint is declared in migration 0288.
+    retrievalVersionId: uuid('retrieval_version_id'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<!--
+  Mockup 1 — Knowledge page with new Files tab
+  Auto Knowledge Retrieval — Phase 1
+  Shows: Knowledge page with Files tab added alongside existing tabs.
+  Demonstrates: agent-produced artifacts surfaced as a tab in Knowledge,
+                three-dots menu with "Add to Knowledge" action visible.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge: Files tab | Auto Knowledge Retrieval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  /* Tab strip */
+  .tab-strip {
+    display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 20px;
+  }
+  .tab-btn {
+    background: none; border: none; padding: 10px 16px; font-size: 13.5px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.12s; display: flex; align-items: center; gap: 7px;
+  }
+  .tab-btn:hover { color: var(--slate-700); }
+  .tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .tab-count {
+    font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--slate-100); color: var(--slate-500);
+  }
+  .tab-btn.active .tab-count { background: var(--indigo-100); color: var(--indigo-700); }
+  .tab-btn .new-badge {
+    font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px;
+    background: var(--emerald-500); color: white; letter-spacing: 0.04em;
+  }
+
+  /* Tab toolbar */
+  .tab-toolbar {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap;
+  }
+  .tab-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .search-input {
+    padding: 7px 12px; border: 1px solid var(--slate-200); border-radius: 6px; font-size: 13px;
+    width: 280px; outline: none; transition: border-color 0.12s;
+  }
+  .search-input:focus { border-color: var(--indigo-400); }
+  .filter-pill {
+    padding: 5px 12px; border-radius: 14px; font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--slate-200); color: var(--slate-600); background: white; cursor: pointer;
+  }
+  .filter-pill.active { background: var(--slate-900); color: white; border-color: var(--slate-900); }
+
+  /* File list */
+  .file-list { display: flex; flex-direction: column; gap: 6px; }
+  .file-row {
+    background: white; border: 1px solid var(--slate-200); border-radius: 8px;
+    padding: 12px 16px;
+    display: grid; grid-template-columns: auto 1fr auto auto auto auto; gap: 14px;
+    align-items: center; transition: all 0.1s; cursor: pointer;
+  }
+  .file-row:hover { border-color: var(--slate-300); background: var(--slate-50); }
+  .file-row.linked { border-left: 4px solid var(--indigo-500); padding-left: 12px; }
+  .file-icon {
+    width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; color: white; flex-shrink: 0;
+  }
+  .icon-csv { background: var(--emerald-500); }
+  .icon-md { background: var(--indigo-500); }
+  .icon-pdf { background: #dc2626; }
+  .icon-txt { background: var(--slate-500); }
+  .icon-img { background: var(--violet-500); }
+  .icon-json { background: var(--amber-600); }
+
+  .file-meta { min-width: 0; }
+  .file-name {
+    font-size: 13.5px; font-weight: 600; color: var(--slate-800); margin-bottom: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .file-sub {
+    font-size: 11.5px; color: var(--slate-500);
+  }
+  .linked-pill {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px;
+    background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200);
+    font-size: 10.5px; font-weight: 600; margin-left: 8px;
+  }
+
+  .col-label { font-size: 11px; color: var(--slate-400); margin-bottom: 1px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+  .col-val { font-size: 12.5px; color: var(--slate-700); white-space: nowrap; }
+  .col-val.muted { color: var(--slate-500); }
+  .col-val.warn { color: var(--amber-700); }
+
+  .agent-chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 12px;
+    background: var(--slate-100); color: var(--slate-700); font-size: 11.5px; font-weight: 500;
+  }
+  .agent-chip-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--emerald-500);
+  }
+
+  .ttl-pill {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px;
+    background: var(--slate-100); color: var(--slate-600); border: 1px solid var(--slate-200);
+    font-size: 10.5px; font-weight: 500;
+  }
+  .ttl-pill.durable { background: var(--emerald-50); color: var(--emerald-600); border-color: #a7f3d0; }
+  .ttl-pill.warn { background: var(--amber-50); color: var(--amber-700); border-color: #fde68a; }
+
+  .three-dot-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--slate-200);
+    background: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; color: var(--slate-400); position: relative;
+  }
+  .three-dot-btn:hover { background: var(--slate-100); color: var(--slate-700); }
+
+  /* Three-dot menu (open by default on one row to demonstrate) */
+  .menu {
+    position: absolute; right: 0; top: 36px; z-index: 50;
+    background: white; border: 1px solid var(--slate-200); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(15,23,42,0.12);
+    min-width: 220px; padding: 4px; display: none;
+  }
+  .menu.open { display: block; }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 6px;
+    cursor: pointer; font-size: 13px; color: var(--slate-700);
+  }
+  .menu-item:hover { background: var(--slate-50); }
+  .menu-item.primary {
+    color: var(--indigo-600); font-weight: 600;
+  }
+  .menu-item.primary:hover { background: var(--indigo-50); }
+  .menu-item.danger { color: var(--red-600); }
+  .menu-item.danger:hover { background: var(--red-50); }
+  .menu-item-icon { width: 16px; text-align: center; opacity: 0.85; }
+  .menu-divider { height: 1px; background: var(--slate-200); margin: 4px 6px; }
+  .menu-hint {
+    padding: 6px 12px 8px; font-size: 11px; color: var(--slate-400); line-height: 1.4;
+  }
+
+  /* Page intro / explainer */
+  .page-intro {
+    background: linear-gradient(135deg, var(--indigo-50) 0%, var(--violet-50) 100%);
+    border: 1px solid var(--indigo-200); border-radius: 10px; padding: 14px 18px;
+    margin-bottom: 20px; display: flex; align-items: flex-start; gap: 12px;
+  }
+  .page-intro-icon {
+    width: 28px; height: 28px; border-radius: 8px; background: var(--indigo-600); color: white;
+    display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0;
+  }
+  .page-intro-title { font-size: 13px; font-weight: 600; color: var(--indigo-700); margin-bottom: 2px; }
+  .page-intro-body { font-size: 12.5px; color: var(--slate-700); line-height: 1.5; }
+
+  /* Sidebar mini (just for shell visual) */
+  .sidebar-pad { padding: 14px 16px; color: rgba(255,255,255,0.55); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sidebar-item { padding: 8px 16px; color: rgba(255,255,255,0.78); font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+  .sidebar-item:hover { background: rgba(255,255,255,0.04); color: white; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-500); padding-left: 13px; }
+
+  /* Topbar */
+  .topbar {
+    background: white; border-bottom: 1px solid var(--border); padding: 12px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--slate-500); }
+  .breadcrumb-current { color: var(--slate-900); font-weight: 600; }
+  .breadcrumb-sep { color: var(--slate-300); }
+
+  /* Page area */
+  .page-content { padding: 28px 32px; max-width: 1280px; margin: 0 auto; }
+  .page-h1 { font-size: 24px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 6px; }
+  .page-sub { font-size: 13px; color: var(--slate-500); margin-bottom: 22px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- ── Sidebar (minimal visual reference) ──────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div style="width:28px;height:28px;border-radius:7px;background:var(--indigo-500);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:14px;">S</div>
+        <div style="color:white;font-weight:700;font-size:14px;">Synthetos</div>
+      </div>
+    </div>
+    <div class="sidebar-pad">Work</div>
+    <div class="sidebar-item">Home</div>
+    <div class="sidebar-item">Inbox</div>
+    <div class="sidebar-item">Activity</div>
+    <div class="sidebar-item">Recurring tasks</div>
+    <div class="sidebar-pad">Knowledge</div>
+    <div class="sidebar-item active">Knowledge</div>
+    <div class="sidebar-item">Connections</div>
+    <div class="sidebar-pad">Agents</div>
+    <div class="sidebar-item">Outreach Agent</div>
+    <div class="sidebar-item">Research Agent</div>
+    <div class="sidebar-item">CRM Hygiene Agent</div>
+  </aside>
+
+  <main style="flex:1; min-width:0;">
+    <!-- ── Topbar ──────────────────────────────────────────────────────── -->
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span>Acme Corp</span>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Knowledge</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="filter-pill">+ Upload document</button>
+        <button class="filter-pill" style="background:var(--indigo-600);color:white;border-color:var(--indigo-600);">+ Add manually</button>
+      </div>
+    </div>
+
+    <!-- ── Page content ────────────────────────────────────────────────── -->
+    <div class="page-content">
+      <h1 class="page-h1">Knowledge</h1>
+      <div class="page-sub">Everything your agents know, learn, and produce in this workspace.</div>
+
+      <!-- Page intro / explainer (helps users understand new model) -->
+      <div class="page-intro" style="position:relative;">
+        <div class="page-intro-icon">i</div>
+        <div>
+          <div class="page-intro-title">Files now live alongside Documents and Memory</div>
+          <div class="page-intro-body">
+            Every file your agents produce shows up here automatically. You can add any of them to your knowledge base in one click, no need to upload again. Files you don't add are kept for 60 days, then expire automatically.
+          </div>
+        </div>
+        <button style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--slate-400);cursor:pointer;font-size:18px;width:24px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;" title="Dismiss">×</button>
+      </div>
+
+      <!-- ── Tab strip ────────────────────────────────────────────────── -->
+      <div class="tab-strip">
+        <button class="tab-btn">Authored memory <span class="tab-count">14</span></button>
+        <button class="tab-btn">Auto-memory <span class="tab-count">5</span></button>
+        <button class="tab-btn">Documents <span class="tab-count">23</span></button>
+        <button class="tab-btn active">
+          Files <span class="tab-count">187</span>
+          <span class="new-badge">NEW</span>
+        </button>
+      </div>
+
+      <!-- ── Files tab toolbar ────────────────────────────────────────── -->
+      <div class="tab-toolbar">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span class="filter-pill active">All (187)</span>
+          <span class="filter-pill">Linked to Knowledge (12)</span>
+        </div>
+        <div class="tab-toolbar-right">
+          <input class="search-input" type="text" placeholder="Search files...">
+          <select class="filter-pill" style="padding:5px 10px;">
+            <option>By any agent</option>
+            <option>Outreach Agent</option>
+            <option>Research Agent</option>
+            <option>CRM Hygiene Agent</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ── File list ────────────────────────────────────────────────── -->
+      <div class="file-list">
+
+        <!-- Row 1: linked to knowledge -->
+        <div class="file-row linked">
+          <div class="file-icon icon-md">MD</div>
+          <div class="file-meta">
+            <div class="file-name">
+              acme-discovery-call-summary-may-7.md
+              <span class="linked-pill">● Linked to Knowledge</span>
+            </div>
+            <div class="file-sub">14 KB</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> Outreach Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">2 days ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val"><span class="ttl-pill durable">Kept indefinitely</span></div>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Row 2: with three-dots menu OPEN to demonstrate Add to Knowledge action -->
+        <div class="file-row" style="position:relative;">
+          <div class="file-icon icon-csv">CSV</div>
+          <div class="file-meta">
+            <div class="file-name">
+              acme-contacts-enriched-2026-05-06.csv
+            </div>
+            <div class="file-sub">86 KB · 412 rows</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> CRM Hygiene Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">2 days ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val"><span class="ttl-pill">Expires in 58 days</span></div>
+          </div>
+          <div style="position:relative;">
+            <button class="three-dot-btn" style="background:var(--slate-100);color:var(--slate-700);">⋮</button>
+            <div class="menu open">
+              <div class="menu-item primary">
+                <span class="menu-item-icon">+</span>
+                <span>Add to Knowledge</span>
+              </div>
+              <div class="menu-hint">
+                Promote this file to a durable document your agents can use as knowledge.
+              </div>
+              <div class="menu-divider"></div>
+              <div class="menu-item">
+                <span class="menu-item-icon">⤓</span>
+                <span>Download</span>
+              </div>
+              <div class="menu-item">
+                <span class="menu-item-icon">→</span>
+                <span>Open in run trace</span>
+              </div>
+              <div class="menu-item">
+                <span class="menu-item-icon">📌</span>
+                <span>Pin (don't expire)</span>
+              </div>
+              <div class="menu-divider"></div>
+              <div class="menu-item danger">
+                <span class="menu-item-icon">🗑</span>
+                <span>Delete file</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3 -->
+        <div class="file-row">
+          <div class="file-icon icon-pdf">PDF</div>
+          <div class="file-meta">
+            <div class="file-name">brand-voice-guidelines-extracted.pdf</div>
+            <div class="file-sub">421 KB · 18 pages</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> Research Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">3 days ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val"><span class="ttl-pill">Expires in 57 days</span></div>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Row 4: linked -->
+        <div class="file-row linked">
+          <div class="file-icon icon-md">MD</div>
+          <div class="file-meta">
+            <div class="file-name">
+              q1-pipeline-analysis-summary.md
+              <span class="linked-pill">● Linked to Knowledge</span>
+            </div>
+            <div class="file-sub">8 KB</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> Research Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">5 days ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val"><span class="ttl-pill durable">Kept indefinitely</span></div>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Row 5: warning expiring -->
+        <div class="file-row">
+          <div class="file-icon icon-json">JSON</div>
+          <div class="file-meta">
+            <div class="file-name">terraform-partners-discovery-notes.json</div>
+            <div class="file-sub">4 KB · 23 entries</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> Outreach Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">53 days ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val warn"><span class="ttl-pill warn">Expires in 7 days</span></div>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Row 6 -->
+        <div class="file-row">
+          <div class="file-icon icon-img">PNG</div>
+          <div class="file-meta">
+            <div class="file-name">acme-pipeline-chart-may-5.png</div>
+            <div class="file-sub">182 KB · 1920x1080</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> Research Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">1 week ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val"><span class="ttl-pill">Expires in 53 days</span></div>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+        <!-- Row 7 -->
+        <div class="file-row">
+          <div class="file-icon icon-txt">TXT</div>
+          <div class="file-meta">
+            <div class="file-name">crm-cleanup-log-2026-05-04.txt</div>
+            <div class="file-sub">22 KB · 514 lines</div>
+          </div>
+          <div>
+            <div class="col-label">Created by</div>
+            <div class="col-val"><span class="agent-chip"><span class="agent-chip-dot"></span> CRM Hygiene Agent</span></div>
+          </div>
+          <div>
+            <div class="col-label">Created</div>
+            <div class="col-val muted">4 days ago</div>
+          </div>
+          <div>
+            <div class="col-label">Lifecycle</div>
+            <div class="col-val"><span class="ttl-pill">Expires in 56 days</span></div>
+          </div>
+          <button class="three-dot-btn">⋮</button>
+        </div>
+
+      </div>
+
+      <!-- Footer note -->
+      <div style="margin-top:24px;padding:14px 18px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px;font-size:12.5px;color:var(--slate-600);line-height:1.6;">
+        <strong style="color:var(--slate-800);">How files become knowledge:</strong>
+        Click "Add to Knowledge" on any file to promote it to a durable document your agents can use across all runs.
+        Promoted files stop expiring automatically. Documents are loaded into agent context only when relevant to the task at hand.
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

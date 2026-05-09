@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Disposition | Consolidation 2026-05-06</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; -webkit-font-smoothing: antialiased; }
+body { padding: 32px 40px; max-width: 1280px; margin: 0 auto; }
+
+.masthead { margin-bottom: 28px; }
+.masthead-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe;
+  border-radius: 5px; padding: 3px 8px; margin-bottom: 10px;
+}
+.masthead h1 { font-size: 24px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 6px; }
+.masthead p { font-size: 13px; color: #64748b; max-width: 760px; line-height: 1.6; }
+
+.toolbar {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.filter-label { font-size: 12px; font-weight: 600; color: #475569; }
+.filter-btn {
+  padding: 5px 12px; font-size: 12px; font-weight: 600; border-radius: 6px;
+  border: 1px solid #e2e8f0; background: white; color: #475569; cursor: pointer;
+  transition: all 0.1s;
+}
+.filter-btn:hover { border-color: #94a3b8; }
+.filter-btn.active { background: #0f172a; color: white; border-color: #0f172a; }
+
+.summary-row {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.summary-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+}
+.chip-keep    { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.chip-merged  { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+.chip-drawer  { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+.chip-renamed { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.chip-removed { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.chip-new     { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.chip-system  { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
+.chip-auth    { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+
+table { width: 100%; border-collapse: collapse; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+thead tr { background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
+th {
+  text-align: left; padding: 10px 14px;
+  font-size: 10.5px; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  white-space: nowrap; cursor: pointer; user-select: none;
+}
+th:hover { color: #1e293b; }
+th.sort-asc::after { content: ' \25B2'; }
+th.sort-desc::after { content: ' \25BC'; }
+
+tbody tr { border-bottom: 1px solid #f1f5f9; transition: background 0.1s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f8fafc; }
+
+td { padding: 10px 14px; font-size: 12.5px; color: #334155; vertical-align: middle; }
+
+.page-name {
+  font-family: 'SFMono-Regular', 'Consolas', monospace;
+  font-size: 12px; color: #1e293b; font-weight: 500;
+}
+.route-text {
+  font-family: 'SFMono-Regular', 'Consolas', monospace;
+  font-size: 11px; color: #64748b;
+}
+.destination-text { font-size: 12.5px; color: #475569; }
+
+.disp-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px; border-radius: 4px;
+  font-size: 11px; font-weight: 700;
+  white-space: nowrap;
+}
+.disp-KEEP    { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.disp-MERGED  { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+.disp-DRAWER  { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+.disp-RENAMED { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.disp-REMOVED { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.disp-NEW     { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.disp-SYSTEM  { background: #f8fafc; color: #64748b; border: 1px solid #cbd5e1; }
+.disp-AUTH    { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+
+.cat-badge {
+  display: inline-block;
+  padding: 1px 7px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 600;
+  background: #f1f5f9; color: #475569;
+  white-space: nowrap;
+}
+
+.search-box {
+  flex: 1; max-width: 320px;
+  padding: 7px 12px 7px 32px; border: 1px solid #e2e8f0; border-radius: 8px;
+  font-size: 13px; background: white; outline: none;
+}
+.search-box:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.search-wrap { position: relative; }
+.search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+
+.count-note { font-size: 12px; color: #94a3b8; margin-left: auto; }
+
+tr.hidden-row { display: none; }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="masthead-eyebrow">Round 3, Canonical Reference</div>
+  <h1>Page Disposition Table</h1>
+  <p>Every source page file mapped to its consolidation outcome. Use the disposition filter to sort by outcome. Use the category filter to focus on a domain. This is the engineering reference for the consolidation work.</p>
+</div>
+
+<div class="summary-row">
+  <span class="summary-chip chip-keep">KEEP <span id="cnt-keep">0</span></span>
+  <span class="summary-chip chip-merged">MERGED <span id="cnt-merged">0</span></span>
+  <span class="summary-chip chip-drawer">TO DRAWER <span id="cnt-drawer">0</span></span>
+  <span class="summary-chip chip-renamed">RENAMED <span id="cnt-renamed">0</span></span>
+  <span class="summary-chip chip-removed">REMOVED <span id="cnt-removed">0</span></span>
+  <span class="summary-chip chip-new">NEW <span id="cnt-new">0</span></span>
+  <span class="summary-chip chip-system">SYSTEM ONLY <span id="cnt-system">0</span></span>
+  <span class="summary-chip chip-auth">AUTH/ONBOARDING <span id="cnt-auth">0</span></span>
+</div>
+
+<div class="toolbar">
+  <div class="search-wrap">
+    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input class="search-box" type="text" placeholder="Search page name, route, destination..." id="searchInput" oninput="applyFilters()">
+  </div>
+  <span class="filter-label">Disposition:</span>
+  <button class="filter-btn active" onclick="setDisp(this, 'ALL')">All</button>
+  <button class="filter-btn" onclick="setDisp(this, 'KEEP')">Keep</button>
+  <button class="filter-btn" onclick="setDisp(this, 'MERGED')">Merged</button>
+  <button class="filter-btn" onclick="setDisp(this, 'DRAWER')">To Drawer</button>
+  <button class="filter-btn" onclick="setDisp(this, 'RENAMED')">Renamed</button>
+  <button class="filter-btn" onclick="setDisp(this, 'REMOVED')">Removed</button>
+  <button class="filter-btn" onclick="setDisp(this, 'NEW')">New</button>
+  <button class="filter-btn" onclick="setDisp(this, 'SYSTEM')">System only</button>
+  <button class="filter-btn" onclick="setDisp(this, 'AUTH')">Auth / Onboarding</button>
+  <span class="count-note" id="visibleCount"></span>
+</div>
+
+<table id="dispTable">
+  <thead>
+    <tr>
+      <th onclick="sortTable(0)">Page file</th>
+      <th onclick="sortTable(1)">Category</th>
+      <th onclick="sortTable(2)">Disposition</th>
+      <th onclick="sortTable(3)">Destination / Notes</th>
+      <th onclick="sortTable(4)">Method</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody">
+  <!-- Rows injected by JS -->
+  </tbody>
+</table>
+
+<script>
+/* ── Data ───────────────────────────────────────────────────────────── */
+const rows = [
+  // Page file | Category | Disposition | Destination | Method
+  ["AcceptInvitePage","Auth","AUTH","Accepts org invite link. Keep as-is.","Auth flow"],
+  ["ActivityPage","Activity","KEEP","Activity feed page stays as dedicated nav item.","Nav item"],
+  ["AdminActionLogPage","Admin","SYSTEM","Admin-only audit log. Stays under system admin.","System admin"],
+  ["AdminAgentEditPage","Agents","MERGED","Merged into unified agents.html (agent detail).","Tab / page"],
+  ["AdminAgentsPage","Agents","MERGED","Merged into unified agents.html list.","Nav item"],
+  ["AdminAutomationEditPage","Automations","MERGED","Merged into automation-detail.html (Definition tab, edit mode).","Sub-screen drawer"],
+  ["AdminAutomationsPage","Automations","MERGED","Merged into unified automations.html.","Nav item"],
+  ["AdminBoardConfigPage","Settings","MERGED","Merged into manage-org.html Board Templates tab.","Tab"],
+  ["AdminCategoriesPage","Settings","RENAMED","Renamed to Tags. Merged into manage-org.html Tags tab.","Tab"],
+  ["AdminEnginesPage","Settings","MERGED","Merged into manage-org.html Engines tab.","Tab"],
+  ["AdminHealthFindingsPage","Connections","MERGED","Issues surfaced in integrations.html Issues tab per connection.","Tab"],
+  ["AdminPermissionSetsPage","Settings","MERGED","Merged into manage-org.html Permission Sets tab.","Tab"],
+  ["AdminSettingsPage","Settings","MERGED","General settings merged into manage-org.html General tab.","Tab"],
+  ["AdminSkillEditPage","Agents","DRAWER","Skill edit is a drawer inside agent-edit.html Capabilities tab.","Drawer"],
+  ["AdminSkillsPage","Agents","DRAWER","Skill library inside agent-edit.html Capabilities tab.","Tab panel"],
+  ["AdminSubaccountDetailPage","Clients","KEEP","Subaccount detail page. Stays (not in scope for this consolidation).","Nav item"],
+  ["AdminSubaccountsPage","Clients","KEEP","Subaccounts list. Stays.","Nav item"],
+  ["AdminUsersPage","Admin","KEEP","Users admin. Stays as manage-org.html or dedicated nav item.","Nav item"],
+  ["AgentCalendarPage","Calendar","MERGED","Merged into calendar.html via scope filter.","Scope filter"],
+  ["AgentChatPage","Agents","KEEP","Agent chat stays. Accessed from agent row action.","Sub-screen"],
+  ["AgentMailboxPage","Inbox","MERGED","Merged into inbox.html unified feed.","Nav item"],
+  ["AgentRunHistoryPage","Runs","MERGED","Run history accessible via agent-edit.html Runs tab.","Tab"],
+  ["AgentRunLivePage","Runs","MERGED","Merged into run-trace.html (live mode auto-detect).","Sub-screen"],
+  ["AgentTriggersPage","Agents","DRAWER","Triggers section in agent-edit.html Schedule tab.","Tab"],
+  ["AgentsPage","Agents","MERGED","Subaccount-scoped agents list. Merged into unified agents.html with scope filter.","Nav item"],
+  ["AutomationExecutionPage","Automations","MERGED","Merged into automation-detail.html Run sandbox tab.","Tab"],
+  ["AutomationsPage","Automations","MERGED","Merged into automations.html.","Nav item"],
+  ["BriefDetailPage","Tasks","KEEP","Brief/task detail view. Stays (task detail drilldown).","Sub-screen"],
+  ["ClientPulseClientsListPage","Client Pulse","KEEP","Client Pulse clients list. Not in consolidation scope.","Nav item"],
+  ["ClientPulseDashboardPage","Client Pulse","KEEP","Client Pulse dashboard. Not in consolidation scope.","Nav item"],
+  ["ClientPulseDrilldownPage","Client Pulse","KEEP","Client drilldown. Not in consolidation scope.","Sub-screen"],
+  ["ClientPulseSettingsPage","Client Pulse","KEEP","Client Pulse settings. Not in consolidation scope.","Sub-screen"],
+  ["ConfigAssistantPage","Config","KEEP","Config assistant. Stays (specialised tool).","Sub-screen"],
+  ["ConfigDocumentUploadPage","Config","KEEP","Document upload. Stays.","Sub-screen"],
+  ["ConfigSessionHistoryPage","Config","KEEP","Config session history. Stays.","Sub-screen"],
+  ["ConnectorConfigsPage","Connections","MERGED","Connector configs surfaced in integrations.html per-connection drawer.","Drawer tab"],
+  ["DashboardPage","Home","MERGED","Current dashboard becomes home.html (new operator landing page).","Nav item"],
+  ["ExecutionDetailPage","Automations","DRAWER","Execution detail is a drawer inside automation-detail.html History tab.","Drawer"],
+  ["ForgotPasswordPage","Auth","AUTH","Forgot password flow. Keep as-is.","Auth flow"],
+  ["GhlOAuthInterstitialPage","Auth","AUTH","GHL OAuth callback interstitial. Keep as-is.","Auth flow"],
+  ["GoalsPage","Goals","KEEP","Goals page stays (not in consolidation scope).","Nav item"],
+  ["HierarchyTemplatesPage","Settings","MERGED","Team / hierarchy templates merged into manage-org.html Board Templates tab.","Tab"],
+  ["InboxPage","Inbox","MERGED","Old InboxPage merged into unified inbox.html.","Nav item"],
+  ["IntegrationsAndCredentialsPage","Connections","MERGED","Merged into unified integrations.html (Connections).","Nav item"],
+  ["JobQueueDashboardPage","Admin","SYSTEM","Job queue dashboard. System admin only.","System admin"],
+  ["LearnedRulesPage","Knowledge","MERGED","Learned rules merged into knowledge.html (Auto-memory entries).","Tab"],
+  ["LoginPage","Auth","AUTH","Login. Keep as-is.","Auth flow"],
+  ["McpServersPage","Connections","DRAWER","MCP servers drawer inside integrations.html.","Drawer"],
+  ["MemoryBlockDetailPage","Knowledge","DRAWER","Memory block detail is a drawer inside knowledge.html.","Drawer"],
+  ["MemoryReviewQueuePage","Inbox","MERGED","Memory review queue merged into inbox.html.","Tab"],
+  ["OnboardingCelebrationPage","Onboarding","AUTH","Celebration screen at end of onboarding. Keep as-is.","Auth/Onboarding"],
+  ["OnboardingWizardPage","Onboarding","AUTH","GHL onboarding wizard (existing, GHL-specific). Stays separately from new onboarding.html.","Auth/Onboarding"],
+  ["OpenTaskView","Tasks","KEEP","Open task view (HITL task detail). Stays.","Sub-screen"],
+  ["OrgAgentConfigsPage","Agents","MERGED","Org-level agent execution config merged into manage-org.html or agents.html.","Tab"],
+  ["OrgApprovalChannelsPage","Settings","MERGED","Approval channels merged into manage-org.html.","Tab"],
+  ["OrgChartPage","Agents","DRAWER","Org chart view accessible from agents.html header action.","Drawer"],
+  ["OrgMemoryPage","Knowledge","MERGED","Org-level memory merged into knowledge.html (scope filter).","Scope filter"],
+  ["OrgSettingsPage","Settings","MERGED","Merged into manage-org.html (7 tabs, 5 sub-pages consolidated).","Nav item"],
+  ["PageProjectDetailPage","Projects","KEEP","Page project detail stays (separate product area).","Sub-screen"],
+  ["PageProjectsPage","Projects","KEEP","Page projects stays.","Nav item"],
+  ["PortalExecutionHistoryPage","Portal","KEEP","Portal execution history. Portal is client-facing; out of scope.","Portal sub-screen"],
+  ["PortalExecutionPage","Portal","KEEP","Portal execution. Portal is client-facing; out of scope.","Portal sub-screen"],
+  ["PortalLandingPage","Portal","KEEP","Portal landing. Client-facing; out of scope.","Portal sub-screen"],
+  ["PortalPage","Portal","KEEP","Portal page. Client-facing; out of scope.","Portal sub-screen"],
+  ["ProfileSettingsPage","Settings","KEEP","Profile settings stays as personal settings.","Nav item"],
+  ["ProjectDetailPage","Projects","KEEP","Project detail stays.","Sub-screen"],
+  ["ProjectsPage","Projects","KEEP","Projects stays.","Nav item"],
+  ["ReportDetailPage","Client Pulse","KEEP","Report detail. Not in consolidation scope.","Sub-screen"],
+  ["ReportsListPage","Client Pulse","KEEP","Reports list. Not in consolidation scope.","Nav item"],
+  ["ResetPasswordPage","Auth","AUTH","Reset password. Keep as-is.","Auth flow"],
+  ["ReviewQueuePage","Inbox","MERGED","Admin review queue merged into inbox.html.","Tab"],
+  ["RunTraceViewerPage","Runs","MERGED","Merged into run-trace.html (historical mode).","Sub-screen"],
+  ["ScheduleCalendarPage","Calendar","MERGED","Merged into calendar.html.","Nav item"],
+  ["ScheduledTaskDetailPage","Calendar","DRAWER","Scheduled task detail is a drawer inside calendar.html.","Drawer"],
+  ["ScheduledTasksPage","Calendar","MERGED","Scheduled tasks list accessible from calendar.html.","Tab / list view"],
+  ["SignupPage","Auth","AUTH","Signup. Keep as-is.","Auth flow"],
+  ["SkillAnalyzerPage","Agents","MERGED","Skill analyzer merged into agent-edit.html Capabilities tab analytics.","Tab panel"],
+  ["SkillStudioPage","Agents","DRAWER","Skill studio merged into skill-edit drawer inside agent-edit.html.","Drawer tab"],
+  ["SpendLedgerPage","Admin","SYSTEM","Spend ledger. Admin/system only.","System admin"],
+  ["SpendingBudgetDetailPage","Settings","MERGED","Budget detail merged into manage-org.html Spending tab.","Tab / drawer"],
+  ["SpendingBudgetsListPage","Settings","MERGED","Budgets list merged into manage-org.html Spending tab.","Tab"],
+  ["SptOnboardingPage","Onboarding","AUTH","SPT onboarding. Separate product flow; keep as-is.","Auth/Onboarding"],
+  ["StudioPage","Studio","KEEP","Studio stays (specialised low-code editor).","Nav item"],
+  ["SubaccountAgentEditPage","Agents","MERGED","Subaccount agent edit merged into unified agent-edit.html.","Nav item"],
+  ["SubaccountAgentsPage","Agents","MERGED","Subaccount agents list merged into unified agents.html.","Nav item"],
+  ["SubaccountApprovalChannelsPage","Settings","MERGED","Approval channels merged into subaccount settings.","Tab"],
+  ["SubaccountBlueprintsPage","Agents","MERGED","Blueprints merged into agents.html Team Templates tab.","Tab"],
+  ["SubaccountKnowledgePage","Knowledge","MERGED","Merged into unified knowledge.html.","Nav item"],
+  ["SubaccountOnboardingPage","Onboarding","AUTH","Subaccount onboarding. Keep as-is.","Auth/Onboarding"],
+  ["SubaccountScheduleCalendarPage","Calendar","MERGED","Merged into calendar.html via scope filter.","Scope filter"],
+  ["SubaccountSkillsPage","Agents","MERGED","Subaccount skills merged into agent-edit.html Capabilities tab.","Tab"],
+  ["SubaccountTagsPage","Settings","MERGED","Tags merged into manage-org.html Tags tab.","Tab"],
+  ["SubaccountTeamPage","Settings","KEEP","Subaccount team page stays (per-client membership).","Sub-screen"],
+  ["SystemAgentEditPage","System","SYSTEM","System admin agent edit. Stays under system admin.","System admin"],
+  ["SystemAgentsPage","System","SYSTEM","System agents. Stays under system admin.","System admin"],
+  ["SystemAutomationsPage","System","SYSTEM","System automations. Stays under system admin.","System admin"],
+  ["SystemBoardTemplatesPage","System","SYSTEM","System board templates. Stays under system admin.","System admin"],
+  ["SystemEnginesPage","System","SYSTEM","System engines. Stays under system admin.","System admin"],
+  ["SystemIncidentsPage","System","SYSTEM","System incidents. Stays under system admin.","System admin"],
+  ["SystemModulesPage","System","SYSTEM","System modules. Stays under system admin.","System admin"],
+  ["SystemOrganisationTemplatesPage","System","SYSTEM","Org templates. Stays under system admin.","System admin"],
+  ["SystemOrganisationsPage","System","SYSTEM","Orgs list. Stays under system admin.","System admin"],
+  ["SystemPnlPage","System","SYSTEM","P&L. Stays under system admin.","System admin"],
+  ["SystemSettingsPage","System","SYSTEM","System settings. Stays under system admin.","System admin"],
+  ["SystemSkillEditPage","System","SYSTEM","System skill edit. Stays under system admin.","System admin"],
+  ["SystemSkillsPage","System","SYSTEM","System skills. Stays under system admin.","System admin"],
+  ["SystemTaskQueuePage","System","SYSTEM","Task queue admin. Stays under system admin.","System admin"],
+  ["SystemUsersPage","System","SYSTEM","System users. Stays under system admin.","System admin"],
+  ["TeamsAdminPage","Settings","KEEP","Teams admin page stays.","Nav item"],
+  ["UsagePage","Admin","SYSTEM","Usage page. Admin/system only.","System admin"],
+  ["WorkflowRunDetailPage","Workflows","KEEP","Workflow run detail stays (workflows remain a separate primitive).","Sub-screen"],
+  ["WorkflowStudioPage","Workflows","SYSTEM","Workflow studio is system-admin authoring tool. Stays under system admin.","System admin"],
+  ["WorkflowsLibraryPage","Workflows","KEEP","Workflows library stays as separate nav item.","Nav item"],
+  ["WorkspaceBoardPage","Tasks","KEEP","Workspace board stays.","Nav item"],
+  ["WorkspaceMemoryPage","Knowledge","MERGED","Merged into unified knowledge.html.","Nav item"],
+  // Subaccount sub-directory
+  ["subaccount/WorkflowRunPage","Workflows","KEEP","Workflow run page (portal-side run view). Stays.","Sub-screen"],
+];
+
+/* ── Render ─────────────────────────────────────────────────────────── */
+let currentDisp = 'ALL';
+let sortCol = -1;
+let sortDir = 1;
+
+function renderRows(data) {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  data.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.dataset.disp = r[2];
+    tr.dataset.cat = r[1];
+    tr.innerHTML = `
+      <td><span class="page-name">${r[0]}</span></td>
+      <td><span class="cat-badge">${r[1]}</span></td>
+      <td><span class="disp-badge disp-${r[2]}">${r[2].replace(/_/g,' ')}</span></td>
+      <td class="destination-text">${r[3]}</td>
+      <td class="route-text">${r[4]}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function getCounts(data) {
+  const c = { KEEP:0, MERGED:0, DRAWER:0, RENAMED:0, REMOVED:0, NEW:0, SYSTEM:0, AUTH:0 };
+  data.forEach(r => { if (c[r[2]] !== undefined) c[r[2]]++; });
+  return c;
+}
+
+function updateCounts(data) {
+  const c = getCounts(data);
+  ['keep','merged','drawer','renamed','removed','new','system','auth'].forEach(k => {
+    const el = document.getElementById('cnt-' + k);
+    if (el) el.textContent = c[k.toUpperCase()] ?? 0;
+  });
+}
+
+function applyFilters() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  let filtered = rows.filter(r => {
+    const matchDisp = currentDisp === 'ALL' || r[2] === currentDisp;
+    const matchQ = !q || r[0].toLowerCase().includes(q) || r[1].toLowerCase().includes(q) || r[3].toLowerCase().includes(q) || r[4].toLowerCase().includes(q);
+    return matchDisp && matchQ;
+  });
+  if (sortCol >= 0) {
+    filtered = [...filtered].sort((a, b) => {
+      const av = a[sortCol].toLowerCase(), bv = b[sortCol].toLowerCase();
+      return av < bv ? -sortDir : av > bv ? sortDir : 0;
+    });
+  }
+  renderRows(filtered);
+  updateCounts(filtered);
+  document.getElementById('visibleCount').textContent = filtered.length + ' of ' + rows.length + ' pages';
+}
+
+function setDisp(btn, disp) {
+  currentDisp = disp;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function sortTable(col) {
+  if (sortCol === col) sortDir = -sortDir;
+  else { sortCol = col; sortDir = 1; }
+  document.querySelectorAll('th').forEach((th, i) => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (i === col) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  });
+  applyFilters();
+}
+
+applyFilters();
+</script>
+</body>
+</html>

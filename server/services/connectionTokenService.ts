@@ -6,9 +6,10 @@
  */
 
 import crypto from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
+import { mcpServerConfigs } from '../db/schema/mcpServerConfigs.js';
 import { env } from '../lib/env.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
@@ -382,6 +383,186 @@ export const connectionTokenService = {
 
       default:
         throw { statusCode: 400, message: `Token refresh not supported for provider: ${provider}` };
+    }
+  },
+
+  /**
+   * Test connectivity for a connection by id (integration_connections OR mcp_server_configs).
+   * Spec §4.9: always returns 200, monotonic 10s timeout, structured error.code drawn from
+   * the closed enum { TIMEOUT, AUTH_FAILED, NETWORK_ERROR, PROVIDER_ERROR }.
+   *
+   * Connection-not-found is a routing error, not a test outcome — returns notFound:true
+   * so the route can map it to a 404 instead of a 200 with a fake code.
+   */
+  async testConnection(
+    { id, organisationId }: { id: string; organisationId: string },
+  ): Promise<
+    | {
+        status: 'ok' | 'failed';
+        latencyMs: number;
+        testedAt: string;
+        error?: { code: 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR'; message: string };
+        capabilities?: string[];
+      }
+    | { notFound: true }
+  > {
+    const TIMEOUT_MS = 10_000;
+    const testedAt = new Date().toISOString();
+    const start = process.hrtime.bigint();
+
+    const elapsed = (): number =>
+      Number(process.hrtime.bigint() - start) / 1_000_000;
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<'timeout'>(resolve => {
+      timeoutHandle = setTimeout(() => resolve('timeout'), TIMEOUT_MS);
+    });
+    const clearTimer = (): void => {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+    };
+
+    try {
+      // Look up the connection — integration or MCP. Filter by (id, organisationId)
+      // in SQL (defence-in-depth per DEVELOPMENT_GUIDELINES §1) so the row never
+      // crosses tenant boundaries even if the request runs outside an RLS-scoped tx.
+      const [icRow] = await db.select()
+        .from(integrationConnections)
+        .where(and(
+          eq(integrationConnections.id, id),
+          eq(integrationConnections.organisationId, organisationId),
+        ))
+        .limit(1);
+
+      if (icRow) {
+        // Integration connection test
+        const testResult = await Promise.race<'ok' | 'timeout'>([
+          (async (): Promise<'ok'> => {
+            if (icRow.authType === 'api_key') {
+              if (!icRow.secretsRef) {
+                throw { authFailed: true, message: 'No API key configured.' };
+              }
+            } else if (icRow.authType === 'oauth2') {
+              const hasToken = !!(icRow.accessToken || icRow.refreshToken);
+              if (!hasToken) {
+                throw { authFailed: true, message: 'No OAuth token stored.' };
+              }
+              if (icRow.tokenExpiresAt && new Date(icRow.tokenExpiresAt) < new Date()) {
+                if (!icRow.refreshToken) {
+                  throw { authFailed: true, message: 'Access token expired and no refresh token available.' };
+                }
+              }
+            }
+            return 'ok';
+          })(),
+          timeoutPromise,
+        ]);
+
+        if (testResult === 'timeout') {
+          return {
+            status: 'failed',
+            latencyMs: Math.round(elapsed()),
+            testedAt,
+            error: { code: 'TIMEOUT', message: 'Provider did not respond within 10s.' },
+          };
+        }
+
+        return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt };
+      }
+
+      // Try MCP server config (same dual-filter pattern as above).
+      const [mcpRow] = await db.select()
+        .from(mcpServerConfigs)
+        .where(and(
+          eq(mcpServerConfigs.id, id),
+          eq(mcpServerConfigs.organisationId, organisationId),
+        ))
+        .limit(1);
+
+      if (mcpRow) {
+        if (mcpRow.transport === 'http' && mcpRow.endpointUrl) {
+          const testResult = await Promise.race<'ok' | 'timeout'>([
+            (async (): Promise<'ok'> => {
+              const response = await fetch(mcpRow.endpointUrl!, {
+                method: 'HEAD',
+                signal: AbortSignal.timeout(9_000),
+              });
+              if (response.status === 401 || response.status === 403) {
+                throw { authFailed: true, message: `MCP server returned ${response.status}.` };
+              }
+              if (!response.ok) {
+                throw { providerError: true, message: `MCP server returned ${response.status}.` };
+              }
+              return 'ok';
+            })(),
+            timeoutPromise,
+          ]);
+
+          if (testResult === 'timeout') {
+            return {
+              status: 'failed',
+              latencyMs: Math.round(elapsed()),
+              testedAt,
+              error: { code: 'TIMEOUT', message: 'Provider did not respond within 10s.' },
+            };
+          }
+
+          const capabilities = mcpRow.discoveredToolsJson
+            ? mcpRow.discoveredToolsJson.map(t => t.name)
+            : undefined;
+
+          return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt, capabilities };
+        }
+
+        // stdio or no endpoint URL — report status from last known state.
+        // lastError is upstream text; do not forward it (could leak secrets / URLs).
+        if (mcpRow.status === 'error') {
+          return {
+            status: 'failed',
+            latencyMs: Math.round(elapsed()),
+            testedAt,
+            error: { code: 'PROVIDER_ERROR', message: 'MCP server is in error state.' },
+          };
+        }
+
+        return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt };
+      }
+
+      // Not in either table — routing error, surfaced as 404 by the route.
+      return { notFound: true };
+    } catch (err: unknown) {
+      const e = err as { authFailed?: boolean; providerError?: boolean; name?: string; message?: string };
+      // Map internal throw shapes onto the closed enum:
+      //   { authFailed: true }    → AUTH_FAILED  (missing/expired credentials, 401/403 from provider)
+      //   { providerError: true } → PROVIDER_ERROR (5xx, 4xx non-auth, malformed response)
+      //   AbortError / fetch network errors → NETWORK_ERROR
+      //   anything else → PROVIDER_ERROR (catch-all stays inside the closed enum)
+      let code: 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR';
+      let message: string;
+      if (e.authFailed) {
+        code = 'AUTH_FAILED';
+        message = e.message ?? 'Authentication failed.';
+      } else if (
+        e.name === 'AbortError' ||
+        e.name === 'TypeError' ||
+        /(ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_|TLS|fetch failed)/i.test(e.message ?? '')
+      ) {
+        code = 'NETWORK_ERROR';
+        message = 'Network error contacting provider.';
+      } else {
+        code = 'PROVIDER_ERROR';
+        message = e.providerError ? (e.message ?? 'Provider error.') : 'Provider error.';
+      }
+      return {
+        status: 'failed',
+        latencyMs: Math.round(elapsed()),
+        testedAt,
+        error: { code, message },
+      };
+    } finally {
+      clearTimer();
     }
   },
 };

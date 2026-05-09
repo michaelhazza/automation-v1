@@ -14,6 +14,7 @@ import {
   tasks,
   taskActivities,
   taskDeliverables,
+  agentExecutionEvents,
 } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
 import { devContextService } from './devContextService.js';
@@ -105,7 +106,9 @@ import type { ThreadContextReadModel } from '../../shared/types/conversationThre
 import { previewSpendForPlan, type SpendingPolicy } from './chargeRouterServicePure.js';
 import { spendingBudgets } from '../db/schema/spendingBudgets.js';
 import { spendingPolicies } from '../db/schema/spendingPolicies.js';
-import { SPEND_ACTION_ALLOWED_SLUGS } from '../config/actionRegistry.js';
+import { SPEND_ACTION_ALLOWED_SLUGS, getActionDefinition } from '../config/actionRegistry.js';
+import { evaluate as evaluateRuntimeCheck } from './runtimeCheckService.js';
+import type { ServicePrincipal } from './principal/types.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -649,6 +652,22 @@ export const agentExecutionService = {
           contentType: s.contentType,
         }));
 
+      // ── 3.5. Auto-knowledge retrieval — spec §8, Chunk 4B ──────────────
+      // Assembles ranked reference-document chunks and memory blocks for
+      // this run. Fail-open: degraded result carries loaded:[] so the run
+      // continues without knowledge context rather than aborting.
+      const { assembleKnowledgeForRun } = await import('./retrievalService.js');
+      const retrievalResult = await assembleKnowledgeForRun(run.id);
+      // Append loaded chunks (auto + always_available modes) to knowledge base.
+      for (const item of retrievalResult.loaded) {
+        dataSourceContents.push({
+          name: item.documentId ?? item.id,
+          description: null,
+          content: item.content,
+          contentType: 'text',
+        });
+      }
+
       // ── 4. Load org processes for trigger_process skill ─────────────────
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
 
@@ -1165,7 +1184,6 @@ export const agentExecutionService = {
         name: s.name,
         description: s.description,
         contentType: s.contentType,
-        loadingMode: s.loadingMode,
         sizeBytes: s.sizeBytes,
         tokenCount: s.tokenCount,
         fetchOk: s.fetchOk,
@@ -1178,8 +1196,7 @@ export const agentExecutionService = {
         suppressedBy: s.suppressedBy,
         exclusionReason: (() => {
           if (s.suppressedByOverride) return 'override_suppressed' as const;
-          if (s.loadingMode === 'lazy') return 'lazy_not_rendered' as const;
-          if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded' as const;
+          if (!s.includedInPrompt) return 'budget_exceeded' as const;
           return null;
         })(),
       }));
@@ -1214,8 +1231,7 @@ export const agentExecutionService = {
             includedInPrompt: s.includedInPrompt ?? false,
             exclusionReason: (() => {
               if (s.suppressedByOverride) return 'override_suppressed';
-              if (s.loadingMode === 'lazy') return 'lazy_not_rendered';
-              if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded';
+              if (!s.includedInPrompt) return 'budget_exceeded';
               return undefined;
             })(),
           },
@@ -1659,6 +1675,86 @@ export const agentExecutionService = {
         });
       }
 
+      // Emit retrieval.summary event — spec §10.4, §11.4, Chunk 4B.
+      // Fire-and-forget: partial-unique-index (run_id, event_type='retrieval.summary')
+      // makes concurrent emits idempotent. Non-critical: failure logs and continues.
+      {
+        const { emitRetrievalSummary } = await import('./retrievalObservabilityService.js');
+        const { DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS } = await import('./documentChunkingServicePure.js');
+        const retrievalSummaryPromise = emitRetrievalSummary({
+          runId: run.id,
+          organisationId: request.organisationId,
+          result: retrievalResult,
+          chunkConfig: { targetTokens: DEFAULT_CHUNK_TARGET_TOKENS, overlapTokens: DEFAULT_CHUNK_OVERLAP_TOKENS },
+        }).catch((err: unknown) => {
+          logger.warn('agentExecutionService.retrieval_summary_emit_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        // Observation emit for retrieval-summary — spec §7.3 Rev 2 composition.
+        // Chains off retrievalSummaryPromise so the event row exists before the
+        // FK-referencing observation row is inserted. Fire-and-forget: observation
+        // failure does NOT roll back the retrieval-summary event.
+        retrievalSummaryPromise.then(async () => {
+          const { append } = await import('./agentObservationService.js');
+          const orgDb = getOrgScopedDb('agentExecutionService.observation_retrieval_summary');
+          const [eventRow] = await orgDb
+            .select({ id: agentExecutionEvents.id })
+            .from(agentExecutionEvents)
+            .where(
+              and(
+                eq(agentExecutionEvents.runId, run.id),
+                eq(agentExecutionEvents.eventType, 'retrieval.summary'),
+              ),
+            )
+            .limit(1);
+          if (!eventRow) return; // event was deduplicated away before we could observe it
+          const ik = createHash('sha256').update(`${run.id}:retrieval_summary`).digest('hex');
+          const ctx: ServicePrincipal = {
+            type: 'service',
+            id: 'agentExecutionService',
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            serviceId: 'agentExecutionService',
+            teamIds: [],
+          };
+          return append(
+            {
+              agentId: run.agentId,
+              eventId: eventRow.id,
+              observationType: 'learned',
+              body: 'Retrieval summary produced',
+              metadata: { source_kind: 'retrieval_summary' },
+              idempotencyKey: ik,
+            },
+            ctx,
+          );
+        }).then((observation) => {
+          if (!observation) return;
+          tryEmitAgentEvent({
+            runId: run.id,
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            sourceService: 'agentExecutionService',
+            payload: {
+              eventType: 'observation_emitted',
+              critical: false,
+              observationId: observation.id,
+              observationType: 'learned',
+              agentId: run.agentId,
+              sourceKind: 'retrieval_summary',
+            },
+          });
+        }).catch((err: unknown) => {
+          logger.warn('agentExecutionService.observation_retrieval_summary_emit_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+
       // Surface terminal failures as system incidents for operator visibility.
       if (finalStatus === 'failed' || finalStatus === 'timeout' || finalStatus === 'loop_detected') {
         recordIncident({
@@ -2020,6 +2116,89 @@ export const agentExecutionService = {
         deliverablesCreated: 0,
       };
     }
+  },
+
+  /**
+   * Start an agent test run asynchronously (C2 — §4.3 async 202 + poll).
+   *
+   * Creates the `agentRuns` row immediately and detaches the LLM execution
+   * loop, returning `{ runId, status: 'running' }` without waiting for the
+   * run to complete. Callers poll `GET /api/agent-runs/:id?shape=test` for
+   * the final result.
+   *
+   * Idempotency: if any of the candidate keys matches an existing row the
+   * existing run is returned without starting a new execution.
+   */
+  async startRunAsync(request: AgentRunRequest): Promise<{ runId: string; status: 'running' | AgentRunResult['status']; isExisting?: true }> {
+    if (!request.idempotencyKey) {
+      throw Object.assign(new Error('startRunAsync: idempotencyKey is required'), {
+        statusCode: 400, errorCode: 'IDEMPOTENCY_KEY_REQUIRED',
+      });
+    }
+
+    // ── Idempotency check — mirror executeRun's early-return path ──────────
+    const idempotencyLookupKeys =
+      request.idempotencyCandidateKeys && request.idempotencyCandidateKeys.length > 0
+        ? Array.from(new Set(request.idempotencyCandidateKeys))
+        : request.idempotencyKey
+          ? [request.idempotencyKey]
+          : [];
+
+    if (idempotencyLookupKeys.length > 0) {
+      const [existing] = await db
+        .select()
+        .from(agentRuns)
+        .where(inArray(agentRuns.idempotencyKey, idempotencyLookupKeys))
+        .limit(1);
+
+      if (existing) {
+        const existingStatus = existing.status as AgentRunResult['status'];
+        return { runId: existing.id, status: existingStatus, isExisting: true };
+      }
+    }
+
+    // ── Insert the run row immediately so we can return the runId ──────────
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        agentId: request.agentId,
+        subaccountAgentId: request.subaccountAgentId ?? null,
+        idempotencyKey: request.idempotencyKey ?? null,
+        runType: request.runType ?? 'manual',
+        executionMode: request.executionMode ?? 'api',
+        executionScope: 'subaccount',
+        runSource: request.runSource ?? null,
+        status: 'running',
+        triggerContext: request.triggerContext ?? null,
+        taskId: request.taskId ?? null,
+        handoffDepth: request.handoffDepth ?? 0,
+        parentRunId: request.parentRunId ?? null,
+        isSubAgent: request.isSubAgent ?? false,
+        parentSpawnRunId: request.parentSpawnRunId ?? null,
+        workflowStepRunId: request.workflowStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
+        delegationScope: request.delegationScope ?? null,
+        delegationDirection: request.delegationDirection ?? null,
+        lastActivityAt: new Date(),
+        startedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    // PLAN_GAP: This is bare fire-and-forget (non-durable). A process restart between the 202
+    // response and run completion will leave the agent_runs row permanently in 'running' state.
+    // For test runs this is acceptable (low stakes, user will re-run). Phase 2 should route through
+    // the durable queue infrastructure (pg-boss) if orphaned test runs become a support issue.
+    // See tasks/builds/consolidation-build/migration-gaps.md.
+    void this.executeRun(request).catch((err: unknown) => {
+      logger.error('async_test_run_failed', { runId: run.id, err });
+    });
+
+    return { runId: run.id, status: 'running' };
   },
 };
 
@@ -3059,6 +3238,74 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           if (r._updated_task) tasksUpdated++;
           if (r._created_deliverable) deliverablesCreated++;
         }
+      }
+
+      // Runtime check hook — inline, bounded by 250ms timeout, never throws.
+      // Evaluates post-action state, persists the result, and pauses the run
+      // when blastRadius === 'external' and state is fail or inconclusive
+      // (spec §11.2: "External — Always pause. Existing approval gate handles
+      // the operator confirmation.").
+      let runtimeCheckPauseNeeded = false;
+      try {
+        const actionDef = getActionDefinition(toolCall.name);
+        if (actionDef !== undefined) {
+          const checkBlastRadius = actionDef.blastRadius ?? 'self';
+          const rcResult = await evaluateRuntimeCheck({
+            runId,
+            eventId: null,
+            sequenceNumber: totalToolCalls,
+            skillSlug: toolCall.name,
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            checkKind: actionDef.verify ?? null,
+            toolResult: result,
+            blastRadius: checkBlastRadius,
+            reversible: actionDef.reversible ?? false,
+          });
+          if (
+            checkBlastRadius === 'external' &&
+            (rcResult.state === 'fail' || rcResult.state === 'inconclusive')
+          ) {
+            runtimeCheckPauseNeeded = true;
+          }
+          // Forced scorecard grading on non-self failure — fire-and-forget,
+          // never throws into the agent loop (spec §12.3).
+          // Gate avoids a DB round-trip for self-scoped actions.
+          if (rcResult.state === 'fail' && checkBlastRadius !== 'self') {
+            void import('./scorecardJudgeRunner.js')
+              .then(({ scheduleForcedGrade }) =>
+                scheduleForcedGrade({
+                  runId,
+                  agentId: request.agentId,
+                  organisationId: request.organisationId,
+                  triggerSource: 'forced_runtime_check_fail',
+                  blastRadius: checkBlastRadius as 'tenant' | 'external',
+                  runtimeCheckState: rcResult.state,
+                })
+              )
+              .catch((err: unknown) => {
+                logger.warn('forced_grade_dispatch_failed', {
+                  runId, agentId: request.agentId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
+        }
+      } catch (rcHookErr) {
+        // Never throw into the agent loop. Log so unexpected failures
+        // (programming error, persistence error, action-definition lookup
+        // failure) are observable instead of silently dropped.
+        logger.warn('runtime_check_hook_error', {
+          runId,
+          skillSlug: toolCall.name,
+          error: rcHookErr instanceof Error ? rcHookErr.message : String(rcHookErr),
+        });
+      }
+
+      if (runtimeCheckPauseNeeded) {
+        finalStatus = 'failed';
+        emitLoopTermination('error', { iteration, totalToolCalls, reason: 'runtime_check_gate' });
+        break outerLoop;
       }
 
       const toolDurationMs = Date.now() - toolStart;

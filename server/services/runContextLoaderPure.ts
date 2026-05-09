@@ -8,10 +8,7 @@
  */
 
 import type { LoadedDataSource } from './agentService.js';
-import {
-  MAX_EAGER_BUDGET,
-  MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT,
-} from '../config/limits.js';
+import { MAX_EAGER_BUDGET } from '../config/limits.js';
 import { EXTERNAL_DOC_FRAGMENTATION_THRESHOLD } from '../lib/constants.js';
 import type { FetchFailureReason } from '../db/schema/documentFetchEvents.js';
 
@@ -105,10 +102,9 @@ export interface ProcessedContextPool {
  */
 export function processContextPool(
   pool: LoadedDataSource[],
-  opts?: { maxEagerBudget?: number; maxLazyManifestItems?: number }
+  opts?: { maxEagerBudget?: number }
 ): ProcessedContextPool {
   const maxEagerBudget = opts?.maxEagerBudget ?? MAX_EAGER_BUDGET;
-  const maxLazyManifestItems = opts?.maxLazyManifestItems ?? MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT;
 
   // 4. Sort the full pool by scope precedence then source priority
   const scopeOrder: Record<LoadedDataSource['scope'], number> = {
@@ -147,9 +143,9 @@ export function processContextPool(
   }
   const activePool = pool.filter((s) => !s.suppressedByOverride);
 
-  // 7. Split eager vs lazy
-  const eager = activePool.filter((s) => s.loadingMode === 'eager');
-  const manifest = activePool.filter((s) => s.loadingMode === 'lazy');
+  // 7. All active sources are treated as eager (loading_mode column removed)
+  const eager = activePool;
+  const manifest: LoadedDataSource[] = [];
 
   // 7b. Phase 1D: If relevance scores are present, re-sort eager sources
   // by relevance descending so the most relevant survive budget truncation.
@@ -172,13 +168,9 @@ export function processContextPool(
       source.includedInPrompt = false;
     }
   }
-  for (const source of manifest) {
-    source.includedInPrompt = false;
-  }
-
-  // 9. Cap the manifest length rendered INTO the prompt
-  const manifestForPrompt = manifest.slice(0, maxLazyManifestItems);
-  const manifestElidedCount = Math.max(0, manifest.length - manifestForPrompt.length);
+  // 9. Manifest fields retained for interface stability; always empty post-migration 0293.
+  const manifestForPrompt: LoadedDataSource[] = [];
+  const manifestElidedCount = 0;
 
   return {
     eager,

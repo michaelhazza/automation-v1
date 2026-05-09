@@ -28,6 +28,7 @@ export const users = pgTable(
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }).notNull().defaultNow(),
     slackUserId: text('slack_user_id'),
     workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
+    defaultAgentTab: text('default_agent_tab').notNull().default('overview').$type<'overview' | 'configure' | 'behaviour' | 'personality' | 'skills' | 'scorecards' | 'data-sources' | 'schedule' | 'budget' | 'runs'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

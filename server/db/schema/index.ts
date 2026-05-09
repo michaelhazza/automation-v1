@@ -217,6 +217,13 @@ export * from './userSettings.js';
 // (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
 export * from './referenceDocuments.js';
 export * from './referenceDocumentVersions.js';
+
+// Auto Knowledge Retrieval Phase 1 — document chunk embeddings (migration 0289)
+export * from './referenceDocumentChunks.js';
+// Auto Knowledge Retrieval Phase 1 — document-to-data-source scope links (migration 0290)
+export * from './referenceDocumentDataSources.js';
+// Auto Knowledge Retrieval Phase 5A — promotion audit ledger (migration 0294)
+export * from './documentPromotionAudit.js';
 export * from './documentBundles.js';
 export * from './documentBundleMembers.js';
 export * from './documentBundleAttachments.js';
@@ -273,3 +280,20 @@ export * from './securityAuditEvents.js';
 // F3 Baseline Capture — baseline rows + per-metric rows (migrations 0280/0283)
 export * from './subaccountBaselines.js';
 export * from './subaccountBaselineMetrics.js';
+
+// Trust & Verification Layer — runtime check verdicts (migration 0296)
+export * from './runtimeCheckResults.js';
+
+
+// Trust & Verification Layer — Stage 2: scorecards + bench (migrations 0297-0300)
+export * from './scorecards.js';
+export * from './agentScorecardAttachments.js';
+export * from './scorecardJudgements.js';
+export * from './benchRuns.js';
+
+// Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
+export * from './agentObservations.js';
+export * from './ieeSessions.js';
+export * from './agentPresenceProjections.js';
+export * from './agentWorkingTimeRollups.js';
+export * from './agentWorkingTimeEventLedger.js';

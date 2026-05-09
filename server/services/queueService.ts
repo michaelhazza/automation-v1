@@ -929,6 +929,46 @@ export const queueService = {
         }
       });
 
+      // Agent Workspace Chunk 11 — IEE session orphan cleanup (every 5 min)
+      await (boss as any).work('maintenance:iee-session-orphan-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runIeeSessionOrphanCleanup } = await import('../jobs/ieeSessionOrphanCleanup.js');
+          await withTimeout(runIeeSessionOrphanCleanup().then(() => undefined), 120_000);
+        } catch (err) {
+          logger.error('job_timeout', { queue: 'maintenance:iee-session-orphan-cleanup', jobId: job.id });
+        }
+      });
+
+      // Agent Workspace Chunk 11 — IEE sessions summary compaction (5am daily)
+      await (boss as any).work('maintenance:iee-sessions-compact', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runIeeSessionsCompact } = await import('../jobs/ieeSessionsCompactJob.js');
+          await withTimeout(runIeeSessionsCompact().then(() => undefined), 120_000);
+        } catch (err) {
+          logger.error('job_timeout', { queue: 'maintenance:iee-sessions-compact', jobId: job.id });
+        }
+      });
+
+      // Agent Workspace Chunk 11 — agent_observations retention prune (5:30am daily)
+      await (boss as any).work('maintenance:agent-observations-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAgentObservationsPrune } = await import('../jobs/agentObservationsPruneJob.js');
+          await withTimeout(runAgentObservationsPrune().then(() => undefined), 300_000);
+        } catch (err) {
+          logger.error('job_timeout', { queue: 'maintenance:agent-observations-prune', jobId: job.id });
+        }
+      });
+
+      // Agent Workspace Chunk 11 — working-time rollup compaction (6am 1st of month)
+      await (boss as any).work('maintenance:working-time-rollup-compact', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runWorkingTimeRollupCompact } = await import('../jobs/workingTimeRollupCompactJob.js');
+          await withTimeout(runWorkingTimeRollupCompact().then(() => undefined), 600_000);
+        } catch (err) {
+          logger.error('job_timeout', { queue: 'maintenance:working-time-rollup-compact', jobId: job.id });
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1129,6 +1169,11 @@ export const queueService = {
       await boss.schedule('maintenance:protected-block-divergence', '0 4 * * *', {});
       // ClientPulse Phase 4 — hourly outcome-measurement cron (B2 ship gate).
       await boss.schedule('clientpulse:measure-outcomes', '7 * * * *', {});
+      // Agent Workspace Chunk 11 — maintenance jobs
+      await boss.schedule('maintenance:iee-session-orphan-cleanup', '*/5 * * * *', {});  // every 5 min
+      await boss.schedule('maintenance:iee-sessions-compact',       '0 5 * * *',   {});  // 5am daily
+      await boss.schedule('maintenance:agent-observations-prune',   '30 5 * * *',  {});  // 5:30am daily
+      await boss.schedule('maintenance:working-time-rollup-compact','0 6 1 * *',   {});  // 6am 1st of month
 
       // System Monitor — self-check (every 5 minutes)
       await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});
@@ -1407,6 +1452,71 @@ export const queueService = {
           throw err;
         }
       });
+
+      // Trust & Verification Layer — scorecard judge workers (spec §12.3)
+      await (boss as any).work('scorecard:judge', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { scorecardJudgeJobHandler } = await import('../jobs/scorecardJudgeJob.js');
+          await withTimeout(scorecardJudgeJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'scorecard:judge', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      await (boss as any).work('scorecard:judge:forced', { teamSize: 4, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { scorecardJudgeJobHandler } = await import('../jobs/scorecardJudgeJob.js');
+          await withTimeout(scorecardJudgeJobHandler(job).then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'scorecard:judge:forced', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — bench execute worker (spec §12.4)
+      await (boss as any).work('bench:execute', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { benchExecuteJobHandler } = await import('../jobs/benchExecuteJob.js');
+          await withTimeout(benchExecuteJobHandler(job).then(() => undefined), 300_000); // 5 min
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'bench:execute', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — bench regression replay worker (spec §12.4)
+      await (boss as any).work('bench:regression-replay', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { benchRegressionReplayJobHandler } = await import('../jobs/benchRegressionReplayJob.js');
+          await withTimeout(benchRegressionReplayJobHandler(job).then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'bench:regression-replay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Trust & Verification Layer — correction pattern detector (daily sweep, spec §13.3)
+      await (boss as any).work('correction:pattern-detect', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runCorrectionPatternDetector } = await import('../jobs/correctionPatternDetectorJob.js');
+          await withTimeout(runCorrectionPatternDetector().then(() => undefined), 300_000); // 5 min max
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'correction:pattern-detect', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('correction:pattern-detect', '0 5 * * *', {}); // 5am daily
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {

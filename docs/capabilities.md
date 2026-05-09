@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-03 (GHL agency-level OAuth: agency token stored per org + GHL company, location tokens minted on demand; agency-scoped adapter methods added)
+> **Last updated:** 2026-05-09 (Agent Workspace: persistent workspace tab, presence stream, working time accounting, IEE session lifecycle, maintenance retention jobs)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -59,6 +59,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Integration Framework](#integration-framework)
   - [Execution Infrastructure](#execution-infrastructure)
   - [Sandboxed Runtime (IEE)](#sandboxed-runtime-iee)
+  - [Persistent Agent Workspace](#persistent-agent-workspace)
 - [Replaces / Consolidates](#replaces--consolidates)
 - [Agency Capabilities](#agency-capabilities)
   - [Performance Reporting & Analytics](#performance-reporting--analytics)
@@ -292,7 +293,7 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 - **Four-tier resolution:** Platform skills → built-in skills → agency-custom skills → per-client workspace skills — each level can override or extend the one above
 - **Per-client skill customisation** — Workspaces can create custom skills that replace platform defaults, so each client gets exactly the behaviour they need
 - **Per-agent allowlists** — Each agent link specifies exactly which skills are available — no accidental access to capabilities a client shouldn't use
-- **Skill Studio** — Authoring environment with definition editor, regression simulation, version history, and rollback across all scopes
+- **Skill authoring** — Definition editor, regression simulation, version history, and rollback across all scopes; accessible from the agent edit surface under the Skills tab
 - **Skill Analyzer** — Bulk import skill libraries from uploaded files, pasted JSON, or a GitHub repo; the platform compares every incoming skill against the existing catalogue, produces a recommended merge for near-duplicates, flags scope creep, name collisions, capability overlap, missing review gates, and required-field regressions, and routes each candidate to a reviewer with structured accept / restore / rename / acknowledge decisions. Approval is locked once granted — edits require explicit unapprove — and every run captures a snapshot of the approval state for audit. When the comparison engine is offline, a deterministic rule-based merger still produces a proposal flagged as low-confidence so the library never stalls. Execution is transactional across skills and suggested new agents, with a pre-mutation backup for one-click rollback.
 - **Full version history** — Every skill change is tracked with immutable versions; restore any previous version with one click
 - **Built-in safeguards** — Total skill instructions are capped to prevent runaway costs; backup/restore built in for safe experimentation
@@ -407,6 +408,10 @@ Every material agent decision — prompt composition, memory retrieval, rule mat
 Multi-layered memory architecture enabling agents to learn, share context, and build institutional knowledge — with provenance, quality controls, and drift detection so memory stays trustworthy as it accumulates.
 
 - **Workspace memory** — Per-client fact store with intelligent retrieval that combines meaning, keywords, and recency for accurate recall
+- **Semantic document retrieval** — Reference documents are chunked at semantic boundaries and ranked at run start by relevance to the active task. Only the most relevant chunks load into context, even when an agent has dozens of attached documents. Tiered scope: a single document can be attached at the organisation, sub-account, agent, recurring task, or single-run level, and the highest-precedence scope wins on conflicts so client-specific context overrides org-wide defaults automatically.
+- **Three retrieval modes per document** — Auto (the default, ranked against every other candidate), Always available (loaded on every run, useful for brand or voice anchors), and Reference only (excluded from auto-load but reachable on demand via tool call when the agent needs it). Switching modes does not require re-uploading the document.
+- **Add to Knowledge** — One-click promotion of any execution-produced file into a durable Knowledge document with full provenance back to the source run. Promoted files are marked durable immediately; chunking and embedding finish in the background without blocking the operator.
+- **Always-available budget guidance** — When the volume of always-available documents starts crowding out the rest of the prompt, operators see a soft warning in the Knowledge tab before runs degrade, with clear before-the-fact guidance instead of mid-run truncation.
 - **Memory blocks** — Named shared context with per-agent read/write permissions and governance controls
 - **Baseline artefacts** — Sub-accounts capture six baseline artefacts at onboarding: brand identity, voice and tone, offer positioning, audience profile, operating constraints, and proof library. The first two are included in every client-touching agent run; the next two are included when the agent role matches the artefact domain; the last two are retrieved on demand via workspace memory search.
 - **Cross-agent search** — Agents query what other agents have learned across the org
@@ -422,6 +427,18 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 - **Automatic accuracy maintenance** — When content changes, the system detects stale data and refreshes it in the background — search always returns matches against current information, not outdated text
 - **Quality safeguards** — Memory quality scores are managed by the platform, not individual agents — preventing any single run from corrupting the knowledge base
 - Automated memory decay (90 days), nightly deduplication, and multi-scope context cascading so agents always have the right context at the right level
+
+### Trust & Verification Layer
+
+Three-stage quality framework that makes agent output verifiable, correctable, and continuously improving — without requiring model changes or prompt re-engineering.
+
+- **Skill verification** — Before any agent output leaves the platform, a set of named quality checks evaluates it against configurable criteria. Every check produces a pass, fail, or inconclusive verdict with the exact text that was evaluated, so operators can see precisely why a check fired.
+- **Scorecards** — Groups of quality checks packaged as a reusable scorecard. Attach a scorecard to any agent and every skill output the agent produces is automatically evaluated against it. System-managed scorecards apply platform-wide; org-managed scorecards apply across all client workspaces; workspace-managed scorecards apply to a single client.
+- **Sampling controls** — Scorecards run on a configurable fraction of outputs (every run, every fourth run, etc.) so quality gates fit any volume without inflating costs. Mandatory checks always run; sampled checks apply the configured rate.
+- **Bench evaluation** — Run any scorecard against a curated set of test inputs to measure quality before and after a change. Results are retained per run so operators can compare quality across model upgrades, prompt edits, or rule changes.
+- **Operator correction** — When an operator corrects an agent output in the Run-trace timeline, the corrected version is captured as a memory block with full provenance: the original output, the corrected version, the skill that produced it, and the source run. Corrections feed directly into the agent's knowledge base.
+- **Pattern detection** — A nightly sweep clusters similar corrections using embedding similarity. When three or more corrections align on the same skill, a pattern-inferred memory block is promoted for human review and a tightening recommendation is surfaced in the Govern page.
+- **Provenance-filtered Knowledge page** — The Knowledge page shows a source filter so operators can isolate correction-sourced entries from manually authored entries and auto-synthesised entries. Every row shows its provenance pill and links back to the source run.
 
 ### Workspace Health & Diagnostics
 
@@ -512,10 +529,11 @@ Production-grade reliability — agents run consistently, recover from failures,
 - **Budget enforcement:** hard ceilings on tokens, cost, tool calls, and timeouts per run
 - **Security:** data isolation enforced at three independent layers; every tool call authorisation logged
 - Infinite loop detection, automatic crash recovery, and full execution tracing for debugging
+- **Working time accounting:** billable compute time tracked per run and surfaced in the Usage Explorer — the working-time chart in each agent's workspace is the same number on the invoice.
 
 ### Sandboxed Runtime (IEE)
 
-Integrated Execution Environment for running agent work in isolated Docker containers — primarily for browser automation on client systems, with a secondary mode for organisation-level extensibility.
+Agents that need to do real work on systems without APIs — filling forms, navigating websites, downloading files, scraping paywalled content — get an on-demand isolated environment provisioned just for that task. When the task completes, the environment is released; nothing persists between runs.
 
 - **Browser automation mode:** Agents execute multi-step browser tasks (logins, form submissions, structured scrapes, file downloads, paywalled content access) inside fully sandboxed containers with per-run cost tracking and budget controls. This is how agents do work on systems that don't have APIs.
 - **Development mode:** Agency-level extensibility for building custom apps, scripts, or connectors that support bespoke processes. Guarded by a mandatory code review workflow with approved command lists and test execution. Not positioned as a standalone IDE.
@@ -523,6 +541,17 @@ Integrated Execution Environment for running agent work in isolated Docker conta
 - **Connection health validation:** stored credentials for paywalled and login-protected sites can be tested on demand — runs a real login attempt in a sandboxed browser and reports back, so credentials are verified before the agent depends on them.
 - **Full cost visibility** — both AI token costs and runtime costs are tracked per execution in the usage explorer, so agencies see their true cost of delivery — not just model spend.
 - All executions run in isolation with enforced gating; no agent touches host state.
+
+### Persistent Agent Workspace
+
+Every agent has a named, persistent workspace that operators can open at any time — not just during a run. The workspace shows what the agent is doing right now, what it learned in its last run, and what it produced — no waiting for a report or digging through logs.
+
+- **Always-on visibility** — the workspace stays open between runs. Operators check in at any moment to see current state, recent observations the agent has logged, knowledge sources it drew on, files it delivered, and the tools it reaches for most often.
+- **Named presence states** — agents surface in plain terms: Running, Waiting on you, Scheduled, Failing, or Idle. No abstract status codes — operators immediately know where every agent stands.
+- **Knowledge in use** — the workspace shows which sources the agent drew on in its last run, so operators can see exactly what informed the agent's decisions.
+- **Files produced** — every file the agent delivered appears in the workspace with a direct link. No hunting through run logs to find what the agent generated.
+- **Working time** — billable compute time is tracked automatically and shown as a working-time chart inside the workspace. The chart is the invoice line — what the agent was actively running, not idle time.
+- **Fleet view at a glance** — the Home page shows all agents at a glance, sectioned by what they're doing: Waiting on you, Working now, Failing, Scheduled next, Idle. One screen replaces the need to check each agent individually.
 
 ---
 
@@ -542,6 +571,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 | Shared team chat products used for agent work | Multi-tenant org + subaccount hierarchy with Client Portal | Strict per-client isolation and white-label portals — shared chat products are built for internal teams sharing context, not agencies serving many isolated clients |
 | Scheduled-prompt and hosted-routine tools | Workflow Engine + portfolio-wide scheduled-work calendar | Multi-step workflows with approval gates, cost ceilings, templating, retry policies, and idempotent execution — plus a single calendar that shows every scheduled agent run, workflow, and scheduled task across every client, rolled up org-wide and exposed inside the client portal. Scheduled-prompt and hosted-routine tools run one prompt on a cadence for one user; Synthetos runs an agency's entire book of client work on one supervised surface. |
 | Hosted single-agent platforms and hosted-agent products | Three-tier agent hierarchy with role-based handoffs | Fleet management with role hierarchy, handoffs up to 5 levels, workspace health monitoring, and per-client skill cascades — hosted single-agent and hosted-agent products have no multi-client operations layer because their buyer is an individual or an internal team, not an agency |
+| Hosted VM-per-agent platforms | Persistent Agent Workspace + on-demand compute | Agents get a named, persistent workspace that survives between runs — plus on-demand isolated compute when needed for browser or dev tasks. A dedicated VM per agent is expensive and idle most of the time; Automation OS provisions compute only when the agent is actively running a task, then releases it. |
 | Hand-maintained no-code workflow libraries | Supervised-migration converter + Workflow Engine | One-shot import of no-code workflow JSON into a draft supervised workflow with approval gates and cost simulation mapped from the source nodes — not a transliteration, an upgrade from stateless trigger/action chains to a multi-client operations system |
 | Self-build on an agent SDK | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, workflows, managed integrations, margin tracking, supervision home |
 | Single-provider LLM lock-in | Model-agnostic per-skill routing | Route across every frontier and open-source LLM per skill; insulated from any one provider's pricing or roadmap shifts |
@@ -968,7 +998,9 @@ Skills that complete transactions autonomously on behalf of agents. All payment 
 | `workflow_simulate` | Static analysis pass returning parallelism and critical path | Deterministic | — |
 | `workflow_validate` | Run DAG validator against candidate definition | Deterministic | — |
 
-### Skill Studio
+### Skill Authoring
+
+_Skill authoring is now accessed via the agent edit surface (Skills tab). The `skill-author` system agent uses the skills below._
 
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
@@ -1055,6 +1087,7 @@ Skills that complete transactions autonomously on behalf of agents. All payment 
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-07 | Consolidation Build: retire 9 legacy admin pages (AdminAgentsPage, AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage, SkillAnalyzerPage, SystemAgentsPage, ScheduledTasksPage, GoalsPage) into 4 consolidated Build-stream pages (AgentsListPage, AgentEditPage, RecurringTasksPage, ProjectEditPage). Skill authoring now accessed via AgentEditPage > Skills tab. Goals migrated to ProjectEditPage. Skills Reference section "Skill Studio" renamed "Skill Authoring" to reflect consolidated entry point. See ADR 0007. | — |
 | 2026-05-04 | F1 Sub-Account Baseline Artefacts (migration 0277): sub-accounts now capture six baseline artefacts at onboarding via the baseline-artefacts-capture workflow. Brand identity and voice/tone (tier 1) are prepended to every client-touching agent run system prompt in hash-stable order for prefix caching. Offer positioning and audience profile (tier 2) are injected when the agent role matches the artefact domain. Operating constraints and proof library (tier 3) are stored in workspace memory and retrieved on demand. Artefact capture status is tracked per sub-account in a versioned JSONB field. The onboarding wizard includes a dedicated capture step; captured artefacts are editable from the sub-account Knowledge page. | — |
 | 2026-05-04 | Agent Spending: ship the agent spending primitive — operator-defined Spending Budgets per sub-account with hard ceiling, daily and monthly caps, and a kill switch that pauses all charges immediately and is re-checked at execute time. Each budget carries a Spending Policy with per-transaction limits, merchant allowlists, approval thresholds, and category rules; policies start in shadow mode (full decision logic, no money moved) and require an explicit approval to promote to live. Per-charge approval gates pause high-risk charges before execution; expired approvals re-queue rather than executing late. Multi-channel approval routing supports per-sub-account and shared agency-level channels. Five payment skills (`pay_invoice`, `purchase_resource`, `subscribe_to_service`, `top_up_balance`, `issue_refund`) all route through one charge router for uniform policy decisions, idempotency, and ledger writes. Immutable spend ledger as append-only audit trail with database-level lifecycle guards; settled-vs-in-flight visibility distinguishes money moved from money committed. Refunds preserve the original charge record by writing a new inbound-refund ledger entry. Tenant-isolated at the database level for budgets, policies, channels, and ledger rows. Compute Budget rename (formerly "Budget") clears the namespace for the new spending primitive — vocabulary lock: no bare "Budget" in the product. | — |
 | 2026-05-03 | GHL agency-level OAuth: agency token stored per org + GHL company (`connector_configs.token_scope='agency'`), location tokens minted on demand per sub-account and cached in `connector_location_tokens`. Nine adapter methods use location-scoped tokens; two (list-locations, get-location) use the agency token. Pending Stage 6b sign-off. | — |
@@ -1065,6 +1098,8 @@ Skills that complete transactions autonomously on behalf of agents. All payment 
 | 2026-04-22 | CRM Query Planner (P1–P3): add deterministic-first natural-language CRM query layer with canonical registry (Stage 1), in-process plan cache (Stage 2), AI fallback with single-escalation retry (Stage 3), and hybrid execution for canonical-base-plus-live-filter intents. Read-only by construction (CI guard + structural import restriction). Per-query trace, per-workspace cache isolation, per-query cost ceiling, router-level budget breaker, subaccount-level capability gate, row-level tenant isolation via principal session context. Dual surface: HTTP endpoint + `crm.query` agent skill. Observability dashboard surfaces stage-hit rate, escalation rate, live-call rate, cost-per-resolved-query. | — |
 | 2026-04-21 | LLM Spend Observability follow-ups — 8 deferred items from the in-flight tracker brief land as one release. Partial-external-success double-bill protection: a provisional audit record is written before every LLM call, a retry under the same logical identity sees the provisional record and surfaces a typed reconciliation signal instead of re-dispatching, and a background sweep reaps orphaned provisional records after the provider timeout ceiling. Single-terminal-transition invariant: every terminal status is guarded against silent overwrite; late-arriving results are detected and logged as ghost arrivals. Pre-dispatch queue-wait visibility surfaces the gap between call request and provider dispatch. Logical-attempt sequencing shows the cumulative attempt number across fallback providers. Click-through live payload inspection lets admins see the exact prompt context before the call completes. Forensic in-flight archive captures every dispatch + terminal transition for 7-day incident reconstruction, gated by a self-disabling soft circuit on write degradation. Mobile-responsive operations view. Token-level streaming progress infrastructure (adapter wiring rolls out per-vendor). Deterministic idempotency-key versioning with load-time shape assertion. | — |
 | 2026-04-20 | LLM cost protection — provider-call timeout hardening. The internal per-call timeout guard now genuinely aborts the underlying network request on timer fire (previously the outer promise rejected while the fetch kept running, so the retry loop fired a second concurrent call and the platform was double-billed upstream). The cap was raised from 30 s to 600 s — above every documented provider ceiling including reasoning models — so legitimate long generations (skill analyzer, long-form outputs, reasoning-mode responses) stop tripping false-positive timeouts. Ambiguous-state failures (timeouts, network resets) are now classified non-retryable, so a second billable provider call is never issued under the same logical attempt. Together these close the root cause behind the skill-analyzer timeout bug that triggered the LLM observability work. | — |
+| 2026-05-09 | Agent Workspace (Chunk 13): add Persistent Agent Workspace product capabilities section (always-on visibility, named presence states, knowledge in use, files produced, working time accounting, home page live widget); add Hosted VM-per-agent platforms row to Replaces / Consolidates; reframe Sandboxed Runtime (IEE) intro to operator-benefit language; add working time accounting bullet to Execution Infrastructure. Create `docs/sales-conversation-vm-question.md` internal sales reference. | — |
+| 2026-05-08 | Memory & Knowledge System: add semantic document retrieval (chunked, ranked at run start), three retrieval modes (auto, always-available, reference-only), Add to Knowledge promotion flow, and always-available budget guidance. Vendor-neutral; reflects auto-knowledge-retrieval build (PR #274). | — |
 | 2026-04-20 | LLM Spend Observability & Per-Client P&L: add new Agency Capability section covering cross-client financial dashboard, attribution-per-call (source type + feature tag), platform overhead surfacing, per-org / per-subaccount / per-source-type / per-provider+model breakdowns with sort + totals, top-cost call triage with detail drawer, structured parse-failure capture, cancellation-aware billing, and retention-safe historical access (12-month default retention with on-demand archive lookup). | — |
 | 2026-04-19 | ClientPulse Phases 4 + 4.5 — intervention pipeline + Configuration Agent extension. Adds 5 namespaced CRM-side action primitives (`crm.fire_automation`, `crm.send_email`, `crm.send_sms`, `crm.create_task`, `clientpulse.operator_alert`), all review-gated; an event-driven scenario detector (`proposeClientPulseInterventionsJob`) that fires after every churn assessment and quotas proposals at the org + subaccount layer; an hourly outcome-measurement job that closes B2 with band-change attribution within 14 days; a strict V1 merge-field resolver (5 namespaces, no fallback / no conditionals) with editor live-preview; the Configuration Assistant tool #29 `config_update_organisation_config` that closes B3 (config_history audit on every write) + B5 (sensitive paths route through the action→review queue); and operator-facing UI for both the Propose Intervention modal (5 editors + wrapper) and the Configuration Assistant chat popup. Lifecycle event `clientpulse.intervention.enqueued` is the single observability anchor for both scenario-detector and operator-driven proposals. | — |
 | 2026-04-19 | Sandboxed Runtime (IEE): add live-progress-on-long-running-browser-tasks bullet (real-time step count + heartbeat surfacing during delegated browser execution) and connection-health-validation bullet (on-demand login test for stored credentials before depending on them in a workflow). Reflects the IEE Phase 0 delegation lifecycle and Web Login Connection "Test Connection" UI. | — |
