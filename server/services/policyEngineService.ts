@@ -3,14 +3,18 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { policyRules } from '../db/schema/index.js';
 import { spendingBudgets } from '../db/schema/spendingBudgets.js';
 import { spendingPolicies } from '../db/schema/spendingPolicies.js';
+import { subaccountAgents } from '../db/schema/subaccountAgents.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { CONFIDENCE_GATE_THRESHOLD } from '../config/limits.js';
 import {
   applyConfidenceUpgrade,
   selectGuidanceTexts,
   evaluateSpendPolicy,
+  applySubaccountConstraintsPure,
   type SpendDecision,
 } from './policyEngineServicePure.js';
+import { deriveGateLevel } from '../../shared/types/riskTier.js';
+import type { RiskTier, GateLevel } from '../../shared/types/riskTier.js';
 import type { PolicyRule } from '../db/schema/policyRules.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +39,13 @@ export interface PolicyContext {
    * as "below threshold" (fail closed).
    */
   toolIntentConfidence?: number | null;
+  /**
+   * Chunk 4 (synthetos-foundation-refactor) — subaccount-agent link ID.
+   * When present, the policy engine fetches the governance row to apply
+   * subaccount-constraint rules (max_risk_tier block, require_approval_at_tier
+   * upgrade) per spec §4.2.8.
+   */
+  subaccountAgentId?: string | null;
 }
 
 export interface PolicyDecision {
@@ -59,6 +70,19 @@ export interface PolicyDecision {
    * does not spend money or no spending policy is found for the subaccount.
    */
   spendDecision?: SpendDecision;
+  /**
+   * Chunk 4 (synthetos-foundation-refactor) — risk tier from the action
+   * definition. Present when the action is registered in ACTION_REGISTRY
+   * with a riskTier field. Used by the tool_security_decision Run Trace
+   * event payload (chunk 7) and the approval UX (chunk 10).
+   */
+  riskTier?: RiskTier;
+  /**
+   * Chunk 4 — four-source union explaining how the gate level was derived.
+   * Precedence (per spec §4.2.8):
+   *   subaccount_constraint > policy_override > preserved_existing > tier_default
+   */
+  gateLevelSource?: 'subaccount_constraint' | 'policy_override' | 'preserved_existing' | 'tier_default';
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +162,29 @@ function renderDescription(
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Subaccount-constraint governance fetch (Chunk 4)
+// ---------------------------------------------------------------------------
+
+interface SubaccountGovernance {
+  maxRiskTier: number;
+  requireApprovalAtTier: number;
+}
+
+async function getSubaccountGovernance(
+  subaccountAgentId: string,
+): Promise<SubaccountGovernance | null> {
+  const [row] = await getOrgScopedDb('policyEngineService.getSubaccountGovernance')
+    .select({
+      maxRiskTier: subaccountAgents.maxRiskTier,
+      requireApprovalAtTier: subaccountAgents.requireApprovalAtTier,
+    })
+    .from(subaccountAgents)
+    .where(eq(subaccountAgents.id, subaccountAgentId))
+    .limit(1);
+  return row ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // Spend-policy evaluation helpers (Chunk 7)
@@ -251,10 +298,13 @@ export const policyEngineService = {
   /**
    * Evaluate the effective gate level for a tool call.
    *
-   * Evaluation order:
-   *   1. Org policy rules, sorted by priority ASC — first match wins
-   *   2. Registry default (ActionDefinition.defaultGateLevel) if no rule matched
-   *   3. 'review' if the action type is not in the registry at all
+   * Evaluation order (spec §4.2.8):
+   *   1. Org policy rules, sorted by priority ASC — first match wins (policy_override)
+   *   2. Registry default (ActionDefinition.defaultGateLevel) if no rule matched (preserved_existing)
+   *   3. Risk-tier default via deriveGateLevel when no defaultGateLevel is set (tier_default)
+   *   4. Subaccount constraints applied on top (subaccount_constraint takes highest precedence):
+   *      - riskTier > maxRiskTier → force block
+   *      - riskTier >= requireApprovalAtTier AND decision is 'auto' → upgrade to review
    *
    * When the action is registered as `spendsMoney: true`, also evaluates
    * `spendDecision` from the active spending policy (Chunk 7).
@@ -272,17 +322,39 @@ export const policyEngineService = {
       spendDecision = await resolveSpendDecision(ctx, definition);
     }
 
+    // Chunk 4: resolve subaccount governance constraints (max_risk_tier,
+    // require_approval_at_tier). Fetched once per evaluation; null when
+    // no subaccountAgentId is present or the row is not found.
+    let subaccountGov: SubaccountGovernance | null = null;
+    if (ctx.subaccountAgentId) {
+      subaccountGov = await getSubaccountGovernance(ctx.subaccountAgentId);
+    }
+
+    // Chunk 4: extract riskTier from the action definition for surfacing
+    // in the decision result and for subaccount-constraint evaluation.
+    const riskTier: RiskTier | undefined =
+      definition !== undefined && 'riskTier' in definition
+        ? (definition.riskTier as RiskTier)
+        : undefined;
+
     for (const rule of rules) {
       if (matchesRule(rule, ctx)) {
-        const baseDecision = rule.decision as 'auto' | 'review' | 'block';
+        const baseDecision = rule.decision as GateLevel;
         const upgraded = applyConfidenceUpgrade(
           baseDecision,
           { toolIntentConfidence: ctx.toolIntentConfidence },
           CONFIDENCE_GATE_THRESHOLD,
           rule.confidenceThreshold,
         );
+        const constrained = applySubaccountConstraintsPure(upgraded.decision, 'policy_override', riskTier, subaccountGov);
+        console.log('foundation.risk_tier.gate_derived', {
+          actionSlug: ctx.toolSlug,
+          riskTier,
+          gateLevel: constrained.decision,
+          source: constrained.gateLevelSource,
+        });
         return {
-          decision: upgraded.decision,
+          decision: constrained.decision,
           matchedRule: rule,
           timeoutSeconds: rule.timeoutSeconds ?? undefined,
           timeoutPolicy: (rule.timeoutPolicy as PolicyDecision['timeoutPolicy']) ?? undefined,
@@ -291,23 +363,42 @@ export const policyEngineService = {
           description: renderDescription(rule.descriptionTemplate, ctx),
           upgradedByConfidence: upgraded.upgradedByConfidence,
           spendDecision,
+          riskTier,
+          gateLevelSource: constrained.gateLevelSource,
         };
       }
     }
 
-    // No rule matched — fall back to registry default, still subject to
-    // the global confidence gate.
-    const fallback = definition?.defaultGateLevel ?? 'review';
+    // No rule matched — derive from riskTier, preserving existing defaultGateLevel
+    // per INV-8 (existing gate level preserved when set).
+    const derived = riskTier !== undefined
+      ? deriveGateLevel(riskTier, definition?.defaultGateLevel as GateLevel | undefined)
+      : { gateLevel: (definition?.defaultGateLevel ?? 'review') as GateLevel, source: 'preserved_existing' as const };
+
     const upgraded = applyConfidenceUpgrade(
-      fallback,
+      derived.gateLevel,
       { toolIntentConfidence: ctx.toolIntentConfidence },
       CONFIDENCE_GATE_THRESHOLD,
     );
+    const constrained = applySubaccountConstraintsPure(
+      upgraded.decision,
+      derived.source as 'policy_override' | 'preserved_existing' | 'tier_default',
+      riskTier,
+      subaccountGov,
+    );
+    console.log('foundation.risk_tier.gate_derived', {
+      actionSlug: ctx.toolSlug,
+      riskTier,
+      gateLevel: constrained.decision,
+      source: constrained.gateLevelSource,
+    });
     return {
-      decision: upgraded.decision,
+      decision: constrained.decision,
       matchedRule: null,
       upgradedByConfidence: upgraded.upgradedByConfidence,
       spendDecision,
+      riskTier,
+      gateLevelSource: constrained.gateLevelSource,
     };
   },
 
